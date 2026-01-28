@@ -94,11 +94,13 @@ class TestTierProgression:
         result = manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_single_failure_no_escalation(self, manager):
         manager.record_failure("kw", "HTTP Error 403")
         result = manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_threshold_failures_escalate_to_tier_2(self, manager):
         """Two 403 failures (threshold=2) should escalate from Tier 1 to Tier 2."""
         manager.record_failure("kw", "HTTP Error 403")
@@ -106,6 +108,7 @@ class TestTierProgression:
         result = manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_tier_2_to_tier_3_escalation(self, manager):
         """After reaching Tier 2, additional threshold failures -> Tier 3."""
         # Escalate to Tier 2
@@ -130,6 +133,7 @@ class TestTierProgression:
         result = manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_no_escalation_beyond_tier_3(self, manager):
         """Tier 3 is the maximum - further failures don't crash."""
         # Fast-track to Tier 3 by mocking time to bypass cooldown
@@ -158,6 +162,7 @@ class TestTierProgression:
         result = manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_success_resets_403_counter_but_keeps_tier(self, manager):
         """record_success() resets 403 counter but keeps tier sticky."""
         manager.record_failure("kw", "HTTP Error 403")
@@ -188,6 +193,7 @@ class TestEscalationArgs:
         assert "--extractor-args" not in result.args
         assert result.rotate_cookies is False
 
+    @pytest.mark.fast
     def test_tier_2_includes_extractor_args(self, manager):
         """Tier 2 should include both --impersonate and --extractor-args."""
         manager.record_failure("kw", "403")
@@ -203,6 +209,7 @@ class TestEscalationArgs:
         assert ea_val.startswith("youtube:player_client=")
         assert result.rotate_cookies is False
 
+    @pytest.mark.fast
     def test_tier_3_includes_cookie_flag(self, manager):
         """Tier 3 includes all Tier 2 args plus rotate_cookies=True."""
         with patch("src.downloader.escalation_manager.time") as em_time, \
@@ -229,6 +236,7 @@ class TestEscalationArgs:
         assert "--extractor-args" in result.args
         assert result.rotate_cookies is True
 
+    @pytest.mark.fast
     def test_disabled_extractor_config_tier_2_no_extractor_args(self, imp_manager):
         """With extractor config disabled, Tier 2 has no --extractor-args."""
         config = FakeExtractorArgsConfig(enabled=False)
@@ -242,6 +250,7 @@ class TestEscalationArgs:
         assert "--impersonate" in result.args
         assert "--extractor-args" not in result.args
 
+    @pytest.mark.fast
     def test_empty_player_clients_no_extractor_args(self, imp_manager):
         """Empty player_clients list means no --extractor-args at Tier 2."""
         config = FakeExtractorArgsConfig(player_clients=[])
@@ -254,6 +263,7 @@ class TestEscalationArgs:
         assert result.tier == EscalationTier.EXTRACTOR_ARGS
         assert "--extractor-args" not in result.args
 
+    @pytest.mark.fast
     def test_no_extractor_config_returns_impersonate_only(self, imp_manager):
         """None extractor config: only impersonate args at any tier."""
         mgr = EscalationManager(imp_manager, None)
@@ -286,6 +296,7 @@ class TestCooldown:
         manager.record_failure("kw", "403")
         assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_escalation_after_cooldown_expiry(self, manager):
         """After cooldown expires, further failures CAN escalate."""
         # Escalate to Tier 2
@@ -305,6 +316,7 @@ class TestCooldown:
 
         assert manager.get_escalation_args("kw").tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_get_cooldown_remaining(self, manager):
         """get_cooldown_remaining() reports correct remaining time."""
         # No state yet -> 0.0
@@ -318,6 +330,7 @@ class TestCooldown:
         remaining = manager.get_cooldown_remaining("kw")
         assert remaining > 0
 
+    @pytest.mark.fast
     def test_cooldown_returns_zero_after_expiry(self, manager):
         """get_cooldown_remaining() returns 0.0 after cooldown expires."""
         manager.record_failure("kw", "403")
@@ -328,6 +341,7 @@ class TestCooldown:
             remaining = manager.get_cooldown_remaining("kw")
             assert remaining == 0.0
 
+    @pytest.mark.fast
     def test_custom_cooldown_seconds(self, imp_manager):
         """Custom cooldown_seconds is respected."""
         config = FakeExtractorArgsConfig(cooldown_seconds=10.0)
@@ -375,6 +389,7 @@ class TestPerKeywordIsolation:
         assert result_a.tier == EscalationTier.EXTRACTOR_ARGS
         assert result_b.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_keyword_a_tier_3_keyword_b_tier_1(self, manager):
         """Full isolation: keyword_a at Tier 3, keyword_b still at Tier 1."""
         with patch("src.downloader.escalation_manager.time") as em_time, \
@@ -397,6 +412,7 @@ class TestPerKeywordIsolation:
         assert manager.get_escalation_args("keyword_a").tier == EscalationTier.FULL_BYPASS
         assert manager.get_escalation_args("keyword_b").tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_success_on_one_keyword_doesnt_affect_other(self, manager):
         """record_success('a') does not affect keyword 'b'."""
         manager.record_failure("a", "403")
@@ -410,6 +426,7 @@ class TestPerKeywordIsolation:
         assert state_a.consecutive_403s == 0
         assert state_b.consecutive_403s == 1
 
+    @pytest.mark.fast
     def test_reset_keyword_only_clears_target(self, manager):
         """reset_keyword('a') clears 'a' but not 'b'."""
         manager.record_failure("a", "403")
@@ -423,6 +440,7 @@ class TestPerKeywordIsolation:
         state_b = manager._get_state("b")
         assert state_b.consecutive_403s == 1
 
+    @pytest.mark.fast
     def test_reset_all_clears_everything(self, manager):
         """reset_all() clears all keyword states."""
         manager.record_failure("a", "403")
@@ -466,6 +484,7 @@ class TestThreadSafety:
         assert len(errors) == 0, f"Thread errors: {errors}"
         assert len(results) == 500
 
+    @pytest.mark.fast
     def test_concurrent_record_failure_and_get_args(self, manager):
         """Concurrent record_failure + get_escalation_args on same keyword."""
         errors = []
@@ -498,6 +517,7 @@ class TestThreadSafety:
 
         assert len(errors) == 0, f"Thread errors: {errors}"
 
+    @pytest.mark.fast
     def test_concurrent_different_keywords(self, manager):
         """Each keyword's state is independent under concurrent access."""
         errors = []
@@ -522,6 +542,7 @@ class TestThreadSafety:
         # All 20 keywords should exist
         assert len(manager._keyword_states) == 20
 
+    @pytest.mark.fast
     def test_concurrent_record_success(self, manager):
         """Concurrent record_success + record_failure don't corrupt state."""
         errors = []
@@ -564,6 +585,7 @@ class TestIsEscalationTrigger:
         "Request blocked",
         "ERROR: Sign in to confirm your age",
     ])
+    @pytest.mark.fast
     def test_matches_known_patterns(self, stderr):
         assert is_escalation_trigger(stderr) is True
 
@@ -575,6 +597,7 @@ class TestIsEscalationTrigger:
         "rate limit exceeded for this IP",
         "rate-limit reached",
     ])
+    @pytest.mark.fast
     def test_matches_429_rate_limit_patterns(self, stderr):
         assert is_escalation_trigger(stderr) is True
 
@@ -586,6 +609,7 @@ class TestIsEscalationTrigger:
         "geo-blocked content",
         "geoblock: video not available in your country",
     ])
+    @pytest.mark.fast
     def test_matches_ip_blocked_patterns(self, stderr):
         assert is_escalation_trigger(stderr) is True
 
@@ -597,6 +621,7 @@ class TestIsEscalationTrigger:
         "age gate verification required",
         "agerestricted: please sign in",
     ])
+    @pytest.mark.fast
     def test_matches_age_gate_patterns(self, stderr):
         assert is_escalation_trigger(stderr) is True
 
@@ -606,13 +631,16 @@ class TestIsEscalationTrigger:
         "Download complete",
         "",
     ])
+    @pytest.mark.fast
     def test_rejects_non_trigger_patterns(self, stderr):
         assert is_escalation_trigger(stderr) is False
 
+    @pytest.mark.fast
     def test_case_insensitive(self):
         assert is_escalation_trigger("http error 403") is True
         assert is_escalation_trigger("CAPTCHA REQUIRED") is True
 
+    @pytest.mark.fast
     def test_none_safe(self):
         """Empty string returns False (no crash)."""
         assert is_escalation_trigger("") is False
@@ -633,6 +661,7 @@ class TestMetrics:
         assert metrics["total_successes"] == 0
         assert metrics["average_tier"] == 1.0
 
+    @pytest.mark.fast
     def test_metrics_after_escalation(self, manager):
         manager.record_failure("kw", "403")
         manager.record_failure("kw", "403")
@@ -680,29 +709,35 @@ class TestClassifyTrigger:
         ("Request blocked", "403"),
         ("Sign in to confirm identity", "403"),
     ])
+    @pytest.mark.fast
     def test_classify_known_patterns(self, stderr, expected):
         assert classify_trigger(stderr) == expected
 
+    @pytest.mark.fast
     def test_classify_returns_none_for_non_triggers(self):
         assert classify_trigger("") is None
         assert classify_trigger("ERROR: HTTP Error 404: Not Found") is None
         assert classify_trigger("Download complete") is None
         assert classify_trigger("Video unavailable") is None
 
+    @pytest.mark.fast
     def test_classify_case_insensitive(self):
         assert classify_trigger("HTTP ERROR 429") == "429"
         assert classify_trigger("AGE-GATED VIDEO") == "age_gate"
         assert classify_trigger("ACCESS DENIED") == "ip_blocked"
 
+    @pytest.mark.fast
     def test_classify_priority_429_over_403(self):
         """429 patterns match '429' category, not '403'."""
         assert classify_trigger("HTTP Error 429") == "429"
 
+    @pytest.mark.fast
     def test_classify_priority_age_gate_over_403(self):
         """'Sign in to confirm your age' matches 'age_gate', not '403'."""
         # This matches age_gate because age_gate is checked before 403
         assert classify_trigger("Sign in to confirm your age") == "age_gate"
 
+    @pytest.mark.fast
     def test_classify_priority_ip_blocked_over_403(self):
         """IP block patterns match 'ip_blocked', not '403'."""
         assert classify_trigger("ip blocked") == "ip_blocked"
@@ -755,6 +790,7 @@ class TestBudgetAwareEscalation:
         """EscalationManager stores the budget reference."""
         assert budget_manager._budget is budget
 
+    @pytest.mark.fast
     def test_constructor_budget_none_is_safe(self, imp_manager, ext_config):
         """EscalationManager works fine without a budget (None)."""
         mgr = EscalationManager(imp_manager, ext_config, budget=None)
@@ -765,6 +801,7 @@ class TestBudgetAwareEscalation:
         mgr.record_failure("kw", "HTTP Error 403")
         mgr.record_success("kw")
 
+    @pytest.mark.fast
     def test_get_escalation_args_calls_record_attempt(self, imp_manager, ext_config):
         """get_escalation_args() calls budget.record_attempt()."""
         mock_budget = MagicMock()
@@ -773,6 +810,7 @@ class TestBudgetAwareEscalation:
         mgr.get_escalation_args("sunset")
         mock_budget.record_attempt.assert_called_once_with("sunset")
 
+    @pytest.mark.fast
     def test_record_failure_records_rotation_on_tier_advance(self, budget_manager, budget):
         """record_failure() calls budget.record_rotation() when tier advances."""
         assert budget.rotations_used == 0
@@ -782,6 +820,7 @@ class TestBudgetAwareEscalation:
         # Should have recorded a rotation for the Tier 1 -> Tier 2 advance
         assert budget.rotations_used == 1
 
+    @pytest.mark.fast
     def test_record_failure_records_rotation_on_each_advance(self, budget_manager, budget):
         """Each tier advance records a rotation in the budget."""
         # Escalate Tier 1 -> Tier 2 (2 failures)
@@ -797,6 +836,7 @@ class TestBudgetAwareEscalation:
             budget_manager.record_failure("kw", "HTTP Error 403")
         assert budget.rotations_used == 2
 
+    @pytest.mark.fast
     def test_exhausted_budget_skips_to_max_tier(self, exhausted_budget_manager):
         """When budget is exhausted, record_failure skips to FULL_BYPASS."""
         mgr = exhausted_budget_manager
@@ -808,6 +848,7 @@ class TestBudgetAwareEscalation:
         assert result.tier == EscalationTier.FULL_BYPASS
         assert result.rotate_cookies is True
 
+    @pytest.mark.fast
     def test_exhausted_budget_skips_from_tier1_to_tier3(self, exhausted_budget_manager):
         """Exhausted budget skips from Tier 1 directly to Tier 3."""
         mgr = exhausted_budget_manager
@@ -820,6 +861,7 @@ class TestBudgetAwareEscalation:
         result = mgr.get_escalation_args("kw")
         assert result.tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_budget_none_normal_escalation(self, manager):
         """Without budget, escalation proceeds normally through all tiers."""
         assert manager._budget is None
@@ -837,6 +879,7 @@ class TestBudgetAwareEscalation:
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_budget_tracks_rotation_with_keyword(self, budget_manager, budget):
         """Budget rotation is recorded with the correct keyword."""
         budget_manager.record_failure("ocean", "HTTP Error 403")
@@ -869,6 +912,7 @@ class TestSpeedTriggeredEscalation:
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_speed_signals_do_not_affect_budget(self, imp_manager, ext_config):
         """Speed-triggered escalations do NOT call budget.record_rotation()."""
         budget = MagicMock()
@@ -883,6 +927,7 @@ class TestSpeedTriggeredEscalation:
         # Budget should NOT have record_rotation called
         budget.record_rotation.assert_not_called()
 
+    @pytest.mark.fast
     def test_speed_escalations_counter_in_metrics(self, manager):
         """speed_escalations counter appears in get_metrics()."""
         metrics = manager.get_metrics()
@@ -897,6 +942,7 @@ class TestSpeedTriggeredEscalation:
         metrics = manager.get_metrics()
         assert metrics['speed_escalations'] == 1
 
+    @pytest.mark.fast
     def test_speed_escalation_resets_counter_after_trigger(self, manager):
         """After speed escalation, counter resets so 3 more signals needed."""
         # First escalation: Tier 1 -> 2
@@ -923,6 +969,7 @@ class TestSpeedTriggeredEscalation:
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_speed_escalation_stops_at_max_tier(self, manager):
         """Speed escalation does not go beyond FULL_BYPASS."""
         # Escalate to Tier 3 via two rounds of speed signals (with cooldown advance)
@@ -951,6 +998,7 @@ class TestSpeedTriggeredEscalation:
         metrics = manager.get_metrics()
         assert metrics['speed_escalations'] == 2
 
+    @pytest.mark.fast
     def test_speed_signals_per_keyword_isolation(self, manager):
         """Speed signals are tracked per-keyword independently."""
         # 2 signals for kw1
@@ -967,6 +1015,7 @@ class TestSpeedTriggeredEscalation:
         assert r1.tier == EscalationTier.IMPERSONATE_ONLY
         assert r2.tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_speed_escalation_logged_at_info(self, manager):
         """Speed-triggered escalation is logged at INFO level."""
         with patch("src.downloader.escalation_manager.logger") as mock_logger:
@@ -981,6 +1030,7 @@ class TestSpeedTriggeredEscalation:
             assert "kw" in log_msg
             assert "low speed" in log_msg
 
+    @pytest.mark.fast
     def test_reset_all_clears_speed_state(self, manager):
         """reset_all() clears speed counters and escalation count."""
         manager.record_slow_speed("kw", 0.05)
@@ -1025,6 +1075,7 @@ class TestSpeedEscalationCooldown:
         assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
         assert manager.get_metrics()['speed_escalations'] == 1
 
+    @pytest.mark.fast
     def test_speed_escalation_proceeds_after_cooldown(self, imp_manager):
         """Speed escalation proceeds once cooldown has elapsed."""
         config = FakeExtractorArgsConfig(cooldown_seconds=300.0)
@@ -1049,6 +1100,7 @@ class TestSpeedEscalationCooldown:
         assert manager.get_escalation_args("kw").tier == EscalationTier.FULL_BYPASS
         assert manager.get_metrics()['speed_escalations'] == 2
 
+    @pytest.mark.fast
     def test_speed_cooldown_zero_allows_immediate_escalation(self, imp_manager):
         """With cooldown_seconds=0, speed escalation is never suppressed."""
         config = FakeExtractorArgsConfig(cooldown_seconds=0.0)
@@ -1087,6 +1139,7 @@ class TestEscalationCheckpointPersistence:
         assert 'saved_at' in data
         assert isinstance(data['saved_at'], float)
 
+    @pytest.mark.fast
     def test_to_dict_with_keyword_states(self, imp_manager, ext_config):
         """to_dict() serializes per-keyword tier, 403 count, etc."""
         manager = EscalationManager(imp_manager, ext_config)
@@ -1114,6 +1167,7 @@ class TestEscalationCheckpointPersistence:
         assert data['total_successes'] == 1
         assert data['total_escalations'] == 1
 
+    @pytest.mark.fast
     def test_round_trip_serialize_deserialize(self, imp_manager):
         """Serialize then deserialize preserves all keyword states and counters."""
         # Use 0s cooldown to allow rapid escalation in test
@@ -1153,6 +1207,7 @@ class TestEscalationCheckpointPersistence:
         assert metrics['total_successes'] == 1
         assert metrics['total_escalations'] == 3  # kw1 once, kw2 twice
 
+    @pytest.mark.fast
     def test_stale_data_de_escalates_by_one_tier(self, imp_manager):
         """If checkpoint is >1 hour old, all keywords de-escalate by one tier."""
         no_cooldown_config = FakeExtractorArgsConfig(cooldown_seconds=0.0)
@@ -1184,6 +1239,7 @@ class TestEscalationCheckpointPersistence:
         r2 = restored.get_escalation_args("kw2")
         assert r2.tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_stale_tier1_stays_at_tier1(self, imp_manager, ext_config):
         """Stale de-escalation does not go below Tier 1."""
         manager = EscalationManager(imp_manager, ext_config)
@@ -1202,6 +1258,7 @@ class TestEscalationCheckpointPersistence:
         r = restored.get_escalation_args("kw1")
         assert r.tier == EscalationTier.IMPERSONATE_ONLY  # Still Tier 1
 
+    @pytest.mark.fast
     def test_missing_checkpoint_data_safe_fallback(self, imp_manager, ext_config):
         """from_dict() with None/empty/invalid data returns fresh manager."""
         # None data
@@ -1230,6 +1287,7 @@ class TestEscalationCheckpointPersistence:
         )
         assert m3.get_metrics()['total_403s'] == 0
 
+    @pytest.mark.fast
     def test_from_dict_with_invalid_tier_value_clamped(self, imp_manager, ext_config):
         """Invalid tier values in checkpoint are clamped to valid range."""
         data = {
@@ -1260,6 +1318,7 @@ class TestEscalationCheckpointPersistence:
         r_low = restored.get_escalation_args("kw_low")
         assert r_low.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_speed_escalations_counter_persisted(self, imp_manager, ext_config):
         """speed_escalations counter survives round-trip."""
         manager = EscalationManager(imp_manager, ext_config)
@@ -1280,6 +1339,7 @@ class TestEscalationCheckpointPersistence:
         metrics = restored.get_metrics()
         assert metrics['speed_escalations'] == 1
 
+    @pytest.mark.fast
     def test_from_dict_missing_saved_at_treats_as_stale(self, imp_manager, ext_config):
         """Missing 'saved_at' key defaults to epoch 0, treating data as stale and de-escalating."""
         data = {
@@ -1315,6 +1375,7 @@ class TestEscalationCheckpointPersistence:
         r1 = restored.get_escalation_args("kw_tier1")
         assert r1.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_from_dict_recent_saved_at_preserves_tiers(self, imp_manager, ext_config):
         """Checkpoint saved within stale_threshold preserves tiers exactly."""
         data = {
@@ -1344,6 +1405,7 @@ class TestEscalationCheckpointPersistence:
         r3 = restored.get_escalation_args("kw_tier3")
         assert r3.tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_from_dict_empty_keyword_states_returns_fresh(self, imp_manager, ext_config):
         """from_dict() with empty keyword_states dict returns working manager with no crash."""
         data = {

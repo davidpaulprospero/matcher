@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 class TestLoadTimingLogged:
     """Tests for checkpoint load timing being logged."""
 
+    @pytest.mark.fast
     def test_load_logs_timing_message(self, tmp_path, caplog):
         """Verify that load() logs timing in milliseconds."""
         # Create valid checkpoint file
@@ -54,6 +55,7 @@ class TestLoadTimingLogged:
         assert len(timing_messages) == 1
         assert 'ms' in timing_messages[0]
 
+    @pytest.mark.fast
     def test_load_timing_includes_milliseconds(self, tmp_path, caplog):
         """Verify that load timing message includes milliseconds unit."""
         checkpoint_data = {
@@ -77,6 +79,7 @@ class TestLoadTimingLogged:
         # Should match pattern like "Checkpoint loaded in X.Xms"
         assert 'Checkpoint loaded in' in timing_messages[0]
 
+    @pytest.mark.fast
     def test_load_timing_is_info_level(self, tmp_path, caplog):
         """Verify that load timing is logged at INFO level."""
         checkpoint_data = {
@@ -97,6 +100,7 @@ class TestLoadTimingLogged:
         assert len(timing_records) == 1
         assert timing_records[0].levelno == logging.INFO
 
+    @pytest.mark.fast
     def test_load_no_timing_when_file_not_exists(self, tmp_path, caplog):
         """Verify that no timing is logged when checkpoint doesn't exist."""
         manager = CheckpointManager(tmp_path)
@@ -108,6 +112,7 @@ class TestLoadTimingLogged:
         timing_messages = [r.message for r in caplog.records if 'loaded in' in r.message]
         assert len(timing_messages) == 0
 
+    @pytest.mark.fast
     def test_load_timing_positive_value(self, tmp_path, caplog):
         """Verify that load timing value is positive."""
         checkpoint_data = {
@@ -137,6 +142,7 @@ class TestLoadTimingLogged:
 class TestSaveTimingLogged:
     """Tests for checkpoint save timing being logged."""
 
+    @pytest.mark.fast
     def test_atomic_save_logs_timing_message(self, tmp_path, caplog):
         """Verify that _atomic_save() logs timing in milliseconds."""
         manager = CheckpointManager(tmp_path)
@@ -153,6 +159,7 @@ class TestSaveTimingLogged:
         assert len(timing_messages) == 1
         assert 'ms' in timing_messages[0]
 
+    @pytest.mark.fast
     def test_atomic_save_timing_includes_milliseconds(self, tmp_path, caplog):
         """Verify that save timing message includes milliseconds unit."""
         manager = CheckpointManager(tmp_path)
@@ -170,6 +177,7 @@ class TestSaveTimingLogged:
         assert 'Checkpoint saved in' in timing_messages[0]
         assert 'ms' in timing_messages[0]
 
+    @pytest.mark.fast
     def test_atomic_save_timing_is_debug_level(self, tmp_path, caplog):
         """Verify that save timing is logged at DEBUG level."""
         manager = CheckpointManager(tmp_path)
@@ -186,6 +194,7 @@ class TestSaveTimingLogged:
         assert len(timing_records) == 1
         assert timing_records[0].levelno == logging.DEBUG
 
+    @pytest.mark.fast
     def test_save_calls_atomic_save_with_timing(self, tmp_path, caplog):
         """Verify that save() method logs timing via _atomic_save()."""
         manager = CheckpointManager(tmp_path)
@@ -196,6 +205,7 @@ class TestSaveTimingLogged:
         timing_messages = [r.message for r in caplog.records if 'saved in' in r.message]
         assert len(timing_messages) == 1
 
+    @pytest.mark.fast
     def test_atomic_save_timing_positive_value(self, tmp_path, caplog):
         """Verify that save timing value is positive."""
         manager = CheckpointManager(tmp_path)
@@ -221,6 +231,7 @@ class TestSaveTimingLogged:
 class TestTimingFormat:
     """Tests for timing message format."""
 
+    @pytest.mark.fast
     def test_load_timing_format(self, tmp_path, caplog):
         """Verify load timing format is 'Checkpoint loaded in X.Xms'."""
         checkpoint_data = {
@@ -243,6 +254,7 @@ class TestTimingFormat:
         # Should match "Checkpoint loaded in X.Xms" format
         assert re.match(r'Checkpoint loaded in \d+\.?\d*ms', timing_messages[0])
 
+    @pytest.mark.fast
     def test_save_timing_format(self, tmp_path, caplog):
         """Verify save timing format is 'Checkpoint saved in X.Xms'."""
         manager = CheckpointManager(tmp_path)
@@ -265,6 +277,7 @@ class TestTimingFormat:
 class TestTimingWithLargeCheckpoint:
     """Tests for timing with larger checkpoint data."""
 
+    @pytest.mark.fast
     def test_load_timing_large_checkpoint(self, tmp_path, caplog):
         """Verify timing is logged for large checkpoints."""
         # Create checkpoint with substantial data
@@ -301,6 +314,7 @@ class TestTimingWithLargeCheckpoint:
         timing_messages = [r.message for r in caplog.records if 'loaded in' in r.message]
         assert len(timing_messages) == 1
 
+    @pytest.mark.fast
     def test_save_timing_large_checkpoint(self, tmp_path, caplog):
         """Verify timing is logged for large checkpoint saves."""
         manager = CheckpointManager(tmp_path)
@@ -331,6 +345,7 @@ class TestTimingWithLargeCheckpoint:
 class TestIntermediateSaveTiming:
     """Tests for save_intermediate() timing."""
 
+    @pytest.mark.fast
     def test_save_intermediate_logs_timing(self, tmp_path, caplog):
         """Verify that save_intermediate() logs timing via _atomic_save()."""
         manager = CheckpointManager(tmp_path)
@@ -350,6 +365,7 @@ class TestIntermediateSaveTiming:
 class TestMarkStageIncompleteTiming:
     """Tests for mark_stage_incomplete() timing."""
 
+    @pytest.mark.fast
     def test_mark_stage_incomplete_logs_timing(self, tmp_path, caplog):
         """Verify that mark_stage_incomplete() logs timing via _atomic_save()."""
         # Create initial checkpoint

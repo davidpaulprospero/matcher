@@ -44,6 +44,7 @@ from src.otio.timeline import _is_missing_file
 class TestVideoIdToSegmentPathResolution:
     """Test that video ID source_files resolve to segment paths after DOWNLOAD_SEGMENTS."""
 
+    @pytest.mark.fast
     def test_video_id_in_match_resolves_to_segment_file(self, tmp_path):
         """Video ID in source_file should resolve to segment file after download."""
         # Create segment files that would exist after DOWNLOAD_SEGMENTS
@@ -63,12 +64,14 @@ class TestVideoIdToSegmentPathResolution:
         # Segment file should exist
         assert segment_file.exists()
 
+    @pytest.mark.fast
     def test_segment_filename_format_encodes_video_id_and_time(self):
         """Segment filename format: {video_id}_{start_seconds:04d}.mp4"""
         assert get_segment_filename("dQw4w9WgXcQ", 0) == "dQw4w9WgXcQ_0000.mp4"
         assert get_segment_filename("abc12345678", 330) == "abc12345678_0330.mp4"
         assert get_segment_filename("xyz-_Aa0Zz1", 9999) == "xyz-_Aa0Zz1_9999.mp4"
 
+    @pytest.mark.fast
     def test_match_with_video_id_finds_segment_path(self, tmp_path):
         """collect_matched_segments uses video_id to map to audio_downloads."""
         @dataclass
@@ -121,6 +124,7 @@ class TestVideoIdToSegmentPathResolution:
         assert len(segments[video_id]) == 1
         assert segments[video_id][0].video_id == video_id
 
+    @pytest.mark.fast
     def test_match_with_full_path_also_works(self, tmp_path):
         """source_file with full path (audio-first cache) should still work."""
         @dataclass
@@ -182,6 +186,7 @@ class TestVideoIdToSegmentPathResolution:
 class TestGlobalCacheSegmentGaps:
     """Test that global caption cache entries correctly identify missing segments."""
 
+    @pytest.mark.fast
     def test_global_cache_video_not_in_project_candidates(self):
         """Videos from global cache aren't in video_candidates, so no segments."""
         # Simulate project's video_candidates
@@ -193,6 +198,7 @@ class TestGlobalCacheSegmentGaps:
         # Global cache video is NOT in project's candidates
         assert global_cache_video_id not in project_candidates
 
+    @pytest.mark.fast
     def test_segment_collection_skips_missing_audio_download(self):
         """collect_matched_segments skips videos not in audio_downloads."""
         @dataclass
@@ -235,6 +241,7 @@ class TestGlobalCacheSegmentGaps:
         assert global_video_id not in segments
         assert "project_vid1" not in segments  # Not matched either
 
+    @pytest.mark.fast
     def test_missing_segment_results_in_gap_detection(self, tmp_path):
         """Video ID without corresponding segment file triggers gap detection."""
         video_id = "global_abcde"
@@ -254,23 +261,27 @@ class TestGlobalCacheSegmentGaps:
 class TestOtioPathValidation:
     """Test that OTIO outputs valid file:/// URLs, not raw video IDs."""
 
+    @pytest.mark.fast
     def test_is_missing_file_handles_video_id(self):
         """_is_missing_file returns False for video IDs (no path separators)."""
         # Video ID without path separators - not treated as local file
         video_id = "dQw4w9WgXcQ"
         assert _is_missing_file(video_id) is False
 
+    @pytest.mark.fast
     def test_is_missing_file_handles_full_path(self, tmp_path):
         """_is_missing_file returns True for missing file paths."""
         missing_path = str(tmp_path / "nonexistent.mp4")
         assert _is_missing_file(missing_path) is True
 
+    @pytest.mark.fast
     def test_is_missing_file_handles_existing_path(self, tmp_path):
         """_is_missing_file returns False for existing file paths."""
         existing_file = tmp_path / "existing.mp4"
         existing_file.touch()
         assert _is_missing_file(str(existing_file)) is False
 
+    @pytest.mark.fast
     def test_valid_file_path_has_extension(self):
         """Valid segment file paths have .mp4 extension."""
         # Valid path pattern
@@ -281,6 +292,7 @@ class TestOtioPathValidation:
         invalid_path = "abc12345678"
         assert not invalid_path.endswith(".mp4")
 
+    @pytest.mark.fast
     def test_file_url_format_is_valid(self):
         """file:/// URLs should have proper format."""
         # Windows path converted to file URL
@@ -295,6 +307,7 @@ class TestOtioPathValidation:
         bad_url = "file:///D:/_Projects/.../dQw4w9WgXcQ"
         assert not bad_url.endswith(".mp4")
 
+    @pytest.mark.fast
     def test_otio_clip_path_not_video_id(self):
         """OTIO clips should have file paths, not video IDs."""
         # Simulate what an OTIO clip path should look like
@@ -313,6 +326,7 @@ class TestOtioPathValidation:
 class TestExtractVideoIdHandling:
     """Test extract_video_id handles various input formats."""
 
+    @pytest.mark.fast
     def test_extract_from_11_char_id(self):
         """Extract video ID from plain 11-character ID."""
         # transcription.utils.extract_video_id
@@ -320,33 +334,39 @@ class TestExtractVideoIdHandling:
         assert extract_video_id("abc12345678") == "abc12345678"
         assert extract_video_id("xyz-_Aa0Zz1") == "xyz-_Aa0Zz1"
 
+    @pytest.mark.fast
     def test_extract_from_filename_with_extension(self):
         """Extract video ID from filename with extension."""
         assert extract_video_id("dQw4w9WgXcQ.mp4") == "dQw4w9WgXcQ"
         assert extract_video_id("abc12345678.mp3") == "abc12345678"
 
+    @pytest.mark.fast
     def test_extract_from_segment_filename(self):
         """Extract video ID from segment filename format."""
         assert extract_video_id("dQw4w9WgXcQ_0045.mp4") == "dQw4w9WgXcQ"
         assert extract_video_id("abc12345678_0330.mp4") == "abc12345678"
         assert extract_video_id("xyz-_Aa0Zz1_9999.mp4") == "xyz-_Aa0Zz1"
 
+    @pytest.mark.fast
     def test_extract_from_full_path(self):
         """Extract video ID from full file path."""
         assert extract_video_id("/path/to/dQw4w9WgXcQ.mp4") == "dQw4w9WgXcQ"
         assert extract_video_id("E:/videos/abc12345678_0030.mp4") == "abc12345678"
 
+    @pytest.mark.fast
     def test_extract_handles_short_strings(self):
         """Extract returns None for strings shorter than 11 chars."""
         result = extract_video_id("short")
         # Either None or whatever the function does for short strings
         assert result is None or len(result) < 11
 
+    @pytest.mark.fast
     def test_extract_handles_empty_string(self):
         """Extract handles empty string gracefully."""
         result = extract_video_id("")
         assert result is None
 
+    @pytest.mark.fast
     def test_segment_utils_extract_video_id_from_path(self):
         """segment_utils._extract_video_id handles paths."""
         # segment_utils version
@@ -354,6 +374,7 @@ class TestExtractVideoIdHandling:
         assert _extract_video_id("abc123_0330.mp4") == "abc123"
         assert _extract_video_id("/path/to/video.mp3") == "video"
 
+    @pytest.mark.fast
     def test_segment_utils_extract_video_id_none(self):
         """segment_utils._extract_video_id returns None for empty."""
         assert _extract_video_id("") is None
@@ -367,6 +388,7 @@ class TestExtractVideoIdHandling:
 class TestSegmentCoverageAnalysis:
     """Test segment coverage analysis for identifying missing segments."""
 
+    @pytest.mark.fast
     def test_identify_segments_from_matches(self):
         """Analyze match video_files to identify which segments are needed."""
         matches = [
@@ -379,6 +401,7 @@ class TestSegmentCoverageAnalysis:
         video_ids = {m["video_file"] for m in matches}
         assert video_ids == {"dQw4w9WgXcQ", "abc12345678"}
 
+    @pytest.mark.fast
     def test_identify_missing_segments(self, tmp_path):
         """Identify which video IDs don't have segment files."""
         segments_dir = tmp_path / "segments"
@@ -396,6 +419,7 @@ class TestSegmentCoverageAnalysis:
         missing = match_video_ids - segment_ids
         assert missing == {"abc12345678", "global_12345"}
 
+    @pytest.mark.fast
     def test_global_cache_videos_in_missing_list(self, tmp_path):
         """Videos from global cache should appear in missing segments list."""
         segments_dir = tmp_path / "segments"
@@ -421,6 +445,7 @@ class TestSegmentCoverageAnalysis:
         assert "project_vid1" not in missing
         assert "project_vid2" not in missing
 
+    @pytest.mark.fast
     def test_coverage_percentage_calculation(self, tmp_path):
         """Calculate segment coverage percentage."""
         segments_dir = tmp_path / "segments"
@@ -442,6 +467,7 @@ class TestSegmentCoverageAnalysis:
 
         assert coverage_percent == 60.0
 
+    @pytest.mark.fast
     def test_prepare_merged_segments_handles_missing_audio_downloads(self):
         """prepare_merged_segments handles videos not in audio_downloads gracefully.
 
@@ -481,6 +507,7 @@ class TestSegmentCoverageAnalysis:
         assert "vid1" in merged_ids
         assert len(merged) == 1
 
+    @pytest.mark.fast
     def test_collect_matched_segments_filters_global_cache_videos(self):
         """collect_matched_segments skips videos not in audio_downloads.
 
@@ -552,6 +579,7 @@ class TestSegmentCoverageAnalysis:
 class TestCaptionFirstIntegration:
     """Integration tests for caption-first video ID resolution flow."""
 
+    @pytest.mark.fast
     def test_caption_first_flow_video_id_to_segment(self, tmp_path):
         """Complete flow: video ID in match -> segment file path in OTIO."""
         @dataclass
@@ -612,6 +640,7 @@ class TestCaptionFirstIntegration:
         assert Path(full_path).exists()
         assert ".mp4" in full_path
 
+    @pytest.mark.fast
     def test_global_cache_video_creates_gap(self, tmp_path):
         """Global cache video without segment creates gap in OTIO."""
         # Global cache video ID (not in project's audio_downloads)

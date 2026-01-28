@@ -61,6 +61,7 @@ def _make_manager(cooldown: float = 0.0) -> EscalationManager:
 class TestTierEffectivenessStructure:
     """Test that get_tier_effectiveness() returns the expected nested dict."""
 
+    @pytest.mark.fast
     def test_returns_dict_keyed_by_category(self):
         mgr = _make_manager()
         mgr.record_outcome('403', EscalationTier.IMPERSONATE_ONLY, success=True)
@@ -72,6 +73,7 @@ class TestTierEffectivenessStructure:
         assert '403' in result
         assert '429' in result
 
+    @pytest.mark.fast
     def test_tier_keys_are_tier_1_tier_2_tier_3(self):
         mgr = _make_manager()
         mgr.record_outcome('403', EscalationTier.IMPERSONATE_ONLY, success=True)
@@ -84,6 +86,7 @@ class TestTierEffectivenessStructure:
         assert 'tier_2' in result['403']
         assert 'tier_3' in result['403']
 
+    @pytest.mark.fast
     def test_success_rate_is_float_between_0_and_1(self):
         mgr = _make_manager()
         mgr.record_outcome('403', EscalationTier.IMPERSONATE_ONLY, success=True)
@@ -95,6 +98,7 @@ class TestTierEffectivenessStructure:
         assert isinstance(rate, float)
         assert 0.0 <= rate <= 1.0
 
+    @pytest.mark.fast
     def test_multiple_categories_tracked_independently(self):
         mgr = _make_manager()
         # 403: all succeed at Tier 1
@@ -117,6 +121,7 @@ class TestTierEffectivenessStructure:
 class TestMixedOutcomes:
     """Test success rate calculation with mixed success/failure outcomes."""
 
+    @pytest.mark.fast
     def test_tier_1_80_percent_success(self):
         """10 attempts at Tier 1, 8 success → 80% rate."""
         mgr = _make_manager()
@@ -129,6 +134,7 @@ class TestMixedOutcomes:
 
         assert result['403']['tier_1'] == 0.8
 
+    @pytest.mark.fast
     def test_tier_2_30_percent_success(self):
         """10 attempts at Tier 2, 3 success → 30% rate."""
         mgr = _make_manager()
@@ -141,6 +147,7 @@ class TestMixedOutcomes:
 
         assert result['403']['tier_2'] == 0.3
 
+    @pytest.mark.fast
     def test_multiple_tiers_same_category(self):
         """Tier 1: 80%, Tier 2: 30% for same category."""
         mgr = _make_manager()
@@ -160,6 +167,7 @@ class TestMixedOutcomes:
         assert result['403']['tier_1'] == 0.8
         assert result['403']['tier_2'] == 0.3
 
+    @pytest.mark.fast
     def test_100_percent_success(self):
         mgr = _make_manager()
         for _ in range(5):
@@ -168,6 +176,7 @@ class TestMixedOutcomes:
         result = mgr.get_tier_effectiveness()
         assert result['bot_detection']['tier_3'] == 1.0
 
+    @pytest.mark.fast
     def test_0_percent_success(self):
         mgr = _make_manager()
         for _ in range(5):
@@ -184,6 +193,7 @@ class TestMixedOutcomes:
 class TestSkipEscalationRecommendation:
     """Test that >80% Tier 1 success generates 'skip escalation' recommendation."""
 
+    @pytest.mark.fast
     def test_skip_escalation_when_tier_1_above_80(self):
         mgr = _make_manager()
         # 403 at Tier 1: 9/10 = 90% success
@@ -195,6 +205,7 @@ class TestSkipEscalationRecommendation:
 
         assert any('skip escalation for 403' in r for r in recs)
 
+    @pytest.mark.fast
     def test_no_skip_escalation_when_tier_1_at_80(self):
         """Exactly 80% should NOT trigger recommendation (>80% required)."""
         mgr = _make_manager()
@@ -207,6 +218,7 @@ class TestSkipEscalationRecommendation:
 
         assert not any('skip escalation for 403' in r for r in recs)
 
+    @pytest.mark.fast
     def test_no_skip_escalation_when_tier_1_below_80(self):
         mgr = _make_manager()
         for _ in range(7):
@@ -218,6 +230,7 @@ class TestSkipEscalationRecommendation:
 
         assert not any('skip escalation for 429' in r for r in recs)
 
+    @pytest.mark.fast
     def test_skip_escalation_per_category(self):
         """Only the high-success category gets the recommendation."""
         mgr = _make_manager()
@@ -244,6 +257,7 @@ class TestSkipEscalationRecommendation:
 class TestSkipTier2Recommendation:
     """Test that <20% Tier 2 + >60% Tier 3 generates 'skip Tier 2' recommendation."""
 
+    @pytest.mark.fast
     def test_skip_tier_2_when_low_t2_high_t3(self):
         mgr = _make_manager()
         # Tier 2: 1/10 = 10% success
@@ -260,6 +274,7 @@ class TestSkipTier2Recommendation:
 
         assert any('skip Tier 2 for 403' in r for r in recs)
 
+    @pytest.mark.fast
     def test_no_skip_tier_2_when_t2_at_20(self):
         """Exactly 20% Tier 2 should NOT trigger (requires <20%)."""
         mgr = _make_manager()
@@ -278,6 +293,7 @@ class TestSkipTier2Recommendation:
 
         assert not any('skip Tier 2 for 403' in r for r in recs)
 
+    @pytest.mark.fast
     def test_no_skip_tier_2_when_t3_at_60(self):
         """Exactly 60% Tier 3 should NOT trigger (requires >60%)."""
         mgr = _make_manager()
@@ -295,6 +311,7 @@ class TestSkipTier2Recommendation:
 
         assert not any('skip Tier 2 for 429' in r for r in recs)
 
+    @pytest.mark.fast
     def test_no_skip_tier_2_when_only_t2_data(self):
         """No Tier 3 data → no skip Tier 2 recommendation."""
         mgr = _make_manager()
@@ -306,6 +323,7 @@ class TestSkipTier2Recommendation:
 
         assert not any('skip Tier 2 for 403' in r for r in recs)
 
+    @pytest.mark.fast
     def test_both_recommendations_possible(self):
         """One category skips escalation, another skips Tier 2."""
         mgr = _make_manager()
@@ -336,6 +354,7 @@ class TestSkipTier2Recommendation:
 class TestExportToJsonIntegration:
     """Test that tier_effectiveness is in export_to_json() under 'escalation'."""
 
+    @pytest.mark.fast
     def test_tier_effectiveness_in_export(self):
         mgr = _make_manager()
         mgr.record_outcome('403', EscalationTier.IMPERSONATE_ONLY, success=True)
@@ -352,6 +371,7 @@ class TestExportToJsonIntegration:
         assert '429' in effectiveness
         assert effectiveness['429']['tier_2'] == 1.0
 
+    @pytest.mark.fast
     def test_tier_recommendations_in_export(self):
         mgr = _make_manager()
         # 403 at Tier 1: 95% success
@@ -367,6 +387,7 @@ class TestExportToJsonIntegration:
         assert isinstance(recs, list)
         assert any('skip escalation for 403' in r for r in recs)
 
+    @pytest.mark.fast
     def test_empty_effectiveness_in_export(self):
         """No outcomes recorded → empty tier_effectiveness in export."""
         mgr = _make_manager()
@@ -376,6 +397,7 @@ class TestExportToJsonIntegration:
         assert export['escalation']['tier_effectiveness'] == {}
         assert export['escalation']['tier_recommendations'] == []
 
+    @pytest.mark.fast
     def test_export_without_escalation_manager(self):
         """No escalation_manager → no tier_effectiveness key."""
         metrics = RateLimitMetrics()
@@ -392,17 +414,20 @@ class TestExportToJsonIntegration:
 class TestEmptyData:
     """Test edge cases with no data."""
 
+    @pytest.mark.fast
     def test_empty_effectiveness_returns_empty_dict(self):
         mgr = _make_manager()
         result = mgr.get_tier_effectiveness()
         assert result == {}
 
+    @pytest.mark.fast
     def test_empty_recommendations_returns_empty_list(self):
         mgr = _make_manager()
         recs = mgr.get_tier_recommendations()
         assert recs == []
         assert isinstance(recs, list)
 
+    @pytest.mark.fast
     def test_reset_clears_tier_outcomes(self):
         mgr = _make_manager()
         mgr.record_outcome('403', EscalationTier.IMPERSONATE_ONLY, success=True)
@@ -412,6 +437,7 @@ class TestEmptyData:
 
         assert mgr.get_tier_effectiveness() == {}
 
+    @pytest.mark.fast
     def test_single_attempt_no_crash(self):
         """Single attempt should not cause any issues."""
         mgr = _make_manager()
@@ -420,6 +446,7 @@ class TestEmptyData:
         result = mgr.get_tier_effectiveness()
         assert result == {'age_gate': {'tier_3': 0.0}}
 
+    @pytest.mark.fast
     def test_recommendations_with_only_tier_2_no_crash(self):
         """Tier 2 data only (no Tier 1 or 3) should not crash."""
         mgr = _make_manager()
@@ -432,6 +459,7 @@ class TestEmptyData:
         # No skip escalation because no Tier 1 data
         assert not any('skip escalation' in r for r in recs)
 
+    @pytest.mark.fast
     def test_recommendations_with_only_tier_1_low_success(self):
         """Tier 1 at exactly 50% → no recommendations."""
         mgr = _make_manager()

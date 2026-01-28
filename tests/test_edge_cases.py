@@ -34,6 +34,7 @@ from src.state import PipelineState
 class TestEmptyInputs:
     """Test handling of empty inputs across modules"""
 
+    @pytest.mark.fast
     def test_empty_voiceover_text(self):
         """Test SRTSegment with empty text"""
         segment = SRTSegment(
@@ -47,6 +48,7 @@ class TestEmptyInputs:
         assert segment.text == ""
         assert segment.duration == 1.0
 
+    @pytest.mark.fast
     def test_empty_keywords_list(self):
         """Test Match with empty keywords"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -62,6 +64,7 @@ class TestEmptyInputs:
 
         assert match.video_segment.keywords == []
 
+    @pytest.mark.fast
     def test_empty_match_result_list(self):
         """Test MatchResult with empty alternatives and secondaries"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -79,6 +82,7 @@ class TestEmptyInputs:
         assert len(result.secondary_matches) == 0
         assert len(result.strategy_matches) == 0
 
+    @pytest.mark.fast
     def test_pipeline_state_with_no_data(self):
         """Test PipelineState initialization with minimal data"""
         state = PipelineState()
@@ -98,6 +102,7 @@ class TestEmptyInputs:
 class TestExtremeValues:
     """Test handling of extreme values"""
 
+    @pytest.mark.fast
     def test_very_long_text(self):
         """Test SRTSegment with extremely long text (10,000 chars)"""
         long_text = "A" * 10000
@@ -112,6 +117,7 @@ class TestExtremeValues:
         assert len(segment.text) == 10000
         assert segment.text == long_text
 
+    @pytest.mark.fast
     def test_very_short_duration(self):
         """Test segment with extremely short duration (0.001 seconds)"""
         segment = SRTSegment(
@@ -124,6 +130,7 @@ class TestExtremeValues:
 
         assert segment.duration == 0.001
 
+    @pytest.mark.fast
     def test_very_long_duration(self):
         """Test segment with very long duration (10 hours)"""
         segment = SRTSegment(
@@ -136,6 +143,7 @@ class TestExtremeValues:
 
         assert segment.duration == 36000.0
 
+    @pytest.mark.fast
     def test_zero_confidence_match(self):
         """Test Match with zero confidence"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -151,6 +159,7 @@ class TestExtremeValues:
 
         assert match.confidence == 0.0
 
+    @pytest.mark.fast
     def test_very_high_segment_index(self):
         """Test SRTSegment with very high index (10000)"""
         segment = SRTSegment(
@@ -163,6 +172,7 @@ class TestExtremeValues:
 
         assert segment.index == 10000
 
+    @pytest.mark.fast
     def test_large_number_of_keywords(self):
         """Test segment with 1000 keywords"""
         keywords = [f"keyword_{i}" for i in range(1000)]
@@ -185,6 +195,7 @@ class TestExtremeValues:
 class TestMalformedData:
     """Test handling of malformed or invalid data"""
 
+    @pytest.mark.fast
     def test_negative_duration(self):
         """Test SRTSegment with negative duration (end < start)"""
         segment = SRTSegment(
@@ -198,6 +209,7 @@ class TestMalformedData:
         # Duration should be negative (catches bug)
         assert segment.duration == -2.0
 
+    @pytest.mark.fast
     def test_confidence_above_one(self):
         """Test Match with confidence > 1.0 (invalid but possible)"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -214,6 +226,7 @@ class TestMalformedData:
         # Should accept but may need validation
         assert match.confidence == 1.5
 
+    @pytest.mark.fast
     def test_negative_confidence(self):
         """Test Match with negative confidence"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -229,6 +242,7 @@ class TestMalformedData:
 
         assert match.confidence == -0.5
 
+    @pytest.mark.fast
     def test_segment_with_none_source_file(self):
         """Test SRTSegment with None as source_file"""
         # This should work since source_file has default ""
@@ -249,6 +263,7 @@ class TestMalformedData:
 class TestUnicodeAndSpecialChars:
     """Test handling of unicode and special characters"""
 
+    @pytest.mark.fast
     def test_unicode_text(self):
         """Test SRTSegment with unicode text"""
         unicode_text = "日本語テキスト 中文文本 العربية Ελληνικά 🎬🎥📹"
@@ -262,6 +277,7 @@ class TestUnicodeAndSpecialChars:
 
         assert segment.text == unicode_text
 
+    @pytest.mark.fast
     def test_special_xml_characters(self):
         """Test text with XML special characters"""
         special_text = "Text with <tags> & \"quotes\" and 'apostrophes'"
@@ -275,6 +291,7 @@ class TestUnicodeAndSpecialChars:
 
         assert segment.text == special_text
 
+    @pytest.mark.fast
     def test_emoji_in_text(self):
         """Test segment with emojis"""
         emoji_text = "Video about 🎬 movies 🎥 and 📹 cameras"
@@ -289,6 +306,7 @@ class TestUnicodeAndSpecialChars:
         assert "🎬" in segment.text
         assert "🎥" in segment.text
 
+    @pytest.mark.fast
     def test_newlines_and_tabs_in_text(self):
         """Test segment with newlines and tabs"""
         text_with_whitespace = "Line 1\nLine 2\tTabbed"
@@ -303,6 +321,7 @@ class TestUnicodeAndSpecialChars:
         assert "\n" in segment.text
         assert "\t" in segment.text
 
+    @pytest.mark.fast
     def test_path_with_unicode(self):
         """Test file path with unicode characters"""
         unicode_path = "/videos/日本語/ビデオ.mp4"
@@ -324,6 +343,7 @@ class TestUnicodeAndSpecialChars:
 class TestBoundaryConditions:
     """Test boundary conditions at limits"""
 
+    @pytest.mark.fast
     def test_segment_at_zero_time(self):
         """Test segment starting at exactly 0.0"""
         segment = SRTSegment(
@@ -336,6 +356,7 @@ class TestBoundaryConditions:
 
         assert segment.start_time == 0.0
 
+    @pytest.mark.fast
     def test_exact_frame_boundary(self):
         """Test segment duration that's exactly one frame at 30fps"""
         frame_duration = 1.0 / 30.0  # 0.0333... seconds
@@ -349,6 +370,7 @@ class TestBoundaryConditions:
 
         assert abs(segment.duration - frame_duration) < 0.0001
 
+    @pytest.mark.fast
     def test_confidence_at_boundaries(self):
         """Test Match with confidence at 0.0 and 1.0 boundaries"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -360,6 +382,7 @@ class TestBoundaryConditions:
         assert match_zero.confidence == 0.0
         assert match_one.confidence == 1.0
 
+    @pytest.mark.fast
     def test_single_character_text(self):
         """Test segment with single character"""
         segment = SRTSegment(
@@ -380,6 +403,7 @@ class TestBoundaryConditions:
 class TestDataTypeEdgeCases:
     """Test edge cases related to data types"""
 
+    @pytest.mark.fast
     def test_float_precision_in_timestamps(self):
         """Test that float precision is maintained"""
         precise_time = 1.123456789
@@ -394,6 +418,7 @@ class TestDataTypeEdgeCases:
         # Python floats have ~15 decimal digits of precision
         assert abs(segment.end_time - precise_time) < 1e-10
 
+    @pytest.mark.fast
     def test_integer_as_float_time(self):
         """Test that integer times work (implicit conversion)"""
         segment = SRTSegment(
@@ -407,6 +432,7 @@ class TestDataTypeEdgeCases:
         assert segment.start_time == 0.0
         assert segment.end_time == 5.0
 
+    @pytest.mark.fast
     def test_very_large_index(self):
         """Test with maximum safe integer for index"""
         large_index = 2**31 - 1  # Max 32-bit signed int
@@ -428,6 +454,7 @@ class TestDataTypeEdgeCases:
 class TestCollectionEdgeCases:
     """Test edge cases with lists and collections"""
 
+    @pytest.mark.fast
     def test_single_item_alternatives(self):
         """Test MatchResult with single alternative"""
         vo_seg = SRTSegment(0, 0.0, 1.0, "test", "vo.srt")
@@ -444,6 +471,7 @@ class TestCollectionEdgeCases:
 
         assert len(result.alternatives) == 1
 
+    @pytest.mark.fast
     def test_duplicate_keywords(self):
         """Test segment with duplicate keywords"""
         segment = SRTSegment(
@@ -457,6 +485,7 @@ class TestCollectionEdgeCases:
 
         assert len(segment.keywords) == 3  # Duplicates preserved
 
+    @pytest.mark.fast
     def test_keywords_with_whitespace(self):
         """Test keywords containing whitespace"""
         segment = SRTSegment(
@@ -478,6 +507,7 @@ class TestCollectionEdgeCases:
 class TestStateTransitions:
     """Test edge cases in state transitions"""
 
+    @pytest.mark.fast
     def test_pipeline_state_stage_progression(self):
         """Test PipelineState through all stages"""
         state = PipelineState()

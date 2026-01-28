@@ -40,6 +40,7 @@ from src.utils import SRTSegment
 class TestWeightsSumToZeroUS008:
     """AC1: Test scoring handles all weights summing to zero gracefully."""
 
+    @pytest.mark.fast
     def test_multimodal_zero_weight_sum_returns_zero(self):
         """compute_multimodal_score with all zero weights returns 0 without crash."""
         zero_weights = {
@@ -63,6 +64,7 @@ class TestWeightsSumToZeroUS008:
         assert not math.isnan(result)
         assert not math.isinf(result)
 
+    @pytest.mark.fast
     def test_multimodal_zero_weights_no_nan_propagation(self):
         """Zero weights don't cause NaN when normalizing."""
         zero_weights = {
@@ -86,6 +88,7 @@ class TestWeightsSumToZeroUS008:
         assert not math.isnan(result)
         assert not math.isinf(result)
 
+    @pytest.mark.fast
     def test_multimodal_single_nonzero_weight(self):
         """Score computed correctly when only one weight is non-zero."""
         single_weight = {
@@ -107,6 +110,7 @@ class TestWeightsSumToZeroUS008:
         # Only embedding should contribute with weight 1.0
         assert abs(result - 0.75) < 0.01
 
+    @pytest.mark.fast
     def test_multimodal_very_small_weights_no_underflow(self):
         """Very small weights don't cause underflow issues."""
         tiny_weights = {
@@ -139,6 +143,7 @@ class TestWeightsSumToZeroUS008:
 class TestNaNPropagationPreventionUS008:
     """AC2: Test scoring prevents NaN propagation through multi-strategy computation."""
 
+    @pytest.mark.fast
     def test_multimodal_nan_input_handled(self):
         """NaN input scores are handled gracefully."""
         result, reason, components = compute_multimodal_score(
@@ -152,6 +157,7 @@ class TestNaNPropagationPreventionUS008:
         # NaN should be clamped to 0.0 or handled
         assert not math.isnan(result)
 
+    @pytest.mark.fast
     def test_multimodal_inf_input_clamped(self):
         """Infinity input scores are clamped."""
         result, reason, components = compute_multimodal_score(
@@ -166,6 +172,7 @@ class TestNaNPropagationPreventionUS008:
         assert not math.isinf(result)
         assert result <= 1.0
 
+    @pytest.mark.fast
     def test_multimodal_negative_inf_input_clamped(self):
         """Negative infinity input scores are clamped to 0."""
         result, reason, components = compute_multimodal_score(
@@ -180,6 +187,7 @@ class TestNaNPropagationPreventionUS008:
         assert not math.isinf(result)
         assert result >= 0.0
 
+    @pytest.mark.fast
     def test_pool_normalization_nan_confidence_handled(self):
         """Pool normalization handles NaN confidence input."""
         result, reason = normalize_confidence_by_pool(
@@ -191,6 +199,7 @@ class TestNaNPropagationPreventionUS008:
         # Should not propagate NaN
         assert not math.isnan(result)
 
+    @pytest.mark.fast
     def test_pool_normalization_inf_pool_size_handled(self):
         """Pool normalization handles extreme pool sizes."""
         # Very large pool size
@@ -205,6 +214,7 @@ class TestNaNPropagationPreventionUS008:
         assert result >= 0.0
         assert result <= 1.0
 
+    @pytest.mark.fast
     def test_semantic_coherence_nan_embedding_handled(self):
         """Semantic coherence handles NaN in embeddings."""
         nan_embedding = np.array([float('nan'), float('nan'), float('nan')])
@@ -223,6 +233,7 @@ class TestNaNPropagationPreventionUS008:
             # Should return safe values even if similarity is NaN
             assert not math.isnan(adjustment)
 
+    @pytest.mark.fast
     def test_keyword_overlap_empty_both_lists_no_nan(self):
         """Empty keyword lists produce 0.0, not NaN."""
         score, matched = calculate_keyword_overlap_score([], [])
@@ -231,6 +242,7 @@ class TestNaNPropagationPreventionUS008:
         assert not math.isnan(score)
         assert matched == []
 
+    @pytest.mark.fast
     def test_entity_match_empty_both_lists_no_nan(self):
         """Empty entity lists produce 0.0, not NaN."""
         score, matched = calculate_entity_match_score([], [])
@@ -247,6 +259,7 @@ class TestNaNPropagationPreventionUS008:
 class TestExtremeConfidenceClampingUS008:
     """AC3: Test scoring clamps extreme confidence values (0.0 and 1.0) correctly."""
 
+    @pytest.mark.fast
     def test_multimodal_clamps_above_one(self):
         """Scores above 1.0 are clamped to 1.0."""
         # Use weights that would produce > 1.0 with boosted inputs
@@ -269,6 +282,7 @@ class TestExtremeConfidenceClampingUS008:
         # Result should be clamped to 1.0 max
         assert result == 1.0
 
+    @pytest.mark.fast
     def test_multimodal_clamps_below_zero(self):
         """Scores below 0.0 are clamped to 0.0."""
         result, reason, components = compute_multimodal_score(
@@ -282,6 +296,7 @@ class TestExtremeConfidenceClampingUS008:
         # Result should be clamped to 0.0 min
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_pool_normalization_preserves_zero_confidence(self):
         """Zero confidence remains zero after normalization."""
         result, reason = normalize_confidence_by_pool(
@@ -292,6 +307,7 @@ class TestExtremeConfidenceClampingUS008:
 
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_pool_normalization_caps_at_one(self):
         """High confidence with small pool boost is capped at 1.0."""
         mock_seg = MagicMock()
@@ -309,6 +325,7 @@ class TestExtremeConfidenceClampingUS008:
 
         assert result <= 1.0
 
+    @pytest.mark.fast
     def test_pool_normalization_floors_at_zero(self):
         """Low confidence with large pool penalty doesn't go below 0."""
         mock_seg = MagicMock()
@@ -326,6 +343,7 @@ class TestExtremeConfidenceClampingUS008:
 
         assert result >= 0.0
 
+    @pytest.mark.fast
     def test_duration_penalty_clamps_at_zero(self):
         """Duration penalty doesn't produce negative confidence."""
         mock_config = Mock()
@@ -346,6 +364,7 @@ class TestExtremeConfidenceClampingUS008:
         # If it goes negative, this test documents that behavior
         assert isinstance(result, float)
 
+    @pytest.mark.fast
     def test_broll_boost_caps_at_one(self):
         """B-roll boost doesn't exceed 1.0."""
         mock_config = Mock()
@@ -360,6 +379,7 @@ class TestExtremeConfidenceClampingUS008:
         # 0.95 + 0.5 = 1.45, should be capped at 1.0
         assert result == 1.0
 
+    @pytest.mark.fast
     def test_caption_quality_caps_at_one(self):
         """Caption quality boost doesn't exceed 1.0."""
         mock_config = Mock()
@@ -377,6 +397,7 @@ class TestExtremeConfidenceClampingUS008:
         # 0.95 + 0.3 = 1.25, should be capped at 1.0
         assert result == 1.0
 
+    @pytest.mark.fast
     def test_caption_quality_floors_at_zero(self):
         """Caption quality penalty doesn't go below 0."""
         mock_config = Mock()
@@ -394,6 +415,7 @@ class TestExtremeConfidenceClampingUS008:
         # 0.1 - 0.5 = -0.4, should be floored at 0.0
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_timing_penalty_floors_at_zero(self):
         """Timing penalty doesn't produce negative confidence."""
         mock_config = Mock()
@@ -408,6 +430,7 @@ class TestExtremeConfidenceClampingUS008:
         # 0.5 * -0.5 = -0.25, should be floored at 0.0
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_temporal_coherence_clamps_confidence(self):
         """Temporal coherence adjustments are clamped."""
         mock_config = Mock()
@@ -438,6 +461,7 @@ class TestExtremeConfidenceClampingUS008:
 class TestDiversityIdenticalKeywordsUS008:
     """AC4: Test diversity enforcement with identical keyword matches."""
 
+    @pytest.mark.fast
     def test_keyword_overlap_same_keywords_returns_max(self):
         """Identical keyword sets return maximum score."""
         keywords = ["earthquake", "damage", "rescue"]
@@ -448,6 +472,7 @@ class TestDiversityIdenticalKeywordsUS008:
         assert abs(score - 0.75) < 0.01
         assert len(matched) == 3
 
+    @pytest.mark.fast
     def test_keyword_overlap_all_identical_single_keyword(self):
         """All candidates with same single keyword get same score."""
         vo_keywords = ["earthquake"]
@@ -464,6 +489,7 @@ class TestDiversityIdenticalKeywordsUS008:
         # All should have identical scores
         assert score1 == score2 == score3
 
+    @pytest.mark.fast
     def test_keyword_overlap_distinguishes_by_count(self):
         """More matching keywords produces higher score for diversity."""
         vo_keywords = ["earthquake", "damage", "rescue", "emergency"]
@@ -482,6 +508,7 @@ class TestDiversityIdenticalKeywordsUS008:
         # More matches = higher score
         assert score1 < score2 < score3
 
+    @pytest.mark.fast
     def test_entity_match_distinguishes_by_count(self):
         """More matching entities produces higher score for diversity."""
         vo_entities = ["New York", "Paris", "Tokyo", "London"]
@@ -500,6 +527,7 @@ class TestDiversityIdenticalKeywordsUS008:
         # More matches = higher score
         assert score1 < score2 <= score3
 
+    @pytest.mark.fast
     def test_visual_description_identical_text_max_score(self):
         """Identical voiceover and description text produces high score."""
         text = "A beautiful sunset over the ocean with golden waves"
@@ -509,6 +537,7 @@ class TestDiversityIdenticalKeywordsUS008:
         # Same text should produce high overlap
         assert score > 0.5
 
+    @pytest.mark.fast
     def test_multimodal_breaks_tie_with_different_components(self):
         """When keywords identical, other components can break ties."""
         # Two candidates with identical keyword scores but different embedding
@@ -539,6 +568,7 @@ class TestDiversityIdenticalKeywordsUS008:
 class TestSingleElementPoolUS008:
     """AC5: Test pool normalization with single-element candidate pools."""
 
+    @pytest.mark.fast
     def test_single_candidate_no_margin_analysis(self):
         """Single candidate pool skips margin analysis."""
         mock_seg = MagicMock()
@@ -556,6 +586,7 @@ class TestSingleElementPoolUS008:
         assert "small_pool(1)" in reason
         assert "clear_winner" not in reason  # Can't determine with single candidate
 
+    @pytest.mark.fast
     def test_single_candidate_gets_boost(self):
         """Single candidate pool gets confidence boost."""
         result, reason = normalize_confidence_by_pool(
@@ -569,6 +600,7 @@ class TestSingleElementPoolUS008:
         assert result > 0.70
         assert "small_pool(1)" in reason
 
+    @pytest.mark.fast
     def test_single_candidate_preserves_valid_range(self):
         """Single candidate with high confidence stays in [0, 1]."""
         result, reason = normalize_confidence_by_pool(
@@ -581,6 +613,7 @@ class TestSingleElementPoolUS008:
         assert result <= 1.0
         assert result >= 0.95  # Should at least maintain or boost
 
+    @pytest.mark.fast
     def test_single_candidate_zero_confidence(self):
         """Single candidate with zero confidence stays zero."""
         result, reason = normalize_confidence_by_pool(
@@ -592,6 +625,7 @@ class TestSingleElementPoolUS008:
         # Zero * anything = zero
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_single_candidate_empty_candidates_list(self):
         """Single pool size with no candidates list provided."""
         result, reason = normalize_confidence_by_pool(
@@ -613,6 +647,7 @@ class TestSingleElementPoolUS008:
 class TestAdditionalEdgeCasesUS008:
     """Additional edge case tests for robustness."""
 
+    @pytest.mark.fast
     def test_multimodal_all_zero_inputs(self):
         """All zero input scores produce zero result."""
         result, reason, components = compute_multimodal_score(
@@ -625,6 +660,7 @@ class TestAdditionalEdgeCasesUS008:
 
         assert result == 0.0
 
+    @pytest.mark.fast
     def test_multimodal_exact_boundary_values(self):
         """Exact 0.0 and 1.0 boundaries handled correctly."""
         # All at 1.0
@@ -648,6 +684,7 @@ class TestAdditionalEdgeCasesUS008:
         assert result_max == 1.0
         assert result_min == 0.0
 
+    @pytest.mark.fast
     def test_pool_normalization_zero_pool_size(self):
         """Zero pool size returns original confidence."""
         result, reason = normalize_confidence_by_pool(
@@ -659,6 +696,7 @@ class TestAdditionalEdgeCasesUS008:
         assert result == 0.75
         assert reason == "empty_pool"
 
+    @pytest.mark.fast
     def test_pool_normalization_negative_pool_size(self):
         """Negative pool size treated as empty."""
         result, reason = normalize_confidence_by_pool(
@@ -670,6 +708,7 @@ class TestAdditionalEdgeCasesUS008:
         assert result == 0.75
         assert reason == "empty_pool"
 
+    @pytest.mark.fast
     def test_keyword_overlap_case_insensitive(self):
         """Keyword matching is case-insensitive."""
         score1, matched1 = calculate_keyword_overlap_score(
@@ -685,6 +724,7 @@ class TestAdditionalEdgeCasesUS008:
         assert score1 == score2
         assert len(matched1) == len(matched2)
 
+    @pytest.mark.fast
     def test_entity_match_filters_short_entities(self):
         """Very short entities (< 2 chars) are filtered."""
         score, matched = calculate_entity_match_score(
@@ -696,6 +736,7 @@ class TestAdditionalEdgeCasesUS008:
         assert len(matched) == 1
         assert "New York" in [m for m in matched if m]
 
+    @pytest.mark.fast
     def test_visual_description_empty_voiceover_returns_zero(self):
         """Empty voiceover text returns zero score."""
         score = calculate_visual_description_score(
@@ -705,6 +746,7 @@ class TestAdditionalEdgeCasesUS008:
 
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_multimodal_disabled_returns_embedding_only(self):
         """When disabled, returns embedding similarity unchanged."""
         result, reason, components = compute_multimodal_score(

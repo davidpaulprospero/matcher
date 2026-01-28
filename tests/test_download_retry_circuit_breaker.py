@@ -18,16 +18,19 @@ from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig,
 class TestCircuitBreakerConfigBlockDownloadRetries:
     """Tests for block_download_retries config option."""
 
+    @pytest.mark.fast
     def test_default_is_true(self):
         """block_download_retries should default to True."""
         config = CircuitBreakerConfig()
         assert config.block_download_retries is True
 
+    @pytest.mark.fast
     def test_can_be_disabled(self):
         """block_download_retries can be set to False."""
         config = CircuitBreakerConfig(block_download_retries=False)
         assert config.block_download_retries is False
 
+    @pytest.mark.fast
     def test_included_in_config_section(self):
         """block_download_retries should be in config/sections/download.py."""
         from src.config.sections.download import CircuitBreakerConfig as ConfigCircuitBreakerConfig
@@ -39,6 +42,7 @@ class TestCircuitBreakerConfigBlockDownloadRetries:
 class TestCircuitBreakerGetRemainingPauseTime:
     """Tests for get_remaining_pause_time() method."""
 
+    @pytest.mark.fast
     def test_returns_zero_when_disabled(self):
         """Should return 0 when circuit breaker is disabled."""
         cb = CircuitBreaker(CircuitBreakerConfig(enabled=False))
@@ -46,12 +50,14 @@ class TestCircuitBreakerGetRemainingPauseTime:
         cb.state.opened_at = time.time()
         assert cb.get_remaining_pause_time() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_closed(self):
         """Should return 0 when circuit breaker is not tripped."""
         cb = CircuitBreaker()
         cb.state.is_open = False
         assert cb.get_remaining_pause_time() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_no_opened_at(self):
         """Should return 0 when opened_at is None."""
         cb = CircuitBreaker()
@@ -59,6 +65,7 @@ class TestCircuitBreakerGetRemainingPauseTime:
         cb.state.opened_at = None
         assert cb.get_remaining_pause_time() == 0.0
 
+    @pytest.mark.fast
     def test_returns_remaining_time_when_tripped(self):
         """Should return remaining time when circuit is tripped."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=10.0))
@@ -69,6 +76,7 @@ class TestCircuitBreakerGetRemainingPauseTime:
         # Should be approximately 7 seconds
         assert 6.5 < remaining <= 7.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_pause_elapsed(self):
         """Should return 0 when pause duration has already elapsed."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=5.0))
@@ -77,6 +85,7 @@ class TestCircuitBreakerGetRemainingPauseTime:
 
         assert cb.get_remaining_pause_time() == 0.0
 
+    @pytest.mark.fast
     def test_never_returns_negative(self):
         """Should never return negative values."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=1.0))
@@ -90,6 +99,7 @@ class TestCircuitBreakerGetRemainingPauseTime:
 class TestCircuitBreakerWaitForRecoveryIfNeeded:
     """Tests for wait_for_recovery_if_needed() method."""
 
+    @pytest.mark.fast
     def test_returns_zero_when_disabled(self):
         """Should return 0 when circuit breaker is disabled."""
         cb = CircuitBreaker(CircuitBreakerConfig(enabled=False))
@@ -97,12 +107,14 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
         cb.state.opened_at = time.time()
         assert cb.wait_for_recovery_if_needed() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_closed(self):
         """Should return 0 when circuit breaker is not tripped."""
         cb = CircuitBreaker()
         cb.state.is_open = False
         assert cb.wait_for_recovery_if_needed() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_pause_elapsed(self):
         """Should return 0 when pause duration has already elapsed."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=1.0))
@@ -111,6 +123,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
 
         assert cb.wait_for_recovery_if_needed() == 0.0
 
+    @pytest.mark.fast
     def test_waits_and_returns_time_when_tripped(self):
         """Should wait and return time when circuit is tripped."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -125,6 +138,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
             assert 0 < called_time <= 0.1
             assert 0 < wait_time <= 0.1
 
+    @pytest.mark.fast
     def test_updates_total_paused_seconds(self):
         """Should accumulate paused time in state.total_paused_seconds."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -137,6 +151,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
 
         assert cb.state.total_paused_seconds > initial_paused
 
+    @pytest.mark.fast
     def test_transitions_to_half_open(self):
         """Should transition to half-open state after waiting."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -149,6 +164,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
         assert cb.state.is_open is False
         assert cb.state.opened_at is None
 
+    @pytest.mark.fast
     def test_logs_with_context(self):
         """Should log with context string when provided."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -174,6 +190,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
             assert 'download retry 2/3' in second_log
             assert 'resuming' in second_log.lower()
 
+    @pytest.mark.fast
     def test_logs_without_context(self):
         """Should log without context when not provided."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -192,12 +209,14 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
 class TestRateLimitMetricsRecordCircuitBreakerWait:
     """Tests for record_circuit_breaker_wait() method."""
 
+    @pytest.mark.fast
     def test_method_exists(self):
         """record_circuit_breaker_wait should exist on RateLimitMetrics."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
         metrics = RateLimitMetrics()
         assert hasattr(metrics, 'record_circuit_breaker_wait')
 
+    @pytest.mark.fast
     def test_adds_to_circuit_breaker_pause_seconds(self):
         """Should add wait time to circuit_breaker_pause_seconds."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -208,6 +227,7 @@ class TestRateLimitMetricsRecordCircuitBreakerWait:
 
         assert metrics.circuit_breaker_pause_seconds == 15.0
 
+    @pytest.mark.fast
     def test_accumulates_multiple_waits(self):
         """Should accumulate multiple wait calls."""
         from src.downloader.rate_limit_metrics import RateLimitMetrics
@@ -223,6 +243,7 @@ class TestRateLimitMetricsRecordCircuitBreakerWait:
 class TestDownloadRetryCoordination:
     """Integration tests for download retry and circuit breaker coordination."""
 
+    @pytest.mark.fast
     def test_retry_loop_checks_circuit_breaker_on_retry_attempts(self):
         """Download retry should check circuit breaker before retry attempts (not first attempt)."""
         from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -268,6 +289,7 @@ class TestDownloadRetryCoordination:
         assert len(wait_calls) == 1
         assert wait_calls[0] > 0
 
+    @pytest.mark.fast
     def test_retry_count_preserved_across_circuit_breaker_pause(self):
         """Retry count should be preserved across circuit breaker pause."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -298,6 +320,7 @@ class TestDownloadRetryCoordination:
         # Retry count should go 0, 1, 2, 3 (not reset)
         assert retry_counts == [0, 1, 2, 3]
 
+    @pytest.mark.fast
     def test_no_wait_when_block_download_retries_disabled(self):
         """Should not wait for circuit breaker when block_download_retries is False."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -320,6 +343,7 @@ class TestDownloadRetryCoordination:
 
         assert wait_called is False
 
+    @pytest.mark.fast
     def test_no_wait_when_circuit_breaker_not_tripped(self):
         """Should not wait when circuit breaker is not tripped."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -334,6 +358,7 @@ class TestDownloadRetryCoordination:
         wait_time = cb.wait_for_recovery_if_needed()
         assert wait_time == 0.0
 
+    @pytest.mark.fast
     def test_first_attempt_does_not_check_circuit_breaker(self):
         """First attempt (attempt=0) should not check circuit breaker."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -369,6 +394,7 @@ class TestDownloadRetryCoordination:
 class TestConfigYamlIntegration:
     """Tests for config.yaml integration."""
 
+    @pytest.mark.fast
     def test_circuit_breaker_section_has_block_download_retries(self):
         """config.yaml circuit_breaker section should have block_download_retries."""
         import yaml
@@ -387,6 +413,7 @@ class TestConfigYamlIntegration:
 class TestVideoDownloaderCircuitBreakerConfig:
     """Tests for VideoDownloader reading block_download_retries config."""
 
+    @pytest.mark.fast
     def test_reads_block_download_retries_from_config(self):
         """VideoDownloader should read block_download_retries from config."""
         from src.downloader.core import VideoDownloader
@@ -435,6 +462,7 @@ class TestVideoDownloaderCircuitBreakerConfig:
         )
         assert block_retries is True
 
+    @pytest.mark.fast
     def test_block_download_retries_defaults_true_if_missing(self):
         """Should default to True if block_download_retries not in config."""
         from src.downloader.core import VideoDownloader
@@ -487,6 +515,7 @@ class TestVideoDownloaderCircuitBreakerConfig:
 class TestLogging:
     """Tests for logging behavior."""
 
+    @pytest.mark.fast
     def test_logs_when_download_retry_paused(self):
         """Should log when download retry is paused due to circuit breaker."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -510,6 +539,7 @@ class TestLogging:
             assert 'download retry 1/3' in log_message
             assert 'waiting' in log_message.lower()
 
+    @pytest.mark.fast
     def test_logs_include_trip_count(self):
         """Log message should include trip count."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -525,6 +555,7 @@ class TestLogging:
             log_message = mock_logger.info.call_args_list[0][0][0]
             assert 'trip #3' in log_message
 
+    @pytest.mark.fast
     def test_logs_include_consecutive_failures(self):
         """Log message should include consecutive failures count."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
@@ -540,6 +571,7 @@ class TestLogging:
             log_message = mock_logger.info.call_args_list[0][0][0]
             assert '7 consecutive failures' in log_message
 
+    @pytest.mark.fast
     def test_logs_resume_after_wait(self):
         """Should log when resuming after circuit breaker wait."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))

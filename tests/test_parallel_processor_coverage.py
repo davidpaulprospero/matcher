@@ -49,6 +49,7 @@ class TestTranscribeVideosParallel:
             mock.return_value = "/tmp/audio.wav"
             yield mock
 
+    @pytest.mark.integration
     def test_all_videos_cached(self, mock_whisper_client, mock_transcript_cache):
         """Test when all videos are cached"""
         from src.transcription.parallel_processor import transcribe_videos_parallel
@@ -67,6 +68,7 @@ class TestTranscribeVideosParallel:
 
     @patch('src.transcription.parallel_processor.ThreadPoolExecutor')
     @patch('src.transcription.parallel_processor.extract_audio')
+    @pytest.mark.integration
     def test_audio_extraction_error(self, mock_extract, mock_executor, mock_whisper_client, mock_transcript_cache):
         """Test handles audio extraction errors"""
         from src.transcription.parallel_processor import transcribe_videos_parallel
@@ -93,6 +95,7 @@ class TestTranscribeVideosParallel:
         # Should return empty results for failed extraction
         assert isinstance(result, dict)
 
+    @pytest.mark.integration
     def test_with_config_object(self, mock_whisper_client, mock_transcript_cache, mock_extract_audio):
         """Test with config object"""
         from src.transcription.parallel_processor import transcribe_videos_parallel
@@ -116,6 +119,7 @@ class TestTranscribeVideosParallel:
 
         assert isinstance(result, dict)
 
+    @pytest.mark.integration
     def test_without_config_uses_defaults(self, mock_whisper_client, mock_transcript_cache):
         """Test uses default values without config"""
         from src.transcription.parallel_processor import transcribe_videos_parallel
@@ -164,6 +168,7 @@ class TestTranscribeVideo:
             mock.return_value = "/tmp/audio.wav"
             yield mock
 
+    @pytest.mark.fast
     def test_transcribe_video_cached(self, mock_cache):
         """Test transcribe_video with cached result"""
         from src.transcription.parallel_processor import transcribe_video
@@ -177,6 +182,7 @@ class TestTranscribeVideo:
         assert len(result) == 1
         assert result[0].text == 'Cached segment'
 
+    @pytest.mark.fast
     def test_transcribe_video_extraction_fails(self, mock_cache, mock_whisper_client):
         """Test when audio extraction fails"""
         from src.transcription.parallel_processor import transcribe_video
@@ -186,6 +192,7 @@ class TestTranscribeVideo:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_transcribe_video_transcription_error(self, mock_cache, mock_extract_audio):
         """Test handles transcription errors"""
         from src.transcription.parallel_processor import transcribe_video
@@ -228,6 +235,7 @@ class TestTranscribeVoiceoverMedia:
             mock.return_value = "/tmp/audio.wav"
             yield mock
 
+    @pytest.mark.integration
     def test_transcribe_voiceover_audio_file(self, mock_whisper_client, mock_write_srt):
         """Test transcribing audio file directly"""
         from src.transcription.parallel_processor import transcribe_voiceover_media
@@ -247,6 +255,7 @@ class TestTranscribeVoiceoverMedia:
         finally:
             Path(audio_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_transcribe_voiceover_video_file(self, mock_whisper_client, mock_write_srt, mock_extract_audio):
         """Test transcribing video file (extracts audio first)"""
         from src.transcription.parallel_processor import transcribe_voiceover_media
@@ -268,6 +277,7 @@ class TestTranscribeVoiceoverMedia:
         finally:
             Path(video_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_transcribe_voiceover_video_extraction_fails(self, mock_whisper_client, mock_write_srt):
         """Test error when video audio extraction fails"""
         from src.transcription.parallel_processor import transcribe_voiceover_media
@@ -285,6 +295,7 @@ class TestTranscribeVoiceoverMedia:
             finally:
                 Path(video_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_transcribe_voiceover_unsupported_format(self, mock_whisper_client):
         """Test error for unsupported format"""
         from src.transcription.parallel_processor import transcribe_voiceover_media
@@ -301,6 +312,7 @@ class TestTranscribeVoiceoverMedia:
         finally:
             Path(bad_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_transcribe_voiceover_no_segments(self, mock_whisper_client, mock_write_srt):
         """Test error when no segments generated"""
         from src.transcription.parallel_processor import transcribe_voiceover_media
@@ -320,6 +332,7 @@ class TestTranscribeVoiceoverMedia:
         finally:
             Path(audio_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_transcribe_voiceover_saves_word_timestamps(self, mock_whisper_client, mock_write_srt):
         """Test word timestamps are saved to JSON"""
         from src.transcription.parallel_processor import transcribe_voiceover_media
@@ -350,6 +363,7 @@ class TestTranscribeVoiceoverMedia:
 class TestGetTranscriptSegments:
     """Test get_transcript_segments function"""
 
+    @pytest.mark.fast
     def test_get_transcript_segments(self):
         """Test get_transcript_segments wrapper"""
         from src.transcription.parallel_processor import get_transcript_segments
@@ -377,6 +391,7 @@ class TestGetTranscriptSegments:
 class TestTranscribeVoiceoverAudio:
     """Test transcribe_voiceover_audio function"""
 
+    @pytest.mark.fast
     def test_transcribe_voiceover_audio(self):
         """Test basic voiceover audio transcription"""
         from src.transcription.parallel_processor import transcribe_voiceover_audio

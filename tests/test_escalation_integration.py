@@ -184,6 +184,7 @@ class TestFullEscalationFlow:
         assert "--extractor-args" in result_t3.args
         assert result_t3.rotate_cookies is True
 
+    @pytest.mark.fast
     def test_multiple_keywords_escalate_independently(self, manager):
         """Two keywords escalate through tiers independently."""
         kw_a = "mountain landscape"
@@ -206,6 +207,7 @@ class TestFullEscalationFlow:
         # kw_a should still be at Tier 2, not Tier 3
         assert manager.get_escalation_args(kw_a).tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_metrics_reflect_full_flow(self, manager):
         """After full escalation, metrics accurately track all events."""
         keyword = "drone footage"
@@ -239,6 +241,7 @@ class TestTriggerDetectionRealSamples:
     yt-dlp stderr samples."""
 
     @pytest.mark.parametrize("stderr", REAL_STDERR_403_SAMPLES)
+    @pytest.mark.fast
     def test_real_403_samples_trigger(self, stderr):
         """Each real 403/bot stderr sample is correctly identified as a trigger."""
         assert is_escalation_trigger(stderr) is True, (
@@ -246,12 +249,14 @@ class TestTriggerDetectionRealSamples:
         )
 
     @pytest.mark.parametrize("stderr", REAL_STDERR_NON_TRIGGER_SAMPLES)
+    @pytest.mark.fast
     def test_real_non_trigger_samples_rejected(self, stderr):
         """Non-403 stderr samples are correctly rejected."""
         assert is_escalation_trigger(stderr) is False, (
             f"Should NOT trigger for: {stderr!r}"
         )
 
+    @pytest.mark.fast
     def test_multiline_stderr_with_trigger(self):
         """Real yt-dlp often outputs multiple lines; trigger buried inside."""
         multiline_stderr = (
@@ -262,6 +267,7 @@ class TestTriggerDetectionRealSamples:
         )
         assert is_escalation_trigger(multiline_stderr) is True
 
+    @pytest.mark.fast
     def test_multiline_stderr_without_trigger(self):
         """Multi-line non-trigger stderr should not trigger."""
         multiline_stderr = (
@@ -272,6 +278,7 @@ class TestTriggerDetectionRealSamples:
         )
         assert is_escalation_trigger(multiline_stderr) is False
 
+    @pytest.mark.fast
     def test_case_variations(self):
         """Trigger detection is case-insensitive."""
         assert is_escalation_trigger("http error 403") is True
@@ -313,6 +320,7 @@ class TestSuccessReset:
         result = manager.get_escalation_args(keyword)
         assert result.tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_multiple_successes_dont_deescalate(self, manager):
         """Many successes do not reduce the tier back to Tier 1."""
         keyword = "city timelapse"
@@ -329,6 +337,7 @@ class TestSuccessReset:
         result = manager.get_escalation_args(keyword)
         assert result.tier == EscalationTier.EXTRACTOR_ARGS
 
+    @pytest.mark.fast
     def test_success_at_tier_3_keeps_tier_3(self, manager):
         """At Tier 3, successes do not de-escalate."""
         keyword = "aerial footage"
@@ -354,6 +363,7 @@ class TestSuccessReset:
         # Still Tier 3
         assert manager.get_escalation_args(keyword).tier == EscalationTier.FULL_BYPASS
 
+    @pytest.mark.fast
     def test_success_then_failure_cycle(self, manager):
         """Alternating success/failure doesn't accidentally escalate."""
         keyword = "wildlife footage"
@@ -413,6 +423,7 @@ class TestExtractorArgsRotation:
             f"Expected different rotation: {client_str_1} vs {client_str_2}"
         )
 
+    @pytest.mark.fast
     def test_rotation_wraps_around(self, imp_manager):
         """Rotation index wraps around the player_clients list."""
         config = FakeExtractorArgsConfig(
@@ -444,6 +455,7 @@ class TestExtractorArgsRotation:
             assert len(clients) == 3
             assert set(clients) == {"a", "b", "c"}
 
+    @pytest.mark.fast
     def test_single_keyword_escalation_rotates_index(self, imp_manager):
         """A single keyword escalating twice gets different extractor-args index."""
         config = FakeExtractorArgsConfig(
@@ -497,6 +509,7 @@ class TestMockingEnforced:
         """ImpersonationManager is a MagicMock, not a real instance."""
         assert isinstance(manager._impersonation_manager, MagicMock)
 
+    @pytest.mark.fast
     def test_no_subprocess_in_test_module(self):
         """This test module does not import subprocess."""
         import sys
@@ -506,6 +519,7 @@ class TestMockingEnforced:
         # Verify subprocess module is not referenced in this module's globals
         assert "subprocess" not in dir(mod)
 
+    @pytest.mark.fast
     def test_escalation_manager_works_without_network(self, manager):
         """Full flow works without any network calls."""
         # This test simply exercises the full flow and verifies it completes

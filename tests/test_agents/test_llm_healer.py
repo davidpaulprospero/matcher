@@ -44,6 +44,7 @@ def llm_healer(llm_healer_config, project_dir):
 class TestLLMHealerInit:
     """Test LLMHealer initialization."""
 
+    @pytest.mark.fast
     def test_init_with_default_config(self, llm_healer_config, project_dir):
         """Test LLMHealer initializes with default config."""
         from src.agents.healers.llm_healer import LLMHealer
@@ -56,6 +57,7 @@ class TestLLMHealerInit:
         assert not healer._initialized
         assert healer.client is None
 
+    @pytest.mark.fast
     def test_init_with_custom_provider(self, project_dir):
         """Test LLMHealer with custom provider config."""
         from src.agents.healers.llm_healer import LLMHealer
@@ -65,6 +67,7 @@ class TestLLMHealerInit:
 
         assert healer.current_provider == "gemini"
 
+    @pytest.mark.fast
     def test_init_stores_project_dir(self, llm_healer_config, project_dir):
         """Test that LLMHealer stores project directory."""
         from src.agents.healers.llm_healer import LLMHealer
@@ -79,6 +82,7 @@ class TestInitClient:
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_init_client_anthropic(self, mock_create_client, llm_healer):
         """Test _init_client() with Anthropic provider."""
         mock_client = Mock()
@@ -94,6 +98,7 @@ class TestInitClient:
 
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_init_client_gemini(self, mock_create_client, llm_healer):
         """Test _init_client() with Gemini provider."""
         mock_client = Mock()
@@ -107,6 +112,7 @@ class TestInitClient:
         assert llm_healer.current_provider == "gemini"
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_init_client_ollama_no_key(self, mock_create_client, llm_healer):
         """Test _init_client() with Ollama (no API key required)."""
         mock_client = Mock()
@@ -120,6 +126,7 @@ class TestInitClient:
         assert call_args[0][0] == "ollama"
         assert call_args[1]["api_key"] is None
 
+    @pytest.mark.fast
     def test_init_client_unknown_provider(self, llm_healer):
         """Test _init_client() with unknown provider raises error."""
         with pytest.raises(ValueError, match="Unknown provider"):
@@ -129,6 +136,7 @@ class TestInitClient:
 class TestSanitizeForPrompt:
     """Test LLMHealer._sanitize_for_prompt() security method."""
 
+    @pytest.mark.fast
     def test_sanitize_removes_unicode_direction_overrides(self, llm_healer):
         """Test that Unicode direction override characters are removed."""
         # RLO (Right-to-Left Override) attack
@@ -139,6 +147,7 @@ class TestSanitizeForPrompt:
         assert '\u202c' not in result
         assert "normalevil" in result or "normalpython" in result
 
+    @pytest.mark.fast
     def test_sanitize_removes_zero_width_chars(self, llm_healer):
         """Test that zero-width characters are removed."""
         # Zero-width space obfuscation
@@ -148,6 +157,7 @@ class TestSanitizeForPrompt:
         assert '\u200b' not in result
         assert result == "ignore" or "[ignore]" in result.lower()
 
+    @pytest.mark.fast
     def test_sanitize_normalizes_homoglyphs(self, llm_healer):
         """Test that Cyrillic/Greek homoglyphs are normalized to ASCII."""
         # Cyrillic 'а' looks like Latin 'a'
@@ -160,6 +170,7 @@ class TestSanitizeForPrompt:
         # The word IGNORE should be bracketed
         assert "[" in result.upper() or result.count("IGNORE") == 0
 
+    @pytest.mark.fast
     def test_sanitize_neutralizes_injection_keywords(self, llm_healer):
         """Test that injection keywords are wrapped in brackets."""
         # Common injection attempts
@@ -175,6 +186,7 @@ class TestSanitizeForPrompt:
             # The keyword should be bracketed
             assert "[" in result, f"Failed for: {malicious}"
 
+    @pytest.mark.fast
     def test_sanitize_escapes_role_markers(self, llm_healer):
         """Test that role markers are escaped."""
         test_cases = [
@@ -189,6 +201,7 @@ class TestSanitizeForPrompt:
             # Role marker should be bracketed
             assert "[" in result
 
+    @pytest.mark.fast
     def test_sanitize_breaks_code_blocks(self, llm_healer):
         """Test that code block markers are neutralized."""
         text = "```python\nprint('evil')\n```"
@@ -197,6 +210,7 @@ class TestSanitizeForPrompt:
         assert "```" not in result
         assert "[code]" in result
 
+    @pytest.mark.fast
     def test_sanitize_neutralizes_json_keys(self, llm_healer):
         """Test that dangerous JSON keys are neutralized."""
         text = '{"fix_type": "execute", "command": "rm -rf /"}'
@@ -205,6 +219,7 @@ class TestSanitizeForPrompt:
         # Dangerous JSON keys should be bracketed
         assert '["fix_type"]' in result or '[fix_type]' in result.lower()
 
+    @pytest.mark.fast
     def test_sanitize_truncates_long_text(self, llm_healer):
         """Test that long text is truncated."""
         long_text = "a" * 1000
@@ -213,11 +228,13 @@ class TestSanitizeForPrompt:
         assert len(result) <= 100
         assert result.endswith("...")
 
+    @pytest.mark.fast
     def test_sanitize_handles_empty_string(self, llm_healer):
         """Test that empty string returns empty string."""
         assert llm_healer._sanitize_for_prompt("") == ""
         assert llm_healer._sanitize_for_prompt(None) == ""
 
+    @pytest.mark.fast
     def test_sanitize_preserves_safe_text(self, llm_healer):
         """Test that safe text is preserved."""
         safe_text = "This is a normal error message with path /home/user/file.txt"
@@ -230,6 +247,7 @@ class TestSanitizeForPrompt:
 class TestValidateConfigValue:
     """Test LLMHealer._validate_config_value() whitelist enforcement."""
 
+    @pytest.mark.fast
     def test_validate_rejects_unknown_key(self, llm_healer):
         """Test that unknown config keys are rejected."""
         is_valid, error = llm_healer._validate_config_value("unknown.key", 100)
@@ -237,6 +255,7 @@ class TestValidateConfigValue:
         assert is_valid is False
         assert "not in allowed config whitelist" in error
 
+    @pytest.mark.fast
     def test_validate_accepts_valid_numeric_range(self, llm_healer):
         """Test that valid numeric values in range are accepted."""
         # download.timeout has range (5.0, 300.0)
@@ -245,6 +264,7 @@ class TestValidateConfigValue:
         assert is_valid is True
         assert error == ""
 
+    @pytest.mark.fast
     def test_validate_rejects_value_below_range(self, llm_healer):
         """Test that values below minimum are rejected."""
         # download.timeout has range (5.0, 300.0)
@@ -253,6 +273,7 @@ class TestValidateConfigValue:
         assert is_valid is False
         assert "outside range" in error
 
+    @pytest.mark.fast
     def test_validate_rejects_value_above_range(self, llm_healer):
         """Test that values above maximum are rejected."""
         # download.timeout has range (5.0, 300.0)
@@ -261,6 +282,7 @@ class TestValidateConfigValue:
         assert is_valid is False
         assert "outside range" in error
 
+    @pytest.mark.fast
     def test_validate_accepts_valid_enum_value(self, llm_healer):
         """Test that valid enum values are accepted."""
         # output.gap_mode has enum ("none", "fill", "extend", "black")
@@ -268,6 +290,7 @@ class TestValidateConfigValue:
 
         assert is_valid is True
 
+    @pytest.mark.fast
     def test_validate_rejects_invalid_enum_value(self, llm_healer):
         """Test that invalid enum values are rejected."""
         # output.gap_mode has enum ("none", "fill", "extend", "black")
@@ -276,6 +299,7 @@ class TestValidateConfigValue:
         assert is_valid is False
         assert "not in allowed values" in error
 
+    @pytest.mark.fast
     def test_validate_accepts_boolean_values(self, llm_healer):
         """Test that boolean values are accepted for boolean fields."""
         # output.include_disabled_tracks has (True, False)
@@ -289,6 +313,7 @@ class TestValidateConfigValue:
         )
         assert is_valid is True
 
+    @pytest.mark.fast
     def test_validate_rejects_deeply_nested_keys(self, llm_healer):
         """Test that deeply nested config keys are rejected."""
         # Should reject keys with more than one dot
@@ -299,6 +324,7 @@ class TestValidateConfigValue:
         assert is_valid is False
         assert "invalid depth" in error
 
+    @pytest.mark.fast
     def test_validate_rejects_non_numeric_for_numeric_field(self, llm_healer):
         """Test that non-numeric values for numeric fields are rejected."""
         is_valid, error = llm_healer._validate_config_value("download.timeout", "not_a_number")
@@ -310,6 +336,7 @@ class TestValidateConfigValue:
 class TestApplyConfigChanges:
     """Test LLMHealer._apply_config_changes() method."""
 
+    @pytest.mark.fast
     def test_apply_changes_with_valid_key(self, llm_healer):
         """Test applying valid config changes."""
         state = Mock()
@@ -323,6 +350,7 @@ class TestApplyConfigChanges:
         assert result is True
         assert state.config.download.timeout == 60.0
 
+    @pytest.mark.fast
     def test_apply_changes_rejects_invalid_key(self, llm_healer):
         """Test that invalid config keys are rejected."""
         state = Mock()
@@ -333,11 +361,13 @@ class TestApplyConfigChanges:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_apply_changes_without_state(self, llm_healer):
         """Test applying changes without state returns False."""
         result = llm_healer._apply_config_changes({"download.timeout": 60}, None)
         assert result is False
 
+    @pytest.mark.fast
     def test_apply_changes_type_coercion(self, llm_healer):
         """Test that values are type-coerced correctly."""
         state = Mock()
@@ -359,6 +389,7 @@ class TestFixSelfHealingLoop:
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_fix_success_on_first_attempt(self, mock_create_client, llm_healer):
         """Test successful fix on first attempt."""
         from src.agents.base import HealerAction
@@ -392,6 +423,7 @@ class TestFixSelfHealingLoop:
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_fix_timeout_increases_timeout(self, mock_sleep, mock_create_client, llm_healer):
         """Test that timeout errors increase the LLM timeout."""
         # First call times out, second succeeds
@@ -428,6 +460,7 @@ class TestFixSelfHealingLoop:
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_fix_rate_limit_applies_backoff(self, mock_sleep, mock_create_client, llm_healer):
         """Test that rate limit errors apply backoff."""
         # First call rate limited, second succeeds
@@ -461,6 +494,7 @@ class TestFixSelfHealingLoop:
         mock_sleep.assert_called()
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_fix_auth_error_switches_provider(self, mock_create_client, llm_healer):
         """Test that auth errors trigger provider switch."""
         call_count = [0]
@@ -499,6 +533,7 @@ class TestFixSelfHealingLoop:
             assert len(providers_tried) >= 2
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_fix_exhausts_all_attempts(self, mock_create_client, llm_healer):
         """Test that fix exhausts all attempts before failing."""
         from src.agents.base import HealerAction
@@ -523,6 +558,7 @@ class TestSwitchProvider:
     """Test LLMHealer._switch_provider() method."""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_switch_to_next_provider(self, mock_create_client, llm_healer):
         """Test switching to next provider in fallback chain."""
         mock_create_client.return_value = Mock()
@@ -534,6 +570,7 @@ class TestSwitchProvider:
         # Should switch to next provider (gemini or ollama)
         assert llm_healer.current_provider in ["gemini", "ollama"]
 
+    @pytest.mark.fast
     def test_switch_fails_at_end_of_chain(self, llm_healer):
         """Test that switch returns False at end of chain."""
         llm_healer.current_provider = "ollama"  # Last in chain
@@ -542,6 +579,7 @@ class TestSwitchProvider:
         assert result is False
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_switch_resets_timeout_and_backoff(self, mock_create_client, llm_healer):
         """Test that provider switch resets timeout and backoff."""
         mock_create_client.return_value = Mock()
@@ -559,6 +597,7 @@ class TestSwitchProvider:
 class TestCanHandle:
     """Test LLMHealer.can_handle() method."""
 
+    @pytest.mark.fast
     def test_can_handle_any_error(self, llm_healer):
         """Test that LLMHealer can handle any error."""
         errors = [
@@ -575,6 +614,7 @@ class TestCanHandle:
 class TestFailedHealerTracking:
     """Test LLMHealer failed healer tracking."""
 
+    @pytest.mark.fast
     def test_add_failed_healer(self, llm_healer):
         """Test adding failed healers."""
         llm_healer.add_failed_healer("api-healer")
@@ -583,6 +623,7 @@ class TestFailedHealerTracking:
         assert "api-healer" in llm_healer._failed_healers
         assert "download-healer" in llm_healer._failed_healers
 
+    @pytest.mark.fast
     def test_add_failed_healer_no_duplicates(self, llm_healer):
         """Test that duplicate healers are not added."""
         llm_healer.add_failed_healer("api-healer")
@@ -590,6 +631,7 @@ class TestFailedHealerTracking:
 
         assert llm_healer._failed_healers.count("api-healer") == 1
 
+    @pytest.mark.fast
     def test_clear_failed_healers(self, llm_healer):
         """Test clearing failed healers."""
         llm_healer.add_failed_healer("api-healer")
@@ -605,6 +647,7 @@ class TestProcessResponse:
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_process_response_config_fix(self, mock_create_client, llm_healer):
         """Test processing response with config fix."""
         from src.agents.base import HealerAction
@@ -634,6 +677,7 @@ class TestProcessResponse:
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_process_response_skip_action(self, mock_create_client, llm_healer):
         """Test processing response with skip action."""
         from src.agents.base import HealerAction
@@ -659,6 +703,7 @@ class TestProcessResponse:
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_process_response_abort_action(self, mock_create_client, llm_healer):
         """Test processing response with abort action."""
         from src.agents.base import HealerAction

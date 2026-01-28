@@ -93,6 +93,7 @@ class TestGeminiMatcher:
     """Test GeminiMatcher class"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_init_creates_client(self, mock_create_client):
         """Test GeminiMatcher initialization"""
         mock_client = Mock()
@@ -106,6 +107,7 @@ class TestGeminiMatcher:
         assert matcher.client == mock_client
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_success(self, mock_create_client, mock_items, mock_llm_response):
         """Test successful batch matching"""
         mock_client = Mock()
@@ -122,6 +124,7 @@ class TestGeminiMatcher:
         assert results[1][:3] == (1, 0.75, "semantic alignment")  # selected 2 -> idx 1
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_with_context(self, mock_create_client, mock_items, mock_llm_response):
         """Test batch matching with context"""
         mock_client = Mock()
@@ -137,6 +140,7 @@ class TestGeminiMatcher:
         assert "CONTEXT: Python tutorial series" in request.prompt
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_with_negative_rules(self, mock_create_client, mock_items, mock_llm_response):
         """Test batch matching with negative rules"""
         mock_client = Mock()
@@ -156,6 +160,7 @@ class TestGeminiMatcher:
         assert "Avoid stock footage" in request.prompt
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_clamps_confidence(self, mock_create_client, mock_items):
         """Test that confidence is clamped to 0.0-1.0"""
         response = Mock()
@@ -174,6 +179,7 @@ class TestGeminiMatcher:
         assert results[1][1] == 0.0  # Clamped to min
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_clamps_selected_index(self, mock_create_client, mock_items):
         """Test that selected index is clamped to valid range"""
         response = Mock()
@@ -193,6 +199,7 @@ class TestGeminiMatcher:
         assert 0 <= results[1][0] <= 2
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_missing_voiceover_entry(self, mock_create_client, mock_items):
         """Test fallback when response missing voiceover entry"""
         response = Mock()
@@ -213,6 +220,7 @@ class TestGeminiMatcher:
         assert results[1][2] == "parse fallback"  # Fallback for missing entry
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_empty_response(self, mock_create_client, mock_items):
         """Test handling of empty response"""
         response = Mock()
@@ -227,6 +235,7 @@ class TestGeminiMatcher:
             matcher.match_batch(mock_items)
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_non_list_response(self, mock_create_client, mock_items):
         """Test handling of non-list response"""
         response = Mock()
@@ -241,6 +250,7 @@ class TestGeminiMatcher:
             matcher.match_batch(mock_items)
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_api_error(self, mock_create_client, mock_items):
         """Test handling of API error"""
         mock_client = Mock()
@@ -253,6 +263,7 @@ class TestGeminiMatcher:
             matcher.match_batch(mock_items)
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_truncates_reason(self, mock_create_client, mock_items):
         """Test that reason is truncated to 50 chars"""
         response = Mock()
@@ -280,6 +291,7 @@ class TestClaudeMatcher:
     """Test ClaudeMatcher class"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_init_creates_client(self, mock_create_client):
         """Test ClaudeMatcher initialization"""
         mock_client = Mock()
@@ -293,6 +305,7 @@ class TestClaudeMatcher:
         assert matcher.client == mock_client
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_success(self, mock_create_client, mock_items, mock_llm_response):
         """Test successful batch matching with Claude"""
         mock_client = Mock()
@@ -308,6 +321,7 @@ class TestClaudeMatcher:
         assert results[1][:3] == (1, 0.75, "semantic alignment")
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_with_context_and_rules(self, mock_create_client, mock_items, mock_llm_response):
         """Test batch matching with context and negative rules"""
         mock_client = Mock()
@@ -328,6 +342,7 @@ class TestClaudeMatcher:
         assert "No ads" in request.prompt
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_clamps_values(self, mock_create_client, mock_items):
         """Test value clamping in ClaudeMatcher"""
         response = Mock()
@@ -349,6 +364,7 @@ class TestClaudeMatcher:
         assert results[1][1] == 0.0  # Confidence clamped to min
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_parse_error(self, mock_create_client, mock_items):
         """Test handling of parse error"""
         response = Mock()
@@ -363,6 +379,7 @@ class TestClaudeMatcher:
             matcher.match_batch(mock_items)
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_api_error(self, mock_create_client, mock_items):
         """Test handling of API error"""
         mock_client = Mock()
@@ -375,6 +392,7 @@ class TestClaudeMatcher:
             matcher.match_batch(mock_items)
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_missing_entries_fallback(self, mock_create_client, mock_items):
         """Test fallback for missing voiceover entries"""
         response = Mock()
@@ -403,6 +421,7 @@ class TestLocalLLMMatcher:
     """Test LocalLLMMatcher (Ollama) class"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_init_creates_client(self, mock_create_client):
         """Test LocalLLMMatcher initialization"""
         mock_client = Mock()
@@ -416,6 +435,7 @@ class TestLocalLLMMatcher:
         assert matcher.client == mock_client
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_processes_one_at_a_time(self, mock_create_client, mock_items, mock_single_response):
         """Test that LocalLLM processes items one at a time"""
         mock_client = Mock()
@@ -430,6 +450,7 @@ class TestLocalLLMMatcher:
         assert len(results) == 2
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_success(self, mock_create_client, mock_items, mock_single_response):
         """Test successful matching with LocalLLM"""
         mock_client = Mock()
@@ -446,6 +467,7 @@ class TestLocalLLMMatcher:
             assert result[2] == "local match"
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_clamps_values(self, mock_create_client, mock_items):
         """Test value clamping in LocalLLMMatcher"""
         response = Mock()
@@ -462,6 +484,7 @@ class TestLocalLLMMatcher:
             assert result[1] == 1.0  # Confidence clamped
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_fallback_on_error(self, mock_create_client, mock_items):
         """Test fallback when LLM call fails"""
         mock_client = Mock()
@@ -478,6 +501,7 @@ class TestLocalLLMMatcher:
             assert result[2] == "local fallback"
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_fallback_on_invalid_response(self, mock_create_client, mock_items):
         """Test fallback when response is invalid"""
         response = Mock()
@@ -495,6 +519,7 @@ class TestLocalLLMMatcher:
             assert result[2] == "local fallback"
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_match_batch_empty_candidates(self, mock_create_client):
         """Test handling of empty candidates list"""
         mock_client = Mock()
@@ -519,11 +544,13 @@ class TestLocalLLMMatcher:
 class TestLLMProviderBase:
     """Test LLMProvider abstract base class"""
 
+    @pytest.mark.fast
     def test_cannot_instantiate_directly(self):
         """Test that LLMProvider cannot be instantiated directly"""
         with pytest.raises(TypeError):
             LLMProvider()
 
+    @pytest.mark.fast
     def test_subclass_must_implement_match_batch(self):
         """Test that subclasses must implement match_batch"""
         class IncompleteProvider(LLMProvider):
@@ -541,6 +568,7 @@ class TestEdgeCases:
     """Test edge cases across all providers"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_quotes_in_text_escaped(self, mock_create_client, mock_llm_response):
         """Test that quotes in text are escaped"""
         mock_client = Mock()
@@ -565,6 +593,7 @@ class TestEdgeCases:
         assert '"hello"' not in request.prompt  # Double quotes escaped
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_long_text_truncated(self, mock_create_client, mock_llm_response):
         """Test that long text is truncated"""
         mock_client = Mock()
@@ -591,6 +620,7 @@ class TestEdgeCases:
         assert "B" * 101 not in request.prompt
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_single_item_batch(self, mock_create_client, mock_candidates):
         """Test batch with single item"""
         response = Mock()
@@ -611,6 +641,7 @@ class TestEdgeCases:
         assert results[0][:3] == (0, 0.9, "match")
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_empty_candidates_in_batch(self, mock_create_client):
         """Test handling when some items have empty candidates"""
         response = Mock()
@@ -646,6 +677,7 @@ class TestRequestConfiguration:
     """Test LLM request configuration"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_gemini_uses_json_array_format(self, mock_create_client, mock_items, mock_llm_response):
         """Test that GeminiMatcher uses JSON_ARRAY format"""
         mock_client = Mock()
@@ -661,6 +693,7 @@ class TestRequestConfiguration:
         assert request.response_format == ResponseFormat.JSON_ARRAY
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_gemini_uses_120s_timeout(self, mock_create_client, mock_items, mock_llm_response):
         """Test that GeminiMatcher uses 120s timeout"""
         mock_client = Mock()
@@ -675,6 +708,7 @@ class TestRequestConfiguration:
         assert request.timeout == 120
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_local_llm_uses_json_format(self, mock_create_client, mock_items, mock_single_response):
         """Test that LocalLLMMatcher uses JSON format (not array)"""
         mock_client = Mock()
@@ -690,6 +724,7 @@ class TestRequestConfiguration:
         assert request.response_format == ResponseFormat.JSON
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_local_llm_uses_60s_timeout(self, mock_create_client, mock_items, mock_single_response):
         """Test that LocalLLMMatcher uses 60s timeout"""
         mock_client = Mock()
@@ -704,6 +739,7 @@ class TestRequestConfiguration:
         assert request.timeout == 60
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_claude_uses_max_tokens(self, mock_create_client, mock_items, mock_llm_response):
         """Test that ClaudeMatcher uses max_tokens"""
         mock_client = Mock()
@@ -718,6 +754,7 @@ class TestRequestConfiguration:
         assert request.max_tokens == 1500
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_matching_cache_key_prefix(self, mock_create_client, mock_items, mock_llm_response):
         """Test that all matchers use 'matching' cache key prefix"""
         mock_client = Mock()

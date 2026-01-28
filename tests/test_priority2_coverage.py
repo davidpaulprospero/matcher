@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 class TestLocationServiceGeoLocation:
     """Test GeoLocation dataclass methods."""
 
+    @pytest.mark.fast
     def test_geolocation_continent_property(self):
         """Test GeoLocation.continent property uses COUNTRY_TO_CONTINENT mapping."""
         from src.location_service import GeoLocation, COUNTRY_TO_CONTINENT
@@ -48,6 +49,7 @@ class TestLocationServiceGeoLocation:
         # Should use mapping for FR -> Europe
         assert loc.continent == "Europe"
 
+    @pytest.mark.fast
     def test_geolocation_continent_unknown_country(self):
         """Test continent property with unknown country code."""
         from src.location_service import GeoLocation
@@ -62,6 +64,7 @@ class TestLocationServiceGeoLocation:
 
         assert loc.continent == "Unknown"
 
+    @pytest.mark.fast
     def test_geolocation_parent_regions_property(self):
         """Test GeoLocation.parent_regions property returns hierarchy."""
         from src.location_service import GeoLocation
@@ -80,6 +83,7 @@ class TestLocationServiceGeoLocation:
         assert "United States" in regions
         assert "North America" in regions
 
+    @pytest.mark.fast
     def test_geolocation_to_dict(self):
         """Test GeoLocation.to_dict serialization."""
         from src.location_service import GeoLocation
@@ -98,6 +102,7 @@ class TestLocationServiceGeoLocation:
         assert data["country_code"] == "JP"
         assert "coordinates" in data
 
+    @pytest.mark.fast
     def test_geolocation_from_dict(self):
         """Test GeoLocation.from_dict deserialization."""
         from src.location_service import GeoLocation
@@ -123,6 +128,7 @@ class TestLocationServiceGeoLocation:
 class TestOtioTimelineEntityValidation:
     """Test _validate_entity_images function."""
 
+    @pytest.mark.fast
     def test_validate_entity_images_filters_invalid(self, tmp_path):
         """Test that invalid entity images are filtered out."""
         # This tests the validation logic from timeline.py
@@ -173,6 +179,7 @@ class TestOtioTimelineEntityValidation:
 class TestSceneDetectionStageWarnings:
     """Test SceneDetectionStage warning paths."""
 
+    @pytest.mark.fast
     def test_no_video_files_warning(self):
         """Test warning when no video files found."""
         from src.stages.scene_detection import SceneDetectionStage
@@ -204,6 +211,7 @@ class TestSceneDetectionStageWarnings:
 class TestPipelineCheckpointWarnings:
     """Test PipelineOrchestrator checkpoint warnings."""
 
+    @pytest.mark.fast
     def test_load_checkpoint_logs_warnings(self, tmp_path):
         """Test that checkpoint validation warnings are logged."""
         from src.pipeline import PipelineOrchestrator
@@ -236,6 +244,7 @@ class TestPipelineCheckpointWarnings:
 class TestMatchingMainLocationChapters:
     """Test location chapter handling in match_all_segments."""
 
+    @pytest.mark.fast
     def test_match_all_segments_sets_location_chapters(self):
         """Test that location_chapters are passed to matcher."""
         # Verify the location chapters are set on matcher
@@ -279,6 +288,7 @@ class TestMatchingMainLocationChapters:
 class TestAudioFirstPipelineConfig:
     """Test AudioFirstPipeline configuration handling."""
 
+    @pytest.mark.fast
     def test_download_audio_missing_config(self):
         """Test handling when audio_first config is missing."""
         from src.downloader.audio_first import AudioFirstPipeline
@@ -304,6 +314,7 @@ class TestAudioFirstPipelineConfig:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_download_audio_max_total_reached(self):
         """Test skipping when max_total for tier is reached."""
         from src.downloader.audio_first import AudioFirstPipeline
@@ -344,6 +355,7 @@ class TestAudioFirstPipelineConfig:
 class TestPexelsImageClientApi:
     """Test PexelsImageClient API handling."""
 
+    @pytest.mark.fast
     def test_search_no_api_key(self):
         """Test search returns empty when no API key."""
         from src.media_sources.images.pexels import PexelsImageClient
@@ -358,6 +370,7 @@ class TestPexelsImageClientApi:
             result = client.search("test query")
             assert result == []
 
+    @pytest.mark.fast
     def test_search_successful(self):
         """Test successful Pexels search."""
         from src.media_sources.images.pexels import PexelsImageClient
@@ -394,6 +407,7 @@ class TestPexelsImageClientApi:
 class TestMatchAwareIndex:
     """Test MatchAwareIndex video hash handling."""
 
+    @pytest.mark.fast
     def test_load_empty_index(self, tmp_path):
         """Test loading when index file doesn't exist."""
         from src.match_index import MatchAwareIndex
@@ -403,6 +417,7 @@ class TestMatchAwareIndex:
         assert index.matched_videos == {}
         assert index.voiceover_hash == ""
 
+    @pytest.mark.fast
     def test_load_existing_index(self, tmp_path):
         """Test loading existing index file."""
         from src.match_index import MatchAwareIndex
@@ -434,6 +449,7 @@ class TestMatchAwareIndex:
         assert len(index.matched_videos) == 1
         assert index.voiceover_hash == "vo_hash_123"
 
+    @pytest.mark.fast
     def test_get_new_videos(self, tmp_path):
         """Test detecting new videos."""
         from src.match_index import MatchAwareIndex
@@ -457,6 +473,7 @@ class TestMatchAwareIndex:
 class TestEmbeddingsCache:
     """Test embeddings cache functionality."""
 
+    @pytest.mark.fast
     def test_build_embedding_index_faiss_fallback(self):
         """Test FAISS index building with fallback."""
         from src.embeddings import build_embedding_index
@@ -471,6 +488,7 @@ class TestEmbeddingsCache:
         result = build_embedding_index([], config)
         assert result is None
 
+    @pytest.mark.fast
     def test_build_embedding_index_with_embeddings(self):
         """Test building FAISS index with embeddings."""
         from src.embeddings import build_embedding_index
@@ -499,6 +517,7 @@ class TestEmbeddingsCache:
 class TestWhisperClientErrorHandling:
     """Test WhisperClient error handling."""
 
+    @pytest.mark.fast
     def test_whisper_client_initialization(self):
         """Test WhisperClient initializes correctly."""
         from src.transcription.whisper_client import WhisperClient
@@ -511,6 +530,7 @@ class TestWhisperClientErrorHandling:
         assert client.model_name == "base"
         assert client.compute_type == "int8"
 
+    @pytest.mark.fast
     def test_whisper_client_default_values(self):
         """Test WhisperClient uses default values correctly."""
         from src.transcription.whisper_client import WhisperClient

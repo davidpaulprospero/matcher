@@ -78,6 +78,7 @@ class TestBrollConflictingSignalsUS007:
     - Segment has both is_broll=True and face_score < 0.3 (consistent signals)
     """
 
+    @pytest.mark.fast
     def test_broll_true_but_high_face_score_conflicting_signal(self):
         """Test B-roll detection when is_broll=True but face_score indicates faces present."""
         from src.matching.scoring import apply_broll_boost
@@ -101,6 +102,7 @@ class TestBrollConflictingSignalsUS007:
         assert adjusted > confidence
         assert "broll" in reason.lower() or "B-roll" in reason
 
+    @pytest.mark.fast
     def test_low_face_score_but_broll_false_no_boost(self):
         """Test no B-roll boost when face_score < 0.3 but is_broll=False."""
         from src.matching.scoring import apply_broll_boost
@@ -122,6 +124,7 @@ class TestBrollConflictingSignalsUS007:
         assert adjusted == confidence
         assert reason == ""
 
+    @pytest.mark.fast
     def test_consistent_broll_signals_applies_boost(self):
         """Test B-roll boost with consistent signals (is_broll=True, face_score < 0.3)."""
         from src.matching.scoring import apply_broll_boost
@@ -142,6 +145,7 @@ class TestBrollConflictingSignalsUS007:
         assert adjusted > confidence
         assert "broll" in reason.lower() or "B-roll" in reason
 
+    @pytest.mark.fast
     def test_broll_boost_respects_ceiling(self):
         """Test B-roll boost doesn't exceed 1.0."""
         from src.matching.scoring import apply_broll_boost
@@ -162,6 +166,7 @@ class TestBrollConflictingSignalsUS007:
         # Should not exceed 1.0
         assert adjusted <= 1.0
 
+    @pytest.mark.fast
     def test_face_preference_none_with_conflicting_broll(self):
         """Test face_preference='none' interaction with B-roll conflicts."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -204,6 +209,7 @@ class TestBrollExact03ThresholdUS007:
     Already covered in test_face_detection.py, but adding specific tiered matcher context.
     """
 
+    @pytest.mark.fast
     def test_face_score_exactly_03_not_broll(self):
         """Test face_score exactly at 0.3 is NOT classified as B-roll."""
         from src.face_detection import is_broll_scene
@@ -212,6 +218,7 @@ class TestBrollExact03ThresholdUS007:
         # So it should NOT be B-roll
         assert is_broll_scene(0.3, threshold=0.3) is False
 
+    @pytest.mark.fast
     def test_face_score_just_below_03_is_broll(self):
         """Test face_score just below 0.3 IS classified as B-roll."""
         from src.face_detection import is_broll_scene
@@ -220,6 +227,7 @@ class TestBrollExact03ThresholdUS007:
         assert is_broll_scene(0.29, threshold=0.3) is True
         assert is_broll_scene(0.299, threshold=0.3) is True
 
+    @pytest.mark.fast
     def test_face_score_just_above_03_not_broll(self):
         """Test face_score just above 0.3 is NOT classified as B-roll."""
         from src.face_detection import is_broll_scene
@@ -243,6 +251,7 @@ class TestMemoryExhaustionHandlingUS007:
     - Handle edge cases gracefully
     """
 
+    @pytest.mark.fast
     def test_large_candidate_list_1000_candidates(self):
         """Test TieredMatcher handles 1000+ candidates without crash."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -280,6 +289,7 @@ class TestMemoryExhaustionHandlingUS007:
         assert result is not None
         assert result.primary_match is not None
 
+    @pytest.mark.fast
     def test_large_candidate_list_5000_candidates(self):
         """Test TieredMatcher handles 5000 candidates (stress test)."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -316,6 +326,7 @@ class TestMemoryExhaustionHandlingUS007:
 
         assert result is not None
 
+    @pytest.mark.fast
     def test_secondary_matches_limits_processing(self):
         """Test _get_secondary_matches limits candidates to prevent memory issues."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -347,6 +358,7 @@ class TestMemoryExhaustionHandlingUS007:
         # Should return at most 3 (num_secondary limit)
         assert len(result) <= 3
 
+    @pytest.mark.fast
     def test_alternatives_limits_processing(self):
         """Test _get_alternatives limits candidates."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -373,6 +385,7 @@ class TestMemoryExhaustionHandlingUS007:
         # Should return at most num_alternatives
         assert len(result) <= 2
 
+    @pytest.mark.fast
     def test_confidence_variance_calculation_large_pool(self):
         """Test confidence variance calculation with large candidate pool."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -415,6 +428,7 @@ class TestStrategySelectionUS007:
     These tests verify the integration points.
     """
 
+    @pytest.mark.fast
     def test_no_api_keys_uses_embedding_strategy(self):
         """Test embedding-only strategy when no API keys available."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -428,6 +442,7 @@ class TestStrategySelectionUS007:
         assert matcher.primary_provider is None
         assert matcher.secondary_provider is None
 
+    @pytest.mark.fast
     def test_gemini_key_uses_gemini_strategy(self):
         """Test Gemini strategy when Gemini API key available."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -442,6 +457,7 @@ class TestStrategySelectionUS007:
 
         mock_gemini.assert_called_once()
 
+    @pytest.mark.fast
     def test_fallback_to_anthropic_when_gemini_unavailable(self):
         """Test fallback to Anthropic when Gemini key not available."""
         from src.matching.tiered_matcher import TieredMatcher

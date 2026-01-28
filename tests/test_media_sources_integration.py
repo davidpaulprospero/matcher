@@ -1,3 +1,4 @@
+import pytest
 """
 Integration tests for media_sources package with mocked API responses.
 
@@ -32,6 +33,7 @@ class TestPexelsImageIntegration(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     @patch('src.media_sources.base.requests.Session')
+    @pytest.mark.fast
     def test_pexels_search_and_download(self, mock_session_class):
         """Test Pexels search and download with mocked API"""
         # Mock API response
@@ -97,6 +99,7 @@ class TestPixabayImageIntegration(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     @patch('src.media_sources.base.requests.Session')
+    @pytest.mark.fast
     def test_pixabay_search(self, mock_session_class):
         """Test Pixabay search with mocked API"""
         mock_session = MagicMock()
@@ -143,6 +146,7 @@ class TestUnsplashImageIntegration(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     @patch('src.media_sources.base.requests.Session')
+    @pytest.mark.fast
     def test_unsplash_search(self, mock_session_class):
         """Test Unsplash search with mocked API"""
         mock_session = MagicMock()
@@ -196,6 +200,7 @@ class TestPexelsVideoIntegration(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     @patch('src.media_sources.base.requests.Session')
+    @pytest.mark.fast
     def test_pexels_video_search(self, mock_session_class):
         """Test Pexels video search with mocked API"""
         mock_session = MagicMock()
@@ -249,6 +254,7 @@ class TestPixabayVideoIntegration(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     @patch('src.media_sources.base.requests.Session')
+    @pytest.mark.fast
     def test_pixabay_video_search(self, mock_session_class):
         """Test Pixabay video search with mocked API"""
         mock_session = MagicMock()
@@ -298,6 +304,7 @@ class TestDownloadEntityImagesIntegration(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     @patch('src.media_sources.images.orchestrator.PexelsImageClient')
+    @pytest.mark.fast
     def test_download_with_stock_apis_only(self, mock_pexels_class):
         """Test download using only stock APIs (no Google/Bing)"""
         # Mock Pexels client
@@ -349,6 +356,7 @@ class TestDownloadEntityVideosIntegration(unittest.TestCase):
 
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
+    @pytest.mark.fast
     def test_download_entity_videos(self, mock_pixabay_class, mock_pexels_class):
         """Test entity video download orchestration"""
         # Mock Pexels client

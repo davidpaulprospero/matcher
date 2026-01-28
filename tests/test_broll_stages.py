@@ -32,6 +32,7 @@ from src.state import PipelineState, VoiceoverSegment
 class TestBrollSourceBoostConfig:
     """Test BrollSourceBoostConfig dataclass"""
 
+    @pytest.mark.fast
     def test_default_initialization(self):
         """Test default source boost values"""
         config = BrollSourceBoostConfig()
@@ -40,6 +41,7 @@ class TestBrollSourceBoostConfig:
         assert config.pexels == 0.05
         assert config.pixabay == 0.0
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test with custom boost values"""
         config = BrollSourceBoostConfig(
@@ -52,6 +54,7 @@ class TestBrollSourceBoostConfig:
         assert config.pexels == 0.1
         assert config.pixabay == 0.05
 
+    @pytest.mark.fast
     def test_zero_boosts(self):
         """Test all zero boosts"""
         config = BrollSourceBoostConfig(
@@ -68,6 +71,7 @@ class TestBrollSourceBoostConfig:
 class TestBrollConfig:
     """Test BrollConfig dataclass"""
 
+    @pytest.mark.fast
     def test_default_initialization(self):
         """Test default B-roll config values"""
         config = BrollConfig()
@@ -109,12 +113,14 @@ class TestBrollConfig:
         assert config.sample_interval_seconds == 120
         assert config.max_scenes_per_video == 15
 
+    @pytest.mark.fast
     def test_scoring_weights_sum(self):
         """Test that default scoring weights sum to 1.0"""
         config = BrollConfig()
         total = config.embedding_weight + config.keyword_weight + config.entity_weight
         assert abs(total - 1.0) < 0.001
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test with custom config values"""
         config = BrollConfig(
@@ -131,6 +137,7 @@ class TestBrollConfig:
         assert config.min_words_threshold == 5
         assert config.embedding_weight == 0.5
 
+    @pytest.mark.fast
     def test_post_init_dict_conversion(self):
         """Test __post_init__ converts dict to BrollSourceBoostConfig"""
         config = BrollConfig(
@@ -142,6 +149,7 @@ class TestBrollConfig:
         assert config.source_boost.pexels == 0.08
         assert config.source_boost.pixabay == 0.02
 
+    @pytest.mark.fast
     def test_source_boost_dataclass(self):
         """Test source_boost as BrollSourceBoostConfig"""
         boost = BrollSourceBoostConfig(youtube=0.2, pexels=0.1, pixabay=0.05)
@@ -150,6 +158,7 @@ class TestBrollConfig:
         assert config.source_boost.youtube == 0.2
         assert config.source_boost.pexels == 0.1
 
+    @pytest.mark.fast
     def test_custom_search_suffixes(self):
         """Test custom search suffixes"""
         config = BrollConfig(
@@ -159,6 +168,7 @@ class TestBrollConfig:
         assert "aerial" in config.search_suffixes
         assert "b-roll" not in config.search_suffixes
 
+    @pytest.mark.fast
     def test_custom_ignore_markers(self):
         """Test custom ignore markers"""
         config = BrollConfig(
@@ -210,11 +220,13 @@ class TestBrollDownloadStage:
         checkpoint.get_stage_data.return_value = None
         return checkpoint
 
+    @pytest.mark.fast
     def test_stage_attributes(self, stage):
         """Test stage name and description"""
         assert stage.name == "BROLL_DOWNLOAD"
         assert "B-roll" in stage.description
 
+    @pytest.mark.fast
     def test_generate_search_terms_keywords(self, stage, mock_state):
         """Test search term generation from keywords"""
         broll_config = BrollConfig()
@@ -226,6 +238,7 @@ class TestBrollDownloadStage:
         assert "earthquake footage" in terms
         assert "tsunami cinematic" in terms
 
+    @pytest.mark.fast
     def test_generate_search_terms_entities(self, stage, mock_state):
         """Test search term generation from entities"""
         broll_config = BrollConfig()
@@ -235,6 +248,7 @@ class TestBrollDownloadStage:
         # Should have location entity terms
         assert any("California" in t for t in terms)
 
+    @pytest.mark.fast
     def test_generate_search_terms_generic(self, stage, mock_state):
         """Test generic search terms are included"""
         broll_config = BrollConfig(include_generic_searches=True)
@@ -245,6 +259,7 @@ class TestBrollDownloadStage:
         assert "stock footage compilation" in terms
         assert "cinematic footage 4k" in terms
 
+    @pytest.mark.fast
     def test_generate_search_terms_no_generic(self, stage, mock_state):
         """Test generic searches can be disabled"""
         broll_config = BrollConfig(include_generic_searches=False)
@@ -254,6 +269,7 @@ class TestBrollDownloadStage:
         # Should NOT include generic terms
         assert "stock footage compilation" not in terms
 
+    @pytest.mark.fast
     def test_generate_search_terms_deduplication(self, stage, mock_state):
         """Test duplicate terms are removed"""
         broll_config = BrollConfig()
@@ -263,6 +279,7 @@ class TestBrollDownloadStage:
         # No duplicates
         assert len(terms) == len(set(t.lower() for t in terms))
 
+    @pytest.mark.fast
     def test_generate_search_terms_empty_keywords(self, stage):
         """Test with no keywords"""
         state = PipelineState()
@@ -274,6 +291,7 @@ class TestBrollDownloadStage:
 
         assert terms == []
 
+    @pytest.mark.fast
     def test_run_broll_disabled(self, stage, mock_state, mock_checkpoint):
         """Test stage skips when broll disabled"""
         config = Mock()
@@ -285,6 +303,7 @@ class TestBrollDownloadStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'broll_disabled'
 
+    @pytest.mark.fast
     def test_run_download_disabled(self, stage, mock_state, mock_checkpoint):
         """Test stage skips when download disabled"""
         config = Mock()
@@ -296,6 +315,7 @@ class TestBrollDownloadStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'download_disabled'
 
+    @pytest.mark.fast
     def test_run_skip_download_enabled(self, stage, mock_state, mock_checkpoint):
         """Test stage skips when pipeline.skip_download is true"""
         config = Mock()
@@ -309,6 +329,7 @@ class TestBrollDownloadStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'skip_download_enabled'
 
+    @pytest.mark.fast
     def test_run_no_keywords(self, stage, mock_checkpoint):
         """Test stage skips when no keywords"""
         state = PipelineState()
@@ -325,6 +346,7 @@ class TestBrollDownloadStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'no_keywords'
 
+    @pytest.mark.fast
     def test_can_skip(self, stage, mock_state, mock_checkpoint):
         """Test can_skip checks checkpoint"""
         mock_checkpoint.should_skip_stage.return_value = True
@@ -332,6 +354,7 @@ class TestBrollDownloadStage:
         assert stage.can_skip(mock_state, mock_checkpoint) is True
         mock_checkpoint.should_skip_stage.assert_called_with("BROLL_DOWNLOAD")
 
+    @pytest.mark.fast
     def test_validate_inputs(self, stage, mock_state, mock_config):
         """Test validate_inputs is optional stage"""
         result = stage.validate_inputs(mock_state, mock_config)
@@ -345,6 +368,7 @@ class TestBrollDownloadStage:
 class TestBrollScene:
     """Test BrollScene dataclass"""
 
+    @pytest.mark.fast
     def test_broll_scene_creation(self):
         """Test BrollScene creation"""
         scene = BrollScene(
@@ -363,6 +387,7 @@ class TestBrollScene:
         assert scene.embedding is None
         assert scene.source == ""
 
+    @pytest.mark.fast
     def test_broll_scene_with_description(self):
         """Test BrollScene with description"""
         scene = BrollScene(
@@ -382,6 +407,7 @@ class TestBrollScene:
 class TestBrollMatch:
     """Test BrollMatch dataclass"""
 
+    @pytest.mark.fast
     def test_broll_match_creation(self):
         """Test BrollMatch creation"""
         scene = BrollScene(
@@ -472,11 +498,13 @@ class TestBrollMatchStage:
         checkpoint.get_stage_data.return_value = None
         return checkpoint
 
+    @pytest.mark.fast
     def test_stage_attributes(self, stage):
         """Test stage name and description"""
         assert stage.name == "BROLL_MATCH"
         assert "V8" in stage.description or "silent" in stage.description.lower()
 
+    @pytest.mark.fast
     def test_detect_silent_scenes_by_word_count(self, stage, mock_state):
         """Test silent detection by word count"""
         broll_config = BrollConfig(min_words_threshold=10)
@@ -488,6 +516,7 @@ class TestBrollMatchStage:
         silent_files = [s.source_file for s in scenes]
         assert "/video1.mp4" in silent_files
 
+    @pytest.mark.fast
     def test_detect_silent_scenes_respects_threshold(self, stage, mock_state):
         """Test threshold is respected"""
         # With very high threshold, more scenes are silent
@@ -502,6 +531,7 @@ class TestBrollMatchStage:
 
         assert high_count >= low_count
 
+    @pytest.mark.fast
     def test_detect_silent_scenes_ignores_markers(self, stage):
         """Test ignore markers are stripped"""
         state = PipelineState()
@@ -526,6 +556,7 @@ class TestBrollMatchStage:
         # Should be detected as silent (markers don't count as words)
         assert len(scenes) == 1
 
+    @pytest.mark.fast
     def test_detect_silent_scenes_includes_is_broll(self, stage):
         """Test scenes with is_broll=True are included"""
         state = PipelineState()
@@ -547,21 +578,25 @@ class TestBrollMatchStage:
         # Should be included because is_broll=True
         assert len(scenes) == 1
 
+    @pytest.mark.fast
     def test_get_video_source_youtube(self, stage, mock_state):
         """Test source detection for YouTube"""
         source = stage._get_video_source("/videos/some_video.mp4", mock_state)
         assert source == "youtube"
 
+    @pytest.mark.fast
     def test_get_video_source_pexels(self, stage, mock_state):
         """Test source detection for Pexels"""
         source = stage._get_video_source("/videos/pexels_12345.mp4", mock_state)
         assert source == "pexels"
 
+    @pytest.mark.fast
     def test_get_video_source_pixabay(self, stage, mock_state):
         """Test source detection for Pixabay"""
         source = stage._get_video_source("/videos/pixabay_67890.mp4", mock_state)
         assert source == "pixabay"
 
+    @pytest.mark.fast
     def test_extract_keywords_from_filename(self, stage):
         """Test keyword extraction from filename"""
         # Normal filename
@@ -574,11 +609,13 @@ class TestBrollMatchStage:
         assert "sunset" in keywords.lower()
         assert "pexels" not in keywords.lower()
 
+    @pytest.mark.fast
     def test_extract_keywords_removes_video_ids(self, stage):
         """Test video IDs are removed from keywords"""
         keywords = stage._extract_keywords_from_filename("/videos/city_dQw4w9WgXcQ.mp4")
         assert "dQw4w9WgXcQ" not in keywords
 
+    @pytest.mark.fast
     def test_should_use_vision_default(self, stage, mock_config):
         """Test Vision API is used by default when available"""
         mock_config.vision = Mock()
@@ -589,6 +626,7 @@ class TestBrollMatchStage:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_should_use_vision_disabled_in_broll(self, stage, mock_config):
         """Test Vision API disabled in broll config"""
         mock_config.vision = Mock()
@@ -599,6 +637,7 @@ class TestBrollMatchStage:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_should_use_vision_audio_first_mode(self, stage, mock_config):
         """Test Vision API disabled in audio-first mode"""
         mock_config.vision = Mock()
@@ -611,6 +650,7 @@ class TestBrollMatchStage:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_calculate_keyword_score(self, stage):
         """Test keyword overlap scoring"""
         keywords = {"earthquake", "disaster", "damage"}
@@ -631,6 +671,7 @@ class TestBrollMatchStage:
         )
         assert score < 0.3
 
+    @pytest.mark.fast
     def test_calculate_entity_score(self, stage):
         """Test entity matching score"""
         entities = {"california", "san francisco"}
@@ -651,6 +692,7 @@ class TestBrollMatchStage:
         )
         assert score == 0
 
+    @pytest.mark.fast
     def test_run_broll_disabled(self, stage, mock_state, mock_checkpoint):
         """Test stage skips when broll disabled"""
         config = Mock()
@@ -662,6 +704,7 @@ class TestBrollMatchStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'broll_disabled'
 
+    @pytest.mark.fast
     def test_run_no_voiceover(self, stage, mock_checkpoint):
         """Test stage skips with no voiceover"""
         state = PipelineState()
@@ -676,6 +719,7 @@ class TestBrollMatchStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'no_voiceover'
 
+    @pytest.mark.fast
     def test_run_no_transcripts(self, stage, mock_checkpoint):
         """Test stage skips with no transcripts"""
         state = PipelineState()
@@ -694,6 +738,7 @@ class TestBrollMatchStage:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'no_transcripts'
 
+    @pytest.mark.fast
     def test_can_skip(self, stage, mock_state, mock_checkpoint):
         """Test can_skip checks checkpoint"""
         mock_checkpoint.should_skip_stage.return_value = True
@@ -701,11 +746,13 @@ class TestBrollMatchStage:
         assert stage.can_skip(mock_state, mock_checkpoint) is True
         mock_checkpoint.should_skip_stage.assert_called_with("BROLL_MATCH")
 
+    @pytest.mark.fast
     def test_validate_inputs(self, stage, mock_state, mock_config):
         """Test validate_inputs returns None (optional stage)"""
         result = stage.validate_inputs(mock_state, mock_config)
         assert result is None
 
+    @pytest.mark.fast
     def test_sample_long_video_scenes(self, stage):
         """Test long video scene sampling"""
         # Create many scenes from same file
@@ -738,6 +785,7 @@ class TestBrollMatchStage:
 class TestBrollStagesIntegration:
     """Integration tests for B-roll stages"""
 
+    @pytest.mark.fast
     def test_checkpoint_stage_order(self):
         """Test stages are in checkpoint STAGE_ORDER"""
         from src.checkpoint import STAGE_ORDER
@@ -755,6 +803,7 @@ class TestBrollStagesIntegration:
         main_match_idx = STAGE_ORDER.index("MATCH")
         assert match_idx > main_match_idx
 
+    @pytest.mark.fast
     def test_pipeline_state_has_broll_fields(self):
         """Test PipelineState has B-roll fields"""
         state = PipelineState()
@@ -764,6 +813,7 @@ class TestBrollStagesIntegration:
         assert isinstance(state.broll_downloads, list)
         assert isinstance(state.broll_matches, list)
 
+    @pytest.mark.fast
     def test_config_has_broll_section(self):
         """Test Config has broll section"""
         from src.config.base import Config
@@ -772,6 +822,7 @@ class TestBrollStagesIntegration:
         assert hasattr(config, 'broll')
         assert isinstance(config.broll, BrollConfig)
 
+    @pytest.mark.fast
     def test_stages_registered(self):
         """Test stages are registered in stage registry"""
         from src.stages import get_stage
@@ -795,6 +846,7 @@ class TestBrollMatchWeightValidation:
         """Create BrollMatchStage instance"""
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_weights_sum_to_one_no_warning(self, stage):
         """Test no warning when weights sum to exactly 1.0"""
         broll_config = BrollConfig(
@@ -807,6 +859,7 @@ class TestBrollMatchWeightValidation:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_weights_sum_to_one_custom_values(self, stage):
         """Test no warning with custom weights that sum to 1.0"""
         broll_config = BrollConfig(
@@ -819,6 +872,7 @@ class TestBrollMatchWeightValidation:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_weights_not_sum_to_one_logs_warning(self, stage, caplog):
         """Test warning logged when weights don't sum to 1.0"""
         broll_config = BrollConfig(
@@ -834,6 +888,7 @@ class TestBrollMatchWeightValidation:
         assert "sum to 0.9" in caplog.text
         assert "not 1.0" in caplog.text
 
+    @pytest.mark.fast
     def test_weights_within_tolerance_normalized(self, stage):
         """Test weights within 0.01 tolerance are auto-normalized"""
         broll_config = BrollConfig(
@@ -850,6 +905,7 @@ class TestBrollMatchWeightValidation:
         total = broll_config.embedding_weight + broll_config.keyword_weight + broll_config.entity_weight
         assert abs(total - 1.0) < 1e-9
 
+    @pytest.mark.fast
     def test_weights_below_tolerance_normalized(self, stage):
         """Test weights sum below 1.0 within tolerance are normalized"""
         broll_config = BrollConfig(
@@ -866,6 +922,7 @@ class TestBrollMatchWeightValidation:
         total = broll_config.embedding_weight + broll_config.keyword_weight + broll_config.entity_weight
         assert abs(total - 1.0) < 1e-9
 
+    @pytest.mark.fast
     def test_weights_outside_tolerance_not_normalized(self, stage):
         """Test weights outside 0.01 tolerance are NOT normalized"""
         original_embedding = 0.5
@@ -886,6 +943,7 @@ class TestBrollMatchWeightValidation:
         assert broll_config.keyword_weight == original_keyword
         assert broll_config.entity_weight == original_entity
 
+    @pytest.mark.fast
     def test_weights_far_below_tolerance_not_normalized(self, stage):
         """Test weights far below 1.0 are NOT normalized"""
         broll_config = BrollConfig(
@@ -899,6 +957,7 @@ class TestBrollMatchWeightValidation:
         assert result is not None
         assert "not auto-normalized" in result.lower()
 
+    @pytest.mark.fast
     def test_normalization_preserves_ratios(self, stage):
         """Test normalization preserves weight ratios"""
         broll_config = BrollConfig(
@@ -916,6 +975,7 @@ class TestBrollMatchWeightValidation:
         assert abs(embedding_ratio - (0.404/0.25)) < 0.01
         assert abs(keyword_ratio - (0.353/0.25)) < 0.01
 
+    @pytest.mark.fast
     def test_validation_called_in_run(self, stage, caplog):
         """Test weight validation is called during run()"""
         from src.state import PipelineState, VoiceoverSegment
@@ -944,6 +1004,7 @@ class TestBrollMatchWeightValidation:
         # Should log warning about weights
         assert "sum to 0.9" in caplog.text
 
+    @pytest.mark.fast
     def test_run_includes_warning_in_result(self, stage):
         """Test run() includes weight warning in result"""
         from src.state import PipelineState, VoiceoverSegment

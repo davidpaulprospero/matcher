@@ -35,6 +35,7 @@ class TestShouldUseVisionUS005:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_returns_false_in_audio_first_mode(self, stage):
         """Audio-first mode disables Vision API (no video frames available)."""
         config = Mock()
@@ -49,6 +50,7 @@ class TestShouldUseVisionUS005:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_returns_true_in_standard_mode_with_vision(self, stage):
         """Standard mode with Vision API key configured returns True."""
         config = Mock()
@@ -62,6 +64,7 @@ class TestShouldUseVisionUS005:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_returns_false_when_broll_vision_disabled(self, stage):
         """Vision disabled in broll config returns False regardless of global config."""
         config = Mock()
@@ -75,6 +78,7 @@ class TestShouldUseVisionUS005:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_returns_false_when_global_vision_disabled(self, stage):
         """Global vision.enabled=False returns False."""
         config = Mock()
@@ -88,6 +92,7 @@ class TestShouldUseVisionUS005:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_returns_false_when_no_vision_config(self, stage):
         """Missing global vision config returns False."""
         config = Mock()
@@ -100,6 +105,7 @@ class TestShouldUseVisionUS005:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_audio_first_enabled_false_treated_as_standard(self, stage):
         """audio_first.enabled=False is treated as standard mode."""
         config = Mock()
@@ -126,6 +132,7 @@ class TestEnrichWithKeywordsUS005:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_pexels_sunset_ocean_4k_yields_keywords(self, stage):
         """'pexels_sunset_ocean_4k.mp4' yields keywords including sunset, ocean, 4k."""
         scenes = [
@@ -145,6 +152,7 @@ class TestEnrichWithKeywordsUS005:
         assert "4k" in desc
         assert "pexels" not in desc
 
+    @pytest.mark.fast
     def test_pixabay_prefix_stripped(self, stage):
         """'pixabay_city_night.mp4' strips pixabay_ prefix."""
         scenes = [
@@ -163,6 +171,7 @@ class TestEnrichWithKeywordsUS005:
         assert "night" in desc
         assert "pixabay" not in desc
 
+    @pytest.mark.fast
     def test_skips_scenes_with_existing_description(self, stage):
         """Scenes with existing descriptions are not overwritten."""
         scenes = [
@@ -186,6 +195,7 @@ class TestEnrichWithKeywordsUS005:
         assert scenes[0].description == "already described"
         assert "earthquake" in scenes[1].description.lower()
 
+    @pytest.mark.fast
     def test_video_id_removed_from_keywords(self, stage):
         """Video IDs (11+ alphanumeric chars) removed from extracted keywords."""
         scenes = [
@@ -201,6 +211,7 @@ class TestEnrichWithKeywordsUS005:
         assert count == 1
         assert "dQw4w9WgXcQ" not in scenes[0].description
 
+    @pytest.mark.fast
     def test_empty_filename_returns_empty_description(self, stage):
         """Scene with no meaningful keywords still gets enriched (possibly empty)."""
         scenes = [
@@ -228,6 +239,7 @@ class TestExtractKeywordsFromFilenameUS005:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_underscore_separated(self, stage):
         """'earthquake_damage_city.mp4' -> 'earthquake damage city'."""
         result = stage._extract_keywords_from_filename("/videos/earthquake_damage_city.mp4")
@@ -236,6 +248,7 @@ class TestExtractKeywordsFromFilenameUS005:
         assert "city" in result.lower()
         assert "_" not in result
 
+    @pytest.mark.fast
     def test_hyphen_separated(self, stage):
         """'city-skyline-night.mp4' -> keywords with spaces."""
         result = stage._extract_keywords_from_filename("/videos/city-skyline-night.mp4")
@@ -244,6 +257,7 @@ class TestExtractKeywordsFromFilenameUS005:
         assert "night" in result.lower()
         assert "-" not in result
 
+    @pytest.mark.fast
     def test_mixed_underscores_hyphens(self, stage):
         """'urban_city-skyline_at-night.mp4' -> all keywords extracted."""
         result = stage._extract_keywords_from_filename("/videos/urban_city-skyline_at-night.mp4")
@@ -251,12 +265,14 @@ class TestExtractKeywordsFromFilenameUS005:
         assert "city" in result.lower()
         assert "skyline" in result.lower()
 
+    @pytest.mark.fast
     def test_video_id_stripped(self, stage):
         """11-char video IDs like 'dQw4w9WgXcQ' are removed."""
         result = stage._extract_keywords_from_filename("/videos/sunset_dQw4w9WgXcQ.mp4")
         assert "dQw4w9WgXcQ" not in result
         assert "sunset" in result.lower()
 
+    @pytest.mark.fast
     def test_pexels_prefix_stripped(self, stage):
         """'pexels_' prefix removed from filename."""
         result = stage._extract_keywords_from_filename("/videos/pexels_sunset_beach.mp4")
@@ -264,36 +280,42 @@ class TestExtractKeywordsFromFilenameUS005:
         assert "sunset" in result.lower()
         assert "beach" in result.lower()
 
+    @pytest.mark.fast
     def test_pixabay_prefix_stripped(self, stage):
         """'pixabay_' prefix removed from filename."""
         result = stage._extract_keywords_from_filename("/videos/pixabay_ocean_waves.mp4")
         assert "pixabay" not in result.lower()
         assert "ocean" in result.lower()
 
+    @pytest.mark.fast
     def test_entity_prefix_stripped(self, stage):
         """'entity_' prefix removed from filename."""
         result = stage._extract_keywords_from_filename("/videos/entity_california_coast.mp4")
         assert "entity" not in result.lower()
         assert "california" in result.lower()
 
+    @pytest.mark.fast
     def test_yt_prefix_stripped(self, stage):
         """'yt_' prefix removed from filename."""
         result = stage._extract_keywords_from_filename("/videos/yt_earthquake_footage.mp4")
         assert "yt" not in result.lower().split()
         assert "earthquake" in result.lower()
 
+    @pytest.mark.fast
     def test_broll_prefix_stripped(self, stage):
         """'broll_' prefix removed from filename."""
         result = stage._extract_keywords_from_filename("/videos/broll_aerial_shot.mp4")
         assert "broll" not in result.lower().split()
         assert "aerial" in result.lower()
 
+    @pytest.mark.fast
     def test_trailing_numbers_removed(self, stage):
         """Trailing numbers (timestamps) removed from filename."""
         result = stage._extract_keywords_from_filename("/videos/sunset_beach_12345.mp4")
         assert "12345" not in result
         assert "sunset" in result.lower()
 
+    @pytest.mark.fast
     def test_resolution_suffix_preserved(self, stage):
         """Resolution like '4k' is preserved as a keyword."""
         result = stage._extract_keywords_from_filename("/videos/pexels_sunset_4k.mp4")
@@ -313,6 +335,7 @@ class TestMatchScenesToVoiceoverUS005:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_each_segment_gets_best_scoring_scene(self, stage):
         """Mock 3 scenes and 2 segments, verify each segment gets best-scoring scene."""
         scenes = [
@@ -368,6 +391,7 @@ class TestMatchScenesToVoiceoverUS005:
         seg1_match = [m for m in matches if m.segment_index == 1][0]
         assert seg1_match.scene.source_file == "/videos/scene_b.mp4"
 
+    @pytest.mark.fast
     def test_returns_broll_match_objects(self, stage):
         """Returned matches are BrollMatch instances with score components."""
         scenes = [
@@ -404,6 +428,7 @@ class TestMatchScenesToVoiceoverUS005:
         assert isinstance(match.entity_score, float)
         assert isinstance(match.source_boost, float)
 
+    @pytest.mark.fast
     def test_only_one_match_per_segment(self, stage):
         """V8 track gets only the best match per voiceover segment."""
         scenes = [
@@ -435,6 +460,7 @@ class TestMatchScenesToVoiceoverUS005:
         # Should only return 1 match (best) for the single segment
         assert len(matches) == 1
 
+    @pytest.mark.fast
     def test_min_score_threshold_respected_when_always_match_false(self, stage):
         """When always_match=False, scenes below min_score are excluded."""
         scenes = [
@@ -470,6 +496,7 @@ class TestMatchScenesToVoiceoverUS005:
         # No match should meet the 0.9 threshold for completely unrelated content
         assert len(matches) == 0
 
+    @pytest.mark.fast
     def test_source_boost_affects_ranking(self, stage):
         """Source boost gives YouTube scenes advantage over otherwise equal scenes."""
         youtube_scene = BrollScene(
@@ -524,6 +551,7 @@ class TestCanSkipUS005:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_can_skip_true_when_checkpoint_says_skip(self, stage):
         """can_skip() returns True when checkpoint says to skip BROLL_MATCH."""
         state = PipelineState()
@@ -534,6 +562,7 @@ class TestCanSkipUS005:
         assert result is True
         checkpoint.should_skip_stage.assert_called_once_with("BROLL_MATCH")
 
+    @pytest.mark.fast
     def test_can_skip_false_when_checkpoint_says_no(self, stage):
         """can_skip() returns False when checkpoint says not to skip."""
         state = PipelineState()
@@ -543,6 +572,7 @@ class TestCanSkipUS005:
         result = stage.can_skip(state, checkpoint)
         assert result is False
 
+    @pytest.mark.fast
     def test_run_skips_when_broll_disabled(self, stage):
         """run() returns ok with 'broll_disabled' when broll.enabled=False."""
         state = PipelineState()
@@ -556,6 +586,7 @@ class TestCanSkipUS005:
         assert result.data.get('skipped') is True
         assert result.data.get('reason') == 'broll_disabled'
 
+    @pytest.mark.fast
     def test_run_skips_when_no_voiceover_segments(self, stage):
         """run() returns ok with 'no_voiceover' when voiceover_segments is empty."""
         state = PipelineState()
@@ -570,6 +601,7 @@ class TestCanSkipUS005:
         assert result.data.get('skipped') is True
         assert result.data.get('reason') == 'no_voiceover'
 
+    @pytest.mark.fast
     def test_run_skips_when_no_broll_config(self, stage):
         """run() returns ok when config.broll is None."""
         state = PipelineState()
@@ -594,6 +626,7 @@ class TestRestoreUS005:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_restore_rebuilds_matches(self, stage):
         """restore() populates state.broll_matches from checkpoint match data."""
         state = PipelineState()
@@ -635,6 +668,7 @@ class TestRestoreUS005:
         assert state.broll_matches[1]['segment_index'] == 1
         assert state.broll_matches[1]['source'] == 'pexels'
 
+    @pytest.mark.fast
     def test_restore_handles_missing_checkpoint_data(self, stage):
         """restore() returns False when no checkpoint data exists."""
         state = PipelineState()
@@ -645,6 +679,7 @@ class TestRestoreUS005:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_handles_empty_matches(self, stage):
         """restore() handles checkpoint with empty matches list."""
         state = PipelineState()
@@ -662,6 +697,7 @@ class TestRestoreUS005:
         assert result is True
         assert len(state.broll_matches) == 0
 
+    @pytest.mark.fast
     def test_restore_populates_all_fields(self, stage):
         """restore() correctly maps all fields from checkpoint to state."""
         state = PipelineState()
@@ -695,6 +731,7 @@ class TestRestoreUS005:
         assert m['description'] == 'test scene'
         assert m['source'] == 'youtube'
 
+    @pytest.mark.fast
     def test_restore_handles_exception(self, stage):
         """restore() returns False on exception without crashing."""
         state = PipelineState()
@@ -705,6 +742,7 @@ class TestRestoreUS005:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_missing_optional_fields_use_defaults(self, stage):
         """restore() uses defaults for missing optional fields in match data."""
         state = PipelineState()

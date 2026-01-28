@@ -63,6 +63,7 @@ from src.utils import (
 class TestLogFfmpegDebugExceptionHandling:
     """Test exception handling in log_ffmpeg_debug (lines 187-188)."""
 
+    @pytest.mark.fast
     def test_log_ffmpeg_debug_write_exception(self, tmp_path):
         """Test that exceptions during writing are caught silently."""
         log_dir = tmp_path / "logs"
@@ -84,6 +85,7 @@ class TestLogFfmpegDebugExceptionHandling:
 
         # Test passed if no exception was raised
 
+    @pytest.mark.fast
     def test_log_ffmpeg_debug_ioerror(self, tmp_path):
         """Test that IOError during logging is handled silently."""
         log_dir = tmp_path / "logs"
@@ -100,6 +102,7 @@ class TestLogFfmpegDebugExceptionHandling:
 class TestFFmpegStderrCaptureNoLog:
     """Test FFmpegStderrCapture when no log path is set (line 212)."""
 
+    @pytest.mark.fast
     def test_enter_when_no_log_path_set(self):
         """Test __enter__ returns self when no log path configured."""
         # Reset the global log path
@@ -121,6 +124,7 @@ class TestFFmpegStderrCaptureNoLog:
 class TestFFmpegStderrCaptureExceptionInEnter:
     """Test exception handling in FFmpegStderrCapture.__enter__ (lines 221-222)."""
 
+    @pytest.mark.fast
     def test_exception_during_stderr_capture_setup(self, tmp_path):
         """Test that exceptions during capture setup are handled silently."""
         log_dir = tmp_path / "logs"
@@ -144,6 +148,7 @@ class TestFFmpegStderrCaptureExceptionInEnter:
 class TestProgressBarZeroProgress:
     """Test ProgressBar ETA when progress is 0 (line 546)."""
 
+    @pytest.mark.fast
     def test_eta_shows_dashes_when_no_progress(self, capsys):
         """Test that ETA shows --:-- when progress is 0."""
         bar = ProgressBar(total=100, description="Test")
@@ -159,6 +164,7 @@ class TestProgressBarZeroProgress:
         # Line 546: eta_str = "--:--"
         assert "--:--" in captured.out
 
+    @pytest.mark.fast
     def test_zero_total_progress(self, capsys):
         """Test progress bar with 0 total."""
         bar = ProgressBar(total=0, description="Empty")
@@ -173,6 +179,7 @@ class TestProgressBarZeroProgress:
 class TestProgressBarUnicodeEncode:
     """Test ProgressBar UnicodeEncodeError handling (lines 559-563)."""
 
+    @pytest.mark.fast
     def test_unicode_encode_error_fallback(self, capsys):
         """Test fallback when stdout can't handle unicode."""
         bar = ProgressBar(total=100, description="Test")
@@ -225,6 +232,7 @@ class TestProgressBarUnicodeEncode:
 class TestProgressBarTimeFormatting:
     """Test ProgressBar _format_time for hours (lines 574-577)."""
 
+    @pytest.mark.fast
     def test_format_time_hours(self):
         """Test formatting time >= 1 hour."""
         bar = ProgressBar(total=100)
@@ -234,6 +242,7 @@ class TestProgressBarTimeFormatting:
 
         assert result == "01:01:01"
 
+    @pytest.mark.fast
     def test_format_time_many_hours(self):
         """Test formatting many hours."""
         bar = ProgressBar(total=100)
@@ -243,6 +252,7 @@ class TestProgressBarTimeFormatting:
 
         assert result == "12:34:56"
 
+    @pytest.mark.fast
     def test_format_time_under_hour(self):
         """Test formatting time < 1 hour (different branch)."""
         bar = ProgressBar(total=100)
@@ -252,6 +262,7 @@ class TestProgressBarTimeFormatting:
 
         assert result == "02:05"
 
+    @pytest.mark.fast
     def test_format_time_exactly_one_hour(self):
         """Test formatting exactly 1 hour."""
         bar = ProgressBar(total=100)
@@ -260,6 +271,7 @@ class TestProgressBarTimeFormatting:
 
         assert result == "01:00:00"
 
+    @pytest.mark.fast
     def test_format_time_with_fractional_seconds(self):
         """Test formatting with fractional seconds."""
         bar = ProgressBar(total=100)
@@ -277,6 +289,7 @@ class TestProgressBarTimeFormatting:
 class TestCacheManagerGetFileHashSlow:
     """Test CacheManager.get_file_hash_slow (lines 622-626)."""
 
+    @pytest.mark.fast
     def test_get_file_hash_slow_small_file(self, tmp_path):
         """Test slow hash on small file."""
         test_file = tmp_path / "small.txt"
@@ -288,6 +301,7 @@ class TestCacheManagerGetFileHashSlow:
         assert isinstance(hash_result, str)
         assert len(hash_result) == 32  # MD5 hex digest
 
+    @pytest.mark.fast
     def test_get_file_hash_slow_larger_file(self, tmp_path):
         """Test slow hash on file larger than chunk size."""
         test_file = tmp_path / "larger.bin"
@@ -300,6 +314,7 @@ class TestCacheManagerGetFileHashSlow:
         assert isinstance(hash_result, str)
         assert len(hash_result) == 32
 
+    @pytest.mark.fast
     def test_get_file_hash_slow_binary_file(self, tmp_path):
         """Test slow hash on binary file."""
         test_file = tmp_path / "binary.dat"
@@ -311,6 +326,7 @@ class TestCacheManagerGetFileHashSlow:
         assert isinstance(hash_result, str)
         assert len(hash_result) == 32
 
+    @pytest.mark.fast
     def test_get_file_hash_slow_consistent(self, tmp_path):
         """Test that slow hash is consistent for same content."""
         test_file = tmp_path / "consistent.txt"
@@ -327,6 +343,7 @@ class TestCacheManagerGetFileHashSlow:
 class TestCacheManagerCacheMisses:
     """Test cache miss paths for various CacheManager methods."""
 
+    @pytest.mark.fast
     def test_get_embeddings_cache_miss(self, tmp_path):
         """Test get_embeddings returns None on cache miss (line 655)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -335,6 +352,7 @@ class TestCacheManagerCacheMisses:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_scenes_cache_miss(self, tmp_path):
         """Test get_scenes returns None on cache miss (line 671)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -343,6 +361,7 @@ class TestCacheManagerCacheMisses:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_scenes_cache_hit(self, tmp_path):
         """Test get_scenes cache hit path (line 671)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -359,6 +378,7 @@ class TestCacheManagerCacheMisses:
         assert len(result) == 2
         assert result[0].video_path == "/test.mp4"
 
+    @pytest.mark.fast
     def test_get_llm_response_cache_miss(self, tmp_path):
         """Test get_llm_response returns None on cache miss (line 686)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -367,6 +387,7 @@ class TestCacheManagerCacheMisses:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_llm_response_cache_hit(self, tmp_path):
         """Test get_llm_response cache hit path (line 686)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -379,6 +400,7 @@ class TestCacheManagerCacheMisses:
         assert result is not None
         assert result["text"] == "response"
 
+    @pytest.mark.fast
     def test_get_video_index_cache_miss(self, tmp_path):
         """Test get_video_index returns None on cache miss (line 702)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -387,6 +409,7 @@ class TestCacheManagerCacheMisses:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_video_index_cache_hit(self, tmp_path):
         """Test get_video_index cache hit path (line 702)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -405,6 +428,7 @@ class TestCacheManagerCacheMisses:
         assert result.video_path == "/test.mp4"
         assert result.has_embeddings is True
 
+    @pytest.mark.fast
     def test_get_master_index_empty(self, tmp_path):
         """Test get_master_index returns empty dict when not found (line 726)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -414,6 +438,7 @@ class TestCacheManagerCacheMisses:
 
         assert result == {}
 
+    @pytest.mark.fast
     def test_get_master_index_exists(self, tmp_path):
         """Test get_master_index returns data when file exists (line 726)."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -433,6 +458,7 @@ class TestCacheManagerCacheMisses:
 class TestReuseTrackerSourceFileLimit:
     """Test ReuseTracker source file limit checking (line 799)."""
 
+    @pytest.mark.fast
     def test_can_use_source_file_limit_reached(self):
         """Test can_use returns False when source file limit reached."""
         # Enable source file tracking with limit
@@ -455,6 +481,7 @@ class TestReuseTrackerSourceFileLimit:
         # Line 799: source file limit reached
         assert not tracker.can_use(seg3)  # At source limit
 
+    @pytest.mark.fast
     def test_can_use_no_source_file_limit(self):
         """Test can_use when source file limit is disabled (0)."""
         tracker = ReuseTracker(
@@ -476,6 +503,7 @@ class TestReuseTrackerSourceFileLimit:
 class TestReuseTrackerSourceFilePenalty:
     """Test ReuseTracker source file penalty calculation (lines 814-815)."""
 
+    @pytest.mark.fast
     def test_source_file_penalty_applied(self):
         """Test penalty is applied when over source file threshold."""
         tracker = ReuseTracker(
@@ -507,6 +535,7 @@ class TestReuseTrackerSourceFilePenalty:
         penalty_over_threshold = tracker.get_penalty(seg4)
         assert penalty_over_threshold == 0.2  # Source penalty only (seg4 not used yet as clip)
 
+    @pytest.mark.fast
     def test_source_file_penalty_escalates(self):
         """Test penalty escalates with more usage."""
         tracker = ReuseTracker(
@@ -533,6 +562,7 @@ class TestReuseTrackerSourceFilePenalty:
 
         assert abs(penalty - 0.30) < 0.001
 
+    @pytest.mark.fast
     def test_source_file_penalty_combined_with_clip_penalty(self):
         """Test source file penalty combines with clip penalty."""
         tracker = ReuseTracker(
@@ -565,6 +595,7 @@ class TestReuseTrackerSourceFilePenalty:
 class TestSRTParsingEncodingErrors:
     """Test SRT parsing with encoding issues (lines 885-887)."""
 
+    @pytest.mark.fast
     def test_parse_srt_generic_exception_in_encoding_loop(self, tmp_path):
         """Test handling generic exception during encoding attempts."""
         srt_file = tmp_path / "error.srt"
@@ -592,6 +623,7 @@ class TestSRTParsingEncodingErrors:
 class TestSRTParsingBinaryFallback:
     """Test SRT parsing binary fallback (lines 891-901)."""
 
+    @pytest.mark.fast
     def test_parse_srt_binary_fallback_utf16_bom(self, tmp_path):
         """Test binary fallback with UTF-16 BOM."""
         srt_content = "1\n00:00:00,000 --> 00:00:05,000\nTest subtitle\n\n"
@@ -607,6 +639,7 @@ class TestSRTParsingBinaryFallback:
         # Should handle BOM and parse
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_binary_fallback_utf16_be_bom(self, tmp_path):
         """Test binary fallback with UTF-16 BE BOM."""
         srt_content = "1\n00:00:00,000 --> 00:00:05,000\nTest\n\n"
@@ -621,6 +654,7 @@ class TestSRTParsingBinaryFallback:
 
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_binary_fallback_no_bom(self, tmp_path):
         """Test binary fallback with corrupted file (no BOM)."""
         srt_file = tmp_path / "nobom.srt"
@@ -642,6 +676,7 @@ class TestSRTParsingBinaryFallback:
 
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_binary_fallback_exception(self, tmp_path):
         """Test binary fallback exception handling (lines 899-901)."""
         srt_file = tmp_path / "broken.srt"
@@ -661,6 +696,7 @@ class TestSRTParsingBinaryFallback:
 class TestSRTParsingValueIndexError:
     """Test SRT parsing ValueError/IndexError handling (lines 931-932)."""
 
+    @pytest.mark.fast
     def test_parse_srt_invalid_index_number(self, tmp_path):
         """Test parsing SRT with invalid segment index."""
         srt_content = """not_a_number
@@ -680,6 +716,7 @@ Valid subtitle
         assert len(segments) == 1
         assert segments[0].text == "Valid subtitle"
 
+    @pytest.mark.fast
     def test_parse_srt_missing_timestamp_parts(self, tmp_path):
         """Test parsing SRT with malformed timestamp line."""
         srt_content = """1
@@ -699,6 +736,7 @@ Valid subtitle
         assert len(segments) == 1
         assert segments[0].text == "Valid subtitle"
 
+    @pytest.mark.fast
     def test_parse_srt_empty_timestamp(self, tmp_path):
         """Test parsing SRT with empty timestamp parts."""
         srt_content = """1
@@ -717,6 +755,7 @@ Valid
         # Should skip malformed and parse valid
         assert len(segments) >= 1
 
+    @pytest.mark.fast
     def test_parse_srt_insufficient_lines(self, tmp_path):
         """Test parsing SRT block with insufficient lines."""
         srt_content = """1
@@ -736,6 +775,7 @@ Valid subtitle
         # Should skip malformed blocks
         assert any(seg.text == "Valid subtitle" for seg in segments)
 
+    @pytest.mark.fast
     def test_parse_srt_timestamp_parse_error(self, tmp_path):
         """Test parsing SRT with unparseable timestamp."""
         srt_content = """1
@@ -759,6 +799,7 @@ Valid
 class TestSRTParsingBinaryDetection:
     """Test SRT binary file detection."""
 
+    @pytest.mark.fast
     def test_parse_srt_detects_id3_tag(self, tmp_path):
         """Test detection of ID3 tag (audio file)."""
         srt_file = tmp_path / "audio.srt"
@@ -769,6 +810,7 @@ class TestSRTParsingBinaryDetection:
 
         assert segments == []
 
+    @pytest.mark.fast
     def test_parse_srt_detects_null_bytes(self, tmp_path):
         """Test detection of null bytes (binary file)."""
         srt_file = tmp_path / "binary.srt"
@@ -784,6 +826,7 @@ class TestSRTParsingBinaryDetection:
 class TestSRTParsingEmptyText:
     """Test SRT parsing with empty text segments."""
 
+    @pytest.mark.fast
     def test_parse_srt_empty_text_skipped(self, tmp_path):
         """Test that segments with empty text are skipped."""
         srt_content = """1
@@ -811,6 +854,7 @@ Non-empty
 class TestProgressBarComplete:
     """Test ProgressBar completion behavior."""
 
+    @pytest.mark.fast
     def test_progress_bar_prints_newline_on_complete(self, capsys):
         """Test that newline is printed when progress completes."""
         bar = ProgressBar(total=10, description="Test")
@@ -827,6 +871,7 @@ class TestProgressBarComplete:
 class TestFFmpegStderrCaptureExit:
     """Test FFmpegStderrCapture __exit__ behavior."""
 
+    @pytest.mark.fast
     def test_exit_with_captured_content(self, tmp_path):
         """Test __exit__ logs captured content."""
         log_dir = tmp_path / "logs"
@@ -841,6 +886,7 @@ class TestFFmpegStderrCaptureExit:
 
         assert "Captured stderr message" in content or "test_source" in content
 
+    @pytest.mark.fast
     def test_exit_with_empty_capture(self, tmp_path):
         """Test __exit__ with no captured content."""
         log_dir = tmp_path / "logs"
@@ -853,6 +899,7 @@ class TestFFmpegStderrCaptureExit:
         # Should complete without error
         assert True
 
+    @pytest.mark.fast
     def test_exit_restores_stderr(self, tmp_path):
         """Test that __exit__ restores original stderr."""
         log_dir = tmp_path / "logs"

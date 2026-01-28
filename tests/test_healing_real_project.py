@@ -163,6 +163,7 @@ def real_state(project_dir, real_config, real_checkpoint):
 class TestCheckpointHealerReal:
     """Test checkpoint healing against real project."""
 
+    @pytest.mark.fast
     def test_checkpoint_integrity(self, project_dir, real_checkpoint):
         """Verify checkpoint file integrity."""
         assert real_checkpoint is not None, "Checkpoint should exist"
@@ -176,6 +177,7 @@ class TestCheckpointHealerReal:
         print(f"  Created: {real_checkpoint.get('created_at')}")
         print(f"  Updated: {real_checkpoint.get('updated_at')}")
 
+    @pytest.mark.integration
     def test_backup_restoration_simulation(self, project_dir, real_config, backup_checkpoint):
         """Simulate checkpoint corruption and backup restoration."""
         from src.agents.healers.checkpoint import CheckpointHealer
@@ -221,6 +223,7 @@ class TestCheckpointHealerReal:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_cache_rebuild_detection(self, project_dir, real_config):
         """Test that healer can detect cached data for rebuild."""
         from src.agents.healers.checkpoint import CheckpointHealer
@@ -266,6 +269,7 @@ class TestCheckpointHealerReal:
 class TestOTIOHealerReal:
     """Test OTIO healing against real project data."""
 
+    @pytest.mark.fast
     def test_segment_duration_validation(self, real_state, real_config, project_dir):
         """Validate segment durations from real checkpoint."""
         from src.agents.healers.otio import OTIOHealer
@@ -290,6 +294,7 @@ class TestOTIOHealerReal:
         # This is informational - real data might have issues
         # The point is to verify the healer can handle them
 
+    @pytest.mark.fast
     def test_gap_mode_detection(self, real_state, real_config, project_dir):
         """Test gap mode handling with real segments."""
         from src.agents.healers.otio import OTIOHealer
@@ -324,6 +329,7 @@ class TestOTIOHealerReal:
                 result = healer.fix(error, real_state, "OUTPUT")
                 print(f"  Gap overflow fix: {result.message}")
 
+    @pytest.mark.fast
     def test_media_reference_check(self, project_dir, real_config, real_state):
         """Check media references in real project."""
         from src.agents.healers.otio import OTIOHealer
@@ -377,6 +383,7 @@ class TestOTIOHealerReal:
 class TestAPIHealerReal:
     """Test API healing with real configuration."""
 
+    @pytest.mark.requires_api
     def test_api_key_detection(self, real_config, project_dir):
         """Check which API keys are available."""
         from src.agents.healers.api import APIHealer
@@ -404,6 +411,7 @@ class TestAPIHealerReal:
         print(f"  Current: {current_provider}")
         print(f"  Fallbacks: {fallback_providers}")
 
+    @pytest.mark.fast
     def test_rate_limit_backoff_simulation(self, real_config, project_dir, real_state):
         """Simulate rate limiting and verify backoff."""
         from src.agents.healers.api import APIHealer
@@ -442,6 +450,7 @@ class TestAPIHealerReal:
 class TestDiskHealerReal:
     """Test disk healing with real project data."""
 
+    @pytest.mark.fast
     def test_disk_space_check(self, project_dir):
         """Check available disk space for project."""
         import shutil
@@ -463,6 +472,7 @@ class TestDiskHealerReal:
         else:
             print(f"  OK: Sufficient disk space")
 
+    @pytest.mark.fast
     def test_cache_cleanup_potential(self, project_dir, real_config):
         """Calculate how much space cache cleanup would recover."""
         cache_dir = project_dir / ".cache"
@@ -493,6 +503,7 @@ class TestDiskHealerReal:
 class TestPathHealerReal:
     """Test path healing with real project paths."""
 
+    @pytest.mark.fast
     def test_path_length_analysis(self, project_dir):
         """Analyze path lengths in real project."""
         from src.agents.healers.path import PathHealer
@@ -520,6 +531,7 @@ class TestPathHealerReal:
             for length, path in sorted(long_paths, reverse=True)[:3]:
                 print(f"    {length} chars: ...{path}")
 
+    @pytest.mark.fast
     def test_unicode_filename_check(self, project_dir):
         """Check for unicode characters in filenames."""
         unicode_files = []
@@ -557,6 +569,7 @@ class TestPathHealerReal:
 class TestOrchestratorReal:
     """Test orchestrator with real project."""
 
+    @pytest.mark.fast
     def test_preflight_check(self, project_dir, real_config, real_state):
         """Run preflight checks against real project."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -618,6 +631,7 @@ class TestOrchestratorReal:
             auto_fix = " (auto-fixable)" if issue.auto_fixable else ""
             print(f"  [{issue.severity}] {issue.message}{auto_fix}")
 
+    @pytest.mark.fast
     def test_healer_registry(self, project_dir, real_config):
         """Check which healers are available."""
         from src.agents.healers import HEALER_REGISTRY
@@ -637,6 +651,7 @@ class TestOrchestratorReal:
 class TestEndToEndSimulation:
     """End-to-end healing simulation with real project."""
 
+    @pytest.mark.fast
     def test_simulated_pipeline_run(self, project_dir, real_config, real_state):
         """Simulate a pipeline run with various errors."""
         from src.agents.healers.api import APIHealer

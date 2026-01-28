@@ -62,6 +62,7 @@ def sample_video_paths(temp_project_dir):
 class TestMatchedVideoInfo:
     """Test MatchedVideoInfo dataclass"""
 
+    @pytest.mark.fast
     def test_init(self):
         """Test initialization"""
         info = MatchedVideoInfo(
@@ -76,6 +77,7 @@ class TestMatchedVideoInfo:
         assert info.matched_at == 1234567890.0
         assert info.segment_count == 5
 
+    @pytest.mark.fast
     def test_to_dict(self):
         """Test conversion to dict"""
         info = MatchedVideoInfo(
@@ -92,6 +94,7 @@ class TestMatchedVideoInfo:
         assert result['matched_at'] == 1234567890.0
         assert result['segment_count'] == 5
 
+    @pytest.mark.fast
     def test_from_dict(self):
         """Test creation from dict"""
         data = {
@@ -108,6 +111,7 @@ class TestMatchedVideoInfo:
         assert info.matched_at == 1234567890.0
         assert info.segment_count == 5
 
+    @pytest.mark.fast
     def test_from_dict_missing_fields(self):
         """Test from_dict with missing fields"""
         data = {}  # Empty dict
@@ -128,6 +132,7 @@ class TestMatchedVideoInfo:
 class TestMatchAwareIndexInit:
     """Test MatchAwareIndex initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_cache_dir(self, temp_project_dir):
         """Test initialization creates cache directory"""
         index = MatchAwareIndex(temp_project_dir)
@@ -136,12 +141,14 @@ class TestMatchAwareIndexInit:
         assert cache_dir.exists()
         assert index.cache_dir == cache_dir
 
+    @pytest.mark.fast
     def test_init_empty_index(self, match_index):
         """Test initialization with no existing index"""
         assert len(match_index.matched_videos) == 0
         assert match_index.voiceover_hash == ""
         assert match_index.config_hash == ""
 
+    @pytest.mark.fast
     def test_init_loads_existing_index(self, temp_project_dir):
         """Test initialization loads existing index"""
         # Create an index file
@@ -174,6 +181,7 @@ class TestMatchAwareIndexInit:
         assert index.voiceover_hash == 'voiceover123'
         assert index.config_hash == 'config456'
 
+    @pytest.mark.fast
     def test_init_handles_corrupted_index(self, temp_project_dir):
         """Test initialization handles corrupted index file"""
         cache_dir = Path(temp_project_dir) / ".cache"
@@ -196,6 +204,7 @@ class TestMatchAwareIndexInit:
 class TestVideoTracking:
     """Test video tracking functionality"""
 
+    @pytest.mark.fast
     def test_mark_matched(self, match_index, sample_video_paths):
         """Test marking a video as matched"""
         video_path = sample_video_paths[0]
@@ -207,6 +216,7 @@ class TestVideoTracking:
         assert info.segment_count == 5
         assert info.video_hash != ""
 
+    @pytest.mark.fast
     def test_mark_matched_batch(self, match_index, sample_video_paths):
         """Test marking multiple videos as matched"""
         segment_counts = {
@@ -221,6 +231,7 @@ class TestVideoTracking:
         assert match_index.matched_videos[sample_video_paths[0]].segment_count == 3
         assert match_index.matched_videos[sample_video_paths[1]].segment_count == 5
 
+    @pytest.mark.fast
     def test_is_matched(self, match_index, sample_video_paths):
         """Test checking if video is matched"""
         video_path = sample_video_paths[0]
@@ -231,6 +242,7 @@ class TestVideoTracking:
 
         assert match_index.is_matched(video_path)
 
+    @pytest.mark.fast
     def test_get_new_videos(self, match_index, sample_video_paths):
         """Test getting list of new (unmatched) videos"""
         # Mark first video as matched
@@ -242,6 +254,7 @@ class TestVideoTracking:
         assert sample_video_paths[1] in new_videos
         assert sample_video_paths[2] in new_videos
 
+    @pytest.mark.fast
     def test_is_video_modified(self, match_index, sample_video_paths):
         """Test detecting modified videos"""
         video_path = sample_video_paths[0]
@@ -256,6 +269,7 @@ class TestVideoTracking:
         # Should detect modification
         assert match_index.is_video_modified(video_path)
 
+    @pytest.mark.fast
     def test_get_modified_videos(self, match_index, sample_video_paths):
         """Test getting list of modified videos"""
         # Mark all as matched
@@ -269,6 +283,7 @@ class TestVideoTracking:
         assert len(modified) == 1
         assert sample_video_paths[0] in modified
 
+    @pytest.mark.fast
     def test_get_deleted_videos(self, match_index, sample_video_paths):
         """Test getting list of deleted videos"""
         # Mark all as matched
@@ -283,6 +298,7 @@ class TestVideoTracking:
         assert len(deleted) == 1
         assert sample_video_paths[0] in deleted
 
+    @pytest.mark.fast
     def test_remove_videos(self, match_index, sample_video_paths):
         """Test removing videos from index"""
         # Mark all as matched
@@ -302,6 +318,7 @@ class TestVideoTracking:
 class TestVoiceoverConfigTracking:
     """Test voiceover and config change detection"""
 
+    @pytest.mark.fast
     def test_set_voiceover_hash(self, match_index, temp_project_dir):
         """Test setting voiceover hash"""
         voiceover_path = Path(temp_project_dir) / "voiceover.mp3"
@@ -311,6 +328,7 @@ class TestVoiceoverConfigTracking:
 
         assert match_index.voiceover_hash != ""
 
+    @pytest.mark.fast
     def test_is_voiceover_changed(self, match_index, temp_project_dir):
         """Test detecting voiceover changes"""
         voiceover_path = Path(temp_project_dir) / "voiceover.mp3"
@@ -326,6 +344,7 @@ class TestVoiceoverConfigTracking:
         # Should detect change
         assert match_index.is_voiceover_changed(str(voiceover_path))
 
+    @pytest.mark.fast
     def test_is_voiceover_changed_first_run(self, match_index, temp_project_dir):
         """Test voiceover change detection on first run"""
         voiceover_path = Path(temp_project_dir) / "voiceover.mp3"
@@ -334,6 +353,7 @@ class TestVoiceoverConfigTracking:
         # First run - no hash set yet
         assert not match_index.is_voiceover_changed(str(voiceover_path))
 
+    @pytest.mark.fast
     def test_set_config_hash(self, match_index):
         """Test setting config hash"""
         config_hash = "config123abc"
@@ -342,6 +362,7 @@ class TestVoiceoverConfigTracking:
 
         assert match_index.config_hash == config_hash
 
+    @pytest.mark.fast
     def test_is_config_changed(self, match_index):
         """Test detecting config changes"""
         match_index.set_config_hash("config123")
@@ -349,6 +370,7 @@ class TestVoiceoverConfigTracking:
         assert not match_index.is_config_changed("config123")
         assert match_index.is_config_changed("config456")
 
+    @pytest.mark.fast
     def test_is_config_changed_first_run(self, match_index):
         """Test config change detection on first run"""
         # First run - no hash set yet
@@ -362,6 +384,7 @@ class TestVoiceoverConfigTracking:
 class TestMatchResultCaching:
     """Test match result caching"""
 
+    @pytest.mark.fast
     def test_save_and_load_matches(self, match_index):
         """Test saving and loading match results"""
         matches = [
@@ -377,6 +400,7 @@ class TestMatchResultCaching:
         assert len(loaded) == 2
         assert loaded[0]['segment_id'] == 1
 
+    @pytest.mark.fast
     def test_save_matches_creates_timestamped_copy(self, match_index, temp_project_dir):
         """Test that save_matches creates timestamped archive"""
         matches = [{'segment_id': 1, 'video': 'video1.mp4'}]
@@ -389,12 +413,14 @@ class TestMatchResultCaching:
 
         assert len(timestamped_files) > 0
 
+    @pytest.mark.fast
     def test_get_cached_matches_no_cache(self, match_index):
         """Test loading matches when no cache exists"""
         result = match_index.get_cached_matches()
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_cached_matches_corrupted(self, match_index, temp_project_dir):
         """Test loading corrupted match cache"""
         cache_dir = Path(temp_project_dir) / ".cache"
@@ -407,6 +433,7 @@ class TestMatchResultCaching:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_clear_matches(self, match_index):
         """Test clearing cached matches"""
         matches = [{'segment_id': 1, 'video': 'video1.mp4'}]
@@ -426,6 +453,7 @@ class TestMatchResultCaching:
 class TestPersistence:
     """Test index persistence"""
 
+    @pytest.mark.fast
     def test_index_persists_across_instances(self, temp_project_dir, sample_video_paths):
         """Test that index persists across instances"""
         # Create index and mark videos
@@ -438,6 +466,7 @@ class TestPersistence:
         # Should load persisted data
         assert index2.is_matched(sample_video_paths[0])
 
+    @pytest.mark.fast
     def test_save_creates_index_file(self, match_index, temp_project_dir, sample_video_paths):
         """Test that saving creates index file"""
         match_index.mark_matched(sample_video_paths[0])
@@ -445,6 +474,7 @@ class TestPersistence:
         index_path = Path(temp_project_dir) / ".cache" / "match_index.json"
         assert index_path.exists()
 
+    @pytest.mark.fast
     def test_atomic_write(self, match_index, sample_video_paths):
         """Test atomic write using temp file"""
         match_index.mark_matched(sample_video_paths[0])
@@ -461,6 +491,7 @@ class TestPersistence:
 class TestUtilityMethods:
     """Test utility methods"""
 
+    @pytest.mark.fast
     def test_clear(self, match_index, sample_video_paths):
         """Test clearing entire index"""
         # Add some data
@@ -475,6 +506,7 @@ class TestUtilityMethods:
         assert match_index.voiceover_hash == ""
         assert match_index.get_cached_matches() is None
 
+    @pytest.mark.fast
     def test_get_stats(self, match_index, sample_video_paths):
         """Test getting index statistics"""
         match_index.mark_matched_batch(sample_video_paths)
@@ -485,6 +517,7 @@ class TestUtilityMethods:
         assert 'has_cached_matches' in stats
         assert 'updated_at' in stats
 
+    @pytest.mark.fast
     def test_repr(self, match_index, sample_video_paths):
         """Test string representation"""
         match_index.mark_matched(sample_video_paths[0])
@@ -502,6 +535,7 @@ class TestUtilityMethods:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_mark_matched_with_no_segment_count(self, match_index, sample_video_paths):
         """Test marking video without segment count"""
         match_index.mark_matched(sample_video_paths[0])
@@ -509,18 +543,21 @@ class TestEdgeCases:
         info = match_index.matched_videos[sample_video_paths[0]]
         assert info.segment_count == 0
 
+    @pytest.mark.fast
     def test_get_file_hash_nonexistent_file(self, match_index):
         """Test getting hash of nonexistent file"""
         hash_result = match_index._get_file_hash("/nonexistent/file.mp4")
 
         assert hash_result == ""
 
+    @pytest.mark.fast
     def test_is_video_modified_unmatched_video(self, match_index, sample_video_paths):
         """Test checking modification of unmatched video"""
         result = match_index.is_video_modified(sample_video_paths[0])
 
         assert result is False
 
+    @pytest.mark.fast
     def test_save_matches_with_voiceover_path(self, match_index, temp_project_dir):
         """Test saving matches with voiceover metadata"""
         voiceover_path = Path(temp_project_dir) / "voiceover.mp3"
@@ -534,12 +571,14 @@ class TestEdgeCases:
 
         assert data['voiceover_path'] == str(voiceover_path)
 
+    @pytest.mark.fast
     def test_empty_video_list_operations(self, match_index):
         """Test operations with empty video lists"""
         assert match_index.get_new_videos([]) == []
         assert match_index.get_modified_videos([]) == []
         assert match_index.get_deleted_videos([]) == []
 
+    @pytest.mark.fast
     def test_mark_matched_batch_empty_segment_counts(self, match_index, sample_video_paths):
         """Test batch marking without segment counts"""
         match_index.mark_matched_batch(sample_video_paths)

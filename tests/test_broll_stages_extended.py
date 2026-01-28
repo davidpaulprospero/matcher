@@ -50,6 +50,7 @@ class TestBrollDownloadStageExtended:
         state.downloaded_videos = []
         return state
 
+    @pytest.mark.fast
     def test_generate_search_terms_location_suffixes(self, stage, mock_state):
         """Test location entities get aerial/drone suffixes"""
         broll_config = BrollConfig()
@@ -60,6 +61,7 @@ class TestBrollDownloadStageExtended:
         location_aerial = [t for t in terms if "California" in t and "aerial" in t.lower()]
         assert len(location_aerial) > 0 or any("aerial" in t.lower() for t in terms)
 
+    @pytest.mark.fast
     def test_generate_search_terms_skips_person_entities(self, stage, mock_state):
         """Test PERSON entities are skipped for B-roll"""
         broll_config = BrollConfig()
@@ -70,6 +72,7 @@ class TestBrollDownloadStageExtended:
         person_terms = [t for t in terms if "John Smith" in t]
         assert len(person_terms) == 0
 
+    @pytest.mark.fast
     def test_generate_search_terms_limits_keywords(self, stage):
         """Test keywords are limited to top 10"""
         state = PipelineState()
@@ -83,6 +86,7 @@ class TestBrollDownloadStageExtended:
         keyword_11_terms = [t for t in terms if "keyword_11" in t]
         assert len(keyword_11_terms) == 0
 
+    @pytest.mark.fast
     def test_generate_search_terms_limits_entities(self, stage):
         """Test entities are limited to top 5"""
         state = PipelineState()
@@ -98,6 +102,7 @@ class TestBrollDownloadStageExtended:
         entity_6_terms = [t for t in terms if "Entity_6" in t]
         assert len(entity_6_terms) == 0
 
+    @pytest.mark.fast
     def test_generate_search_terms_custom_suffixes(self, stage, mock_state):
         """Test custom search suffixes are used"""
         broll_config = BrollConfig(
@@ -111,6 +116,7 @@ class TestBrollDownloadStageExtended:
         assert any("4k" in t.lower() for t in terms)
         assert any("slow motion" in t.lower() for t in terms)
 
+    @pytest.mark.fast
     def test_generate_search_terms_entity_as_string(self, stage):
         """Test entities provided as strings (not dicts)"""
         state = PipelineState()
@@ -123,6 +129,7 @@ class TestBrollDownloadStageExtended:
         # Should still generate terms
         assert len(terms) > 0
 
+    @pytest.mark.integration
     def test_restore_from_checkpoint(self, stage):
         """Test restore from checkpoint data"""
         state = PipelineState()
@@ -150,6 +157,7 @@ class TestBrollDownloadStageExtended:
             assert hasattr(state, 'broll_downloads')
             assert len(state.broll_downloads) == 2
 
+    @pytest.mark.fast
     def test_restore_no_checkpoint_data(self, stage):
         """Test restore with no checkpoint data"""
         state = PipelineState()
@@ -160,6 +168,7 @@ class TestBrollDownloadStageExtended:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_missing_files(self, stage):
         """Test restore when files no longer exist"""
         state = PipelineState()
@@ -172,6 +181,7 @@ class TestBrollDownloadStageExtended:
 
         assert result is False
 
+    @pytest.mark.integration
     def test_restore_partial_files(self, stage):
         """Test restore when some files exist"""
         state = PipelineState()
@@ -238,6 +248,7 @@ class TestBrollMatchStageExtended:
         ]
         return state
 
+    @pytest.mark.fast
     def test_detect_silent_scenes_broll_flag(self, stage, mock_state_with_broll):
         """Test that is_broll=True segments are included"""
         broll_config = BrollConfig(min_words_threshold=10)
@@ -250,6 +261,7 @@ class TestBrollMatchStageExtended:
         assert "/videos/earthquake_footage.mp4" in sources
         assert "/videos/silent_stock.mp4" in sources
 
+    @pytest.mark.fast
     def test_detect_silent_scenes_empty_transcripts(self, stage):
         """Test videos with empty transcript list"""
         state = PipelineState()
@@ -266,6 +278,7 @@ class TestBrollMatchStageExtended:
 
         assert len(scenes) == 1
 
+    @pytest.mark.fast
     def test_get_video_source_from_downloaded_videos(self, stage):
         """Test source detection from downloaded_videos list"""
         state = PipelineState()
@@ -276,6 +289,7 @@ class TestBrollMatchStageExtended:
         source = stage._get_video_source("/videos/my_video.mp4", state)
         assert source == "broll"
 
+    @pytest.mark.fast
     def test_get_video_source_broll_directory(self, stage):
         """Test source detection from broll directory"""
         state = PipelineState()
@@ -284,6 +298,7 @@ class TestBrollMatchStageExtended:
         source = stage._get_video_source("/videos/broll/my_video.mp4", state)
         assert source == "broll"
 
+    @pytest.mark.fast
     def test_extract_keywords_strips_prefixes(self, stage):
         """Test all prefixes are stripped"""
         prefixes = ["pexels_", "pixabay_", "entity_", "yt_", "broll_"]
@@ -293,6 +308,7 @@ class TestBrollMatchStageExtended:
             assert prefix.rstrip("_") not in result.lower()
             assert "sunset" in result.lower()
 
+    @pytest.mark.fast
     def test_extract_keywords_handles_underscores_hyphens(self, stage):
         """Test underscores and hyphens become spaces"""
         result = stage._extract_keywords_from_filename("/videos/city-skyline_at_night.mp4")
@@ -303,6 +319,7 @@ class TestBrollMatchStageExtended:
         assert "_" not in result
         assert "-" not in result
 
+    @pytest.mark.fast
     def test_calculate_embedding_score_with_numpy(self, stage):
         """Test embedding score calculation"""
         # Create normalized vectors
@@ -314,6 +331,7 @@ class TestBrollMatchStageExtended:
         # Same vector should have score ~1.0
         assert abs(score - 1.0) < 0.01
 
+    @pytest.mark.fast
     def test_calculate_embedding_score_orthogonal(self, stage):
         """Test orthogonal vectors have low score"""
         vo_emb = np.array([1.0, 0.0, 0.0])
@@ -324,6 +342,7 @@ class TestBrollMatchStageExtended:
         # Orthogonal vectors should have score ~0.0
         assert abs(score) < 0.01
 
+    @pytest.mark.fast
     def test_calculate_embedding_score_none_inputs(self, stage):
         """Test embedding score with None inputs"""
         score = stage._calculate_embedding_score(None, np.array([1.0]))
@@ -335,6 +354,7 @@ class TestBrollMatchStageExtended:
         score = stage._calculate_embedding_score(None, None)
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_calculate_keyword_score_full_overlap(self, stage):
         """Test keyword score with full overlap"""
         keywords = {"earthquake", "damage"}
@@ -347,6 +367,7 @@ class TestBrollMatchStageExtended:
 
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_calculate_keyword_score_no_keywords(self, stage):
         """Test keyword score with no matching keywords"""
         keywords = {"earthquake", "damage"}
@@ -360,6 +381,7 @@ class TestBrollMatchStageExtended:
         # Falls back to direct word overlap
         assert score >= 0.0
 
+    @pytest.mark.fast
     def test_calculate_keyword_score_empty_description(self, stage):
         """Test keyword score with empty description"""
         keywords = {"earthquake"}
@@ -372,6 +394,7 @@ class TestBrollMatchStageExtended:
 
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_calculate_entity_score_multiple_matches(self, stage):
         """Test entity score with multiple entity matches"""
         entities = {"california", "san francisco", "los angeles"}
@@ -384,6 +407,7 @@ class TestBrollMatchStageExtended:
 
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_calculate_entity_score_partial_match(self, stage):
         """Test entity score with partial match"""
         entities = {"california", "new york"}
@@ -396,6 +420,7 @@ class TestBrollMatchStageExtended:
 
         assert score == 0.5
 
+    @pytest.mark.fast
     def test_calculate_entity_score_no_entities_in_vo(self, stage):
         """Test entity score when voiceover has no entities"""
         entities = {"california"}
@@ -408,6 +433,7 @@ class TestBrollMatchStageExtended:
 
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_calculate_entity_score_empty_entities(self, stage):
         """Test entity score with empty entity set"""
         score = stage._calculate_entity_score(
@@ -418,6 +444,7 @@ class TestBrollMatchStageExtended:
 
         assert score == 0.0
 
+    @pytest.mark.fast
     def test_sample_long_video_scenes_short_video(self, stage):
         """Test sampling doesn't affect short videos"""
         scenes = [
@@ -441,6 +468,7 @@ class TestBrollMatchStageExtended:
         # Should keep all scenes (fewer than max)
         assert len(sampled) == 5
 
+    @pytest.mark.fast
     def test_sample_long_video_scenes_multiple_videos(self, stage):
         """Test sampling handles multiple video sources"""
         scenes = []
@@ -466,6 +494,7 @@ class TestBrollMatchStageExtended:
             video_scenes = [s for s in sampled if f"video{video_idx}" in s.source_file]
             assert len(video_scenes) <= 10
 
+    @pytest.mark.fast
     def test_restore_from_checkpoint(self, stage):
         """Test restore from checkpoint"""
         state = PipelineState()
@@ -484,6 +513,7 @@ class TestBrollMatchStageExtended:
         assert len(state.broll_matches) == 2
         assert state.broll_matches[0]['score'] == 0.8
 
+    @pytest.mark.fast
     def test_restore_no_data(self, stage):
         """Test restore with no checkpoint data"""
         state = PipelineState()
@@ -494,6 +524,7 @@ class TestBrollMatchStageExtended:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_exception_handling(self, stage):
         """Test restore handles exceptions"""
         state = PipelineState()
@@ -504,6 +535,7 @@ class TestBrollMatchStageExtended:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_enrich_with_keywords_existing_description(self, stage):
         """Test keyword enrichment skips scenes with description"""
         scenes = [
@@ -536,6 +568,7 @@ class TestBrollScoringIntegration:
     def stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_combined_score_calculation(self, stage):
         """Test that combined score uses correct weights"""
         broll_config = BrollConfig(
@@ -561,6 +594,7 @@ class TestBrollScoringIntegration:
 
         assert abs(combined - 0.815) < 0.001
 
+    @pytest.mark.fast
     def test_source_boost_values(self, stage):
         """Test source boost values are applied correctly"""
         broll_config = BrollConfig()
@@ -582,6 +616,7 @@ class TestBrollScoringIntegration:
 class TestBrollConfigValidation:
     """Test config validation and edge cases"""
 
+    @pytest.mark.fast
     def test_negative_weights_allowed(self):
         """Test that negative weights don't crash (user responsibility)"""
         config = BrollConfig(
@@ -593,21 +628,25 @@ class TestBrollConfigValidation:
         # Should create without error
         assert config.embedding_weight == -0.1
 
+    @pytest.mark.fast
     def test_zero_downloads_per_term(self):
         """Test zero downloads_per_term"""
         config = BrollConfig(downloads_per_term=0)
         assert config.downloads_per_term == 0
 
+    @pytest.mark.fast
     def test_very_high_threshold(self):
         """Test very high min_words_threshold"""
         config = BrollConfig(min_words_threshold=10000)
         assert config.min_words_threshold == 10000
 
+    @pytest.mark.fast
     def test_empty_search_suffixes(self):
         """Test empty search suffixes list"""
         config = BrollConfig(search_suffixes=[])
         assert config.search_suffixes == []
 
+    @pytest.mark.fast
     def test_empty_ignore_markers(self):
         """Test empty ignore markers list"""
         config = BrollConfig(ignore_markers=[])
@@ -621,6 +660,7 @@ class TestBrollConfigValidation:
 class TestBrollPipelineIntegration:
     """Test B-roll stages in pipeline context"""
 
+    @pytest.mark.integration
     def test_default_pipeline_includes_broll_stages(self):
         """Test default pipeline has B-roll stages"""
         from src.pipeline import create_default_pipeline
@@ -639,6 +679,7 @@ class TestBrollPipelineIntegration:
             assert "BROLL_DOWNLOAD" in stage_names
             assert "BROLL_MATCH" in stage_names
 
+    @pytest.mark.integration
     def test_match_only_pipeline_includes_broll_stages(self):
         """Test match-only pipeline has B-roll stages"""
         from src.pipeline import create_match_only_pipeline
@@ -655,6 +696,7 @@ class TestBrollPipelineIntegration:
             assert "BROLL_DOWNLOAD" in stage_names
             assert "BROLL_MATCH" in stage_names
 
+    @pytest.mark.fast
     def test_broll_download_before_remix(self):
         """Test BROLL_DOWNLOAD comes before REMIX"""
         from src.checkpoint import STAGE_ORDER
@@ -664,6 +706,7 @@ class TestBrollPipelineIntegration:
 
         assert broll_idx < remix_idx
 
+    @pytest.mark.fast
     def test_broll_match_after_main_match(self):
         """Test BROLL_MATCH comes after MATCH"""
         from src.checkpoint import STAGE_ORDER
@@ -673,6 +716,7 @@ class TestBrollPipelineIntegration:
 
         assert broll_match_idx > match_idx
 
+    @pytest.mark.fast
     def test_broll_match_before_output(self):
         """Test BROLL_MATCH comes before OUTPUT"""
         from src.checkpoint import STAGE_ORDER
@@ -698,6 +742,7 @@ class TestBrollErrorHandling:
     def match_stage(self):
         return BrollMatchStage()
 
+    @pytest.mark.fast
     def test_download_stage_handles_missing_broll_config(self, download_stage):
         """Test download stage handles missing broll config"""
         state = PipelineState()
@@ -712,6 +757,7 @@ class TestBrollErrorHandling:
         assert result.success is True
         assert result.data['skipped'] is True
 
+    @pytest.mark.fast
     def test_match_stage_handles_missing_broll_config(self, match_stage):
         """Test match stage handles missing broll config"""
         state = PipelineState()
@@ -728,6 +774,7 @@ class TestBrollErrorHandling:
         assert result.success is True
         assert result.data['skipped'] is True
 
+    @pytest.mark.fast
     def test_download_stage_exception_returns_fail(self, download_stage):
         """Test download stage returns fail on exception"""
         state = PipelineState()

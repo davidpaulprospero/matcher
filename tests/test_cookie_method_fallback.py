@@ -87,14 +87,17 @@ class TestCookieMethod:
         m = CookieMethod(kind="browser", value="firefox", label="browser:firefox")
         assert m.get_cmd_args() == ["--cookies-from-browser", "firefox"]
 
+    @pytest.mark.fast
     def test_file_method_args(self):
         m = CookieMethod(kind="file", value="cookies/main.txt", label="file:main.txt")
         assert m.get_cmd_args() == ["--cookies", "cookies/main.txt"]
 
+    @pytest.mark.fast
     def test_none_method_args(self):
         m = CookieMethod(kind="none", value="", label="no-cookies")
         assert m.get_cmd_args() == []
 
+    @pytest.mark.fast
     def test_unknown_kind_returns_empty(self):
         m = CookieMethod(kind="unknown", value="x", label="unknown")
         assert m.get_cmd_args() == []
@@ -125,6 +128,7 @@ class TestFallbackChainOrdering:
             "no-cookies",
         ], f"Chain order mismatch: {labels}"
 
+    @pytest.mark.fast
     def test_no_browser_starts_with_files(self):
         fb = _build_fallback(
             cookie_files=["cookies/main.txt"],
@@ -133,11 +137,13 @@ class TestFallbackChainOrdering:
         assert fb._chain[0].kind == "file"
         assert fb._chain[-1].kind == "none"
 
+    @pytest.mark.fast
     def test_no_files_or_browser_only_none(self):
         fb = _build_fallback()
         assert len(fb._chain) == 1
         assert fb._chain[0].kind == "none"
 
+    @pytest.mark.fast
     def test_cookies_path_appended_after_rotation_files(self):
         fb = _build_fallback(
             cookie_files=["cookies/main.txt"],
@@ -148,6 +154,7 @@ class TestFallbackChainOrdering:
         labels = [m.label for m in fb._chain]
         assert labels == ["file:main.txt", "file:static.txt", "no-cookies"]
 
+    @pytest.mark.fast
     def test_duplicate_file_deduplication(self):
         """Same file in rotation_files and cookies_path is not duplicated."""
         fb = _build_fallback(
@@ -158,6 +165,7 @@ class TestFallbackChainOrdering:
         file_methods = [m for m in fb._chain if m.kind == "file"]
         assert len(file_methods) == 1, f"Expected 1 file method, got {len(file_methods)}"
 
+    @pytest.mark.fast
     def test_none_always_last(self):
         fb = _build_fallback(browser="chrome")
         assert fb._chain[-1].kind == "none"
@@ -184,12 +192,14 @@ class TestAdvance:
         assert fb.advance() is True   # -> no-cookies
         assert fb.advance() is False  # exhausted
 
+    @pytest.mark.fast
     def test_is_exhausted_after_advancing_past_end(self):
         fb = _build_fallback()  # only no-cookies
         assert fb.is_exhausted is False
         fb.advance()
         assert fb.is_exhausted is True
 
+    @pytest.mark.fast
     def test_methods_remaining_decreases(self):
         fb = _build_fallback(browser="firefox")
         # Chain: browser:firefox, no-cookies
@@ -199,6 +209,7 @@ class TestAdvance:
         fb.advance()
         assert fb.methods_remaining == 0
 
+    @pytest.mark.fast
     def test_current_method_changes_on_advance(self):
         fb = _build_fallback(
             browser="firefox",
@@ -232,6 +243,7 @@ class TestReset:
         fb.reset_for_next_download()
         assert fb.current_method.label == "browser:firefox"
 
+    @pytest.mark.fast
     def test_reset_after_success_goes_to_rotated_method(self):
         fb = _build_fallback(
             browser="firefox",
@@ -243,6 +255,7 @@ class TestReset:
         fb.reset_for_next_download()
         assert fb.current_method.label == "file:main.txt"
 
+    @pytest.mark.fast
     def test_reset_after_exhaustion_restores_position(self):
         fb = _build_fallback()  # only no-cookies
         fb.advance()  # exhausted
@@ -265,6 +278,7 @@ class TestGetCmdArgs:
         fb = _build_fallback(browser="firefox")
         assert fb.get_cmd_args() == ["--cookies-from-browser", "firefox"]
 
+    @pytest.mark.fast
     def test_file_args(self):
         fb = _build_fallback(
             cookie_files=["cookies/main.txt"],
@@ -272,16 +286,19 @@ class TestGetCmdArgs:
         )
         assert fb.get_cmd_args() == ["--cookies", "cookies/main.txt"]
 
+    @pytest.mark.fast
     def test_none_args(self):
         fb = _build_fallback()
         assert fb.get_cmd_args() == []
 
+    @pytest.mark.fast
     def test_exhausted_returns_empty(self):
         fb = _build_fallback()
         fb.advance()
         assert fb.is_exhausted
         assert fb.get_cmd_args() == []
 
+    @pytest.mark.fast
     def test_args_change_after_advance(self):
         fb = _build_fallback(
             browser="firefox",
@@ -314,6 +331,7 @@ class TestFileBasedMethods:
         assert "file:missing.txt" not in labels
         assert "file:main.txt" in labels
 
+    @pytest.mark.fast
     def test_all_files_missing_falls_back_to_none(self):
         fb = _build_fallback(
             cookie_files=["cookies/missing1.txt", "cookies/missing2.txt"],
@@ -322,6 +340,7 @@ class TestFileBasedMethods:
         assert len(fb._chain) == 1
         assert fb._chain[0].kind == "none"
 
+    @pytest.mark.fast
     def test_cookies_path_missing_not_added(self):
         fb = _build_fallback(
             cookies_path="cookies/static.txt",
@@ -330,6 +349,7 @@ class TestFileBasedMethods:
         labels = [m.label for m in fb._chain]
         assert "file:static.txt" not in labels
 
+    @pytest.mark.fast
     def test_file_path_preserved_in_args(self):
         """get_cmd_args() uses the original path string, not resolved."""
         fb = _build_fallback(
@@ -339,6 +359,7 @@ class TestFileBasedMethods:
         args = fb.get_cmd_args()
         assert args == ["--cookies", "cookies/main.txt"]
 
+    @pytest.mark.fast
     def test_multiple_existing_files_all_included(self):
         fb = _build_fallback(
             cookie_files=["cookies/main.txt", "cookies/backup1.txt", "cookies/backup2.txt"],
@@ -372,6 +393,7 @@ class TestMarkSuccess:
         fb.reset_for_next_download()
         assert fb.current_method.label == "file:main.txt"
 
+    @pytest.mark.fast
     def test_mark_success_skips_none_method(self):
         """Rotation skips 'no-cookies' since rotating to no-auth is counterproductive."""
         fb = _build_fallback(
@@ -386,6 +408,7 @@ class TestMarkSuccess:
         # Should rotate to browser:firefox (wrapping around, skipping no-cookies)
         assert fb.current_method.label == "browser:firefox"
 
+    @pytest.mark.fast
     def test_mark_success_single_authenticated_stays(self):
         """With only one authenticated method, rotation stays put."""
         fb = _build_fallback(browser="firefox")
@@ -394,6 +417,7 @@ class TestMarkSuccess:
         fb.reset_for_next_download()
         assert fb.current_method.label == "browser:firefox"
 
+    @pytest.mark.fast
     def test_mark_success_no_op_when_exhausted(self):
         fb = _build_fallback()
         fb.advance()
@@ -415,16 +439,19 @@ class TestGetStatus:
         status = fb.get_status()
         assert status["chain"] == ["browser:firefox", "no-cookies"]
 
+    @pytest.mark.fast
     def test_status_shows_current_method(self):
         fb = _build_fallback(browser="firefox")
         assert fb.get_status()["current_method"] == "browser:firefox"
 
+    @pytest.mark.fast
     def test_status_shows_exhausted(self):
         fb = _build_fallback()
         fb.advance()
         assert fb.get_status()["is_exhausted"] is True
         assert fb.get_status()["current_method"] == "exhausted"
 
+    @pytest.mark.fast
     def test_status_shows_last_success(self):
         fb = _build_fallback(
             browser="firefox",
@@ -457,6 +484,7 @@ class TestChainValidation:
         assert "file:backup1.txt" in labels
         assert "file:missing.txt" not in labels
 
+    @pytest.mark.fast
     def test_all_files_invalid_degrades_to_browser_and_none(self):
         """If all file methods invalid, chain is [browser, none]."""
         fb = _build_fallback(
@@ -467,6 +495,7 @@ class TestChainValidation:
         labels = [m.label for m in fb._chain]
         assert labels == ["browser:firefox", "no-cookies"]
 
+    @pytest.mark.fast
     def test_all_files_invalid_no_browser_degrades_to_none(self):
         """If all file methods invalid and no browser, chain is [none]."""
         fb = _build_fallback(
@@ -476,6 +505,7 @@ class TestChainValidation:
         labels = [m.label for m in fb._chain]
         assert labels == ["no-cookies"]
 
+    @pytest.mark.fast
     def test_file_exists_but_not_readable_skipped(self):
         """A file that exists but isn't readable (R_OK) is skipped."""
         fb = _build_fallback(
@@ -489,6 +519,7 @@ class TestChainValidation:
         assert "file:main.txt" in labels
         assert "file:locked.txt" not in labels
 
+    @pytest.mark.fast
     def test_get_chain_health_all_valid(self):
         """get_chain_health() reports correct counts when all files valid."""
         fb = _build_fallback(
@@ -502,6 +533,7 @@ class TestChainValidation:
         assert health["total_methods"] == 3
         assert health["skipped_files"] == []
 
+    @pytest.mark.fast
     def test_get_chain_health_with_skipped(self):
         """get_chain_health() reports skipped files."""
         fb = _build_fallback(
@@ -515,6 +547,7 @@ class TestChainValidation:
         assert len(health["skipped_files"]) == 1
         assert "cookies/missing.txt" in health["skipped_files"]
 
+    @pytest.mark.fast
     def test_get_chain_health_all_files_skipped(self):
         """get_chain_health() when all file methods are invalid."""
         fb = _build_fallback(
@@ -528,6 +561,7 @@ class TestChainValidation:
         assert health["total_methods"] == 4
         assert len(health["skipped_files"]) == 3
 
+    @pytest.mark.fast
     def test_skipped_files_logged_as_warnings(self):
         """Each skipped file produces a logger.warning call."""
         config, exist_set = _make_download_config(
@@ -553,6 +587,7 @@ class TestChainValidation:
         ]
         assert len(warning_calls) == 2
 
+    @pytest.mark.fast
     def test_health_summary_logged_at_info(self):
         """Chain health summary is logged at INFO level on init."""
         config, exist_set = _make_download_config(
@@ -594,6 +629,7 @@ class TestCrossKeywordExhaustion:
 
     # ---- AC1: Full chain advance with type verification ----
 
+    @pytest.mark.fast
     def test_advance_full_chain_returns_correct_types(self):
         """Advance through browser -> file:main -> file:backup1 -> file:backup2 -> no-cookies.
 
@@ -641,6 +677,7 @@ class TestCrossKeywordExhaustion:
 
     # ---- AC2: mark_success() proactive rotation ----
 
+    @pytest.mark.fast
     def test_mark_success_on_method_0_advances_to_method_1(self):
         """After success on method 0 (browser), last_success_index points to method 1 (file).
 
@@ -665,6 +702,7 @@ class TestCrossKeywordExhaustion:
         assert fb._last_success_index == 1
         assert fb._chain[fb._last_success_index].label == "file:main.txt"
 
+    @pytest.mark.fast
     def test_mark_success_rotation_wraps_around(self):
         """Success on last authenticated method wraps to first authenticated method."""
         fb = _build_fallback(
@@ -682,6 +720,7 @@ class TestCrossKeywordExhaustion:
 
     # ---- AC3: reset_for_next_download() after exhaustion ----
 
+    @pytest.mark.fast
     def test_reset_after_exhaustion_uses_last_success_index(self):
         """After exhaustion, reset goes to last_success_index, not always 0."""
         fb = _build_fallback(
@@ -713,6 +752,7 @@ class TestCrossKeywordExhaustion:
         assert fb.current_method.label == expected_label
         assert fb._current_index == success_idx
 
+    @pytest.mark.fast
     def test_reset_without_success_goes_to_zero_after_exhaustion(self):
         """After exhaustion with no prior success, reset goes to index 0."""
         fb = _build_fallback(
@@ -732,6 +772,7 @@ class TestCrossKeywordExhaustion:
 
     # ---- AC4: get_status() after partial traversal ----
 
+    @pytest.mark.fast
     def test_get_status_remaining_methods_after_partial_traversal(self):
         """get_status() reports accurate remaining_methods and current_method mid-chain."""
         fb = _build_fallback(
@@ -780,6 +821,7 @@ class TestCrossKeywordExhaustion:
 
     # ---- AC5: Duplicate cookie file deduplication ----
 
+    @pytest.mark.fast
     def test_duplicate_paths_in_cookie_files_deduplicated(self):
         """Duplicate entries within cookie_rotation.cookie_files are deduplicated."""
         fb = _build_fallback(
@@ -792,6 +834,7 @@ class TestCrossKeywordExhaustion:
             f"{[m.label for m in file_methods]}"
         )
 
+    @pytest.mark.fast
     def test_duplicate_resolved_paths_deduplicated(self):
         """Paths that resolve to the same file are deduplicated (forward vs back slash)."""
         fb = _build_fallback(

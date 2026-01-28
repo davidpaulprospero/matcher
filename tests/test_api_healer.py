@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 class TestAPIHealerInit:
     """Test APIHealer initialization."""
 
+    @pytest.mark.fast
     def test_init_with_default_backoff(self):
         """Test that APIHealer initializes with default backoff values."""
         from src.agents.healers.api import APIHealer
@@ -19,6 +20,7 @@ class TestAPIHealerInit:
         assert healer.backoff_time == healer.INITIAL_BACKOFF
         assert healer.retry_count == 0
 
+    @pytest.mark.fast
     def test_init_stores_config_and_project(self):
         """Test that APIHealer stores config and project_dir."""
         from src.agents.healers.api import APIHealer
@@ -33,6 +35,7 @@ class TestAPIHealerInit:
 class TestAPIHealerCanHandle:
     """Test APIHealer.can_handle() method."""
 
+    @pytest.mark.fast
     def test_can_handle_rate_limit(self):
         """Test that APIHealer can handle rate limit errors."""
         from src.agents.healers.api import APIHealer
@@ -46,6 +49,7 @@ class TestAPIHealerCanHandle:
         error = Exception("HTTP 429 Too Many Requests")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_can_handle_auth_errors(self):
         """Test that APIHealer can handle authentication errors."""
         from src.agents.healers.api import APIHealer
@@ -62,6 +66,7 @@ class TestAPIHealerCanHandle:
         error = Exception("Invalid API key")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_can_handle_timeout_errors(self):
         """Test that APIHealer can handle timeout errors."""
         from src.agents.healers.api import APIHealer
@@ -75,6 +80,7 @@ class TestAPIHealerCanHandle:
         error = Exception("Connection timed out")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_can_handle_provider_errors(self):
         """Test that APIHealer can handle provider-specific errors."""
         from src.agents.healers.api import APIHealer
@@ -92,6 +98,7 @@ class TestAPIHealerCanHandle:
         error = Exception("Ollama connection refused")
         assert healer.can_handle(error, "TEST") is True
 
+    @pytest.mark.fast
     def test_cannot_handle_unrelated_error(self):
         """Test that APIHealer doesn't handle unrelated errors."""
         from src.agents.healers.api import APIHealer
@@ -106,6 +113,7 @@ class TestAPIHealerCanHandle:
 class TestAPIHealerHandleRateLimit:
     """Test APIHealer._handle_rate_limit() method."""
 
+    @pytest.mark.fast
     def test_rate_limit_waits_backoff_time(self):
         """Test that rate limit handler waits for backoff time."""
         from src.agents.healers.api import APIHealer
@@ -126,6 +134,7 @@ class TestAPIHealerHandleRateLimit:
         assert result.success is True
         assert result.action == HealerAction.RETRY
 
+    @pytest.mark.fast
     def test_rate_limit_increases_backoff(self):
         """Test that rate limit increases backoff time exponentially."""
         from src.agents.healers.api import APIHealer
@@ -145,6 +154,7 @@ class TestAPIHealerHandleRateLimit:
         healer._handle_rate_limit(error, state)
         assert healer.backoff_time == 0.04  # 0.02 * 2
 
+    @pytest.mark.fast
     def test_rate_limit_increments_retry_count(self):
         """Test that rate limit increments retry count."""
         from src.agents.healers.api import APIHealer
@@ -162,6 +172,7 @@ class TestAPIHealerHandleRateLimit:
         healer._handle_rate_limit(error, state)
         assert healer.retry_count == 2
 
+    @pytest.mark.fast
     def test_rate_limit_respects_max_backoff(self):
         """Test that rate limit respects maximum backoff time."""
         from src.agents.healers.api import APIHealer
@@ -182,6 +193,7 @@ class TestAPIHealerHandleRateLimit:
 class TestAPIHealerHandleAuthError:
     """Test APIHealer._handle_auth_error() method."""
 
+    @pytest.mark.requires_api
     def test_auth_error_detects_gemini_and_tries_switch(self):
         """Test that auth error detects Gemini provider and attempts switch."""
         from src.agents.healers.api import APIHealer
@@ -202,6 +214,7 @@ class TestAPIHealerHandleAuthError:
             assert result.action == HealerAction.MODIFY_CONFIG
             assert config.llm.provider == "anthropic"
 
+    @pytest.mark.requires_api
     def test_auth_error_detects_anthropic_and_tries_switch(self):
         """Test that auth error detects Anthropic provider and attempts switch."""
         from src.agents.healers.api import APIHealer
@@ -222,6 +235,7 @@ class TestAPIHealerHandleAuthError:
             assert result.action == HealerAction.MODIFY_CONFIG
             assert config.llm.provider == "gemini"
 
+    @pytest.mark.fast
     def test_auth_error_falls_back_to_ollama(self):
         """Test that auth error falls back to Ollama when no API keys."""
         from src.agents.healers.api import APIHealer
@@ -242,6 +256,7 @@ class TestAPIHealerHandleAuthError:
             if result.success:
                 assert config.llm.provider == "ollama"
 
+    @pytest.mark.fast
     def test_auth_error_unknown_provider_fails(self):
         """Test that auth error for unknown provider returns failure with suggestion."""
         from src.agents.healers.api import APIHealer
@@ -262,6 +277,7 @@ class TestAPIHealerHandleAuthError:
 class TestAPIHealerHandleTimeout:
     """Test APIHealer._handle_timeout() method."""
 
+    @pytest.mark.fast
     def test_timeout_increases_config_timeout(self):
         """Test that timeout handler increases config timeout."""
         from src.agents.healers.api import APIHealer
@@ -282,6 +298,7 @@ class TestAPIHealerHandleTimeout:
         assert result.modified_config is True
         assert config.llm.timeout == 60  # Doubled
 
+    @pytest.mark.fast
     def test_timeout_respects_max_timeout(self):
         """Test that timeout handler respects maximum timeout."""
         from src.agents.healers.api import APIHealer
@@ -299,6 +316,7 @@ class TestAPIHealerHandleTimeout:
         # 200 * 2 = 400, but capped at 300 (5 minutes)
         assert config.llm.timeout == 300
 
+    @pytest.mark.fast
     def test_timeout_handles_missing_llm_config(self):
         """Test timeout handler when LLM config is missing."""
         from src.agents.healers.api import APIHealer
@@ -321,6 +339,7 @@ class TestAPIHealerHandleTimeout:
 class TestAPIHealerProviderSwitch:
     """Test APIHealer._try_provider_switch() method."""
 
+    @pytest.mark.requires_api
     def test_provider_switch_with_available_provider(self):
         """Test provider switch when alternate provider is available."""
         from src.agents.healers.api import APIHealer
@@ -342,6 +361,7 @@ class TestAPIHealerProviderSwitch:
                 assert result.action == HealerAction.MODIFY_CONFIG
                 assert config.llm.provider == "anthropic"
 
+    @pytest.mark.fast
     def test_provider_switch_ollama_always_available(self):
         """Test that Ollama is always considered available (no API key needed)."""
         from src.agents.healers.api import APIHealer
@@ -351,6 +371,7 @@ class TestAPIHealerProviderSwitch:
 
         assert healer._is_provider_available("ollama") is True
 
+    @pytest.mark.fast
     def test_provider_switch_no_llm_config(self):
         """Test provider switch when LLM config is missing."""
         from src.agents.healers.api import APIHealer
@@ -366,6 +387,7 @@ class TestAPIHealerProviderSwitch:
 
         assert result.success is False
 
+    @pytest.mark.fast
     def test_provider_switch_exclude_specific_provider(self):
         """Test provider switch can exclude a specific provider."""
         from src.agents.healers.api import APIHealer
@@ -389,6 +411,7 @@ class TestAPIHealerProviderSwitch:
 class TestAPIHealerIsProviderAvailable:
     """Test APIHealer._is_provider_available() method."""
 
+    @pytest.mark.requires_api
     def test_is_provider_available_gemini(self):
         """Test Gemini availability check."""
         from src.agents.healers.api import APIHealer
@@ -403,6 +426,7 @@ class TestAPIHealerIsProviderAvailable:
             os.environ.pop("GEMINI_API_KEY", None)
             assert healer._is_provider_available("gemini") is False
 
+    @pytest.mark.requires_api
     def test_is_provider_available_anthropic(self):
         """Test Anthropic availability check."""
         from src.agents.healers.api import APIHealer
@@ -417,6 +441,7 @@ class TestAPIHealerIsProviderAvailable:
             os.environ.pop("ANTHROPIC_API_KEY", None)
             assert healer._is_provider_available("anthropic") is False
 
+    @pytest.mark.fast
     def test_is_provider_available_ollama_no_key_needed(self):
         """Test that Ollama doesn't need API key."""
         from src.agents.healers.api import APIHealer
@@ -432,6 +457,7 @@ class TestAPIHealerIsProviderAvailable:
 class TestAPIHealerResetBackoff:
     """Test APIHealer.reset_backoff() method."""
 
+    @pytest.mark.fast
     def test_reset_backoff_resets_time(self):
         """Test that reset_backoff resets backoff time."""
         from src.agents.healers.api import APIHealer
@@ -444,6 +470,7 @@ class TestAPIHealerResetBackoff:
 
         assert healer.backoff_time == healer.INITIAL_BACKOFF
 
+    @pytest.mark.fast
     def test_reset_backoff_resets_retry_count(self):
         """Test that reset_backoff resets retry count."""
         from src.agents.healers.api import APIHealer
@@ -460,6 +487,7 @@ class TestAPIHealerResetBackoff:
 class TestAPIHealerFix:
     """Test APIHealer.fix() method routing."""
 
+    @pytest.mark.fast
     def test_fix_routes_rate_limit(self):
         """Test that fix() routes rate limit errors correctly."""
         from src.agents.healers.api import APIHealer
@@ -477,6 +505,7 @@ class TestAPIHealerFix:
         assert result.success is True
         assert result.action == HealerAction.RETRY
 
+    @pytest.mark.fast
     def test_fix_routes_timeout(self):
         """Test that fix() routes timeout errors correctly."""
         from src.agents.healers.api import APIHealer
@@ -493,6 +522,7 @@ class TestAPIHealerFix:
 
         assert result.success is True
 
+    @pytest.mark.fast
     def test_fix_routes_connection_error(self):
         """Test that fix() routes connection errors correctly."""
         from src.agents.healers.api import APIHealer

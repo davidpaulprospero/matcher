@@ -16,6 +16,7 @@ from src.chapter_detection.models import ChapterCandidate
 class TestRunValidation:
     """Test validation pass."""
 
+    @pytest.mark.fast
     def test_empty_chapters(self, mock_config, mock_llm_client):
         """Test empty list returned for empty input."""
         result = run_validation(
@@ -26,6 +27,7 @@ class TestRunValidation:
         )
         assert result == []
 
+    @pytest.mark.fast
     def test_validation_disabled(self, mock_llm_client):
         """Test skips validation when disabled in config."""
         config = Mock()
@@ -46,6 +48,7 @@ class TestRunValidation:
         # LLM should not be called
         mock_llm_client.generate.assert_not_called()
 
+    @pytest.mark.fast
     def test_with_validation_response(self, mock_config, mock_llm_client):
         """Test applies validation response."""
         mock_response = Mock()
@@ -88,6 +91,7 @@ class TestRunValidation:
 class TestApplyValidationResults:
     """Test applying validation results."""
 
+    @pytest.mark.fast
     def test_boundary_correction(self):
         """Test boundary correction is applied."""
         chapters = [
@@ -118,6 +122,7 @@ class TestApplyValidationResults:
         assert result[0].end_segment_idx == 8
         assert "[Corrected by validation]" in result[0].boundary_reasoning
 
+    @pytest.mark.fast
     def test_title_correction(self):
         """Test title correction is applied."""
         chapters = [
@@ -141,6 +146,7 @@ class TestApplyValidationResults:
 
         assert result[0].title == "Better Title"
 
+    @pytest.mark.fast
     def test_confidence_decrease_for_incoherent(self):
         """Test confidence decreases for incoherent content."""
         chapters = [
@@ -166,6 +172,7 @@ class TestApplyValidationResults:
 class TestApplyMergeSuggestions:
     """Test merge suggestions."""
 
+    @pytest.mark.fast
     def test_merges_chapters(self):
         """Test chapters are merged."""
         chapters = [
@@ -202,6 +209,7 @@ class TestApplyMergeSuggestions:
         assert "Part 1" in merged.title
         assert "Part 2" in merged.title
 
+    @pytest.mark.fast
     def test_no_merge_empty_suggestions(self):
         """Test no merge with empty suggestions."""
         chapters = [ChapterCandidate(chapter_id=0)]
@@ -212,6 +220,7 @@ class TestApplyMergeSuggestions:
 class TestMergeChapters:
     """Test chapter merging."""
 
+    @pytest.mark.fast
     def test_merge_two_chapters(self):
         """Test merging two chapters."""
         chapters = [
@@ -243,12 +252,14 @@ class TestMergeChapters:
         assert "topic2" in result.topics
         assert result.confidence == pytest.approx(0.75)  # Average
 
+    @pytest.mark.fast
     def test_merge_single_chapter(self):
         """Test merge of single chapter returns it unchanged."""
         chapters = [ChapterCandidate(chapter_id=0, title="Only")]
         result = _merge_chapters(chapters)
         assert result.title == "Only"
 
+    @pytest.mark.fast
     def test_merge_empty(self):
         """Test merge of empty list."""
         result = _merge_chapters([])
@@ -258,6 +269,7 @@ class TestMergeChapters:
 class TestAddMissedChapters:
     """Test adding missed chapters."""
 
+    @pytest.mark.fast
     def test_adds_non_overlapping(self):
         """Test adds chapter in gap."""
         chapters = [
@@ -290,6 +302,7 @@ class TestAddMissedChapters:
         assert new_ch.end_segment_idx == 9
         assert new_ch.detection_strategy == "validation_added"
 
+    @pytest.mark.fast
     def test_skips_overlapping(self):
         """Test skips chapter that overlaps existing."""
         chapters = [

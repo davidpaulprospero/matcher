@@ -12,6 +12,7 @@ from unittest.mock import Mock, MagicMock
 class TestAssertValidMatchResult:
     """Tests for assert_valid_match_result helper."""
 
+    @pytest.mark.fast
     def test_valid_basic_result(self):
         """Valid minimal match result passes."""
         from tests.helpers import assert_valid_match_result
@@ -26,6 +27,7 @@ class TestAssertValidMatchResult:
         # Should not raise
         assert_valid_match_result(result)
 
+    @pytest.mark.fast
     def test_missing_segment_index(self):
         """Missing segment_index raises assertion."""
         from tests.helpers import assert_valid_match_result
@@ -34,6 +36,7 @@ class TestAssertValidMatchResult:
         with pytest.raises(AssertionError, match="missing 'segment_index'"):
             assert_valid_match_result(result)
 
+    @pytest.mark.fast
     def test_missing_confidence(self):
         """Missing confidence raises assertion."""
         from tests.helpers import assert_valid_match_result
@@ -42,6 +45,7 @@ class TestAssertValidMatchResult:
         with pytest.raises(AssertionError, match="missing 'confidence'"):
             assert_valid_match_result(result)
 
+    @pytest.mark.fast
     def test_confidence_below_min(self):
         """Confidence below minimum raises assertion."""
         from tests.helpers import assert_valid_match_result
@@ -54,6 +58,7 @@ class TestAssertValidMatchResult:
         with pytest.raises(AssertionError, match="below minimum threshold"):
             assert_valid_match_result(result, min_confidence=0.5)
 
+    @pytest.mark.fast
     def test_confidence_at_min_passes(self):
         """Confidence at minimum threshold passes."""
         from tests.helpers import assert_valid_match_result
@@ -66,6 +71,7 @@ class TestAssertValidMatchResult:
         # Should not raise
         assert_valid_match_result(result, min_confidence=0.5)
 
+    @pytest.mark.fast
     def test_confidence_out_of_range(self):
         """Confidence outside [0, 1] range raises assertion."""
         from tests.helpers import assert_valid_match_result
@@ -78,6 +84,7 @@ class TestAssertValidMatchResult:
         with pytest.raises(AssertionError, match="must be in range"):
             assert_valid_match_result(result)
 
+    @pytest.mark.fast
     def test_empty_video_file(self):
         """Empty video_file raises assertion."""
         from tests.helpers import assert_valid_match_result
@@ -90,6 +97,7 @@ class TestAssertValidMatchResult:
         with pytest.raises(AssertionError, match="non-empty string"):
             assert_valid_match_result(result)
 
+    @pytest.mark.fast
     def test_video_file_not_required(self):
         """Missing video_file passes when not required."""
         from tests.helpers import assert_valid_match_result
@@ -101,6 +109,7 @@ class TestAssertValidMatchResult:
         # Should not raise
         assert_valid_match_result(result, require_video_file=False, require_timing=False)
 
+    @pytest.mark.fast
     def test_invalid_strategy(self):
         """Invalid strategy raises assertion."""
         from tests.helpers import assert_valid_match_result
@@ -118,6 +127,7 @@ class TestAssertValidMatchResult:
                 valid_strategies=["embedding", "llm"],
             )
 
+    @pytest.mark.fast
     def test_valid_strategy(self):
         """Valid strategy passes."""
         from tests.helpers import assert_valid_match_result
@@ -138,6 +148,7 @@ class TestAssertValidMatchResult:
 class TestAssertCheckpointConsistent:
     """Tests for assert_checkpoint_consistent helper."""
 
+    @pytest.mark.fast
     def test_valid_basic_checkpoint(self):
         """Valid minimal checkpoint passes."""
         from tests.helpers import assert_checkpoint_consistent
@@ -149,6 +160,7 @@ class TestAssertCheckpointConsistent:
         # Should not raise
         assert_checkpoint_consistent(checkpoint)
 
+    @pytest.mark.fast
     def test_missing_version(self):
         """Missing version raises assertion when required."""
         from tests.helpers import assert_checkpoint_consistent
@@ -157,6 +169,7 @@ class TestAssertCheckpointConsistent:
         with pytest.raises(AssertionError, match="missing 'version'"):
             assert_checkpoint_consistent(checkpoint, require_version=True)
 
+    @pytest.mark.fast
     def test_missing_last_completed_stage(self):
         """Missing last_completed_stage raises assertion."""
         from tests.helpers import assert_checkpoint_consistent
@@ -165,6 +178,7 @@ class TestAssertCheckpointConsistent:
         with pytest.raises(AssertionError, match="missing 'last_completed_stage'"):
             assert_checkpoint_consistent(checkpoint)
 
+    @pytest.mark.fast
     def test_invalid_stage_name(self):
         """Invalid stage name raises assertion."""
         from tests.helpers import assert_checkpoint_consistent
@@ -176,6 +190,7 @@ class TestAssertCheckpointConsistent:
         with pytest.raises(AssertionError, match="Invalid stage"):
             assert_checkpoint_consistent(checkpoint)
 
+    @pytest.mark.fast
     def test_expected_stage_mismatch(self):
         """Stage mismatch with expected raises assertion."""
         from tests.helpers import assert_checkpoint_consistent
@@ -187,6 +202,7 @@ class TestAssertCheckpointConsistent:
         with pytest.raises(AssertionError, match="Expected stage 'MATCH'"):
             assert_checkpoint_consistent(checkpoint, expected_stage="MATCH")
 
+    @pytest.mark.fast
     def test_require_stages_with_empty(self):
         """Empty stages dict raises assertion when required."""
         from tests.helpers import assert_checkpoint_consistent
@@ -199,6 +215,7 @@ class TestAssertCheckpointConsistent:
         with pytest.raises(AssertionError, match="no stage data"):
             assert_checkpoint_consistent(checkpoint, require_stages=True)
 
+    @pytest.mark.fast
     def test_require_stages_with_populated(self):
         """Populated stages dict passes."""
         from tests.helpers import assert_checkpoint_consistent
@@ -213,6 +230,7 @@ class TestAssertCheckpointConsistent:
         # Should not raise
         assert_checkpoint_consistent(checkpoint, require_stages=True)
 
+    @pytest.mark.fast
     def test_min_matches_requirement(self):
         """Insufficient matches raises assertion."""
         from tests.helpers import assert_checkpoint_consistent
@@ -231,6 +249,7 @@ class TestAssertCheckpointConsistent:
 class TestAssertConfigValid:
     """Tests for assert_config_valid helper."""
 
+    @pytest.mark.fast
     def test_valid_mock_config(self):
         """Valid mock config passes."""
         from tests.helpers import assert_config_valid
@@ -248,6 +267,7 @@ class TestAssertConfigValid:
         errors = assert_config_valid(config)
         assert not errors
 
+    @pytest.mark.fast
     def test_invalid_confidence_range(self):
         """Invalid confidence range returns error."""
         from tests.helpers import assert_config_valid
@@ -262,6 +282,7 @@ class TestAssertConfigValid:
         errors = assert_config_valid(config, check_constraints=False)
         assert any("min_confidence" in e for e in errors)
 
+    @pytest.mark.fast
     def test_invalid_provider(self):
         """Invalid provider returns error."""
         from tests.helpers import assert_config_valid
@@ -277,6 +298,7 @@ class TestAssertConfigValid:
         errors = assert_config_valid(config)
         assert any("primary_provider" in e for e in errors)
 
+    @pytest.mark.fast
     def test_constraint_violation(self):
         """Constraint violation returns error."""
         from tests.helpers import assert_config_valid
@@ -292,6 +314,7 @@ class TestAssertConfigValid:
         errors = assert_config_valid(config, check_constraints=True)
         assert any("should be <=" in e for e in errors)
 
+    @pytest.mark.fast
     def test_allowed_errors_filtering(self):
         """Allowed errors are filtered out."""
         from tests.helpers import assert_config_valid
@@ -310,6 +333,7 @@ class TestAssertConfigValid:
         )
         assert not errors  # All filtered out
 
+    @pytest.mark.fast
     def test_none_config_raises(self):
         """None config raises assertion."""
         from tests.helpers import assert_config_valid
@@ -317,6 +341,7 @@ class TestAssertConfigValid:
         with pytest.raises(AssertionError, match="Config is None"):
             assert_config_valid(None)
 
+    @pytest.mark.fast
     def test_config_with_validate_method(self):
         """Config with validate() method uses it."""
         from tests.helpers import assert_config_valid
@@ -333,6 +358,7 @@ class TestAssertConfigValid:
 class TestAssertValidOtioTimeline:
     """Tests for assert_valid_otio_timeline helper."""
 
+    @pytest.mark.fast
     def test_rejects_non_timeline(self):
         """Non-Timeline object raises assertion."""
         from tests.helpers import assert_valid_otio_timeline
@@ -340,6 +366,7 @@ class TestAssertValidOtioTimeline:
         with pytest.raises(AssertionError, match="Expected opentimelineio"):
             assert_valid_otio_timeline({"not": "a timeline"})
 
+    @pytest.mark.fast
     def test_rejects_string(self):
         """String raises assertion."""
         from tests.helpers import assert_valid_otio_timeline
@@ -351,6 +378,7 @@ class TestAssertValidOtioTimeline:
         not pytest.importorskip("opentimelineio", reason="opentimelineio not installed"),
         reason="opentimelineio not installed"
     )
+    @pytest.mark.fast
     def test_valid_timeline_passes(self):
         """Valid OTIO timeline passes validation."""
         from tests.helpers import assert_valid_otio_timeline
@@ -381,6 +409,7 @@ class TestAssertValidOtioTimeline:
 class TestUtilityAssertions:
     """Tests for utility assertion helpers."""
 
+    @pytest.mark.fast
     def test_assert_file_exists_missing(self, tmp_path):
         """Missing file raises assertion."""
         from tests.helpers import assert_file_exists
@@ -389,6 +418,7 @@ class TestUtilityAssertions:
         with pytest.raises(AssertionError, match="not found"):
             assert_file_exists(fake_path, description="Test file")
 
+    @pytest.mark.fast
     def test_assert_file_exists_is_dir(self, tmp_path):
         """Directory instead of file raises assertion."""
         from tests.helpers import assert_file_exists
@@ -396,6 +426,7 @@ class TestUtilityAssertions:
         with pytest.raises(AssertionError, match="is not a file"):
             assert_file_exists(tmp_path, description="Test file")
 
+    @pytest.mark.fast
     def test_assert_file_exists_valid(self, tmp_path):
         """Existing file passes."""
         from tests.helpers import assert_file_exists
@@ -406,6 +437,7 @@ class TestUtilityAssertions:
         # Should not raise
         assert_file_exists(test_file)
 
+    @pytest.mark.fast
     def test_assert_dir_exists_missing(self, tmp_path):
         """Missing directory raises assertion."""
         from tests.helpers import assert_dir_exists
@@ -414,6 +446,7 @@ class TestUtilityAssertions:
         with pytest.raises(AssertionError, match="not found"):
             assert_dir_exists(fake_path)
 
+    @pytest.mark.fast
     def test_assert_dir_exists_is_file(self, tmp_path):
         """File instead of directory raises assertion."""
         from tests.helpers import assert_dir_exists
@@ -424,6 +457,7 @@ class TestUtilityAssertions:
         with pytest.raises(AssertionError, match="is not a directory"):
             assert_dir_exists(test_file)
 
+    @pytest.mark.fast
     def test_assert_json_structure_missing_key(self):
         """Missing required key raises assertion."""
         from tests.helpers import assert_json_structure
@@ -432,6 +466,7 @@ class TestUtilityAssertions:
         with pytest.raises(AssertionError, match="Missing required key: c"):
             assert_json_structure(data, required_keys=["a", "b", "c"])
 
+    @pytest.mark.fast
     def test_assert_json_structure_wrong_type(self):
         """Wrong type raises assertion."""
         from tests.helpers import assert_json_structure
@@ -440,6 +475,7 @@ class TestUtilityAssertions:
         with pytest.raises(AssertionError, match="should be int"):
             assert_json_structure(data, type_checks={"count": int})
 
+    @pytest.mark.fast
     def test_assert_json_structure_valid(self):
         """Valid structure passes."""
         from tests.helpers import assert_json_structure
@@ -461,6 +497,7 @@ class TestUtilityAssertions:
 class TestAssertHealerAttemptLogged:
     """Tests for assert_healer_attempt_logged helper."""
 
+    @pytest.mark.fast
     def test_healer_with_dict_context(self):
         """Healer attempt in dict context passes."""
         from tests.helpers import assert_healer_attempt_logged
@@ -476,6 +513,7 @@ class TestAssertHealerAttemptLogged:
         assert_healer_attempt_logged(context, "api-healer")
         assert_healer_attempt_logged(context, "checkpoint-healer")
 
+    @pytest.mark.fast
     def test_healer_with_healers_dict(self):
         """Healer in healers dict context passes."""
         from tests.helpers import assert_healer_attempt_logged
@@ -491,6 +529,7 @@ class TestAssertHealerAttemptLogged:
 
         assert_healer_attempt_logged(context, "download-healer")
 
+    @pytest.mark.fast
     def test_healer_not_found_raises(self):
         """Missing healer raises assertion."""
         from tests.helpers import assert_healer_attempt_logged
@@ -504,6 +543,7 @@ class TestAssertHealerAttemptLogged:
         with pytest.raises(AssertionError, match="did not log any attempts"):
             assert_healer_attempt_logged(context, "checkpoint-healer")
 
+    @pytest.mark.fast
     def test_specific_attempt_number(self):
         """Specific attempt number validation."""
         from tests.helpers import assert_healer_attempt_logged
@@ -525,6 +565,7 @@ class TestAssertHealerAttemptLogged:
         with pytest.raises(AssertionError, match="only logged 2 attempts"):
             assert_healer_attempt_logged(context, "api-healer", 3)
 
+    @pytest.mark.fast
     def test_expected_message_found(self):
         """Message substring matching passes."""
         from tests.helpers import assert_healer_attempt_logged
@@ -539,6 +580,7 @@ class TestAssertHealerAttemptLogged:
             context, "disk-healer", expected_message="Cleaning up"
         )
 
+    @pytest.mark.fast
     def test_expected_message_not_found(self):
         """Missing message raises assertion."""
         from tests.helpers import assert_healer_attempt_logged
@@ -554,6 +596,7 @@ class TestAssertHealerAttemptLogged:
                 context, "disk-healer", expected_message="Cleaning up"
             )
 
+    @pytest.mark.fast
     def test_healer_name_normalization(self):
         """Healer names are normalized (underscores to dashes)."""
         from tests.helpers import assert_healer_attempt_logged
@@ -568,6 +611,7 @@ class TestAssertHealerAttemptLogged:
         assert_healer_attempt_logged(context, "api-healer")
         assert_healer_attempt_logged(context, "api_healer")
 
+    @pytest.mark.fast
     def test_mock_with_healer_attempts_attr(self):
         """Context with _healer_attempts attribute works."""
         from tests.helpers import assert_healer_attempt_logged
@@ -584,6 +628,7 @@ class TestAssertHealerAttemptLogged:
 class TestAssertHealingStrategyApplied:
     """Tests for assert_healing_strategy_applied helper."""
 
+    @pytest.mark.fast
     def test_direct_strategy_object(self):
         """Direct strategy object validation passes."""
         from tests.helpers import assert_healing_strategy_applied
@@ -596,6 +641,7 @@ class TestAssertHealingStrategyApplied:
         strategy = MockStrategy()
         assert_healing_strategy_applied(strategy, "conservative")
 
+    @pytest.mark.fast
     def test_strategy_from_orchestrator(self):
         """Strategy extracted from orchestrator passes."""
         from tests.helpers import assert_healing_strategy_applied
@@ -610,6 +656,7 @@ class TestAssertHealingStrategyApplied:
         orchestrator = MockOrchestrator()
         assert_healing_strategy_applied(orchestrator, "aggressive")
 
+    @pytest.mark.fast
     def test_strategy_from_dict(self):
         """Strategy extracted from dict passes."""
         from tests.helpers import assert_healing_strategy_applied
@@ -624,6 +671,7 @@ class TestAssertHealingStrategyApplied:
 
         assert_healing_strategy_applied(context, "minimal")
 
+    @pytest.mark.fast
     def test_invalid_strategy_name(self):
         """Invalid strategy name raises assertion."""
         from tests.helpers import assert_healing_strategy_applied
@@ -634,6 +682,7 @@ class TestAssertHealingStrategyApplied:
         with pytest.raises(AssertionError, match="Invalid strategy"):
             assert_healing_strategy_applied(MockStrategy(), "invalid_strategy")
 
+    @pytest.mark.fast
     def test_strategy_mismatch(self):
         """Wrong strategy raises assertion."""
         from tests.helpers import assert_healing_strategy_applied
@@ -645,6 +694,7 @@ class TestAssertHealingStrategyApplied:
         with pytest.raises(AssertionError, match="Expected strategy 'aggressive'"):
             assert_healing_strategy_applied(MockStrategy(), "aggressive")
 
+    @pytest.mark.fast
     def test_check_max_attempts(self):
         """Max attempts parameter check."""
         from tests.helpers import assert_healing_strategy_applied
@@ -665,6 +715,7 @@ class TestAssertHealingStrategyApplied:
                 MockStrategy(), "aggressive", check_max_attempts=3
             )
 
+    @pytest.mark.fast
     def test_check_heal_delay(self):
         """Heal delay parameter check."""
         from tests.helpers import assert_healing_strategy_applied
@@ -689,6 +740,7 @@ class TestAssertHealingStrategyApplied:
 class TestAssertRecoveryMetricsValid:
     """Tests for assert_recovery_metrics_valid helper."""
 
+    @pytest.mark.fast
     def test_valid_metrics_dict(self):
         """Valid metrics dict passes."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -704,6 +756,7 @@ class TestAssertRecoveryMetricsValid:
         # Should not raise
         assert_recovery_metrics_valid(metrics)
 
+    @pytest.mark.fast
     def test_expected_attempts(self):
         """Expected attempts check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -715,6 +768,7 @@ class TestAssertRecoveryMetricsValid:
         with pytest.raises(AssertionError, match="Expected 10 heal attempts"):
             assert_recovery_metrics_valid(metrics, expected_attempts=10)
 
+    @pytest.mark.fast
     def test_expected_success_true(self):
         """Expected success=True check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -726,6 +780,7 @@ class TestAssertRecoveryMetricsValid:
         with pytest.raises(AssertionError, match="no successful heals"):
             assert_recovery_metrics_valid(metrics_no_success, expected_success=True)
 
+    @pytest.mark.fast
     def test_expected_success_false(self):
         """Expected success=False check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -737,6 +792,7 @@ class TestAssertRecoveryMetricsValid:
         with pytest.raises(AssertionError, match="no failed heals"):
             assert_recovery_metrics_valid(metrics_all_success, expected_success=False)
 
+    @pytest.mark.fast
     def test_min_successful_heals(self):
         """Minimum successful heals check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -748,6 +804,7 @@ class TestAssertRecoveryMetricsValid:
         with pytest.raises(AssertionError, match="Expected at least 5 successful"):
             assert_recovery_metrics_valid(metrics, min_successful_heals=5)
 
+    @pytest.mark.fast
     def test_max_failed_heals(self):
         """Maximum failed heals check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -759,6 +816,7 @@ class TestAssertRecoveryMetricsValid:
         with pytest.raises(AssertionError, match="Expected at most 1 failed"):
             assert_recovery_metrics_valid(metrics, max_failed_heals=1)
 
+    @pytest.mark.fast
     def test_expected_healers_used(self):
         """Expected healers used check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -779,6 +837,7 @@ class TestAssertRecoveryMetricsValid:
                 metrics, expected_healers_used=["checkpoint-healer"]
             )
 
+    @pytest.mark.fast
     def test_expected_stages_healed(self):
         """Expected stages healed check."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -799,6 +858,7 @@ class TestAssertRecoveryMetricsValid:
                 metrics, expected_stages_healed=["OUTPUT"]
             )
 
+    @pytest.mark.fast
     def test_consistency_check(self):
         """Metrics consistency validation."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -808,6 +868,7 @@ class TestAssertRecoveryMetricsValid:
         with pytest.raises(AssertionError, match="exceeds total_heals"):
             assert_recovery_metrics_valid(metrics)
 
+    @pytest.mark.fast
     def test_negative_values_rejected(self):
         """Negative metric values are rejected."""
         from tests.helpers import assert_recovery_metrics_valid
@@ -819,6 +880,7 @@ class TestAssertRecoveryMetricsValid:
 class TestAssertHealerChainExecuted:
     """Tests for assert_healer_chain_executed helper."""
 
+    @pytest.mark.fast
     def test_chain_with_all_healers(self):
         """All expected healers executed passes."""
         from tests.helpers import assert_healer_chain_executed
@@ -836,6 +898,7 @@ class TestAssertHealerChainExecuted:
             ["checkpoint-healer", "api-healer", "download-healer"],
         )
 
+    @pytest.mark.fast
     def test_chain_missing_healer(self):
         """Missing required healer raises assertion."""
         from tests.helpers import assert_healer_chain_executed
@@ -852,6 +915,7 @@ class TestAssertHealerChainExecuted:
                 ["checkpoint-healer", "api-healer"],
             )
 
+    @pytest.mark.fast
     def test_chain_partial_match(self):
         """Partial chain match with all_required=False."""
         from tests.helpers import assert_healer_chain_executed
@@ -869,6 +933,7 @@ class TestAssertHealerChainExecuted:
             all_required=False,
         )
 
+    @pytest.mark.fast
     def test_chain_in_order(self):
         """Chain order validation."""
         from tests.helpers import assert_healer_chain_executed
@@ -888,6 +953,7 @@ class TestAssertHealerChainExecuted:
             in_order=True,
         )
 
+    @pytest.mark.fast
     def test_chain_wrong_order(self):
         """Wrong chain order raises assertion."""
         from tests.helpers import assert_healer_chain_executed
@@ -907,6 +973,7 @@ class TestAssertHealerChainExecuted:
                 in_order=True,
             )
 
+    @pytest.mark.fast
     def test_empty_healers_list_rejected(self):
         """Empty expected_healers raises assertion."""
         from tests.helpers import assert_healer_chain_executed
@@ -916,6 +983,7 @@ class TestAssertHealerChainExecuted:
         with pytest.raises(AssertionError, match="cannot be empty"):
             assert_healer_chain_executed(context, [])
 
+    @pytest.mark.fast
     def test_no_healers_logged(self):
         """No healers logged raises assertion."""
         from tests.helpers import assert_healer_chain_executed
@@ -929,6 +997,7 @@ class TestAssertHealerChainExecuted:
 class TestHealerHelperConstants:
     """Tests for healer helper constants."""
 
+    @pytest.mark.fast
     def test_valid_healers_constant(self):
         """VALID_HEALERS constant has expected values."""
         from tests.helpers import VALID_HEALERS
@@ -941,6 +1010,7 @@ class TestHealerHelperConstants:
         assert "otio-healer" in VALID_HEALERS
         assert "llm-healer" in VALID_HEALERS
 
+    @pytest.mark.fast
     def test_valid_strategies_constant(self):
         """VALID_STRATEGIES constant has expected values."""
         from tests.helpers import VALID_STRATEGIES

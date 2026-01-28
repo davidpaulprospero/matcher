@@ -11,6 +11,7 @@ from src.agents.base import HealerResult, HealerAction
 class TestPathHealerInit:
     """Test PathHealer initialization."""
 
+    @pytest.mark.fast
     def test_init_stores_config_and_project(self):
         """Test that PathHealer stores config and project_dir."""
         config = MagicMock()
@@ -19,6 +20,7 @@ class TestPathHealerInit:
         assert healer.config is config
         assert healer.project_dir == "/path/to/project"
 
+    @pytest.mark.fast
     def test_init_has_correct_name(self):
         """Test that PathHealer has correct name."""
         config = MagicMock()
@@ -26,6 +28,7 @@ class TestPathHealerInit:
 
         assert healer.name == "path-healer"
 
+    @pytest.mark.fast
     def test_init_has_max_path_length_constant(self):
         """Test that PathHealer has MAX_PATH_LENGTH constant."""
         config = MagicMock()
@@ -34,6 +37,7 @@ class TestPathHealerInit:
         assert hasattr(healer, 'MAX_PATH_LENGTH')
         assert healer.MAX_PATH_LENGTH == 260  # Windows MAX_PATH
 
+    @pytest.mark.fast
     def test_init_has_short_roots_list(self):
         """Test that PathHealer has SHORT_ROOTS list."""
         config = MagicMock()
@@ -47,6 +51,7 @@ class TestPathHealerInit:
 class TestPathHealerCanHandle:
     """Test PathHealer.can_handle() method."""
 
+    @pytest.mark.fast
     def test_can_handle_path_too_long(self):
         """Test that PathHealer can handle path too long errors."""
         config = MagicMock()
@@ -58,6 +63,7 @@ class TestPathHealerCanHandle:
         error = Exception("Filename too long: very_long_filename.mp4")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_errno_63(self):
         """Test that PathHealer can handle ENAMETOOLONG (errno 63)."""
         config = MagicMock()
@@ -66,6 +72,7 @@ class TestPathHealerCanHandle:
         error = OSError("[Errno 63] File name too long")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_errno_36(self):
         """Test that PathHealer can handle macOS ENAMETOOLONG (errno 36)."""
         config = MagicMock()
@@ -74,6 +81,7 @@ class TestPathHealerCanHandle:
         error = OSError("[Errno 36] File name too long")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_errno_206(self):
         """Test that PathHealer can handle Windows path too long (errno 206)."""
         config = MagicMock()
@@ -82,6 +90,7 @@ class TestPathHealerCanHandle:
         error = OSError("[Errno 206] The filename or extension is too long")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_unicode_errors(self):
         """Test that PathHealer can handle unicode encoding errors."""
         config = MagicMock()
@@ -94,6 +103,7 @@ class TestPathHealerCanHandle:
         error = Exception("Unicode decode error in filename")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_can_handle_invalid_path(self):
         """Test that PathHealer can handle invalid path errors."""
         config = MagicMock()
@@ -102,6 +112,7 @@ class TestPathHealerCanHandle:
         error = Exception("Invalid path: contains illegal characters")
         assert healer.can_handle(error, "OUTPUT") is True
 
+    @pytest.mark.fast
     def test_cannot_handle_unrelated_error(self):
         """Test that PathHealer doesn't handle unrelated errors."""
         config = MagicMock()
@@ -117,6 +128,7 @@ class TestPathHealerCanHandle:
 class TestPathHealerHandlePathTooLong:
     """Test PathHealer._handle_path_too_long() method."""
 
+    @pytest.mark.fast
     def test_path_too_long_tries_short_roots(self, tmp_path):
         """Test that path too long handler tries short roots."""
         config = MagicMock()
@@ -134,6 +146,7 @@ class TestPathHealerHandlePathTooLong:
         assert result.action == HealerAction.MODIFY_CONFIG
         assert "E:/v" in result.message
 
+    @pytest.mark.fast
     def test_path_too_long_falls_back_to_truncate(self, tmp_path):
         """Test that path too long falls back to filename truncation."""
         config = MagicMock()
@@ -153,6 +166,7 @@ class TestPathHealerHandlePathTooLong:
 class TestPathHealerHandleUnicodeError:
     """Test PathHealer._handle_unicode_error() method."""
 
+    @pytest.mark.fast
     def test_unicode_error_sanitizes_downloads(self, tmp_path):
         """Test that unicode handler sanitizes download paths."""
         config = MagicMock()
@@ -170,6 +184,7 @@ class TestPathHealerHandleUnicodeError:
         assert result.success is True
         assert "\u2019" not in download1.file
 
+    @pytest.mark.fast
     def test_unicode_error_fails_when_no_downloads(self, tmp_path):
         """Test that unicode handler fails when no downloads in state."""
         config = MagicMock()
@@ -186,6 +201,7 @@ class TestPathHealerHandleUnicodeError:
 class TestPathHealerSanitizeUnicode:
     """Test PathHealer._sanitize_unicode() method."""
 
+    @pytest.mark.fast
     def test_sanitize_unicode_replaces_smart_quotes(self, tmp_path):
         """Test that _sanitize_unicode replaces smart quotes."""
         config = MagicMock()
@@ -196,6 +212,7 @@ class TestPathHealerSanitizeUnicode:
         assert "\u2019" not in result
         assert "'" in result
 
+    @pytest.mark.fast
     def test_sanitize_unicode_replaces_smart_double_quotes(self, tmp_path):
         """Test that _sanitize_unicode replaces smart double quotes."""
         config = MagicMock()
@@ -206,6 +223,7 @@ class TestPathHealerSanitizeUnicode:
         assert "\u201c" not in result
         assert "\u201d" not in result
 
+    @pytest.mark.fast
     def test_sanitize_unicode_replaces_dashes(self, tmp_path):
         """Test that _sanitize_unicode replaces en-dash and em-dash."""
         config = MagicMock()
@@ -217,6 +235,7 @@ class TestPathHealerSanitizeUnicode:
         assert "\u2014" not in result
         assert "-" in result
 
+    @pytest.mark.fast
     def test_sanitize_unicode_replaces_ellipsis(self, tmp_path):
         """Test that _sanitize_unicode replaces ellipsis character."""
         config = MagicMock()
@@ -227,6 +246,7 @@ class TestPathHealerSanitizeUnicode:
         assert "\u2026" not in result
         assert "..." in result
 
+    @pytest.mark.fast
     def test_sanitize_unicode_removes_windows_invalid_chars(self, tmp_path):
         """Test that _sanitize_unicode removes Windows-invalid characters."""
         config = MagicMock()
@@ -238,6 +258,7 @@ class TestPathHealerSanitizeUnicode:
         assert ">" not in result
         assert "?" not in result
 
+    @pytest.mark.fast
     def test_sanitize_unicode_handles_empty_string(self, tmp_path):
         """Test that _sanitize_unicode handles empty string."""
         config = MagicMock()
@@ -247,6 +268,7 @@ class TestPathHealerSanitizeUnicode:
 
         assert result == ""
 
+    @pytest.mark.fast
     def test_sanitize_unicode_handles_none(self, tmp_path):
         """Test that _sanitize_unicode handles None."""
         config = MagicMock()
@@ -260,6 +282,7 @@ class TestPathHealerSanitizeUnicode:
 class TestPathHealerCheckPathLength:
     """Test PathHealer.check_path_length() method."""
 
+    @pytest.mark.fast
     def test_check_path_length_short_path(self):
         """Test check_path_length with short path."""
         config = MagicMock()
@@ -267,6 +290,7 @@ class TestPathHealerCheckPathLength:
 
         assert healer.check_path_length("/short/path/file.mp4") is True
 
+    @pytest.mark.fast
     def test_check_path_length_long_path(self):
         """Test check_path_length with path exceeding MAX_PATH."""
         config = MagicMock()
@@ -275,6 +299,7 @@ class TestPathHealerCheckPathLength:
         long_path = "a" * 300
         assert healer.check_path_length(long_path) is False
 
+    @pytest.mark.fast
     def test_check_path_length_exactly_max(self):
         """Test check_path_length with path exactly at MAX_PATH."""
         config = MagicMock()
@@ -287,6 +312,7 @@ class TestPathHealerCheckPathLength:
 class TestPathHealerEstimateSafeFilenameLength:
     """Test PathHealer.estimate_safe_filename_length() method."""
 
+    @pytest.mark.fast
     def test_estimate_safe_filename_length_short_dir(self, tmp_path):
         """Test estimate with short directory path."""
         config = MagicMock()
@@ -297,6 +323,7 @@ class TestPathHealerEstimateSafeFilenameLength:
         assert safe_len >= 20
         assert safe_len <= 200
 
+    @pytest.mark.fast
     def test_estimate_safe_filename_length_long_dir(self, tmp_path):
         """Test estimate with long directory path."""
         config = MagicMock()
@@ -307,6 +334,7 @@ class TestPathHealerEstimateSafeFilenameLength:
 
         assert safe_len >= 20  # Minimum guaranteed
 
+    @pytest.mark.fast
     def test_estimate_safe_filename_length_respects_max(self, tmp_path):
         """Test that estimate doesn't exceed 200 chars."""
         config = MagicMock()
@@ -321,6 +349,7 @@ class TestPathHealerEstimateSafeFilenameLength:
 class TestPathHealerFindAvailableShortRoot:
     """Test PathHealer._find_available_short_root() method."""
 
+    @pytest.mark.fast
     def test_find_available_short_root_returns_writable(self, tmp_path):
         """Test that _find_available_short_root returns a writable path."""
         config = MagicMock()
@@ -336,6 +365,7 @@ class TestPathHealerFindAvailableShortRoot:
 
         assert result == str(short_root)
 
+    @pytest.mark.fast
     def test_find_available_short_root_none_available(self, tmp_path):
         """Test that _find_available_short_root returns None when none available."""
         config = MagicMock()
@@ -351,6 +381,7 @@ class TestPathHealerFindAvailableShortRoot:
 class TestPathHealerTruncateFilenames:
     """Test PathHealer._truncate_filenames() method."""
 
+    @pytest.mark.fast
     def test_truncate_filenames_sets_max_length(self, tmp_path):
         """Test that _truncate_filenames sets max_filename_length in config."""
         config = MagicMock()
@@ -365,6 +396,7 @@ class TestPathHealerTruncateFilenames:
         assert result.action == HealerAction.MODIFY_CONFIG
         assert config.download.max_filename_length == 50
 
+    @pytest.mark.fast
     def test_truncate_filenames_handles_dict_config(self, tmp_path):
         """Test that _truncate_filenames handles dict-style config."""
         config = MagicMock()
@@ -386,6 +418,7 @@ class TestPathHealerCanHandleAcceptanceCriteria:
     - False for API or network errors
     """
 
+    @pytest.mark.fast
     def test_can_handle_file_not_found_error(self):
         """PathHealer can handle FileNotFoundError (path-related)."""
         config = MagicMock()
@@ -401,6 +434,7 @@ class TestPathHealerCanHandleAcceptanceCriteria:
         # This is expected - FileNotFoundError is for OTIOHealer, not PathHealer.
         assert isinstance(result, bool)
 
+    @pytest.mark.fast
     def test_can_handle_path_with_invalid_characters(self):
         """PathHealer returns True for invalid character errors."""
         config = MagicMock()
@@ -409,6 +443,7 @@ class TestPathHealerCanHandleAcceptanceCriteria:
         error = Exception("Invalid path: contains illegal characters <>:|")
         assert healer.can_handle(error, "DOWNLOAD") is True
 
+    @pytest.mark.fast
     def test_can_handle_returns_false_for_api_errors(self):
         """PathHealer returns False for API-related errors."""
         config = MagicMock()
@@ -418,6 +453,7 @@ class TestPathHealerCanHandleAcceptanceCriteria:
         assert healer.can_handle(Exception("HTTP 403 Forbidden"), "DOWNLOAD") is False
         assert healer.can_handle(Exception("Authentication failed"), "DOWNLOAD") is False
 
+    @pytest.mark.fast
     def test_can_handle_returns_false_for_network_errors(self):
         """PathHealer returns False for network-related errors."""
         config = MagicMock()
@@ -433,6 +469,7 @@ class TestPathHealerFixWindowsPathLength:
     Acceptance criterion 2: returns .fixed() with corrected path.
     """
 
+    @pytest.mark.fast
     def test_fix_shortens_path_via_short_root(self, tmp_path):
         """fix() switches to short root and returns fixed result."""
         config = MagicMock()
@@ -449,6 +486,7 @@ class TestPathHealerFixWindowsPathLength:
         assert result.action == HealerAction.MODIFY_CONFIG
         assert "E:/v" in result.message
 
+    @pytest.mark.fast
     def test_fix_truncates_filenames_as_fallback(self, tmp_path):
         """fix() truncates filenames when no short root available and returns fixed."""
         config = MagicMock()
@@ -471,6 +509,7 @@ class TestPathHealerFixMissingDrive:
     Acceptance criterion 3: Z:\\nonexistent returns descriptive failure.
     """
 
+    @pytest.mark.fast
     def test_fix_fails_for_missing_drive_no_short_roots(self, tmp_path):
         """fix() returns failed when no short roots and no config to truncate."""
         config = MagicMock()
@@ -486,6 +525,7 @@ class TestPathHealerFixMissingDrive:
         assert result.success is False
         assert "Could not configure" in result.message
 
+    @pytest.mark.fast
     def test_fix_unicode_fails_with_no_downloads(self, tmp_path):
         """fix() returns .failed() when no downloads to sanitize."""
         config = MagicMock()
@@ -503,6 +543,7 @@ class TestPathHealerFixMissingDrive:
 class TestPathHealerFix:
     """Test PathHealer.fix() method routing."""
 
+    @pytest.mark.fast
     def test_fix_routes_path_too_long(self, tmp_path):
         """Test that fix() routes path too long errors correctly."""
         config = MagicMock()
@@ -516,6 +557,7 @@ class TestPathHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_unicode_error(self, tmp_path):
         """Test that fix() routes unicode errors correctly."""
         config = MagicMock()
@@ -528,6 +570,7 @@ class TestPathHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_invalid_chars(self, tmp_path):
         """Test that fix() routes invalid character errors correctly."""
         config = MagicMock()
@@ -540,6 +583,7 @@ class TestPathHealerFix:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_errno_63(self, tmp_path):
         """Test that fix() routes ENAMETOOLONG correctly."""
         config = MagicMock()
@@ -560,6 +604,7 @@ class TestHealerResilientRunnerIntegration:
     verify correct healer selected and heal() called.
     """
 
+    @pytest.mark.fast
     def test_runner_selects_path_healer_for_path_error(self, tmp_path):
         """ResilientRunner picks PathHealer when path error occurs."""
         from src.agents.runner import ResilientRunner
@@ -588,6 +633,7 @@ class TestHealerResilientRunnerIntegration:
         # PathHealer should have been called (it can handle path errors)
         assert path_healer.fix.called or otio_healer.fix.called
 
+    @pytest.mark.fast
     def test_runner_selects_otio_healer_for_timeline_error(self, tmp_path):
         """ResilientRunner picks OTIOHealer when OTIO error occurs."""
         from src.agents.runner import ResilientRunner
@@ -620,6 +666,7 @@ class TestHealerResilientRunnerIntegration:
         # The runner should have found a healer that can handle it
         assert len(runner.heal_history) >= 1
 
+    @pytest.mark.fast
     def test_runner_iterates_healers_only_second_can_handle(self, tmp_path):
         """ResilientRunner iterates through healer list; only 2nd can_handle returns True."""
         from src.agents.runner import ResilientRunner
@@ -657,6 +704,7 @@ class TestHealerResilientRunnerIntegration:
         # healer3 should NOT be checked since healer2 already handled it
         healer3.can_handle.assert_not_called()
 
+    @pytest.mark.fast
     def test_runner_respects_max_attempts(self, tmp_path):
         """ResilientRunner stops after max_attempts_per_stage healing attempts."""
         from src.agents.runner import ResilientRunner

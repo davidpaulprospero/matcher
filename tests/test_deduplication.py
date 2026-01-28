@@ -86,6 +86,7 @@ def sample_videos(temp_dir):
 class TestVideoDeduplicatorInit:
     """Test VideoDeduplicator initialization"""
 
+    @pytest.mark.fast
     def test_init_default_threshold(self):
         """Test initialization with default threshold"""
         dedup = VideoDeduplicator()
@@ -93,12 +94,14 @@ class TestVideoDeduplicatorInit:
         assert dedup.threshold == VideoDeduplicator.DEFAULT_THRESHOLD
         assert dedup.frame_timeout == VideoDeduplicator.DEFAULT_FRAME_TIMEOUT
 
+    @pytest.mark.fast
     def test_init_custom_threshold(self):
         """Test initialization with custom threshold"""
         dedup = VideoDeduplicator(threshold=5)
 
         assert dedup.threshold == 5
 
+    @pytest.mark.fast
     def test_init_with_config(self):
         """Test initialization with config object"""
         config = Mock()
@@ -113,6 +116,7 @@ class TestVideoDeduplicatorInit:
         assert dedup.frame_timeout == 60
         assert dedup.auto_delete is False
 
+    @pytest.mark.fast
     def test_init_checks_imagehash_availability(self):
         """Test initialization checks for imagehash"""
         with patch.dict('sys.modules', {'imagehash': None, 'PIL': None}):
@@ -130,6 +134,7 @@ class TestFrameExtraction:
     """Test video frame extraction"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_first_frame_success(self, mock_run, deduplicator, temp_dir):
         """Test successful frame extraction"""
         video_path = temp_dir / "test.mp4"
@@ -144,6 +149,7 @@ class TestFrameExtraction:
         assert result == str(frame_path)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_first_frame_gpu_fallback(self, mock_run, deduplicator, temp_dir):
         """Test fallback to CPU when GPU extraction fails"""
         video_path = temp_dir / "test.mp4"
@@ -166,6 +172,7 @@ class TestFrameExtraction:
         assert mock_run.call_count == 2
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_first_frame_failure(self, mock_run, deduplicator, temp_dir):
         """Test frame extraction failure"""
         mock_run.side_effect = Exception("FFmpeg error")
@@ -186,6 +193,7 @@ class TestHashComputation:
     """Test perceptual hash computation"""
 
     @patch('src.deduplication.VideoDeduplicator._extract_first_frame')
+    @pytest.mark.fast
     def test_compute_hash_success(self, mock_extract, deduplicator):
         """Test successful hash computation"""
         mock_extract.return_value = "/tmp/frame.jpg"
@@ -198,6 +206,7 @@ class TestHashComputation:
         assert hash_val == "abc123"
 
     @patch('src.deduplication.VideoDeduplicator._extract_first_frame')
+    @pytest.mark.fast
     def test_compute_hash_uses_cache(self, mock_extract, deduplicator):
         """Test hash computation uses cache"""
         mock_extract.return_value = "/tmp/frame.jpg"
@@ -212,6 +221,7 @@ class TestHashComputation:
         assert mock_extract.call_count == 1
 
     @patch('src.deduplication.VideoDeduplicator._extract_first_frame')
+    @pytest.mark.fast
     def test_compute_hash_extraction_failure(self, mock_extract, deduplicator):
         """Test hash computation when frame extraction fails"""
         mock_extract.return_value = None
@@ -221,6 +231,7 @@ class TestHashComputation:
         assert hash_val is None
 
     @patch('src.deduplication.VideoDeduplicator._extract_first_frame')
+    @pytest.mark.fast
     def test_compute_hash_cleans_up_frame(self, mock_extract, deduplicator, temp_dir):
         """Test hash computation cleans up temporary frame"""
         frame_path = temp_dir / "frame.jpg"
@@ -243,6 +254,7 @@ class TestHashComputation:
 class TestHashDistance:
     """Test hash distance calculation"""
 
+    @pytest.mark.fast
     def test_hash_distance_identical(self, deduplicator):
         """Test distance between identical hashes"""
         deduplicator.imagehash.hex_to_hash = lambda h: Mock(__sub__=lambda s, o: 0)
@@ -251,6 +263,7 @@ class TestHashDistance:
 
         assert distance == 0
 
+    @pytest.mark.fast
     def test_hash_distance_different(self, deduplicator):
         """Test distance between different hashes"""
         def mock_hex_to_hash(h):
@@ -262,6 +275,7 @@ class TestHashDistance:
 
         assert distance == 5
 
+    @pytest.mark.fast
     def test_hash_distance_when_unavailable(self):
         """Test hash distance when imagehash unavailable"""
         dedup = VideoDeduplicator()
@@ -280,6 +294,7 @@ class TestDuplicateFinding:
     """Test finding duplicate videos"""
 
     @patch('src.deduplication.VideoDeduplicator._compute_hash')
+    @pytest.mark.fast
     def test_find_duplicates_empty_directory(self, mock_compute, deduplicator, temp_dir):
         """Test finding duplicates in empty directory"""
         groups = deduplicator.find_duplicates(str(temp_dir))
@@ -288,6 +303,7 @@ class TestDuplicateFinding:
 
     @patch('src.deduplication.VideoDeduplicator._compute_hash')
     @patch('src.deduplication.VideoDeduplicator._hash_distance')
+    @pytest.mark.fast
     def test_find_duplicates_with_duplicates(self, mock_distance, mock_compute, deduplicator, sample_videos):
         """Test finding duplicate videos"""
         # Mock hashes - all three videos hash successfully
@@ -311,6 +327,7 @@ class TestDuplicateFinding:
         assert len(groups[0].duplicates) == 2  # Both video1 and video2
 
     @patch('src.deduplication.VideoDeduplicator._compute_hash')
+    @pytest.mark.fast
     def test_find_duplicates_no_duplicates(self, mock_compute, deduplicator, sample_videos):
         """Test finding when no duplicates exist"""
         # All different hashes
@@ -322,6 +339,7 @@ class TestDuplicateFinding:
 
         assert len(groups) == 0
 
+    @pytest.mark.fast
     def test_find_duplicates_when_unavailable(self, temp_dir):
         """Test finding duplicates when imagehash unavailable"""
         dedup = VideoDeduplicator()
@@ -340,6 +358,7 @@ class TestDeduplication:
     """Test full deduplication process"""
 
     @patch('src.deduplication.VideoDeduplicator.find_duplicates')
+    @pytest.mark.fast
     def test_deduplicate_with_no_duplicates(self, mock_find, deduplicator, sample_videos):
         """Test deduplication when no duplicates found"""
         mock_find.return_value = []
@@ -351,6 +370,7 @@ class TestDeduplication:
         assert report.space_saved_mb == 0
 
     @patch('src.deduplication.VideoDeduplicator.find_duplicates')
+    @pytest.mark.fast
     def test_deduplicate_with_duplicates_auto_delete(self, mock_find, deduplicator, sample_videos):
         """Test deduplication with auto-delete enabled"""
         # Create duplicate group
@@ -371,6 +391,7 @@ class TestDeduplication:
         assert not Path(sample_videos[1]).exists()
 
     @patch('src.deduplication.VideoDeduplicator.find_duplicates')
+    @pytest.mark.fast
     def test_deduplicate_no_auto_delete(self, mock_find, deduplicator, sample_videos):
         """Test deduplication with auto-delete disabled"""
         group = DuplicateGroup(
@@ -390,6 +411,7 @@ class TestDeduplication:
         assert Path(sample_videos[1]).exists()
 
     @patch('src.deduplication.VideoDeduplicator.find_duplicates')
+    @pytest.mark.fast
     def test_deduplicate_saves_report(self, mock_find, deduplicator, sample_videos, temp_dir):
         """Test deduplication saves JSON report"""
         mock_find.return_value = []
@@ -413,6 +435,7 @@ class TestDeduplication:
 class TestDeduplicationReport:
     """Test DeduplicationReport dataclass"""
 
+    @pytest.mark.fast
     def test_report_creation(self):
         """Test creating DeduplicationReport"""
         report = DeduplicationReport(
@@ -429,6 +452,7 @@ class TestDeduplicationReport:
         assert report.unique_videos == 8
         assert report.duplicates_found == 2
 
+    @pytest.mark.fast
     def test_report_to_dict(self):
         """Test report serialization"""
         report = DeduplicationReport(
@@ -456,6 +480,7 @@ class TestStatsPreview:
     """Test stats preview functionality"""
 
     @patch('src.deduplication.VideoDeduplicator.find_duplicates')
+    @pytest.mark.fast
     def test_get_stats_preview(self, mock_find, deduplicator, sample_videos):
         """Test getting stats preview"""
         group = DuplicateGroup(
@@ -482,6 +507,7 @@ class TestConvenienceFunctions:
     """Test convenience functions"""
 
     @patch('src.deduplication.VideoDeduplicator.deduplicate')
+    @pytest.mark.fast
     def test_deduplicate_videos_function(self, mock_deduplicate, temp_dir):
         """Test deduplicate_videos convenience function"""
         mock_report = DeduplicationReport(
@@ -500,6 +526,7 @@ class TestConvenienceFunctions:
 
         assert result.duplicates_found == 1
 
+    @pytest.mark.fast
     def test_deduplicate_videos_when_unavailable(self, temp_dir):
         """Test convenience function when imagehash unavailable"""
         with patch('src.deduplication.VideoDeduplicator.is_available', return_value=False):
@@ -518,6 +545,7 @@ class TestEdgeCases:
 
     @patch('src.deduplication.VideoDeduplicator._hash_distance')
     @patch('src.deduplication.VideoDeduplicator._compute_hash')
+    @pytest.mark.fast
     def test_find_duplicates_with_hash_failures(self, mock_compute, mock_distance, deduplicator, sample_videos):
         """Test handling when some videos fail to hash"""
         # First hash succeeds, second fails, third succeeds
@@ -532,6 +560,7 @@ class TestEdgeCases:
         assert isinstance(groups, list)
 
     @patch('src.deduplication.VideoDeduplicator.find_duplicates')
+    @pytest.mark.fast
     def test_deduplicate_handles_delete_errors(self, mock_find, deduplicator, temp_dir):
         """Test deduplication handles file deletion errors"""
         # Create group with non-existent duplicate
@@ -549,6 +578,7 @@ class TestEdgeCases:
 
         assert report.duplicates_deleted == 0
 
+    @pytest.mark.fast
     def test_video_extensions_constant(self):
         """Test VIDEO_EXTENSIONS constant is comprehensive"""
         assert '.mp4' in VIDEO_EXTENSIONS

@@ -56,42 +56,49 @@ def _seg(start, end, text):
 class TestEmptyScenes:
     """AC-1: Empty scenes → needs_vision=True, reason mentions 'no scenes'."""
 
+    @pytest.mark.fast
     def test_empty_scenes_needs_vision_true(self):
         """Empty scenes list → needs_vision=True."""
         analyzer = TranscriptAnalyzer(_make_config())
         decision = analyzer.analyze_video_transcript("/v.mp4", [], [])
         assert decision.needs_vision is True
 
+    @pytest.mark.fast
     def test_empty_scenes_reason_mentions_no_scenes(self):
         """Reason should reference 'no scenes' (case-insensitive)."""
         analyzer = TranscriptAnalyzer(_make_config())
         decision = analyzer.analyze_video_transcript("/v.mp4", [], [])
         assert "no scenes" in decision.reason.lower()
 
+    @pytest.mark.fast
     def test_empty_scenes_returns_video_vision_decision(self):
         """Return type is VideoVisionDecision."""
         analyzer = TranscriptAnalyzer(_make_config())
         decision = analyzer.analyze_video_transcript("/v.mp4", [], [])
         assert isinstance(decision, VideoVisionDecision)
 
+    @pytest.mark.fast
     def test_empty_scenes_total_scenes_zero(self):
         """total_scenes should be 0."""
         analyzer = TranscriptAnalyzer(_make_config())
         decision = analyzer.analyze_video_transcript("/v.mp4", [], [])
         assert decision.total_scenes == 0
 
+    @pytest.mark.fast
     def test_empty_scenes_sparse_list_empty(self):
         """sparse_scenes should be empty (no scenes to mark sparse)."""
         analyzer = TranscriptAnalyzer(_make_config())
         decision = analyzer.analyze_video_transcript("/v.mp4", [], [])
         assert decision.sparse_scenes == []
 
+    @pytest.mark.fast
     def test_empty_scenes_coverage_zero(self):
         """transcript_coverage should be 0.0."""
         analyzer = TranscriptAnalyzer(_make_config())
         decision = analyzer.analyze_video_transcript("/v.mp4", [], [])
         assert decision.transcript_coverage == 0.0
 
+    @pytest.mark.fast
     def test_empty_scenes_with_transcript_segments(self):
         """Empty scenes but non-empty transcript still yields needs_vision=True."""
         analyzer = TranscriptAnalyzer(_make_config())
@@ -109,6 +116,7 @@ class TestEmptyScenes:
 class TestSparseSceneIdentification:
     """AC-2: Scenes with word_count < min_words_per_scene flagged in sparse_scenes."""
 
+    @pytest.mark.fast
     def test_single_sparse_scene_flagged(self):
         """Scene with 2 words (< min_words=5) is in sparse_scenes."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -117,6 +125,7 @@ class TestSparseSceneIdentification:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert 0 in decision.sparse_scenes
 
+    @pytest.mark.fast
     def test_all_sparse_when_no_transcript(self):
         """All scenes sparse when transcript is empty."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -124,6 +133,7 @@ class TestSparseSceneIdentification:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, [])
         assert decision.sparse_scenes == [0, 1, 2]
 
+    @pytest.mark.fast
     def test_non_sparse_scene_excluded(self):
         """Scene with enough words NOT in sparse_scenes."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -132,6 +142,7 @@ class TestSparseSceneIdentification:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert 0 not in decision.sparse_scenes
 
+    @pytest.mark.fast
     def test_mixed_sparse_and_sufficient(self):
         """Mix of sparse and sufficient scenes, only sparse flagged."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -146,6 +157,7 @@ class TestSparseSceneIdentification:
         assert 0 not in decision.sparse_scenes
         assert 2 not in decision.sparse_scenes
 
+    @pytest.mark.fast
     def test_sparse_with_srt_segment_objects(self):
         """Sparse detection works with SRTSegment-like objects, not just dicts."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -157,6 +169,7 @@ class TestSparseSceneIdentification:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, [seg])
         assert 0 in decision.sparse_scenes
 
+    @pytest.mark.fast
     def test_exact_threshold_not_sparse(self):
         """Exactly min_words_per_scene words → NOT sparse."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -165,6 +178,7 @@ class TestSparseSceneIdentification:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert 0 not in decision.sparse_scenes
 
+    @pytest.mark.fast
     def test_below_threshold_sparse(self):
         """min_words - 1 words → sparse."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -181,6 +195,7 @@ class TestSparseSceneIdentification:
 class TestSufficientTranscript:
     """AC-3: All scenes sufficient → needs_vision=False, sparse_scenes empty."""
 
+    @pytest.mark.fast
     def test_all_scenes_sufficient_needs_vision_false(self):
         """All scenes with ≥ min_words → needs_vision=False."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5, coverage_threshold=0.3))
@@ -192,6 +207,7 @@ class TestSufficientTranscript:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert decision.needs_vision is False
 
+    @pytest.mark.fast
     def test_all_scenes_sufficient_sparse_empty(self):
         """All scenes sufficient → sparse_scenes is empty list."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5, coverage_threshold=0.3))
@@ -203,6 +219,7 @@ class TestSufficientTranscript:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert decision.sparse_scenes == []
 
+    @pytest.mark.fast
     def test_coverage_threshold_met(self):
         """Coverage passes threshold → checked correctly."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5, coverage_threshold=0.5))
@@ -215,6 +232,7 @@ class TestSufficientTranscript:
         assert decision.transcript_coverage >= 0.5
         assert decision.needs_vision is False
 
+    @pytest.mark.fast
     def test_single_scene_sufficient(self):
         """Single scene with enough words → no vision needed."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=3, coverage_threshold=0.3))
@@ -224,6 +242,7 @@ class TestSufficientTranscript:
         assert decision.needs_vision is False
         assert decision.sparse_scenes == []
 
+    @pytest.mark.fast
     def test_reason_mentions_good_coverage(self):
         """Reason text reflects good coverage."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=3, coverage_threshold=0.3))
@@ -240,6 +259,7 @@ class TestSufficientTranscript:
 class TestSceneAnalysisSerialization:
     """AC-4: SceneAnalysis stores and serializes correct fields."""
 
+    @pytest.mark.fast
     def test_required_fields_stored(self):
         """All required fields are accessible."""
         sa = SceneAnalysis(
@@ -259,6 +279,7 @@ class TestSceneAnalysisSerialization:
         assert sa.needs_vision is True
         assert sa.reason == "Low text"
 
+    @pytest.mark.fast
     def test_optional_vision_description_default_none(self):
         """vision_description defaults to None."""
         sa = SceneAnalysis(
@@ -268,6 +289,7 @@ class TestSceneAnalysisSerialization:
         )
         assert sa.vision_description is None
 
+    @pytest.mark.fast
     def test_optional_combined_description_default_none(self):
         """combined_description defaults to None."""
         sa = SceneAnalysis(
@@ -277,6 +299,7 @@ class TestSceneAnalysisSerialization:
         )
         assert sa.combined_description is None
 
+    @pytest.mark.fast
     def test_vision_description_stored(self):
         """Explicit vision_description is stored."""
         sa = SceneAnalysis(
@@ -287,6 +310,7 @@ class TestSceneAnalysisSerialization:
         )
         assert sa.vision_description == "A mountain view"
 
+    @pytest.mark.fast
     def test_asdict_round_trip(self):
         """asdict() produces a dict containing all fields."""
         sa = SceneAnalysis(
@@ -311,6 +335,7 @@ class TestSceneAnalysisSerialization:
         assert d["vision_description"] == "trees and sky"
         assert d["combined_description"] == "some text [Visual: trees and sky]"
 
+    @pytest.mark.fast
     def test_asdict_none_optionals(self):
         """asdict() preserves None for optional fields."""
         sa = SceneAnalysis(
@@ -322,6 +347,7 @@ class TestSceneAnalysisSerialization:
         assert d["vision_description"] is None
         assert d["combined_description"] is None
 
+    @pytest.mark.fast
     def test_asdict_is_json_serializable(self):
         """asdict() output can be serialized to JSON without error."""
         import json
@@ -346,6 +372,7 @@ class TestSceneAnalysisSerialization:
 class TestTranscriptCoverage:
     """AC-5: Coverage is 0.0 for no-transcript, 1.0 for full, proportional for partial."""
 
+    @pytest.mark.fast
     def test_coverage_zero_no_transcript(self):
         """No transcript segments → coverage 0.0."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -353,6 +380,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, [])
         assert decision.transcript_coverage == 0.0
 
+    @pytest.mark.fast
     def test_coverage_one_all_scenes_covered(self):
         """All scenes covered → coverage 1.0."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=3))
@@ -364,6 +392,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert decision.transcript_coverage == 1.0
 
+    @pytest.mark.fast
     def test_coverage_proportional_half(self):
         """Half scenes covered → coverage 0.5."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -375,6 +404,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert decision.transcript_coverage == 0.5
 
+    @pytest.mark.fast
     def test_coverage_proportional_two_thirds(self):
         """2 of 3 scenes covered → coverage ≈ 0.667."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=3))
@@ -387,6 +417,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert abs(decision.transcript_coverage - 2 / 3) < 0.01
 
+    @pytest.mark.fast
     def test_coverage_proportional_one_third(self):
         """1 of 3 scenes covered → coverage ≈ 0.333."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=3))
@@ -397,6 +428,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert abs(decision.transcript_coverage - 1 / 3) < 0.01
 
+    @pytest.mark.fast
     def test_coverage_type_is_float(self):
         """transcript_coverage is always a float."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=3))
@@ -405,6 +437,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert isinstance(decision.transcript_coverage, float)
 
+    @pytest.mark.fast
     def test_coverage_zero_with_empty_text_segments(self):
         """Segments with empty text → coverage 0.0."""
         analyzer = TranscriptAnalyzer(_make_config(min_words=5))
@@ -416,6 +449,7 @@ class TestTranscriptCoverage:
         decision = analyzer.analyze_video_transcript("/v.mp4", scenes, transcript)
         assert decision.transcript_coverage == 0.0
 
+    @pytest.mark.fast
     def test_video_vision_decision_fields(self):
         """VideoVisionDecision stores all fields correctly."""
         decision = VideoVisionDecision(
@@ -433,6 +467,7 @@ class TestTranscriptCoverage:
         assert decision.sparse_scenes == []
         assert decision.total_scenes == 0
 
+    @pytest.mark.fast
     def test_video_vision_decision_asdict(self):
         """VideoVisionDecision serializes via asdict()."""
         decision = VideoVisionDecision(

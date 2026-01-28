@@ -140,16 +140,19 @@ def mock_remix_result():
 class TestRemixStageInit:
     """Test stage initialization"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name"""
         stage = RemixStage()
         assert stage.name == "REMIX"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = RemixStage()
         assert "keyword relevance" in stage.description.lower()
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered in stage registry"""
         from src.stages import get_stage
@@ -164,6 +167,7 @@ class TestRemixStageInit:
 class TestInputValidation:
     """Test input validation"""
 
+    @pytest.mark.fast
     def test_validate_no_hard_requirements(self, mock_config):
         """Test validation has no hard requirements (optional stage)"""
         stage = RemixStage()
@@ -180,6 +184,7 @@ class TestInputValidation:
 class TestSkipConditions:
     """Test various skip conditions"""
 
+    @pytest.mark.fast
     def test_skip_when_disabled(self, mock_config, mock_checkpoint):
         """Test skipping when remix disabled"""
         stage = RemixStage()
@@ -192,6 +197,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'disabled'
 
+    @pytest.mark.fast
     def test_skip_when_no_remix_config(self, mock_config, mock_checkpoint):
         """Test skipping when remix config not present"""
         stage = RemixStage()
@@ -204,6 +210,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'disabled'
 
+    @pytest.mark.fast
     def test_skip_when_trigger_disabled(self, mock_config, mock_checkpoint):
         """Test skipping when trigger_after_download disabled"""
         stage = RemixStage()
@@ -216,6 +223,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'trigger_disabled'
 
+    @pytest.mark.fast
     def test_skip_when_no_keywords(self, mock_config, mock_checkpoint):
         """Test skipping when no keywords available"""
         stage = RemixStage()
@@ -228,6 +236,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'no_keywords'
 
+    @pytest.mark.fast
     def test_skip_when_no_files(self, mock_config, mock_checkpoint, mock_keywords):
         """Test skipping when no files to remix"""
         stage = RemixStage()
@@ -250,6 +259,7 @@ class TestSkipConditions:
 class TestModeDetection:
     """Test audio vs video mode detection"""
 
+    @pytest.mark.fast
     def test_detect_audio_mode(self, mock_downloaded_audio):
         """Test detection of audio-first mode"""
         stage = RemixStage()
@@ -261,6 +271,7 @@ class TestModeDetection:
 
         assert mode == 'audio'
 
+    @pytest.mark.fast
     def test_detect_video_mode(self, mock_downloaded_videos):
         """Test detection of video mode"""
         stage = RemixStage()
@@ -272,6 +283,7 @@ class TestModeDetection:
 
         assert mode == 'video'
 
+    @pytest.mark.fast
     def test_detect_none_mode(self):
         """Test detection when no files present"""
         stage = RemixStage()
@@ -283,6 +295,7 @@ class TestModeDetection:
 
         assert mode == 'none'
 
+    @pytest.mark.fast
     def test_audio_mode_priority(self, mock_downloaded_audio, mock_downloaded_videos):
         """Test audio mode takes priority when both present"""
         stage = RemixStage()
@@ -304,6 +317,7 @@ class TestVideoModeRemix:
     """Test video file remixing"""
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_remix_videos_success(self, mock_remix, mock_config, mock_checkpoint,
                                   mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test successful video remix"""
@@ -328,6 +342,7 @@ class TestVideoModeRemix:
         assert result.data['mode'] == 'video'
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_remix_videos_config_passed(self, mock_remix, mock_config, mock_checkpoint,
                                        mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test RemixConfig is properly constructed and passed"""
@@ -357,6 +372,7 @@ class TestAudioModeRemix:
     """Test audio file remixing"""
 
     @patch('src.keyword_remix.remix_audio_files')
+    @pytest.mark.fast
     def test_remix_audio_success(self, mock_remix, mock_config, mock_checkpoint,
                                 mock_keywords, mock_downloaded_audio, mock_remix_result):
         """Test successful audio remix"""
@@ -380,6 +396,7 @@ class TestAudioModeRemix:
         assert result.data['mode'] == 'audio'
 
     @patch('src.keyword_remix.remix_audio_files')
+    @pytest.mark.fast
     def test_remix_audio_keywords_passed(self, mock_remix, mock_config, mock_checkpoint,
                                         mock_keywords, mock_downloaded_audio, mock_remix_result):
         """Test keywords are passed to remix function"""
@@ -407,6 +424,7 @@ class TestInteractiveCuration:
     """Test interactive curation mode"""
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_interactive_mode_passed(self, mock_remix, mock_config, mock_checkpoint,
                                     mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test interactive mode flag is passed"""
@@ -434,6 +452,7 @@ class TestStageExecution:
     """Test full stage execution"""
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_run_success(self, mock_remix, mock_config, mock_checkpoint,
                         mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test successful full execution"""
@@ -453,6 +472,7 @@ class TestStageExecution:
         assert 'avg_score' in result.data
         assert 'mode' in result.data
 
+    @pytest.mark.fast
     def test_run_import_error(self, mock_config, mock_checkpoint, mock_keywords,
                               mock_downloaded_videos):
         """Test handling import errors"""
@@ -470,6 +490,7 @@ class TestStageExecution:
         assert "import" in result.error.lower()
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_remix, mock_config, mock_checkpoint,
                                    mock_keywords, mock_downloaded_videos):
         """Test exception handling in main run"""
@@ -494,6 +515,7 @@ class TestStageExecution:
 class TestCheckpointOperations:
     """Test checkpoint save/restore"""
 
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_checkpoint):
         """Test can_skip returns True when checkpoint exists"""
         stage = RemixStage()
@@ -505,6 +527,7 @@ class TestCheckpointOperations:
         assert result is True
         mock_checkpoint.should_skip_stage.assert_called_with("REMIX")
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = RemixStage()
@@ -515,6 +538,7 @@ class TestCheckpointOperations:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_success(self, mock_checkpoint):
         """Test successful restore from checkpoint"""
         stage = RemixStage()
@@ -534,6 +558,7 @@ class TestCheckpointOperations:
         # Restore just logs info, doesn't modify state
         assert result is True
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore fails when no checkpoint data"""
         stage = RemixStage()
@@ -553,6 +578,7 @@ class TestEdgeCases:
     """Test edge cases and error conditions"""
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_all_videos_excluded(self, mock_remix, mock_config, mock_checkpoint,
                                 mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test handling when all videos are excluded"""
@@ -572,6 +598,7 @@ class TestEdgeCases:
         assert result.data['included_count'] == 0
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_all_videos_included(self, mock_remix, mock_config, mock_checkpoint,
                                 mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test handling when all videos are included"""
@@ -592,6 +619,7 @@ class TestEdgeCases:
         assert result.data['excluded_count'] == 0
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_default_config_values(self, mock_remix, mock_config, mock_checkpoint,
                                    mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test default values when config attributes missing"""
@@ -614,6 +642,7 @@ class TestEdgeCases:
         assert result.success is True
 
     @patch('src.keyword_remix.remix_downloaded_videos')
+    @pytest.mark.fast
     def test_checkpoint_data_structure(self, mock_remix, mock_config, mock_checkpoint,
                                        mock_keywords, mock_downloaded_videos, mock_remix_result):
         """Test checkpoint data contains all required fields"""

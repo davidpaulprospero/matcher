@@ -63,6 +63,7 @@ def mock_imagedl_client():
 class TestGoogleBingImageClientInit:
     """Test client initialization and configuration"""
 
+    @pytest.mark.fast
     def test_init_creates_output_directory(self, temp_output_dir):
         """Test that initialization creates output directory"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -73,6 +74,7 @@ class TestGoogleBingImageClientInit:
             assert client.output_dir == temp_output_dir
             assert temp_output_dir.exists()
 
+    @pytest.mark.fast
     def test_init_sets_default_configuration(self, temp_output_dir):
         """Test default configuration values"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -87,6 +89,7 @@ class TestGoogleBingImageClientInit:
             assert client.max_results_to_check == 500
             assert client.search_until_found is True
 
+    @pytest.mark.fast
     def test_init_accepts_custom_configuration(self, temp_output_dir):
         """Test custom configuration parameters"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -109,6 +112,7 @@ class TestGoogleBingImageClientInit:
             assert client.max_results_to_check == 1000
             assert client.search_until_found is False
 
+    @pytest.mark.fast
     def test_behavior_without_client(self, temp_output_dir, mock_imagedl_client):
         """Test behavior when client is None (imagedl not available)"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -133,6 +137,7 @@ class TestGoogleBingImageClientInit:
             images = client.search_and_download("test query", max_images=5)
             assert images == []
 
+    @pytest.mark.fast
     def test_search_and_download_no_client(self, temp_output_dir, mock_imagedl_client):
         """Test search_and_download gracefully handles missing client"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -157,6 +162,7 @@ class TestGoogleBingImageClientInit:
             assert isinstance(images, list)
             assert images == []
 
+    @pytest.mark.fast
     def test_init_client_success(self, temp_output_dir, mock_imagedl_client):
         """Test successful imagedl client initialization"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -184,6 +190,7 @@ class TestGoogleBingImageClientInit:
 class TestSearchWithTimeout:
     """Test threaded search with timeout handling"""
 
+    @pytest.mark.fast
     def test_search_with_timeout_success(self, temp_output_dir, mock_imagedl_client):
         """Test successful search with timeout"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -201,6 +208,7 @@ class TestSearchWithTimeout:
                 search_limits_overrides=10
             )
 
+    @pytest.mark.fast
     def test_search_with_timeout_no_client(self, temp_output_dir):
         """Test search when client is None"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -213,6 +221,7 @@ class TestSearchWithTimeout:
 
             assert results == []
 
+    @pytest.mark.fast
     def test_search_with_timeout_error(self, temp_output_dir, mock_imagedl_client):
         """Test search error handling"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -227,6 +236,7 @@ class TestSearchWithTimeout:
 
             assert results == []
 
+    @pytest.mark.slow
     def test_search_with_timeout_hangs(self, temp_output_dir, mock_imagedl_client):
         """Test timeout when search hangs"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -256,6 +266,7 @@ class TestSearchWithTimeout:
 class TestReinitializeClient:
     """Test client reinitialization"""
 
+    @pytest.mark.fast
     def test_reinitialize_client(self, temp_output_dir):
         """Test client can be reinitialized"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -277,6 +288,7 @@ class TestReinitializeClient:
 class TestDownloadSingleImage:
     """Test single image download with requests"""
 
+    @pytest.mark.requires_network
     def test_download_single_image_success_jpg(self, temp_output_dir):
         """Test successful JPG image download"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -305,6 +317,7 @@ class TestDownloadSingleImage:
             assert result.suffix == '.jpg'
             assert 'img_' in result.name
 
+    @pytest.mark.requires_network
     def test_download_single_image_png(self, temp_output_dir):
         """Test PNG image download"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -329,6 +342,7 @@ class TestDownloadSingleImage:
 
             assert result.suffix == '.png'
 
+    @pytest.mark.requires_network
     def test_download_single_image_webp(self, temp_output_dir):
         """Test WebP image download"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -353,6 +367,7 @@ class TestDownloadSingleImage:
 
             assert result.suffix == '.webp'
 
+    @pytest.mark.requires_network
     def test_download_single_image_timeout(self, temp_output_dir):
         """Test download timeout handling"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -374,6 +389,7 @@ class TestDownloadSingleImage:
 
             assert result is None
 
+    @pytest.mark.requires_network
     def test_download_single_image_invalid_content_type(self, temp_output_dir):
         """Test rejection of non-image content"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -397,6 +413,7 @@ class TestDownloadSingleImage:
 
             assert result is None
 
+    @pytest.mark.requires_network
     def test_download_single_image_random_naming(self, temp_output_dir):
         """Test that filenames are randomized to avoid sequence detection"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -436,6 +453,7 @@ class TestDownloadSingleImage:
 class TestCleanupEmptyFolders:
     """Test cleanup of empty or image-less folders"""
 
+    @pytest.mark.fast
     def test_cleanup_empty_folder(self, temp_output_dir):
         """Test cleanup of completely empty folder"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -450,6 +468,7 @@ class TestCleanupEmptyFolders:
 
             assert not empty_folder.exists()
 
+    @pytest.mark.fast
     def test_cleanup_folder_with_small_images(self, temp_output_dir):
         """Test cleanup of folder with only small images"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -469,6 +488,7 @@ class TestCleanupEmptyFolders:
             # Folder should be deleted
             assert not folder.exists()
 
+    @pytest.mark.fast
     def test_cleanup_preserves_folder_with_large_images(self, temp_output_dir):
         """Test that folders with large images are preserved"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -489,6 +509,7 @@ class TestCleanupEmptyFolders:
             assert folder.exists()
             assert large_image.exists()
 
+    @pytest.mark.fast
     def test_cleanup_nonexistent_folder(self, temp_output_dir):
         """Test cleanup of non-existent folder (no error)"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -509,6 +530,7 @@ class TestCleanupEmptyFolders:
 class TestSearchAndDownload:
     """Test main search and download workflow"""
 
+    @pytest.mark.fast
     def test_search_and_download_no_client(self, temp_output_dir):
         """Test when imagedl client is not available"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -521,6 +543,7 @@ class TestSearchAndDownload:
 
             assert results == []
 
+    @pytest.mark.requires_network
     def test_search_and_download_success(self, temp_output_dir, mock_imagedl_client):
         """Test successful search and download"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -561,6 +584,7 @@ class TestSearchAndDownload:
                 assert meta['entity_name'] == "TestEntity"
                 assert meta['entity_type'] == "PERSON"
 
+    @pytest.mark.fast
     def test_search_and_download_no_results(self, temp_output_dir, mock_imagedl_client):
         """Test when search returns no results"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -602,6 +626,7 @@ class TestSearchAndDownload:
             # Should stop early due to timeout
             assert len(results) < 10
 
+    @pytest.mark.requires_network
     def test_search_and_download_filters_small_images(self, temp_output_dir, mock_imagedl_client):
         """Test that small images are filtered out"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -635,6 +660,7 @@ class TestSearchAndDownload:
             # Should only get 2 large images (1st and 3rd)
             assert len(results) == 2
 
+    @pytest.mark.requires_network
     def test_search_and_download_skips_bracketed_paths(self, temp_output_dir, mock_imagedl_client):
         """Test that paths with brackets are skipped (image sequence notation)"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -666,6 +692,7 @@ class TestSearchAndDownload:
             # Should be empty (bracketed path filtered out)
             assert results == []
 
+    @pytest.mark.requires_network
     def test_search_and_download_query_variations(self, temp_output_dir, mock_imagedl_client):
         """Test search_until_found tries query variations"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -712,6 +739,7 @@ class TestSearchAndDownload:
 class TestGoogleBingEdgeCases:
     """Test edge cases and error conditions"""
 
+    @pytest.mark.requires_network
     def test_consecutive_search_failures_trigger_reinit(self, temp_output_dir, mock_imagedl_client):
         """Test that consecutive failures trigger client reinitialization"""
         from src.media_sources.images.google_bing import GoogleBingImageClient
@@ -754,6 +782,7 @@ class TestGoogleBingEdgeCases:
             # After 2 consecutive failures, should reinitialize
             assert reinit_count >= 1
 
+    @pytest.mark.fast
     def test_skips_duplicate_urls(self, temp_output_dir, mock_imagedl_client):
         """Test that duplicate URLs are skipped"""
         from src.media_sources.images.google_bing import GoogleBingImageClient

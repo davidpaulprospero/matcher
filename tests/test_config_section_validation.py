@@ -74,6 +74,7 @@ class TestHealingConfigPostInit:
         assert config.logging.log_dir == '/custom/logs'
         assert config.logging.json_log is False
 
+    @pytest.mark.fast
     def test_watcher_dict_converted(self):
         """Test watcher dict is converted to WatcherConfig."""
         config = HealingConfig(
@@ -91,6 +92,7 @@ class TestHealingConfigPostInit:
         assert config.watcher.model == 'claude-3-haiku'
         assert config.watcher.timeout == 60.0
 
+    @pytest.mark.fast
     def test_llm_healer_dict_converted(self):
         """Test llm_healer dict is converted to LLMHealerConfig."""
         config = HealingConfig(
@@ -110,6 +112,7 @@ class TestHealingConfigPostInit:
         assert config.llm_healer.max_tokens == 8192
         assert config.llm_healer.timeout == 120.0
 
+    @pytest.mark.fast
     def test_all_nested_dicts_converted(self):
         """Test all nested configs converted from dicts at once."""
         config = HealingConfig(
@@ -127,6 +130,7 @@ class TestHealingConfigPostInit:
         assert config.watcher.escalate_threshold == 0.5
         assert config.llm_healer.max_retries == 5
 
+    @pytest.mark.fast
     def test_dataclass_objects_unchanged(self):
         """Test that dataclass instances are not modified."""
         logging_cfg = HealingLoggingConfig(enabled=False)
@@ -143,6 +147,7 @@ class TestHealingConfigPostInit:
         assert config.watcher is watcher_cfg
         assert config.llm_healer is healer_cfg
 
+    @pytest.mark.fast
     def test_partial_dict_conversion(self):
         """Test conversion with mix of dict and dataclass instances."""
         logging_cfg = HealingLoggingConfig(json_log=False)
@@ -172,23 +177,27 @@ class TestMatchingConfigStrategyValidation:
             config = MatchingConfig(primary_provider=provider)
             assert config.primary_provider == provider
 
+    @pytest.mark.fast
     def test_valid_secondary_provider(self):
         """Test valid secondary_provider values accepted."""
         for provider in ['gemini', 'anthropic', 'ollama']:
             config = MatchingConfig(secondary_provider=provider)
             assert config.secondary_provider == provider
 
+    @pytest.mark.fast
     def test_valid_local_provider(self):
         """Test valid local_provider values accepted."""
         config = MatchingConfig(local_provider='ollama')
         assert config.local_provider == 'ollama'
 
+    @pytest.mark.fast
     def test_location_matching_hard_filter_level_valid(self):
         """Test valid hard_filter_level values in LocationMatchingConfig."""
         for level in ['city', 'state', 'country', 'continent']:
             config = LocationMatchingConfig(hard_filter_level=level)
             assert config.hard_filter_level == level
 
+    @pytest.mark.fast
     def test_invalid_hard_filter_level_detected(self, tmp_path):
         """Test invalid hard_filter_level is detected during validation."""
         config_file = tmp_path / "config.yaml"
@@ -203,12 +212,14 @@ matching:
 
         assert any("hard_filter_level" in e for e in errors)
 
+    @pytest.mark.fast
     def test_chapter_detection_strategy_valid(self):
         """Test valid default_strategy values in ChapterDetectionConfig."""
         for strategy in ['topic', 'location']:
             config = ChapterDetectionConfig(default_strategy=strategy)
             assert config.default_strategy == strategy
 
+    @pytest.mark.fast
     def test_matching_config_strategy_field(self):
         """Test MatchingConfig healing strategy-related fields."""
         # Note: MatchingConfig doesn't have a 'strategy' field, but HealingConfig does
@@ -231,6 +242,7 @@ class TestMatchingConfigLocationMatchingPostInit:
         assert isinstance(config.location_matching, LocationMatchingConfig)
         assert config.location_matching.enabled is True
 
+    @pytest.mark.fast
     def test_location_matching_dict_converted(self):
         """Test location_matching dict is converted to dataclass."""
         config = MatchingConfig(
@@ -245,6 +257,7 @@ class TestMatchingConfigLocationMatchingPostInit:
         assert config.location_matching.hard_filter_level == 'country'
         assert config.location_matching.geographic_penalty == 0.3
 
+    @pytest.mark.fast
     def test_chapter_detection_none_creates_default(self):
         """Test chapter_detection=None creates default ChapterDetectionConfig."""
         config = MatchingConfig(chapter_detection=None)
@@ -252,6 +265,7 @@ class TestMatchingConfigLocationMatchingPostInit:
         assert isinstance(config.chapter_detection, ChapterDetectionConfig)
         assert config.chapter_detection.enabled is True
 
+    @pytest.mark.fast
     def test_chapter_detection_dict_converted(self):
         """Test chapter_detection dict is converted to dataclass."""
         config = MatchingConfig(
@@ -281,12 +295,14 @@ class TestMediaConfigProviderValidation:
             config = VisionConfig(provider=provider)
             assert config.provider == provider
 
+    @pytest.mark.fast
     def test_scene_detection_preset_valid(self):
         """Test valid scene detection preset values."""
         for preset in ['fast', 'balanced', 'accurate']:
             config = SceneDetectionConfig(preset=preset)
             assert config.preset == preset
 
+    @pytest.mark.fast
     def test_invalid_embedding_provider_detected(self, tmp_path):
         """Test invalid embedding provider is detected during validation."""
         config_file = tmp_path / "config.yaml"
@@ -299,6 +315,7 @@ embedding:
 
         assert any("embedding.provider" in e for e in errors)
 
+    @pytest.mark.fast
     def test_valid_embedding_providers(self, tmp_path):
         """Test valid embedding provider values."""
         # Valid providers as defined in src/config/base.py line 639
@@ -325,11 +342,13 @@ class TestSceneDetectionConfigValidation:
         assert config.use_gpu is True
         assert config.force_gpu is False
 
+    @pytest.mark.fast
     def test_threshold_range(self):
         """Test scene detection threshold is in valid range."""
         config = SceneDetectionConfig(threshold=27.0)
         assert 0 < config.threshold < 100
 
+    @pytest.mark.fast
     def test_min_scene_len_positive(self):
         """Test min_scene_len must be positive."""
         config = SceneDetectionConfig(min_scene_len=15)
@@ -350,24 +369,28 @@ class TestLLMConfigProviderValidation:
         for key in ['GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'VOYAGE_API_KEY']:
             monkeypatch.delenv(key, raising=False)
 
+    @pytest.mark.requires_api
     def test_google_provider_loads_gemini_key(self):
         """Test google provider loads GEMINI_API_KEY from env."""
         with patch.dict(os.environ, {'GEMINI_API_KEY': 'test_gemini_key'}):
             config = LLMConfig(provider='google', api_key='')
             assert config.api_key == 'test_gemini_key'
 
+    @pytest.mark.requires_api
     def test_anthropic_provider_loads_anthropic_key(self):
         """Test anthropic provider loads ANTHROPIC_API_KEY from env."""
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test_anthropic_key'}):
             config = LLMConfig(provider='anthropic', api_key='')
             assert config.api_key == 'test_anthropic_key'
 
+    @pytest.mark.requires_api
     def test_explicit_key_not_overwritten(self):
         """Test explicitly set api_key is not overwritten."""
         with patch.dict(os.environ, {'GEMINI_API_KEY': 'env_key'}):
             config = LLMConfig(provider='google', api_key='explicit_key')
             assert config.api_key == 'explicit_key'
 
+    @pytest.mark.fast
     def test_invalid_matching_provider_detected(self, tmp_path):
         """Test invalid matching provider is detected during validation."""
         config_file = tmp_path / "config.yaml"
@@ -380,6 +403,7 @@ matching:
 
         assert any("matching.primary_provider" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_gemini_key_required_when_gemini_provider(self, tmp_path):
         """Test GEMINI_API_KEY required when using gemini provider."""
         config_file = tmp_path / "config.yaml"
@@ -394,6 +418,7 @@ api_keys:
 
         assert any("GEMINI_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_anthropic_key_required_when_anthropic_secondary(self, tmp_path):
         """Test ANTHROPIC_API_KEY required when using anthropic as secondary."""
         config_file = tmp_path / "config.yaml"
@@ -408,6 +433,7 @@ api_keys:
 
         assert any("ANTHROPIC_API_KEY required" in e for e in errors)
 
+    @pytest.mark.requires_api
     def test_no_key_error_when_key_present(self, tmp_path):
         """Test no key error when API key is present."""
         config_file = tmp_path / "config.yaml"
@@ -438,6 +464,7 @@ class TestLLMConfigPostInit:
         assert config.retry.max_retries == 5
         assert config.retry.retry_delay_seconds == 5.0
 
+    @pytest.mark.fast
     def test_cache_dict_converted(self):
         """Test cache dict is converted to LLMCacheConfig."""
         config = LLMConfig(
@@ -448,6 +475,7 @@ class TestLLMConfigPostInit:
         assert config.cache.enabled is False
         assert config.cache.ttl_hours == 48
 
+    @pytest.mark.fast
     def test_provider_configs_dict_converted(self):
         """Test provider configs (gemini, anthropic, ollama) dicts are converted."""
         config = LLMConfig(
@@ -490,6 +518,7 @@ class TestLoggingConfigDefaults:
         assert config.log_config_access is False
         assert config.warn_on_hardcoded is True
 
+    @pytest.mark.fast
     def test_partial_override(self):
         """Test partial override preserves other defaults."""
         config = LoggingConfig(log_level="DEBUG", log_to_console=False)
@@ -557,6 +586,7 @@ class TestPipelineConfigDefaults:
 class TestAPIKeysConfigDefaults:
     """Test APIKeysConfig handles missing optional fields with defaults."""
 
+    @pytest.mark.requires_api
     def test_default_empty_keys(self, monkeypatch):
         """Test APIKeysConfig starts with empty keys (not from env)."""
         # Clear all env variables
@@ -574,6 +604,7 @@ class TestAPIKeysConfigDefaults:
         assert config.pixabay_api_key == ""
         assert config.unsplash_api_key == ""
 
+    @pytest.mark.requires_api
     def test_loads_from_environment(self):
         """Test APIKeysConfig loads keys from environment."""
         with patch.dict(os.environ, {
@@ -604,6 +635,7 @@ class TestHealingConfigDefaults:
         assert config.enable_rollback is True
         assert config.print_report is True
 
+    @pytest.mark.fast
     def test_nested_configs_have_defaults(self):
         """Test nested configs are created with defaults."""
         config = HealingConfig()
@@ -667,6 +699,7 @@ class TestMatchingConfigDefaults:
         assert config.cache_llm_responses is True
         assert config.delta_matching_enabled is True
 
+    @pytest.mark.fast
     def test_nested_configs_created(self):
         """Test nested configs are created by default."""
         config = MatchingConfig()
@@ -729,6 +762,7 @@ class TestAudioAnalysisConfigDefaults:
 class TestLLMConfigDefaults:
     """Test LLMConfig handles missing optional fields with defaults."""
 
+    @pytest.mark.requires_api
     def test_default_values(self, monkeypatch):
         """Test LLMConfig default values."""
         # Clear env to avoid loading API keys
@@ -743,6 +777,7 @@ class TestLLMConfigDefaults:
         assert config.max_tokens == 2000
         assert config.ollama_host == "http://localhost:11434"
 
+    @pytest.mark.fast
     def test_nested_configs_created(self):
         """Test nested configs are created with defaults."""
         config = LLMConfig()
@@ -802,6 +837,7 @@ class TestLocationMatchingConfigDefaults:
         assert config.landmark_bonus == 0.2
         assert config.use_llm_disambiguation is True
 
+    @pytest.mark.fast
     def test_loads_geonames_from_env(self):
         """Test geonames_username loaded from environment."""
         with patch.dict(os.environ, {'GEONAMES_USERNAME': 'test_user'}):
@@ -823,6 +859,7 @@ class TestMatchingConfigProviderParametrized:
         "local",
         "embedding_only",
     ])
+    @pytest.mark.fast
     def test_valid_primary_providers(self, provider):
         """Test all valid primary_provider values are accepted."""
         config = MatchingConfig(primary_provider=provider)
@@ -833,6 +870,7 @@ class TestMatchingConfigProviderParametrized:
         "anthropic",
         "ollama",
     ])
+    @pytest.mark.fast
     def test_valid_secondary_providers(self, provider):
         """Test all valid secondary_provider values are accepted."""
         config = MatchingConfig(secondary_provider=provider)
@@ -845,6 +883,7 @@ class TestMatchingConfigProviderParametrized:
         "",
         "GEMINI",  # Case-sensitive
     ])
+    @pytest.mark.fast
     def test_invalid_primary_provider_detected(self, invalid_provider, tmp_path):
         """Test invalid primary_provider values are detected during validation."""
         config_file = tmp_path / "config.yaml"
@@ -865,6 +904,7 @@ class TestLLMConfigProviderParametrized:
         ("google", "GEMINI_API_KEY"),
         ("anthropic", "ANTHROPIC_API_KEY"),
     ])
+    @pytest.mark.fast
     def test_provider_loads_correct_env_key(self, provider, expected_env_key):
         """Test each provider loads the correct environment variable."""
         test_key = f"test_{provider}_key_123"
@@ -877,6 +917,7 @@ class TestLLMConfigProviderParametrized:
         "anthropic",
         "ollama",
     ])
+    @pytest.mark.fast
     def test_valid_llm_providers(self, provider):
         """Test all valid LLMConfig.provider values are accepted."""
         config = LLMConfig(provider=provider)
@@ -887,6 +928,7 @@ class TestLLMConfigProviderParametrized:
         ("anthropic", "anthropic", "claude-3-haiku-20240307"),
         ("ollama", "ollama", "llama3.2"),
     ])
+    @pytest.mark.fast
     def test_provider_default_models(self, provider, model_attr, expected_default):
         """Test each provider has correct default model configuration."""
         config = LLMConfig(provider=provider)
@@ -904,6 +946,7 @@ class TestEmbeddingProviderParametrized:
         "local",
         "sentence_transformers",
     ])
+    @pytest.mark.fast
     def test_valid_embedding_providers(self, provider, tmp_path):
         """Test all valid embedding.provider values are accepted."""
         config_file = tmp_path / f"config_{provider}.yaml"
@@ -922,6 +965,7 @@ embedding:
         "invalid",
         "",
     ])
+    @pytest.mark.fast
     def test_invalid_embedding_provider_detected(self, invalid_provider, tmp_path):
         """Test invalid embedding.provider values are detected."""
         config_file = tmp_path / "config.yaml"
@@ -944,6 +988,7 @@ class TestHealingStrategyParametrized:
         "interactive",
         "minimal",
     ])
+    @pytest.mark.fast
     def test_valid_healing_strategies(self, strategy):
         """Test all valid HealingConfig.strategy values are accepted."""
         config = HealingConfig(strategy=strategy)
@@ -962,6 +1007,7 @@ class TestBoundaryValuesParametrized:
         (1.0, 0.85, False),  # min way higher - invalid
         (0.0, 0.1, True),    # very low thresholds - valid
     ])
+    @pytest.mark.fast
     def test_confidence_threshold_constraints(self, min_conf, high_conf, should_pass, tmp_path):
         """Test min_confidence <= high_confidence_threshold constraint."""
         config_file = tmp_path / "config.yaml"
@@ -989,6 +1035,7 @@ matching:
         (3, 1, True),    # 3 >= 3 - valid edge case
         (2, 1, False),   # 2 < 3 - invalid
     ])
+    @pytest.mark.fast
     def test_embedding_candidates_constraint(self, embedding_candidates, num_alternatives, should_pass, tmp_path):
         """Test embedding_candidates >= num_alternatives * 3 constraint."""
         config_file = tmp_path / "config.yaml"
@@ -1014,6 +1061,7 @@ output:
         (27.0, True),    # Default value
         (100.0, False),  # Beyond valid range (100 is boundary)
     ])
+    @pytest.mark.fast
     def test_scene_detection_threshold_bounds(self, threshold, expected_valid):
         """Test SceneDetectionConfig threshold boundary values."""
         config = SceneDetectionConfig(threshold=threshold)
@@ -1028,6 +1076,7 @@ output:
         1.0,    # Maximum standard
         2.0,    # Extended range (some providers support)
     ])
+    @pytest.mark.fast
     def test_llm_temperature_bounds(self, temperature):
         """Test LLMConfig temperature accepts valid range values."""
         config = LLMConfig(temperature=temperature)
@@ -1040,6 +1089,7 @@ output:
         (0, False),     # Zero - invalid (must be positive)
         (-1, False),    # Negative - invalid
     ])
+    @pytest.mark.fast
     def test_min_scene_len_bounds(self, min_scene_len, expected_valid):
         """Test SceneDetectionConfig min_scene_len boundary values."""
         config = SceneDetectionConfig(min_scene_len=min_scene_len)
@@ -1057,6 +1107,7 @@ class TestLocationMatchingLevelParametrized:
         "country",
         "continent",
     ])
+    @pytest.mark.fast
     def test_valid_hard_filter_levels(self, level):
         """Test all valid hard_filter_level values are accepted."""
         config = LocationMatchingConfig(hard_filter_level=level)
@@ -1068,6 +1119,7 @@ class TestLocationMatchingLevelParametrized:
         "invalid",
         "",
     ])
+    @pytest.mark.fast
     def test_invalid_hard_filter_level_detected(self, invalid_level, tmp_path):
         """Test invalid hard_filter_level values are detected during validation."""
         config_file = tmp_path / "config.yaml"
@@ -1090,6 +1142,7 @@ class TestChapterDetectionStrategyParametrized:
         "topic",
         "location",
     ])
+    @pytest.mark.fast
     def test_valid_chapter_strategies(self, strategy):
         """Test all valid default_strategy values are accepted."""
         config = ChapterDetectionConfig(default_strategy=strategy)
@@ -1105,6 +1158,7 @@ class TestSceneDetectionPresetParametrized:
         "balanced",
         "accurate",
     ])
+    @pytest.mark.fast
     def test_valid_scene_detection_presets(self, preset):
         """Test all valid preset values are accepted."""
         config = SceneDetectionConfig(preset=preset)
@@ -1119,6 +1173,7 @@ class TestVisionProviderParametrized:
         "gemini",
         "openai",
     ])
+    @pytest.mark.fast
     def test_valid_vision_providers(self, provider):
         """Test all valid VisionConfig.provider values are accepted."""
         config = VisionConfig(provider=provider)

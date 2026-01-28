@@ -66,6 +66,7 @@ class TestRemapMatchesToVideoSegments:
     def stage(self):
         return DownloadVideoSegmentsStage()
 
+    @pytest.mark.fast
     def test_remap_basic_match(self, stage):
         """Test remapping a basic Match object"""
         state = PipelineState()
@@ -99,6 +100,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert match.video_file == "/path/to/video_abc123_0010.mp4"
 
+    @pytest.mark.fast
     def test_remap_skips_stock_videos(self, stage):
         """Test remapping skips stock video files (pexels_, pixabay_)"""
         state = PipelineState()
@@ -126,6 +128,7 @@ class TestRemapMatchesToVideoSegments:
         assert "pexels_beach" in pexels_match.video_file
         assert "pixabay_nature" in pixabay_match.video_file
 
+    @pytest.mark.fast
     def test_remap_skips_entity_videos(self, stage):
         """Test remapping skips entity videos"""
         state = PipelineState()
@@ -144,6 +147,7 @@ class TestRemapMatchesToVideoSegments:
         # Should not be modified
         assert "entity_tower" in match.video_file
 
+    @pytest.mark.fast
     def test_remap_handles_match_result_object(self, stage):
         """Test remapping MatchResult objects with primary_match"""
         state = PipelineState()
@@ -175,6 +179,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert primary.video_file == "/path/to/video_def456_0020.mp4"
 
+    @pytest.mark.fast
     def test_remap_match_result_alternatives(self, stage):
         """Test remapping MatchResult alternatives"""
         state = PipelineState()
@@ -215,6 +220,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert alt_segment.source_file == "/path/to/video_ghi789_0030.mp4"
 
+    @pytest.mark.fast
     def test_remap_match_result_secondary_matches(self, stage):
         """Test remapping MatchResult secondary matches"""
         state = PipelineState()
@@ -255,6 +261,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert sec_segment.source_file == "/path/to/video_jkl012_0045.mp4"
 
+    @pytest.mark.fast
     def test_remap_match_result_strategy_matches(self, stage):
         """Test remapping MatchResult strategy matches"""
         state = PipelineState()
@@ -295,6 +302,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert strat_segment.source_file == "/path/to/video_mno345_0060.mp4"
 
+    @pytest.mark.fast
     def test_remap_handles_video_segment_match(self, stage):
         """Test remapping Match with video_segment attribute"""
         state = PipelineState()
@@ -328,6 +336,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert video_segment.source_file == "/path/to/video_pqr678_0075.mp4"
 
+    @pytest.mark.fast
     def test_remap_warns_unknown_match_structure(self, stage):
         """Test logs warning for unknown Match structure"""
         state = PipelineState()
@@ -339,6 +348,7 @@ class TestRemapMatchesToVideoSegments:
         # Should not raise, just warn
         stage._remap_matches_to_video_segments(state, [], {})
 
+    @pytest.mark.fast
     def test_remap_warns_missing_video_id(self, stage):
         """Test logs warning when video_id not found"""
         state = PipelineState()
@@ -358,6 +368,7 @@ class TestRemapMatchesToVideoSegments:
         # Should not raise, just warn
         stage._remap_matches_to_video_segments(state, [], audio_downloads_by_id)
 
+    @pytest.mark.fast
     def test_remap_warns_missing_segment(self, stage):
         """Test logs warning when segment not found for time"""
         state = PipelineState()
@@ -390,6 +401,7 @@ class TestRemapMatchesToVideoSegments:
         # Match should not be updated (no segment at time 999)
         assert "audio_stu901.mp3" in match.video_file
 
+    @pytest.mark.fast
     def test_remap_handles_timestamped_audio_filename(self, stage):
         """Test handles audio filename with timestamp suffix"""
         state = PipelineState()
@@ -421,6 +433,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert match.video_file == "/path/to/video_vwx234_0050.mp4"
 
+    @pytest.mark.fast
     def test_remap_handles_audio_dict_format(self, stage):
         """Test handles audio_downloads_by_id with dict values"""
         state = PipelineState()
@@ -452,6 +465,7 @@ class TestRemapMatchesToVideoSegments:
 
         assert match.video_file == "/path/to/video_yz0567_0080.mp4"
 
+    @pytest.mark.fast
     def test_remap_empty_matches(self, stage):
         """Test with empty matches list"""
         state = PipelineState()
@@ -460,6 +474,7 @@ class TestRemapMatchesToVideoSegments:
         # Should not raise
         stage._remap_matches_to_video_segments(state, [], {})
 
+    @pytest.mark.fast
     def test_remap_counts_updates(self, stage):
         """Test counts updated matches correctly"""
         state = PipelineState()

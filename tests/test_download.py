@@ -515,6 +515,7 @@ class DownloadTestRunner:
 # UNIT TESTS
 # =============================================================================
 
+@pytest.mark.fast
 def test_segment_merging_basic():
     """Test basic segment merging functionality"""
     from src.downloader import merge_segments_with_buffer
@@ -544,6 +545,7 @@ def test_segment_merging_basic():
         assert False, f"Second segment wrong: {merged[1]}"
 
 
+@pytest.mark.fast
 def test_segment_merging_overlap():
     """Test segment merging with overlapping segments"""
     from src.downloader import merge_segments_with_buffer
@@ -573,6 +575,7 @@ def test_segment_merging_overlap():
         assert False, f"Expected end 125.0, got {end}"
 
 
+@pytest.mark.fast
 def test_segment_merging_edge_cases():
     """Test segment merging edge cases"""
     from src.downloader import merge_segments_with_buffer
@@ -621,6 +624,7 @@ def test_segment_merging_edge_cases():
         assert False, f"Invalid segment should be skipped, got {len(result)} segments"
 
 
+@pytest.mark.fast
 def test_segment_filename():
     """Test segment filename generation"""
     from src.downloader import get_segment_filename
@@ -641,6 +645,7 @@ def test_segment_filename():
         assert False, f"Expected test_9999.mp4, got {filename}"
 
 
+@pytest.mark.fast
 def test_video_id_extraction():
     """Test video ID extraction from file paths"""
     from src.downloader import _extract_video_id
@@ -666,6 +671,7 @@ def test_video_id_extraction():
         assert False, f"None path should return None"
 
 
+@pytest.mark.fast
 def test_collect_matched_segments():
     """Test collecting matched segments from match results"""
     from src.downloader import collect_matched_segments, AudioDownload
@@ -723,6 +729,7 @@ def test_collect_matched_segments():
         assert False, f"Wrong tracks: {tracks}"
 
 
+@pytest.mark.fast
 def test_prepare_merged_segments():
     """Test preparing merged segments"""
     from src.downloader import (
@@ -786,6 +793,7 @@ def test_prepare_merged_segments():
         assert False, f"Expected end 85.0, got {m.end_time}"
 
 
+@pytest.mark.fast
 def test_filter_string_building():
     """Test filter string building for yt-dlp"""
     from src.downloader import VideoDownloader
@@ -805,6 +813,7 @@ def test_filter_string_building():
         assert False, "Missing live stream filter"
 
 
+@pytest.mark.fast
 def test_format_string_building():
     """Test format string building for yt-dlp"""
     from src.downloader import VideoDownloader
@@ -820,6 +829,7 @@ def test_format_string_building():
         assert False, "Missing video format selection"
 
 
+@pytest.mark.integration
 def test_needs_transcoding():
     """Test transcoding detection logic"""
     from src.downloader import VideoDownloader
@@ -847,6 +857,7 @@ def test_needs_transcoding():
             assert False, f"H264/MP4 should not need transcoding, reason: {reason}"
 
 
+@pytest.mark.integration
 def test_filename_sanitization():
     """Test filename sanitization for NLE compatibility"""
     from src.downloader import sanitize_filename_for_nle
@@ -931,6 +942,7 @@ def test_fixture_buffer_application(runner: DownloadTestRunner):
 # LIVE TESTS (require network)
 # =============================================================================
 
+@pytest.mark.integration
 def test_ytdlp_available():
     """Test that yt-dlp is installed and accessible"""
     import subprocess
@@ -951,6 +963,7 @@ def test_ytdlp_available():
         assert False, f"Error: {e}"
 
 
+@pytest.mark.fast
 def test_youtube_search_metadata():
     """Test YouTube metadata search (no download)"""
     from src.downloader import VideoDownloader
@@ -976,6 +989,7 @@ def test_youtube_search_metadata():
             assert False, f"Missing required fields in: {v}"
 
 
+@pytest.mark.fast
 def test_dependency_check():
     """Test dependency check method"""
     from src.downloader import VideoDownloader

@@ -90,16 +90,19 @@ def baseline_output_dir(request) -> Optional[Path]:
 class TestBaselineMetricsFixture:
     """Tests that validate the baseline metrics fixture itself."""
 
+    @pytest.mark.fast
     def test_baseline_metrics_file_exists(self):
         """Baseline metrics JSON exists."""
         assert BASELINE_METRICS_FILE.exists(), f"Missing: {BASELINE_METRICS_FILE}"
 
+    @pytest.mark.fast
     def test_baseline_metrics_valid_json(self, baseline_metrics):
         """Baseline metrics is valid JSON with required keys."""
         required_keys = ["files", "timeline_metrics", "track_details", "validation_expectations"]
         for key in required_keys:
             assert key in baseline_metrics, f"Missing key: {key}"
 
+    @pytest.mark.fast
     def test_baseline_has_expected_file_counts(self, baseline_metrics):
         """Baseline has expected file type counts."""
         files = baseline_metrics["files"]
@@ -111,6 +114,7 @@ class TestBaselineMetricsFixture:
         assert otio_count == expectations["otio_file_count"], f"OTIO count mismatch: {otio_count}"
         assert xml_count == expectations["xml_file_count"], f"XML count mismatch: {xml_count}"
 
+    @pytest.mark.fast
     def test_baseline_track_details_complete(self, baseline_metrics):
         """Baseline has all expected tracks."""
         track_names = [t["name"] for t in baseline_metrics["track_details"]]
@@ -123,6 +127,7 @@ class TestBaselineMetricsFixture:
 class TestOutputStructure:
     """Tests that validate output directory structure against baseline."""
 
+    @pytest.mark.fast
     def test_required_files_exist(self, baseline_output_dir, baseline_metrics):
         """All required output files exist."""
         if not baseline_output_dir:
@@ -140,6 +145,7 @@ class TestOutputStructure:
             filepath = baseline_output_dir / filename
             assert filepath.exists(), f"Missing required file: {filename}"
 
+    @pytest.mark.fast
     def test_otio_file_count_matches(self, baseline_output_dir, baseline_metrics):
         """Number of OTIO files matches baseline."""
         if not baseline_output_dir:
@@ -150,6 +156,7 @@ class TestOutputStructure:
 
         assert actual == expected, f"OTIO file count: expected {expected}, got {actual}"
 
+    @pytest.mark.fast
     def test_xml_file_count_matches(self, baseline_output_dir, baseline_metrics):
         """Number of XML files matches baseline."""
         if not baseline_output_dir:
@@ -160,6 +167,7 @@ class TestOutputStructure:
 
         assert actual == expected, f"XML file count: expected {expected}, got {actual}"
 
+    @pytest.mark.fast
     def test_individual_track_otio_files_exist(self, baseline_output_dir):
         """Individual track OTIO files exist for all video tracks."""
         if not baseline_output_dir:
@@ -184,6 +192,7 @@ class TestOutputStructure:
 class TestOTIOValidity:
     """Tests that validate OTIO file integrity."""
 
+    @pytest.mark.fast
     def test_all_otio_files_readable(self, baseline_output_dir):
         """All OTIO files can be parsed without errors."""
         if not baseline_output_dir:
@@ -199,6 +208,7 @@ class TestOTIOValidity:
             except Exception as e:
                 pytest.fail(f"OTIO parse error for {filepath.name}: {e}")
 
+    @pytest.mark.fast
     def test_full_timeline_track_count(self, baseline_output_dir, baseline_metrics):
         """FULL timeline has expected number of tracks."""
         if not baseline_output_dir:
@@ -214,6 +224,7 @@ class TestOTIOValidity:
 
         assert actual >= expected, f"Track count: expected >= {expected}, got {actual}"
 
+    @pytest.mark.fast
     def test_full_timeline_has_required_tracks(self, baseline_output_dir, baseline_metrics):
         """FULL timeline contains all required track names."""
         if not baseline_output_dir:
@@ -230,6 +241,7 @@ class TestOTIOValidity:
         for track in required:
             assert track in track_names, f"Missing required track: {track}"
 
+    @pytest.mark.fast
     def test_v1_primary_clip_count(self, baseline_output_dir, baseline_metrics):
         """V1 Primary track has minimum expected clips."""
         if not baseline_output_dir:
@@ -253,6 +265,7 @@ class TestOTIOValidity:
 
         assert len(clips) >= min_clips, f"V1 clips: expected >= {min_clips}, got {len(clips)}"
 
+    @pytest.mark.fast
     def test_voiceover_track_single_clip(self, baseline_output_dir, baseline_metrics):
         """Voiceover track (A9) has exactly one clip."""
         if not baseline_output_dir:
@@ -276,6 +289,7 @@ class TestOTIOValidity:
 
         assert len(clips) == expected, f"Voiceover clips: expected {expected}, got {len(clips)}"
 
+    @pytest.mark.fast
     def test_no_zero_duration_clips(self, baseline_output_dir):
         """No clips have zero or negative duration."""
         if not baseline_output_dir:
@@ -297,6 +311,7 @@ class TestOTIOValidity:
 
         assert len(issues) == 0, f"Found {len(issues)} zero/negative duration clips:\n" + "\n".join(issues[:10])
 
+    @pytest.mark.fast
     def test_clips_have_media_references(self, baseline_output_dir):
         """All clips (except gaps) have media references."""
         if not baseline_output_dir:
@@ -323,6 +338,7 @@ class TestOTIOValidity:
 class TestXMLValidity:
     """Tests that validate XML file integrity."""
 
+    @pytest.mark.fast
     def test_all_xml_files_well_formed(self, baseline_output_dir):
         """All XML files are well-formed XML."""
         if not baseline_output_dir:
@@ -338,6 +354,7 @@ class TestXMLValidity:
             except ET.ParseError as e:
                 pytest.fail(f"XML parse error for {filepath.name}: {e}")
 
+    @pytest.mark.fast
     def test_project_xml_has_xmeml_root(self, baseline_output_dir):
         """Main project XML has xmeml root element."""
         if not baseline_output_dir:
@@ -352,6 +369,7 @@ class TestXMLValidity:
 
         assert root.tag == "xmeml", f"Expected xmeml root, got: {root.tag}"
 
+    @pytest.mark.fast
     def test_xml_part_files_count(self, baseline_output_dir):
         """Part XML files exist for large timelines."""
         if not baseline_output_dir:
@@ -365,6 +383,7 @@ class TestXMLValidity:
 class TestSegmentsJSON:
     """Tests that validate timeline_segments.json structure."""
 
+    @pytest.mark.fast
     def test_segments_json_valid(self, baseline_output_dir):
         """timeline_segments.json is valid JSON."""
         if not baseline_output_dir:
@@ -379,6 +398,7 @@ class TestSegmentsJSON:
 
         assert isinstance(data, dict), "Segments JSON should be a dict"
 
+    @pytest.mark.fast
     def test_segments_json_has_required_keys(self, baseline_output_dir):
         """timeline_segments.json has required metadata keys."""
         if not baseline_output_dir:
@@ -395,6 +415,7 @@ class TestSegmentsJSON:
         for key in required_keys:
             assert key in data, f"Missing key: {key}"
 
+    @pytest.mark.fast
     def test_segments_json_segment_count(self, baseline_output_dir, baseline_metrics):
         """Segment count matches baseline expectations."""
         if not baseline_output_dir:
@@ -417,6 +438,7 @@ class TestSegmentsJSON:
 class TestMatchReport:
     """Tests that validate match_report.md structure."""
 
+    @pytest.mark.fast
     def test_match_report_exists(self, baseline_output_dir):
         """match_report.md exists."""
         if not baseline_output_dir:
@@ -425,6 +447,7 @@ class TestMatchReport:
         report = baseline_output_dir / "match_report.md"
         assert report.exists(), "match_report.md not found"
 
+    @pytest.mark.fast
     def test_match_report_has_content(self, baseline_output_dir):
         """match_report.md has meaningful content."""
         if not baseline_output_dir:
@@ -440,6 +463,7 @@ class TestMatchReport:
         assert "# Match Report" in content, "Missing report header"
         assert "## Matches" in content or "### Segment" in content, "Missing matches section"
 
+    @pytest.mark.fast
     def test_match_report_segment_entries(self, baseline_output_dir, baseline_metrics):
         """match_report.md has segment entries."""
         if not baseline_output_dir:
@@ -461,6 +485,7 @@ class TestMatchReport:
 class TestEDLValidity:
     """Tests that validate EDL file structure."""
 
+    @pytest.mark.fast
     def test_edl_exists_and_readable(self, baseline_output_dir):
         """timeline.edl exists and is readable."""
         if not baseline_output_dir:
@@ -472,6 +497,7 @@ class TestEDLValidity:
         content = edl_file.read_text(encoding="utf-8")
         assert len(content) > 100, "EDL file too short"
 
+    @pytest.mark.fast
     def test_edl_has_title(self, baseline_output_dir):
         """EDL has TITLE line."""
         if not baseline_output_dir:
@@ -484,6 +510,7 @@ class TestEDLValidity:
         content = edl_file.read_text(encoding="utf-8")
         assert "TITLE:" in content, "EDL missing TITLE line"
 
+    @pytest.mark.fast
     def test_edl_has_fcm(self, baseline_output_dir):
         """EDL has FCM (frame count mode) line."""
         if not baseline_output_dir:

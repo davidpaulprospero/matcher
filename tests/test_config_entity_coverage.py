@@ -18,6 +18,7 @@ from src.config.sections.entity import (
 class TestImageSearchConfigPostInit:
     """Test ImageSearchConfig __post_init__ dict conversions."""
 
+    @pytest.mark.fast
     def test_stock_video_dict_converted(self):
         """Test line 137: stock_video dict converted to StockVideoConfig."""
         config = ImageSearchConfig(
@@ -29,6 +30,7 @@ class TestImageSearchConfigPostInit:
         assert config.stock_video.max_duration == 60.0
         assert config.stock_video.prefer_hd is False
 
+    @pytest.mark.fast
     def test_entity_cache_dict_converted(self):
         """Test line 139: entity_cache dict converted to EntityCacheConfig."""
         config = ImageSearchConfig(
@@ -44,6 +46,7 @@ class TestImageSearchConfigPostInit:
         assert config.entity_cache.cache_dir == "/custom/cache"
         assert config.entity_cache.fuzzy_threshold == 0.9
 
+    @pytest.mark.fast
     def test_both_dicts_converted(self):
         """Test both nested configs converted from dicts."""
         config = ImageSearchConfig(
@@ -56,6 +59,7 @@ class TestImageSearchConfigPostInit:
         assert config.stock_video.min_duration == 2.0
         assert config.entity_cache.max_age_days == 30
 
+    @pytest.mark.fast
     def test_dataclass_objects_unchanged(self):
         """Test that dataclass instances are not modified."""
         stock_config = StockVideoConfig(min_duration=10.0)
@@ -74,6 +78,7 @@ class TestImageSearchConfigPostInit:
 class TestStockVideoConfig:
     """Test StockVideoConfig dataclass."""
 
+    @pytest.mark.fast
     def test_defaults(self):
         """Test default values."""
         config = StockVideoConfig()
@@ -82,6 +87,7 @@ class TestStockVideoConfig:
         assert config.max_duration == 30.0
         assert config.prefer_hd is True
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test custom values."""
         config = StockVideoConfig(
@@ -98,6 +104,7 @@ class TestStockVideoConfig:
 class TestEntityCacheConfig:
     """Test EntityCacheConfig dataclass."""
 
+    @pytest.mark.fast
     def test_defaults(self):
         """Test default values."""
         config = EntityCacheConfig()
@@ -108,6 +115,7 @@ class TestEntityCacheConfig:
         assert config.max_age_days == 0
         assert config.cache_strategy == "copy"
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test custom values."""
         config = EntityCacheConfig(
@@ -128,6 +136,7 @@ class TestEntityCacheConfig:
 class TestSilentVideoConfig:
     """Test SilentVideoConfig dataclass."""
 
+    @pytest.mark.fast
     def test_defaults(self):
         """Test default values."""
         config = SilentVideoConfig()
@@ -138,6 +147,7 @@ class TestSilentVideoConfig:
         assert config.use_llm_fallback is True
         assert config.cache_descriptions is True
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test custom values."""
         config = SilentVideoConfig(
@@ -154,6 +164,7 @@ class TestSilentVideoConfig:
 class TestImageSearchConfig:
     """Test ImageSearchConfig dataclass."""
 
+    @pytest.mark.fast
     def test_defaults(self):
         """Test default values."""
         config = ImageSearchConfig()
@@ -167,6 +178,7 @@ class TestImageSearchConfig:
         assert config.use_stock_apis is True
         assert "PERSON" in config.entity_types
 
+    @pytest.mark.fast
     def test_entity_types_default(self):
         """Test default entity types."""
         config = ImageSearchConfig()
@@ -174,6 +186,7 @@ class TestImageSearchConfig:
         expected = ["PERSON", "GPE", "ORG", "DATE", "EVENT"]
         assert config.entity_types == expected
 
+    @pytest.mark.fast
     def test_custom_entity_types(self):
         """Test custom entity types."""
         config = ImageSearchConfig(entity_types=["PERSON", "GPE"])

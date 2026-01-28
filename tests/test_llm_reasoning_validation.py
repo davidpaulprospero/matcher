@@ -30,15 +30,18 @@ pytestmark = pytest.mark.unit
 class TestValidateLLMReasoningFunction:
     """Test validate_llm_reasoning() function exists and has correct signature."""
 
+    @pytest.mark.fast
     def test_function_exists(self):
         """validate_llm_reasoning function exists in module."""
         from src.matching import llm_providers
         assert hasattr(llm_providers, 'validate_llm_reasoning')
 
+    @pytest.mark.fast
     def test_function_callable(self):
         """validate_llm_reasoning is callable."""
         assert callable(validate_llm_reasoning)
 
+    @pytest.mark.fast
     def test_function_accepts_required_args(self):
         """Function accepts reasoning and voiceover_text args."""
         result = validate_llm_reasoning(
@@ -47,6 +50,7 @@ class TestValidateLLMReasoningFunction:
         )
         assert isinstance(result, ReasoningValidation)
 
+    @pytest.mark.fast
     def test_function_accepts_optional_video_text(self):
         """Function accepts optional video_text argument."""
         result = validate_llm_reasoning(
@@ -56,6 +60,7 @@ class TestValidateLLMReasoningFunction:
         )
         assert isinstance(result, ReasoningValidation)
 
+    @pytest.mark.fast
     def test_function_accepts_min_specific_references(self):
         """Function accepts min_specific_references argument."""
         result = validate_llm_reasoning(
@@ -69,28 +74,33 @@ class TestValidateLLMReasoningFunction:
 class TestReasoningValidationDataclass:
     """Test ReasoningValidation dataclass structure."""
 
+    @pytest.mark.fast
     def test_dataclass_exists(self):
         """ReasoningValidation dataclass exists."""
         assert ReasoningValidation is not None
 
+    @pytest.mark.fast
     def test_has_is_valid_field(self):
         """ReasoningValidation has is_valid field."""
         result = ReasoningValidation(is_valid=True, specific_references=0, matched_keywords=[])
         assert hasattr(result, 'is_valid')
         assert result.is_valid is True
 
+    @pytest.mark.fast
     def test_has_specific_references_field(self):
         """ReasoningValidation has specific_references field."""
         result = ReasoningValidation(is_valid=True, specific_references=5, matched_keywords=[])
         assert hasattr(result, 'specific_references')
         assert result.specific_references == 5
 
+    @pytest.mark.fast
     def test_has_matched_keywords_field(self):
         """ReasoningValidation has matched_keywords field."""
         result = ReasoningValidation(is_valid=True, specific_references=2, matched_keywords=['word1', 'word2'])
         assert hasattr(result, 'matched_keywords')
         assert result.matched_keywords == ['word1', 'word2']
 
+    @pytest.mark.fast
     def test_has_warning_message_field(self):
         """ReasoningValidation has optional warning_message field."""
         result = ReasoningValidation(
@@ -102,6 +112,7 @@ class TestReasoningValidationDataclass:
         assert hasattr(result, 'warning_message')
         assert result.warning_message == "Warning text"
 
+    @pytest.mark.fast
     def test_warning_message_defaults_to_none(self):
         """warning_message defaults to None."""
         result = ReasoningValidation(is_valid=True, specific_references=0, matched_keywords=[])
@@ -111,6 +122,7 @@ class TestReasoningValidationDataclass:
 class TestGenericReasoningDetection:
     """Test detection of generic/low-quality reasoning."""
 
+    @pytest.mark.fast
     def test_short_good_match_flagged(self):
         """Short 'good match' reasoning is flagged as generic."""
         result = validate_llm_reasoning(
@@ -120,6 +132,7 @@ class TestGenericReasoningDetection:
         assert result.is_valid is False
         assert "Generic" in result.warning_message
 
+    @pytest.mark.fast
     def test_short_topic_match_flagged(self):
         """Short 'topic match' reasoning is flagged as generic."""
         result = validate_llm_reasoning(
@@ -129,6 +142,7 @@ class TestGenericReasoningDetection:
         assert result.is_valid is False
         assert "Generic" in result.warning_message
 
+    @pytest.mark.fast
     def test_short_similar_flagged(self):
         """Short 'similar' reasoning is flagged as generic."""
         result = validate_llm_reasoning(
@@ -137,6 +151,7 @@ class TestGenericReasoningDetection:
         )
         assert result.is_valid is False
 
+    @pytest.mark.fast
     def test_short_relevant_flagged(self):
         """Short 'relevant' reasoning is flagged as generic."""
         result = validate_llm_reasoning(
@@ -145,6 +160,7 @@ class TestGenericReasoningDetection:
         )
         assert result.is_valid is False
 
+    @pytest.mark.fast
     def test_longer_reasoning_with_generic_phrase_not_immediately_flagged(self):
         """Longer reasoning with generic phrase is checked for keywords."""
         # This is long enough that it's not immediately flagged as generic
@@ -160,6 +176,7 @@ class TestGenericReasoningDetection:
 class TestSpecificReasoningValidation:
     """Test validation of specific/high-quality reasoning."""
 
+    @pytest.mark.fast
     def test_specific_reasoning_valid(self):
         """Reasoning with specific keywords from voiceover is valid."""
         result = validate_llm_reasoning(
@@ -169,6 +186,7 @@ class TestSpecificReasoningValidation:
         assert result.is_valid is True
         assert result.specific_references >= 3
 
+    @pytest.mark.fast
     def test_matched_keywords_populated(self):
         """matched_keywords contains the actual matched words."""
         result = validate_llm_reasoning(
@@ -179,6 +197,7 @@ class TestSpecificReasoningValidation:
         # Common keywords should be matched
         assert any(kw in ['hurricane', 'florence', 'evacuation', 'coastline'] for kw in result.matched_keywords)
 
+    @pytest.mark.fast
     def test_video_text_keywords_also_count(self):
         """Keywords from video_text also count as specific references."""
         result = validate_llm_reasoning(
@@ -189,6 +208,7 @@ class TestSpecificReasoningValidation:
         # Should find: volcano, eruption, lava, rescue, helicopter
         assert result.specific_references >= 3
 
+    @pytest.mark.fast
     def test_combined_vo_and_video_keywords(self):
         """Keywords from both voiceover and video are considered."""
         result = validate_llm_reasoning(
@@ -203,6 +223,7 @@ class TestSpecificReasoningValidation:
 class TestWarningLogging:
     """Test warning logging for low-quality reasoning."""
 
+    @pytest.mark.fast
     def test_generic_reasoning_logs_warning(self, caplog):
         """Generic reasoning logs a warning."""
         with caplog.at_level(logging.WARNING):
@@ -212,6 +233,7 @@ class TestWarningLogging:
             )
         assert any("Generic" in record.message for record in caplog.records)
 
+    @pytest.mark.fast
     def test_low_quality_reasoning_logs_warning(self, caplog):
         """Low-quality reasoning with few references logs warning."""
         with caplog.at_level(logging.WARNING):
@@ -221,6 +243,7 @@ class TestWarningLogging:
             )
         assert any("Low-quality" in record.message or "Generic" in record.message for record in caplog.records)
 
+    @pytest.mark.fast
     def test_empty_reasoning_logs_warning(self, caplog):
         """Empty reasoning logs a warning."""
         with caplog.at_level(logging.WARNING):
@@ -230,6 +253,7 @@ class TestWarningLogging:
             )
         assert any("Empty reasoning" in record.message for record in caplog.records)
 
+    @pytest.mark.fast
     def test_valid_reasoning_no_warning(self, caplog):
         """Valid specific reasoning does not log warning."""
         with caplog.at_level(logging.WARNING):
@@ -245,6 +269,7 @@ class TestWarningLogging:
 class TestMinSpecificReferencesThreshold:
     """Test min_specific_references threshold parameter."""
 
+    @pytest.mark.fast
     def test_default_threshold_is_3(self):
         """Default threshold requires 3 specific references."""
         # Only 2 matching keywords
@@ -254,6 +279,7 @@ class TestMinSpecificReferencesThreshold:
         )
         assert result.is_valid is False  # Only 2: earthquake, damage
 
+    @pytest.mark.fast
     def test_custom_threshold_1(self):
         """Custom threshold of 1 allows single reference."""
         result = validate_llm_reasoning(
@@ -264,6 +290,7 @@ class TestMinSpecificReferencesThreshold:
         assert result.is_valid is True
         assert result.specific_references >= 1
 
+    @pytest.mark.fast
     def test_custom_threshold_5(self):
         """Custom threshold of 5 requires 5 references."""
         result = validate_llm_reasoning(
@@ -278,6 +305,7 @@ class TestMinSpecificReferencesThreshold:
 class TestExtractKeywordsHelper:
     """Test _extract_keywords helper function."""
 
+    @pytest.mark.fast
     def test_basic_extraction(self):
         """Extracts basic keywords from text."""
         keywords = _extract_keywords("The earthquake destroyed buildings")
@@ -285,6 +313,7 @@ class TestExtractKeywordsHelper:
         assert 'destroyed' in keywords
         assert 'buildings' in keywords
 
+    @pytest.mark.fast
     def test_filters_short_words(self):
         """Filters words shorter than min_length."""
         keywords = _extract_keywords("I am at the zoo")
@@ -292,6 +321,7 @@ class TestExtractKeywordsHelper:
         assert 'am' not in keywords  # 2 chars, excluded
         assert 'at' not in keywords  # 2 chars, excluded
 
+    @pytest.mark.fast
     def test_filters_stopwords(self):
         """Filters common stopwords."""
         keywords = _extract_keywords("The building was destroyed with fire")
@@ -302,16 +332,19 @@ class TestExtractKeywordsHelper:
         assert 'destroyed' in keywords
         assert 'fire' in keywords
 
+    @pytest.mark.fast
     def test_handles_empty_text(self):
         """Handles empty text gracefully."""
         keywords = _extract_keywords("")
         assert keywords == set()
 
+    @pytest.mark.fast
     def test_handles_none_text(self):
         """Handles None text gracefully."""
         keywords = _extract_keywords(None)
         assert keywords == set()
 
+    @pytest.mark.fast
     def test_lowercase_normalization(self):
         """Keywords are normalized to lowercase."""
         keywords = _extract_keywords("The EARTHQUAKE Destroyed BUILDINGS")
@@ -322,16 +355,19 @@ class TestExtractKeywordsHelper:
 class TestGenericPhrasesConstant:
     """Test GENERIC_REASONING_PHRASES constant."""
 
+    @pytest.mark.fast
     def test_constant_exists(self):
         """GENERIC_REASONING_PHRASES constant exists."""
         assert GENERIC_REASONING_PHRASES is not None
 
+    @pytest.mark.fast
     def test_contains_common_generic_phrases(self):
         """Contains common generic matching phrases."""
         assert "good match" in GENERIC_REASONING_PHRASES
         assert "topic match" in GENERIC_REASONING_PHRASES
         assert "relevant" in GENERIC_REASONING_PHRASES
 
+    @pytest.mark.fast
     def test_is_frozenset(self):
         """GENERIC_REASONING_PHRASES is a frozenset (immutable)."""
         assert isinstance(GENERIC_REASONING_PHRASES, frozenset)
@@ -340,6 +376,7 @@ class TestGenericPhrasesConstant:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
+    @pytest.mark.fast
     def test_none_reasoning(self):
         """Handles None reasoning gracefully."""
         result = validate_llm_reasoning(
@@ -349,6 +386,7 @@ class TestEdgeCases:
         assert result.is_valid is False
         assert result.warning_message is not None
 
+    @pytest.mark.fast
     def test_whitespace_only_reasoning(self):
         """Handles whitespace-only reasoning."""
         result = validate_llm_reasoning(
@@ -358,6 +396,7 @@ class TestEdgeCases:
         # Should be treated as invalid (no keywords)
         assert result.is_valid is False
 
+    @pytest.mark.fast
     def test_none_voiceover_text(self):
         """Handles None voiceover_text gracefully."""
         result = validate_llm_reasoning(
@@ -367,6 +406,7 @@ class TestEdgeCases:
         # Should work but may not find matches
         assert isinstance(result, ReasoningValidation)
 
+    @pytest.mark.fast
     def test_special_characters_in_reasoning(self):
         """Handles special characters in reasoning."""
         result = validate_llm_reasoning(
@@ -377,6 +417,7 @@ class TestEdgeCases:
         # Should still extract: earthquake, damage, downtown
         assert result.specific_references >= 3
 
+    @pytest.mark.fast
     def test_unicode_characters(self):
         """Handles unicode characters in text."""
         result = validate_llm_reasoning(
@@ -386,6 +427,7 @@ class TestEdgeCases:
         # Should handle gracefully (only extract ASCII words)
         assert isinstance(result, ReasoningValidation)
 
+    @pytest.mark.fast
     def test_very_long_reasoning(self):
         """Handles very long reasoning strings."""
         # Include enough matching keywords
@@ -402,6 +444,7 @@ class TestEdgeCases:
 class TestRealWorldExamples:
     """Test with realistic voiceover and reasoning examples."""
 
+    @pytest.mark.fast
     def test_documentary_earthquake_good_reasoning(self):
         """Good reasoning for documentary about earthquake."""
         result = validate_llm_reasoning(
@@ -411,6 +454,7 @@ class TestRealWorldExamples:
         assert result.is_valid is True
         assert result.specific_references >= 3
 
+    @pytest.mark.fast
     def test_documentary_earthquake_bad_reasoning(self):
         """Generic reasoning for documentary should be flagged."""
         result = validate_llm_reasoning(
@@ -419,6 +463,7 @@ class TestRealWorldExamples:
         )
         assert result.is_valid is False
 
+    @pytest.mark.fast
     def test_cooking_show_specific_reasoning(self):
         """Specific reasoning for cooking show."""
         result = validate_llm_reasoning(
@@ -427,6 +472,7 @@ class TestRealWorldExamples:
         )
         assert result.is_valid is True
 
+    @pytest.mark.fast
     def test_nature_documentary_specific_reasoning(self):
         """Specific reasoning for nature documentary."""
         result = validate_llm_reasoning(

@@ -446,6 +446,7 @@ class TestOTIOHealerSimulations:
     """Simulate OTIO timeline generation errors."""
 
     @pytest.mark.parametrize("scenario", OTIO_ERROR_SCENARIOS, ids=lambda s: s.name)
+    @pytest.mark.fast
     def test_otio_error_detection(self, otio_healer, scenario):
         """OTIOHealer should detect all OTIO-related errors."""
         error = scenario.error_type(scenario.error_message)
@@ -453,6 +454,7 @@ class TestOTIOHealerSimulations:
         can_handle = otio_healer.can_handle(error, "OUTPUT")
         assert can_handle, f"OTIOHealer should handle: {scenario.name}"
 
+    @pytest.mark.fast
     def test_negative_duration_fix(self, otio_healer, mock_pipeline_state):
         """Simulate negative duration clip and verify fix."""
         error = ValueError("Duration must be positive, got -0.5")
@@ -467,6 +469,7 @@ class TestOTIOHealerSimulations:
         assert result.success, f"Fix should succeed: {result.message}"
         assert result.action.value in ["retry", "modify"]
 
+    @pytest.mark.fast
     def test_zero_duration_fix(self, otio_healer, mock_pipeline_state):
         """Simulate zero duration clip and verify fix."""
         error = ValueError("Zero duration clip detected")
@@ -481,6 +484,7 @@ class TestOTIOHealerSimulations:
         assert result.success
         # Should clamp to minimum duration
 
+    @pytest.mark.fast
     def test_missing_media_search_caches(self, otio_healer, mock_pipeline_state, temp_project_dir):
         """Simulate missing media file - healer should search caches."""
         # Create fake video in cache
@@ -495,6 +499,7 @@ class TestOTIOHealerSimulations:
         # Should attempt to find file or continue with skip
         assert result is not None
 
+    @pytest.mark.fast
     def test_gap_overflow_mode_switch(self, otio_healer, mock_pipeline_state):
         """Simulate gap overflow - healer should switch gap mode."""
         error = ValueError("Total gap duration (45.2s) exceeds available time (30.0s)")
@@ -507,6 +512,7 @@ class TestOTIOHealerSimulations:
         if result.success:
             assert result.action.value in ["retry", "modify"]
 
+    @pytest.mark.fast
     def test_edl_export_disable(self, otio_healer, mock_pipeline_state):
         """Simulate EDL export failure - healer should disable EDL."""
         error = RuntimeError("EDL adapter failed: invalid timecode format")
@@ -519,6 +525,7 @@ class TestOTIOHealerSimulations:
             # Healer reports skip_edl in details rather than modifying mock
             assert result.details.get('skip_edl', False) == True or result.action.value == "modify"
 
+    @pytest.mark.fast
     def test_numpy_metadata_sanitization(self, otio_healer, mock_pipeline_state):
         """Simulate numpy serialization error in metadata."""
         error = TypeError("Object of type ndarray is not JSON serializable")
@@ -528,6 +535,7 @@ class TestOTIOHealerSimulations:
         # Should sanitize metadata and retry
         assert result.success
 
+    @pytest.mark.fast
     def test_clip_overlap_fix(self, otio_healer, mock_pipeline_state):
         """Simulate overlapping clips - healer should trim earlier clip."""
         error = ValueError("Clip overlap detected: clip 1 overlaps clip 2 by 0.5s")
@@ -542,6 +550,7 @@ class TestOTIOHealerSimulations:
 
         assert result.success
 
+    @pytest.mark.fast
     def test_safe_mode_fallback(self, otio_healer, mock_pipeline_state):
         """Simulate repeated failures - healer should fall back to safe mode."""
         error = RuntimeError("Unknown OTIO error after multiple retries")
@@ -564,6 +573,7 @@ class TestAPIHealerSimulations:
     """Simulate LLM/API errors."""
 
     @pytest.mark.parametrize("scenario", API_ERROR_SCENARIOS, ids=lambda s: s.name)
+    @pytest.mark.fast
     def test_api_error_detection(self, api_healer, scenario):
         """APIHealer should detect all API-related errors."""
         error = scenario.error_type(scenario.error_message)
@@ -571,6 +581,7 @@ class TestAPIHealerSimulations:
         can_handle = api_healer.can_handle(error, "MATCH")
         assert can_handle, f"APIHealer should handle: {scenario.name}"
 
+    @pytest.mark.fast
     def test_rate_limit_backoff(self, api_healer, mock_pipeline_state):
         """Simulate rate limiting - verify exponential backoff."""
         error = Exception("Error 429: Rate limit exceeded")
@@ -596,6 +607,7 @@ class TestAPIHealerSimulations:
         assert len(backoff_times) == 2
         assert backoff_times[1] >= backoff_times[0]
 
+    @pytest.mark.fast
     def test_quota_exceeded_provider_switch(self, api_healer, mock_pipeline_state):
         """Simulate quota exceeded - verify provider switch."""
         error = Exception("RESOURCE_EXHAUSTED: Quota exceeded for Gemini API")
@@ -607,6 +619,7 @@ class TestAPIHealerSimulations:
         # Should attempt provider switch or return appropriate action
         assert result is not None
 
+    @pytest.mark.fast
     def test_timeout_increase(self, api_healer, mock_pipeline_state):
         """Simulate timeout - verify timeout is increased."""
         error = TimeoutError("Request timed out after 60 seconds")
@@ -620,6 +633,7 @@ class TestAPIHealerSimulations:
             new_timeout = mock_pipeline_state.config.llm.timeout
             assert new_timeout > original_timeout
 
+    @pytest.mark.fast
     def test_auth_error_detection(self, api_healer, mock_pipeline_state):
         """Simulate auth error - should not retry indefinitely."""
         error = Exception("Error 401: Unauthorized. Invalid API key.")
@@ -641,6 +655,7 @@ class TestCheckpointHealerSimulations:
     """Simulate checkpoint corruption scenarios."""
 
     @pytest.mark.parametrize("scenario", CHECKPOINT_ERROR_SCENARIOS, ids=lambda s: s.name)
+    @pytest.mark.fast
     def test_checkpoint_error_detection(self, checkpoint_healer, scenario):
         """CheckpointHealer should detect all checkpoint errors."""
         # JSONDecodeError requires special construction
@@ -652,6 +667,7 @@ class TestCheckpointHealerSimulations:
         can_handle = checkpoint_healer.can_handle(error, "RESUME")
         assert can_handle, f"CheckpointHealer should handle: {scenario.name}"
 
+    @pytest.mark.fast
     def test_json_corruption_backup_restore(self, checkpoint_healer, mock_pipeline_state, temp_project_dir):
         """Simulate JSON corruption - verify backup restoration."""
         # Create corrupted checkpoint
@@ -678,6 +694,7 @@ class TestCheckpointHealerSimulations:
             restored = json.load(f)
             assert "stages" in restored
 
+    @pytest.mark.fast
     def test_both_files_corrupt_fresh_start(self, checkpoint_healer, mock_pipeline_state, temp_project_dir):
         """Simulate both checkpoint and backup corrupt - verify fresh start."""
         # Create corrupted checkpoint
@@ -695,6 +712,7 @@ class TestCheckpointHealerSimulations:
         # Should start fresh (not crash)
         assert result is not None
 
+    @pytest.mark.fast
     def test_missing_backup_fresh_start(self, checkpoint_healer, mock_pipeline_state, temp_project_dir):
         """Simulate no backup exists - verify fresh start."""
         # Only create corrupted checkpoint, no backup
@@ -708,6 +726,7 @@ class TestCheckpointHealerSimulations:
         # Should handle gracefully
         assert result is not None
 
+    @pytest.mark.fast
     def test_cache_rebuild(self, checkpoint_healer, mock_pipeline_state, temp_project_dir):
         """Simulate missing checkpoint fields - verify cache rebuild."""
         # Create cache files
@@ -736,6 +755,7 @@ class TestDownloadHealerSimulations:
     """Simulate video download errors."""
 
     @pytest.mark.parametrize("scenario", DOWNLOAD_ERROR_SCENARIOS, ids=lambda s: s.name)
+    @pytest.mark.fast
     def test_download_error_detection(self, download_healer, scenario):
         """DownloadHealer should detect all download errors."""
         error = scenario.error_type(scenario.error_message)
@@ -743,6 +763,7 @@ class TestDownloadHealerSimulations:
         can_handle = download_healer.can_handle(error, "DOWNLOAD")
         assert can_handle, f"DownloadHealer should handle: {scenario.name}"
 
+    @pytest.mark.fast
     def test_youtube_rate_limit_backoff(self, download_healer, mock_pipeline_state):
         """Simulate YouTube rate limiting."""
         error = Exception("ERROR: HTTP Error 429: Too Many Requests")
@@ -760,6 +781,7 @@ class TestDownloadHealerSimulations:
         assert len(backoff_times) == 1
         assert backoff_times[0] >= 10.0  # Initial backoff
 
+    @pytest.mark.fast
     def test_unavailable_video_skip(self, download_healer, mock_pipeline_state):
         """Simulate unavailable video - verify skip."""
         error = Exception("ERROR: Video unavailable (video_id: dQw4w9WgXcQ)")
@@ -770,6 +792,7 @@ class TestDownloadHealerSimulations:
         assert result.success
         assert result.action.value in ["skip", "retry"]
 
+    @pytest.mark.fast
     def test_private_video_skip(self, download_healer, mock_pipeline_state):
         """Simulate private video - verify skip."""
         error = Exception("ERROR: Private video. Sign in to access.")
@@ -778,6 +801,7 @@ class TestDownloadHealerSimulations:
 
         assert result.success
 
+    @pytest.mark.fast
     def test_format_error_alternate_format(self, download_healer, mock_pipeline_state):
         """Simulate format extraction error - verify alternate format."""
         error = Exception("ERROR: No video formats found")
@@ -787,6 +811,7 @@ class TestDownloadHealerSimulations:
         # Should try alternate format or skip
         assert result is not None
 
+    @pytest.mark.fast
     def test_multiple_skipped_videos_tracking(self, download_healer, mock_pipeline_state):
         """Verify tracking of multiple skipped videos."""
         errors = [
@@ -812,6 +837,7 @@ class TestDownloadHealerSimulations:
 class TestDiskHealerSimulations:
     """Simulate disk-related errors."""
 
+    @pytest.mark.fast
     def test_disk_healer_import(self):
         """Verify DiskHealer can be imported."""
         try:
@@ -820,6 +846,7 @@ class TestDiskHealerSimulations:
         except ImportError:
             pytest.skip("DiskHealer not implemented yet")
 
+    @pytest.mark.fast
     def test_disk_full_detection(self, mock_config, temp_project_dir):
         """DiskHealer should detect disk full errors."""
         try:
@@ -833,6 +860,7 @@ class TestDiskHealerSimulations:
         except ImportError:
             pytest.skip("DiskHealer not implemented")
 
+    @pytest.mark.fast
     def test_disk_full_cache_cleanup(self, mock_config, temp_project_dir):
         """Simulate disk full - verify cache cleanup."""
         try:
@@ -867,6 +895,7 @@ class TestDiskHealerSimulations:
 class TestPathHealerSimulations:
     """Simulate path-related errors."""
 
+    @pytest.mark.fast
     def test_path_healer_import(self):
         """Verify PathHealer can be imported."""
         try:
@@ -875,6 +904,7 @@ class TestPathHealerSimulations:
         except ImportError:
             pytest.skip("PathHealer not implemented yet")
 
+    @pytest.mark.fast
     def test_long_path_detection(self, mock_config, temp_project_dir):
         """PathHealer should detect path length errors."""
         try:
@@ -888,6 +918,7 @@ class TestPathHealerSimulations:
         except ImportError:
             pytest.skip("PathHealer not implemented")
 
+    @pytest.mark.fast
     def test_unicode_path_detection(self, mock_config, temp_project_dir):
         """PathHealer should detect unicode encoding errors."""
         try:
@@ -901,6 +932,7 @@ class TestPathHealerSimulations:
         except ImportError:
             pytest.skip("PathHealer not implemented")
 
+    @pytest.mark.fast
     def test_short_path_switch(self, mock_config, temp_project_dir):
         """Simulate long path - verify switch to short path."""
         try:
@@ -994,11 +1026,13 @@ def complete_mock_config():
 class TestOrchestratorSimulations:
     """Simulate orchestrated healing scenarios."""
 
+    @pytest.mark.fast
     def test_orchestrator_import(self):
         """Verify HealingOrchestrator can be imported."""
         from src.agents.orchestrator import HealingOrchestrator
         assert HealingOrchestrator is not None
 
+    @pytest.mark.fast
     def test_healer_selection(self, temp_project_dir, complete_mock_config):
         """Orchestrator should select correct healer for error."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -1014,6 +1048,7 @@ class TestOrchestratorSimulations:
         healer_names = [h.name for h in healers]
         assert "api-healer" in healer_names or len(healers) > 0
 
+    @pytest.mark.fast
     def test_preflight_check_disk_space(self, temp_project_dir, complete_mock_config):
         """Orchestrator preflight should check disk space."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -1035,6 +1070,7 @@ class TestOrchestratorSimulations:
         # Should return list of issues (may be empty if disk has space)
         assert isinstance(issues, list)
 
+    @pytest.mark.fast
     def test_config_snapshot_rollback(self, temp_project_dir, complete_mock_config):
         """Orchestrator should snapshot and rollback config."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -1057,6 +1093,7 @@ class TestOrchestratorSimulations:
         # Config should be restored (if implementation supports it)
         # Note: depends on implementation details
 
+    @pytest.mark.fast
     def test_coordinate_heal_flow(self, temp_project_dir, mock_pipeline_state, complete_mock_config):
         """Test coordinated healing flow."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -1081,6 +1118,7 @@ class TestOrchestratorSimulations:
         # Should return a HealerResult
         assert result is not None
 
+    @pytest.mark.fast
     def test_circular_healing_detection(self, temp_project_dir, mock_pipeline_state, complete_mock_config):
         """Orchestrator should detect circular healing loops."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -1119,6 +1157,7 @@ class TestOrchestratorSimulations:
 class TestHealingIntegration:
     """Integration tests for multiple healers working together."""
 
+    @pytest.mark.fast
     def test_cascading_failure_recovery(self, mock_config, temp_project_dir, mock_pipeline_state):
         """Simulate cascading failures across healers."""
         from src.agents.healers.api import APIHealer
@@ -1149,6 +1188,7 @@ class TestHealingIntegration:
 
         assert checkpoint_result.success
 
+    @pytest.mark.fast
     def test_multiple_healers_same_stage(self, mock_config, temp_project_dir, mock_pipeline_state):
         """Multiple healers may be needed for complex errors."""
         from src.agents.healers.otio import OTIOHealer
@@ -1171,6 +1211,7 @@ class TestHealingIntegration:
         # Should handle at least one of the issues
         assert result is not None
 
+    @pytest.mark.fast
     def test_healer_notification_chain(self, mock_config, temp_project_dir):
         """Healers should notify each other of changes."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -1196,6 +1237,7 @@ class TestHealingIntegration:
 
         # No assertions needed - just verifying no crash
 
+    @pytest.mark.fast
     def test_strategy_escalation(self, mock_config, temp_project_dir, mock_pipeline_state):
         """Verify strategy escalation from conservative to aggressive."""
         from src.agents.strategy import HealingStrategy
@@ -1217,11 +1259,13 @@ class TestHealingIntegration:
 class TestResilientRunnerSimulations:
     """Simulate pipeline execution with healing."""
 
+    @pytest.mark.fast
     def test_runner_import(self):
         """Verify ResilientRunner can be imported."""
         from src.agents.runner import ResilientRunner
         assert ResilientRunner is not None
 
+    @pytest.mark.fast
     def test_runner_initialization(self, temp_project_dir, complete_mock_config):
         """Runner should initialize with orchestrator."""
         from src.agents.runner import ResilientRunner
@@ -1241,6 +1285,7 @@ class TestResilientRunnerSimulations:
         assert runner is not None
         assert runner.orchestrator is orchestrator
 
+    @pytest.mark.fast
     def test_heal_history_tracking(self, temp_project_dir, complete_mock_config):
         """Runner should track healing history."""
         from src.agents.runner import ResilientRunner
@@ -1260,6 +1305,7 @@ class TestResilientRunnerSimulations:
         assert runner.heal_history == []
         assert runner.total_heals == 0
 
+    @pytest.mark.fast
     def test_healer_can_handle_check(self, temp_project_dir, complete_mock_config):
         """Runner healers should respond to can_handle checks."""
         from src.agents.runner import ResilientRunner
@@ -1284,6 +1330,7 @@ class TestResilientRunnerSimulations:
         # At least one healer should handle this
         assert can_handle_count > 0
 
+    @pytest.mark.fast
     def test_runner_max_attempts_from_strategy(self, temp_project_dir, complete_mock_config):
         """Runner should use max attempts from strategy."""
         from src.agents.runner import ResilientRunner
@@ -1323,6 +1370,7 @@ class TestResilientRunnerSimulations:
 class TestHealingStress:
     """Stress tests for the healing system."""
 
+    @pytest.mark.fast
     def test_rapid_error_recovery(self, mock_config, temp_project_dir, mock_pipeline_state):
         """100 errors in rapid succession."""
         from src.agents.healers.api import APIHealer
@@ -1341,6 +1389,7 @@ class TestHealingStress:
         # Most should be handled
         assert errors_handled > 50
 
+    @pytest.mark.fast
     def test_mixed_error_types(self, mock_config, temp_project_dir, mock_pipeline_state):
         """Handle mix of different error types."""
         from src.agents.healers.api import APIHealer
@@ -1368,6 +1417,7 @@ class TestHealingStress:
                         healer.fix(error, mock_pipeline_state, "TEST")
                         break
 
+    @pytest.mark.fast
     def test_concurrent_healing(self, mock_config, temp_project_dir, mock_pipeline_state):
         """Multiple threads triggering healing simultaneously."""
         from src.agents.healers.api import APIHealer
@@ -1418,6 +1468,7 @@ class TestHealingRegression:
             result = otio_healer.fix(error, mock_pipeline_state, "OUTPUT")
             assert result is not None
 
+    @pytest.mark.fast
     def test_none_state_handling(self, api_healer):
         """Handle None state gracefully."""
         error = Exception("Error 429")
@@ -1430,6 +1481,7 @@ class TestHealingRegression:
             # Expected - None state not supported
             pass
 
+    @pytest.mark.fast
     def test_unicode_error_message(self, otio_healer, mock_pipeline_state):
         """Handle unicode in error messages."""
         error = ValueError("Error: 日本語ファイル名.mp4 not found")
@@ -1440,6 +1492,7 @@ class TestHealingRegression:
             result = otio_healer.fix(error, mock_pipeline_state, "OUTPUT")
             assert result is not None
 
+    @pytest.mark.fast
     def test_very_long_error_message(self, api_healer, mock_pipeline_state):
         """Handle very long error messages."""
         error = Exception("Error: " + "x" * 10000)

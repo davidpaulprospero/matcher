@@ -102,6 +102,7 @@ def temp_dir():
 class TestTimelineExact3000NoSplit:
     """Test that timeline with exactly 3000 items does not split (AC1)."""
 
+    @pytest.mark.fast
     def test_split_timeline_3000_segments_returns_single_timeline(self, create_timeline_with_n_segments):
         """Timeline with exactly 3000 segments should not split when max=3000."""
         timeline = create_timeline_with_n_segments(3000)
@@ -111,6 +112,7 @@ class TestTimelineExact3000NoSplit:
         assert len(result) == 1
         assert result[0] == timeline
 
+    @pytest.mark.fast
     def test_split_timeline_2999_segments_returns_single_timeline(self, create_timeline_with_n_segments):
         """Timeline with 2999 segments (under threshold) should not split."""
         timeline = create_timeline_with_n_segments(2999)
@@ -120,6 +122,7 @@ class TestTimelineExact3000NoSplit:
         assert len(result) == 1
         assert result[0] == timeline
 
+    @pytest.mark.fast
     def test_split_timeline_boundary_at_max_segments(self, create_timeline_with_n_segments):
         """Verify boundary condition: exactly max_segments returns original timeline."""
         max_segments = 100  # Use smaller number for faster test
@@ -131,6 +134,7 @@ class TestTimelineExact3000NoSplit:
         # Should return original timeline object when no split needed
         assert result[0] == timeline
 
+    @pytest.mark.fast
     def test_clip_count_at_error_threshold_no_auto_split_in_count(self, create_timeline_with_n_segments):
         """Test that _count_timeline_clips correctly counts at threshold boundary."""
         # Note: CLIP_COUNT_ERROR_THRESHOLD is for warning, not auto-split trigger
@@ -151,6 +155,7 @@ class TestTimelineExact3000NoSplit:
 class TestTimelineAutoSplit:
     """Test that timeline with 3001+ items auto-splits (AC2)."""
 
+    @pytest.mark.fast
     def test_split_timeline_3001_segments_creates_two_parts(self, create_timeline_with_n_segments):
         """Timeline with 3001 segments should split into 2 parts when max=3000."""
         timeline = create_timeline_with_n_segments(3001)
@@ -163,6 +168,7 @@ class TestTimelineAutoSplit:
         # Second part should have 1 segment
         assert len(list(result[1].tracks[0])) == 1
 
+    @pytest.mark.fast
     def test_split_timeline_6000_segments_creates_two_parts(self, create_timeline_with_n_segments):
         """Timeline with 6000 segments should split into exactly 2 parts when max=3000."""
         timeline = create_timeline_with_n_segments(6000)
@@ -173,6 +179,7 @@ class TestTimelineAutoSplit:
         assert len(list(result[0].tracks[0])) == 3000
         assert len(list(result[1].tracks[0])) == 3000
 
+    @pytest.mark.fast
     def test_split_timeline_6001_segments_creates_three_parts(self, create_timeline_with_n_segments):
         """Timeline with 6001 segments should split into 3 parts when max=3000."""
         timeline = create_timeline_with_n_segments(6001)
@@ -184,6 +191,7 @@ class TestTimelineAutoSplit:
         assert len(list(result[1].tracks[0])) == 3000
         assert len(list(result[2].tracks[0])) == 1
 
+    @pytest.mark.fast
     def test_split_timeline_calculates_correct_num_parts(self, create_timeline_with_n_segments):
         """Verify num_parts calculation matches math.ceil(segments / max_segments)."""
         test_cases = [
@@ -200,6 +208,7 @@ class TestTimelineAutoSplit:
             assert len(result) == expected_parts, \
                 f"Expected {expected_parts} parts for {n_segments} segments with max={max_seg}, got {len(result)}"
 
+    @pytest.mark.fast
     def test_split_timeline_part_names_include_part_number(self, create_timeline_with_n_segments):
         """Split timelines should have part number in their names."""
         timeline = create_timeline_with_n_segments(100)
@@ -210,6 +219,7 @@ class TestTimelineAutoSplit:
         assert "(Part 2)" in result[1].name
         assert "(Part 3)" in result[2].name
 
+    @pytest.mark.fast
     def test_save_timeline_split_generates_part_files(self, create_timeline_with_n_segments, temp_dir):
         """save_timeline_split with max_segments_per_file creates part files."""
         timeline = create_timeline_with_n_segments(100)
@@ -229,6 +239,7 @@ class TestTimelineAutoSplit:
         for part_path in full_parts:
             assert Path(part_path).exists(), f"Part file should exist: {part_path}"
 
+    @pytest.mark.fast
     def test_save_timeline_split_no_split_when_under_threshold(self, create_timeline_with_n_segments, temp_dir):
         """save_timeline_split should create single FULL file when under threshold."""
         timeline = create_timeline_with_n_segments(50)
@@ -255,6 +266,7 @@ class TestTimelineAutoSplit:
 class TestMediaPathNormalizerDeduplication:
     """Test MediaPathNormalizer deduplicates same file in different folders (AC3/Rule 16)."""
 
+    @pytest.mark.fast
     def test_normalizer_maps_duplicate_files_to_canonical(self, temp_dir):
         """Same file in different folders should map to single canonical path."""
         # Create duplicate files in different folders
@@ -285,6 +297,7 @@ class TestMediaPathNormalizerDeduplication:
         assert canonical_stock == canonical_broll
         assert "stock" in canonical_stock  # stock/ is preferred
 
+    @pytest.mark.fast
     def test_normalizer_prefers_stock_folder(self, temp_dir):
         """MediaPathNormalizer should prefer /stock/ folder for canonical path.
 
@@ -317,6 +330,7 @@ class TestMediaPathNormalizerDeduplication:
         # Stock should be canonical when using forward slashes (matches '/stock/' check)
         assert normalizer.get_canonical(other_file_str) == stock_file_str
 
+    @pytest.mark.fast
     def test_normalizer_uses_shortest_path_when_no_stock(self, temp_dir):
         """Without /stock/ folder, normalizer should prefer shortest path."""
         # Create files in paths of different lengths
@@ -341,6 +355,7 @@ class TestMediaPathNormalizerDeduplication:
         canonical = normalizer.get_canonical(str(long_file))
         assert canonical == str(short_file)
 
+    @pytest.mark.fast
     def test_normalizer_tracks_duplicate_count(self, temp_dir):
         """MediaPathNormalizer should count duplicates found."""
         # Create 3 copies of same file
@@ -365,6 +380,7 @@ class TestMediaPathNormalizerDeduplication:
         # 3 paths -> 1 canonical = 2 duplicates
         assert normalizer.duplicates_found == 2
 
+    @pytest.mark.fast
     def test_normalizer_unique_files_map_to_themselves(self, temp_dir):
         """Unique files (different name/size) should map to themselves."""
         dir1 = temp_dir / "dir1"
@@ -387,6 +403,7 @@ class TestMediaPathNormalizerDeduplication:
         assert normalizer.get_canonical(str(file2)) == str(file2)
         assert normalizer.duplicates_found == 0
 
+    @pytest.mark.fast
     def test_build_canonical_media_map_handles_missing_files(self, temp_dir):
         """build_canonical_media_map should skip non-existent files gracefully."""
         existing_file = temp_dir / "exists.mp4"
@@ -413,6 +430,7 @@ class TestMediaPathNormalizerDeduplication:
 class TestSplitTimelineClipTiming:
     """Test that split timelines maintain correct clip timing (AC4)."""
 
+    @pytest.mark.fast
     def test_split_timeline_clips_preserve_source_range(self, create_timeline_with_n_segments):
         """Clips in split timelines should preserve their source_range values."""
         timeline = create_timeline_with_n_segments(100)
@@ -428,6 +446,7 @@ class TestSplitTimelineClipTiming:
             assert first_clip.source_range.start_time.value == expected_start_frame
             assert first_clip.source_range.duration.value == 30  # 1 second
 
+    @pytest.mark.fast
     def test_split_timeline_part_continuity(self, create_timeline_with_n_segments):
         """Last clip of part N should be immediately before first clip of part N+1."""
         timeline = create_timeline_with_n_segments(100)
@@ -449,6 +468,7 @@ class TestSplitTimelineClipTiming:
             assert first_clip_start == last_clip_end, \
                 f"Discontinuity between part {i} and {i+1}: {last_clip_end} -> {first_clip_start}"
 
+    @pytest.mark.fast
     def test_split_timeline_total_clips_equals_original(self, create_timeline_with_n_segments):
         """Total clips across all split parts should equal original timeline."""
         n_segments = 150
@@ -462,6 +482,7 @@ class TestSplitTimelineClipTiming:
 
         assert total_clips_in_parts == n_segments
 
+    @pytest.mark.fast
     def test_split_timeline_audio_tracks_sync_with_video(self, create_timeline_with_n_segments):
         """Audio tracks in split timeline should match video track clip count."""
         timeline = create_timeline_with_n_segments(100)
@@ -479,6 +500,7 @@ class TestSplitTimelineClipTiming:
                 assert video_clip_count == audio_clip_count, \
                     "Video and audio track clip counts should match in split timeline"
 
+    @pytest.mark.fast
     def test_split_timeline_preserves_metadata(self, create_timeline_with_n_segments):
         """Split timelines should preserve Resolve_OTIO metadata."""
         timeline = create_timeline_with_n_segments(100)
@@ -500,6 +522,7 @@ class TestSplitTimelineClipTiming:
 class TestLargeTimelineWarnings:
     """Test that large timeline warning is logged at threshold (AC5)."""
 
+    @pytest.mark.fast
     def test_log_warning_at_warning_threshold(self, caplog):
         """Warning should be logged at CLIP_COUNT_WARNING_THRESHOLD."""
         caplog.set_level(logging.WARNING)
@@ -509,6 +532,7 @@ class TestLargeTimelineWarnings:
         assert "approaching DaVinci limit" in caplog.text
         assert len([r for r in caplog.records if r.levelno == logging.WARNING]) >= 1
 
+    @pytest.mark.fast
     def test_log_error_at_error_threshold(self, caplog):
         """Error should be logged at CLIP_COUNT_ERROR_THRESHOLD."""
         caplog.set_level(logging.ERROR)
@@ -519,6 +543,7 @@ class TestLargeTimelineWarnings:
         assert "LITE mode" in caplog.text
         assert len([r for r in caplog.records if r.levelno == logging.ERROR]) >= 1
 
+    @pytest.mark.fast
     def test_no_warning_below_threshold(self, caplog):
         """No warning should be logged below CLIP_COUNT_WARNING_THRESHOLD."""
         caplog.set_level(logging.WARNING)
@@ -528,6 +553,7 @@ class TestLargeTimelineWarnings:
         assert "approaching DaVinci limit" not in caplog.text
         assert "exceeding safe limit" not in caplog.text
 
+    @pytest.mark.fast
     def test_threshold_values_match_rule17(self):
         """Verify threshold constants match Rule 17 specification."""
         # Per CLAUDE.md Rule 17: auto-split at 3000 items
@@ -535,6 +561,7 @@ class TestLargeTimelineWarnings:
         assert CLIP_COUNT_WARNING_THRESHOLD == 2500
         assert CLIP_COUNT_ERROR_THRESHOLD == 3000
 
+    @pytest.mark.fast
     def test_warning_includes_clip_count(self, caplog):
         """Warning message should include the actual clip count."""
         caplog.set_level(logging.WARNING)
@@ -544,6 +571,7 @@ class TestLargeTimelineWarnings:
 
         assert str(test_count) in caplog.text
 
+    @pytest.mark.fast
     def test_error_suggests_solutions(self, caplog):
         """Error message should suggest LITE mode and split timeline."""
         caplog.set_level(logging.ERROR)
@@ -561,6 +589,7 @@ class TestLargeTimelineWarnings:
 class TestAutoSplitIntegration:
     """Integration tests for auto-split workflow."""
 
+    @pytest.mark.fast
     def test_full_workflow_small_timeline(self, create_timeline_with_n_segments, temp_dir):
         """Small timeline should save as single file without splitting."""
         timeline = create_timeline_with_n_segments(50)
@@ -573,6 +602,7 @@ class TestAutoSplitIntegration:
         assert any('_FULL.otio' in p for p in paths)
         assert not any('_FULL_part' in p for p in paths)
 
+    @pytest.mark.fast
     def test_full_workflow_large_timeline(self, create_timeline_with_n_segments, temp_dir):
         """Large timeline should auto-split when max_segments_per_file is set."""
         timeline = create_timeline_with_n_segments(100)
@@ -590,6 +620,7 @@ class TestAutoSplitIntegration:
             loaded = otio.adapters.read_from_file(part_path)
             assert isinstance(loaded, otio.schema.Timeline)
 
+    @pytest.mark.fast
     def test_empty_timeline_no_split(self):
         """Timeline with no video tracks should not error on split."""
         timeline = otio.schema.Timeline(name="Empty")

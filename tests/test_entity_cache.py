@@ -95,6 +95,7 @@ def sample_image_files(temp_dir):
 class TestCachedEntity:
     """Test CachedEntity dataclass"""
 
+    @pytest.mark.fast
     def test_cached_entity_creation(self):
         """Test creating CachedEntity"""
         entity = CachedEntity(
@@ -109,6 +110,7 @@ class TestCachedEntity:
         assert entity.entity_type == "GPE"
         assert len(entity.images) == 1
 
+    @pytest.mark.fast
     def test_cached_entity_to_dict(self, sample_entity):
         """Test CachedEntity serialization"""
         data = sample_entity.to_dict()
@@ -117,6 +119,7 @@ class TestCachedEntity:
         assert data['entity_type'] == "GPE"
         assert len(data['images']) == 2
 
+    @pytest.mark.fast
     def test_cached_entity_from_dict(self, sample_entity):
         """Test CachedEntity deserialization"""
         data = sample_entity.to_dict()
@@ -134,11 +137,13 @@ class TestCachedEntity:
 class TestEntityCacheInit:
     """Test EntityCache initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_directories(self, entity_cache):
         """Test initialization creates cache directories"""
         assert entity_cache.cache_dir.exists()
         assert (entity_cache.cache_dir / EntityCache.IMAGES_SUBDIR).exists()
 
+    @pytest.mark.fast
     def test_init_with_disabled_cache(self, temp_dir):
         """Test initialization with disabled cache"""
         config = Mock()
@@ -152,6 +157,7 @@ class TestEntityCacheInit:
 
         assert cache.enabled is False
 
+    @pytest.mark.fast
     def test_init_sets_config_values(self, temp_dir, mock_config):
         """Test initialization sets all config values"""
         mock_config.cache_dir = str(temp_dir / "cache")
@@ -173,6 +179,7 @@ class TestEntityCacheInit:
 class TestEntityRegistration:
     """Test adding entities to cache"""
 
+    @pytest.mark.fast
     def test_add_entity_basic(self, entity_cache, sample_image_files):
         """Test adding entity to cache"""
         entity_cache.add_entity(
@@ -187,6 +194,7 @@ class TestEntityRegistration:
         assert result is not None
         assert result.entity_name == "Paris"
 
+    @pytest.mark.fast
     def test_add_entity_copies_images(self, entity_cache, sample_image_files):
         """Test adding entity copies images to cache"""
         entity_cache.add_entity(
@@ -203,6 +211,7 @@ class TestEntityRegistration:
         assert cache_entity_dir.exists()
         assert len(list(cache_entity_dir.glob("*.jpg"))) == 2
 
+    @pytest.mark.fast
     def test_add_entity_with_empty_images(self, entity_cache):
         """Test adding entity with no images does nothing"""
         entity_cache.add_entity(
@@ -216,6 +225,7 @@ class TestEntityRegistration:
         result = entity_cache.find_entity("Empty")
         assert result is None
 
+    @pytest.mark.fast
     def test_add_entity_when_disabled(self, temp_dir):
         """Test adding entity when cache is disabled"""
         config = Mock()
@@ -238,6 +248,7 @@ class TestEntityRegistration:
 class TestEntityFinding:
     """Test finding entities with fuzzy matching"""
 
+    @pytest.mark.fast
     def test_find_entity_exact_match(self, entity_cache, sample_image_files):
         """Test finding entity with exact name match"""
         entity_cache.add_entity("Paris", "GPE", sample_image_files, "proj")
@@ -247,6 +258,7 @@ class TestEntityFinding:
         assert result is not None
         assert result.entity_name == "Paris"
 
+    @pytest.mark.fast
     def test_find_entity_case_insensitive(self, entity_cache, sample_image_files):
         """Test finding is case-insensitive"""
         entity_cache.add_entity("Paris", "GPE", sample_image_files, "proj")
@@ -256,6 +268,7 @@ class TestEntityFinding:
         assert result is not None
         assert result.entity_name == "Paris"
 
+    @pytest.mark.fast
     def test_find_entity_fuzzy_match(self, entity_cache, sample_image_files):
         """Test finding entity with fuzzy matching"""
         entity_cache.add_entity("Eiffel Tower", "GPE", sample_image_files, "proj")
@@ -266,6 +279,7 @@ class TestEntityFinding:
         assert result is not None
         assert result.entity_name == "Eiffel Tower"
 
+    @pytest.mark.fast
     def test_find_entity_with_type_filter(self, entity_cache, sample_image_files):
         """Test finding entity filtered by type"""
         entity_cache.add_entity("Paris", "GPE", sample_image_files, "proj")
@@ -278,12 +292,14 @@ class TestEntityFinding:
         result = entity_cache.find_entity("Paris", entity_type="PERSON")
         assert result is None
 
+    @pytest.mark.fast
     def test_find_entity_not_found(self, entity_cache):
         """Test finding non-existent entity"""
         result = entity_cache.find_entity("NonExistent")
 
         assert result is None
 
+    @pytest.mark.fast
     def test_find_entity_when_disabled(self, temp_dir):
         """Test finding entity when cache is disabled"""
         config = Mock()
@@ -306,30 +322,35 @@ class TestEntityFinding:
 class TestFuzzyMatching:
     """Test fuzzy string matching"""
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_identical(self, entity_cache):
         """Test similarity of identical strings"""
         score = entity_cache._fuzzy_similarity("Paris", "Paris")
 
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_different_case(self, entity_cache):
         """Test similarity ignores case"""
         score = entity_cache._fuzzy_similarity("Paris", "PARIS")
 
         assert score == 1.0
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_similar(self, entity_cache):
         """Test similarity of similar strings"""
         score = entity_cache._fuzzy_similarity("Eiffel Tower", "Eifel Tower")
 
         assert score > 0.9  # Very similar
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_different(self, entity_cache):
         """Test similarity of different strings"""
         score = entity_cache._fuzzy_similarity("Paris", "London")
 
         assert score < 0.5
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_empty_string(self, entity_cache):
         """Test similarity with empty string"""
         score = entity_cache._fuzzy_similarity("Paris", "")
@@ -344,6 +365,7 @@ class TestFuzzyMatching:
 class TestCacheValidation:
     """Test cache entry validation"""
 
+    @pytest.mark.fast
     def test_is_valid_recent_entry(self, entity_cache, sample_image_files):
         """Test valid recent entry"""
         entity_cache.add_entity("Paris", "GPE", sample_image_files, "proj")
@@ -353,6 +375,7 @@ class TestCacheValidation:
 
         assert is_valid is True
 
+    @pytest.mark.fast
     def test_is_valid_expired_entry(self, entity_cache, temp_dir):
         """Test expired entry is invalid"""
         entity_cache.max_age_days = 1
@@ -374,6 +397,7 @@ class TestCacheValidation:
 
         assert is_valid is False
 
+    @pytest.mark.fast
     def test_is_valid_missing_files(self, entity_cache):
         """Test entry with missing files is invalid"""
         entity_with_missing = CachedEntity(
@@ -396,6 +420,7 @@ class TestCacheValidation:
 class TestImageRetrievalStrategies:
     """Test different image retrieval strategies"""
 
+    @pytest.mark.fast
     def test_get_images_reference_strategy(self, entity_cache, sample_image_files, temp_dir):
         """Test reference strategy returns absolute paths"""
         entity_cache.cache_strategy = 'reference'
@@ -409,6 +434,7 @@ class TestImageRetrievalStrategies:
         assert len(paths) == 2
         assert all(Path(p).is_absolute() for p in paths)
 
+    @pytest.mark.fast
     def test_get_images_copy_strategy(self, entity_cache, sample_image_files, temp_dir):
         """Test copy strategy copies images to project"""
         entity_cache.cache_strategy = 'copy'
@@ -424,6 +450,7 @@ class TestImageRetrievalStrategies:
         # Should be in project directory
         assert all(str(project_dir) in p for p in paths)
 
+    @pytest.mark.fast
     def test_get_images_symlink_strategy(self, entity_cache, sample_image_files, temp_dir):
         """Test symlink strategy creates symlinks"""
         entity_cache.cache_strategy = 'symlink'
@@ -444,6 +471,7 @@ class TestImageRetrievalStrategies:
 class TestCacheCleanup:
     """Test cache cleanup"""
 
+    @pytest.mark.fast
     def test_cleanup_removes_expired(self, entity_cache, sample_image_files):
         """Test cleanup removes expired entries"""
         entity_cache.max_age_days = 1
@@ -466,6 +494,7 @@ class TestCacheCleanup:
         assert entity_cache.find_entity("Recent") is not None
         assert entity_cache.find_entity("Old") is None
 
+    @pytest.mark.fast
     def test_cleanup_removes_missing_files(self, entity_cache):
         """Test cleanup removes entries with missing files"""
         missing_entity = CachedEntity(
@@ -481,6 +510,7 @@ class TestCacheCleanup:
 
         assert removed_count == 1
 
+    @pytest.mark.fast
     def test_cleanup_when_disabled(self, temp_dir):
         """Test cleanup when cache is disabled"""
         config = Mock()
@@ -503,6 +533,7 @@ class TestCacheCleanup:
 class TestCacheStatistics:
     """Test cache statistics"""
 
+    @pytest.mark.fast
     def test_get_stats_empty_cache(self, entity_cache):
         """Test stats on empty cache"""
         stats = entity_cache.get_stats()
@@ -511,6 +542,7 @@ class TestCacheStatistics:
         assert stats['total_entities'] == 0
         assert stats['valid_entities'] == 0
 
+    @pytest.mark.fast
     def test_get_stats_with_entities(self, entity_cache, sample_image_files):
         """Test stats with entities"""
         entity_cache.add_entity("Entity1", "PERSON", sample_image_files, "proj")
@@ -522,6 +554,7 @@ class TestCacheStatistics:
         assert stats['total_images'] == 4  # 2 images each
         assert stats['fuzzy_threshold'] == 0.85
 
+    @pytest.mark.fast
     def test_get_stats_when_disabled(self, temp_dir):
         """Test stats when cache is disabled"""
         config = Mock()
@@ -544,6 +577,7 @@ class TestCacheStatistics:
 class TestUtilityFunctions:
     """Test utility functions"""
 
+    @pytest.mark.fast
     def test_safe_name_basic(self, entity_cache):
         """Test safe name conversion"""
         safe = entity_cache._safe_name("Eiffel Tower")
@@ -551,6 +585,7 @@ class TestUtilityFunctions:
         assert " " not in safe
         assert safe == "Eiffel_Tower"
 
+    @pytest.mark.fast
     def test_safe_name_special_chars(self, entity_cache):
         """Test safe name removes special characters"""
         safe = entity_cache._safe_name("Entity/Name:Test")
@@ -559,6 +594,7 @@ class TestUtilityFunctions:
         assert ":" not in safe
         assert safe == "Entity_Name_Test"
 
+    @pytest.mark.fast
     def test_safe_name_length_limit(self, entity_cache):
         """Test safe name limits length"""
         long_name = "A" * 100
@@ -574,6 +610,7 @@ class TestUtilityFunctions:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_find_entity_best_fuzzy_match(self, entity_cache, sample_image_files):
         """Test finding returns best fuzzy match"""
         entity_cache.add_entity("Eiffel Tower", "GPE", sample_image_files, "proj1")
@@ -585,6 +622,7 @@ class TestEdgeCases:
 
         assert result.entity_name == "Eiffel Tower"
 
+    @pytest.mark.fast
     def test_add_entity_skips_nonexistent_files(self, entity_cache, temp_dir):
         """Test adding entity skips files that don't exist"""
         fake_paths = [
@@ -598,6 +636,7 @@ class TestEdgeCases:
         result = entity_cache.find_entity("Test")
         assert result is None  # No valid images, so not added
 
+    @pytest.mark.fast
     def test_get_images_creates_project_dir(self, entity_cache, sample_image_files, temp_dir):
         """Test get_images creates project directory if missing"""
         entity_cache.add_entity("Test", "PERSON", sample_image_files, "proj")

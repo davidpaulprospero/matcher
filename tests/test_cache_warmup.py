@@ -41,18 +41,21 @@ class ConcreteCache(BaseCache[str]):
 class TestWarmCacheFunctionExists:
     """Test that warm_cache function exists and has correct signature."""
 
+    @pytest.mark.fast
     def test_warm_cache_method_exists(self, tmp_path):
         """Test that warm_cache method exists on BaseCache."""
         cache = ConcreteCache(tmp_path)
         assert hasattr(cache, 'warm_cache')
         assert callable(cache.warm_cache)
 
+    @pytest.mark.fast
     def test_warm_cache_returns_dict(self, tmp_path):
         """Test that warm_cache returns a dictionary."""
         cache = ConcreteCache(tmp_path)
         result = cache.warm_cache()
         assert isinstance(result, dict)
 
+    @pytest.mark.fast
     def test_warm_cache_dict_has_required_keys(self, tmp_path):
         """Test that warm_cache returns dict with required keys."""
         cache = ConcreteCache(tmp_path)
@@ -65,12 +68,14 @@ class TestWarmCacheFunctionExists:
 class TestPreWarmParameter:
     """Test pre_warm parameter in BaseCache.__init__."""
 
+    @pytest.mark.fast
     def test_pre_warm_parameter_exists(self, tmp_path):
         """Test that pre_warm parameter is accepted by __init__."""
         # Should not raise
         cache = ConcreteCache(tmp_path, pre_warm=False)
         assert cache is not None
 
+    @pytest.mark.fast
     def test_pre_warm_default_is_false(self, tmp_path):
         """Test that pre_warm defaults to False."""
         # Creating without pre_warm should not trigger warm_cache
@@ -78,12 +83,14 @@ class TestPreWarmParameter:
             cache = ConcreteCache(tmp_path)
             mock_warm.assert_not_called()
 
+    @pytest.mark.fast
     def test_pre_warm_true_calls_warm_cache(self, tmp_path):
         """Test that pre_warm=True calls warm_cache on init."""
         with patch.object(ConcreteCache, 'warm_cache', return_value={'entries_loaded': 0, 'entries_removed': 0, 'elapsed_ms': 0.0}) as mock_warm:
             cache = ConcreteCache(tmp_path, pre_warm=True)
             mock_warm.assert_called_once()
 
+    @pytest.mark.fast
     def test_pre_warm_false_does_not_call_warm_cache(self, tmp_path):
         """Test that pre_warm=False does not call warm_cache."""
         with patch.object(ConcreteCache, 'warm_cache') as mock_warm:
@@ -94,6 +101,7 @@ class TestPreWarmParameter:
 class TestWarmCacheWithEntries:
     """Test warm_cache behavior with entries in cache."""
 
+    @pytest.mark.fast
     def test_warm_cache_loads_valid_entries(self, tmp_path):
         """Test that warm_cache counts valid entries as loaded."""
         cache = ConcreteCache(tmp_path)
@@ -106,6 +114,7 @@ class TestWarmCacheWithEntries:
         assert result['entries_loaded'] == 3
         assert result['entries_removed'] == 0
 
+    @pytest.mark.fast
     def test_warm_cache_empty_cache(self, tmp_path):
         """Test warm_cache on empty cache."""
         cache = ConcreteCache(tmp_path)
@@ -115,6 +124,7 @@ class TestWarmCacheWithEntries:
         assert result['entries_removed'] == 0
         assert result['elapsed_ms'] >= 0
 
+    @pytest.mark.fast
     def test_warm_cache_single_entry(self, tmp_path):
         """Test warm_cache with single entry."""
         cache = ConcreteCache(tmp_path)
@@ -144,6 +154,7 @@ class TestWarmCacheWithExpiredEntries:
         assert result['entries_loaded'] == 0
         assert result['entries_removed'] == 2
 
+    @pytest.mark.fast
     def test_warm_cache_keeps_non_expired_entries(self, tmp_path):
         """Test that warm_cache keeps non-expired entries."""
         # Create cache with 10 second TTL
@@ -177,6 +188,7 @@ class TestWarmCacheWithExpiredEntries:
 class TestWarmCacheLogging:
     """Test warm_cache logging behavior."""
 
+    @pytest.mark.fast
     def test_warm_cache_logs_completion(self, tmp_path, caplog):
         """Test that warm_cache logs completion message."""
         cache = ConcreteCache(tmp_path)
@@ -189,6 +201,7 @@ class TestWarmCacheLogging:
         assert 'Cache warm-up complete' in caplog.text
         assert '2 entries loaded' in caplog.text
 
+    @pytest.mark.fast
     def test_warm_cache_logs_time_in_ms(self, tmp_path, caplog):
         """Test that warm_cache logs time in milliseconds."""
         cache = ConcreteCache(tmp_path)
@@ -210,6 +223,7 @@ class TestWarmCacheLogging:
 
         assert 'Removed' in caplog.text or 'expired/invalid' in caplog.text
 
+    @pytest.mark.fast
     def test_warm_cache_no_removal_log_when_none_removed(self, tmp_path, caplog):
         """Test that warm_cache does not log removal when none removed."""
         cache = ConcreteCache(tmp_path)
@@ -230,6 +244,7 @@ class TestWarmCacheLogging:
 class TestWarmCacheTiming:
     """Test warm_cache timing measurement."""
 
+    @pytest.mark.fast
     def test_warm_cache_elapsed_ms_is_positive(self, tmp_path):
         """Test that elapsed_ms is positive."""
         cache = ConcreteCache(tmp_path)
@@ -239,6 +254,7 @@ class TestWarmCacheTiming:
 
         assert result['elapsed_ms'] >= 0
 
+    @pytest.mark.fast
     def test_warm_cache_elapsed_ms_increases_with_entries(self, tmp_path):
         """Test that elapsed time tends to increase with more entries."""
         cache1 = ConcreteCache(tmp_path / 'small')
@@ -258,6 +274,7 @@ class TestWarmCacheTiming:
 class TestWarmCacheWithInvalidEntries:
     """Test warm_cache handling of invalid/corrupted entries."""
 
+    @pytest.mark.fast
     def test_warm_cache_handles_deserialization_failure(self, tmp_path):
         """Test that warm_cache handles deserialization failures gracefully."""
         cache = ConcreteCache(tmp_path)
@@ -274,6 +291,7 @@ class TestWarmCacheWithInvalidEntries:
         assert result['entries_loaded'] == 1
         assert result['entries_removed'] == 1
 
+    @pytest.mark.fast
     def test_warm_cache_removes_corrupted_entries_from_index(self, tmp_path):
         """Test that corrupted entries are removed from index."""
         cache = ConcreteCache(tmp_path)
@@ -293,6 +311,7 @@ class TestWarmCacheWithInvalidEntries:
 class TestPreWarmOnInit:
     """Test that pre_warm=True loads index immediately on init."""
 
+    @pytest.mark.fast
     def test_pre_warm_true_loads_index_on_init(self, tmp_path, caplog):
         """Test that pre_warm=True loads index immediately."""
         # First create a cache with some entries
@@ -309,6 +328,7 @@ class TestPreWarmOnInit:
         assert 'Cache warm-up complete' in caplog.text
         assert '3 entries loaded' in caplog.text
 
+    @pytest.mark.fast
     def test_pre_warm_false_does_not_load_entries(self, tmp_path, caplog):
         """Test that pre_warm=False does not trigger warm-up."""
         # First create a cache with some entries

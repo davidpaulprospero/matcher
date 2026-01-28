@@ -30,6 +30,7 @@ from src.downloader.retry_queue import RetryQueue, BatchRetryConfig
 class TestBudgetSuccessFailureTracking:
     """Test record_success() and record_failure() on RateLimitBudget."""
 
+    @pytest.mark.fast
     def test_record_success_increments_counter(self):
         """record_success increments the successes counter."""
         budget = RateLimitBudget()
@@ -39,12 +40,14 @@ class TestBudgetSuccessFailureTracking:
         budget.record_success()
         assert budget.successes == 2
 
+    @pytest.mark.fast
     def test_record_success_with_keyword(self):
         """record_success accepts optional keyword parameter."""
         budget = RateLimitBudget()
         budget.record_success(keyword="sunset")
         assert budget.successes == 1
 
+    @pytest.mark.fast
     def test_record_failure_increments_counter(self):
         """record_failure increments the failures counter."""
         budget = RateLimitBudget()
@@ -54,6 +57,7 @@ class TestBudgetSuccessFailureTracking:
         budget.record_failure()
         assert budget.failures == 2
 
+    @pytest.mark.fast
     def test_record_failure_tracks_keyword(self):
         """record_failure tracks the keyword in rate_limited list."""
         budget = RateLimitBudget()
@@ -61,6 +65,7 @@ class TestBudgetSuccessFailureTracking:
         assert "ocean" in budget.keywords_rate_limited
         assert budget.failures == 1
 
+    @pytest.mark.fast
     def test_record_failure_no_duplicate_keywords(self):
         """record_failure doesn't duplicate keywords."""
         budget = RateLimitBudget()
@@ -69,6 +74,7 @@ class TestBudgetSuccessFailureTracking:
         assert budget.keywords_rate_limited.count("forest") == 1
         assert budget.failures == 2
 
+    @pytest.mark.fast
     def test_success_failure_in_summary(self):
         """Summary includes successes and failures."""
         budget = RateLimitBudget()
@@ -79,6 +85,7 @@ class TestBudgetSuccessFailureTracking:
         assert summary["successes"] == 2
         assert summary["failures"] == 1
 
+    @pytest.mark.fast
     def test_success_failure_in_serialization(self):
         """to_dict/from_dict roundtrips successes and failures."""
         budget = RateLimitBudget()
@@ -94,6 +101,7 @@ class TestBudgetSuccessFailureTracking:
         assert restored.successes == 2
         assert restored.failures == 1
 
+    @pytest.mark.fast
     def test_clear_resets_success_failure(self):
         """clear() resets successes and failures."""
         budget = RateLimitBudget()
@@ -123,6 +131,7 @@ class TestBudgetExhaustedSkipsKeyword:
         downloader.rate_limit_metrics = MagicMock()
         return downloader
 
+    @pytest.mark.fast
     def test_exhausted_budget_skips_keyword(self):
         """When budget is exhausted, keyword is skipped and added to retry queue."""
         budget = RateLimitBudget()
@@ -137,6 +146,7 @@ class TestBudgetExhaustedSkipsKeyword:
         assert budget.get_recommended_escalation() == "exhausted"
         assert budget.is_exhausted() is True
 
+    @pytest.mark.fast
     def test_budget_not_exhausted_allows_download(self):
         """When budget has resources, download proceeds."""
         budget = RateLimitBudget()
@@ -146,6 +156,7 @@ class TestBudgetExhaustedSkipsKeyword:
         assert budget.get_recommended_escalation() == "backoff"
         assert budget.is_exhausted() is False
 
+    @pytest.mark.fast
     def test_exhausted_budget_records_failure(self):
         """When budget is exhausted, record_failure is called."""
         budget = RateLimitBudget()
@@ -171,6 +182,7 @@ class TestBudgetExhaustedSkipsKeyword:
 class TestBudgetCanBackoffCheck:
     """Test budget.can_backoff() check before retry backoff."""
 
+    @pytest.mark.fast
     def test_can_backoff_allows_retry(self):
         """When backoff budget is available, retry proceeds."""
         budget = RateLimitBudget()
@@ -180,6 +192,7 @@ class TestBudgetCanBackoffCheck:
         delay = 2.0
         assert budget.can_backoff(delay) is True
 
+    @pytest.mark.fast
     def test_can_backoff_exhausted_blocks_retry(self):
         """When backoff budget is exhausted, retry is blocked."""
         budget = RateLimitBudget()
@@ -189,6 +202,7 @@ class TestBudgetCanBackoffCheck:
         delay = 2.0  # 29 + 2 = 31 > 30
         assert budget.can_backoff(delay) is False
 
+    @pytest.mark.fast
     def test_record_backoff_accumulates(self):
         """record_backoff accumulates time in budget."""
         budget = RateLimitBudget()
@@ -204,6 +218,7 @@ class TestBudgetCanBackoffCheck:
         assert "kw1" in budget.keywords_rate_limited
         assert "kw2" in budget.keywords_rate_limited
 
+    @pytest.mark.fast
     def test_backoff_budget_shared_across_keywords(self):
         """Backoff from keyword A reduces budget for keyword B."""
         budget = RateLimitBudget()
@@ -224,6 +239,7 @@ class TestBudgetCanBackoffCheck:
 class TestRetryQueueBudgetState:
     """Test that retry queue receives and stores budget state."""
 
+    @pytest.mark.fast
     def test_set_budget_state(self):
         """Retry queue stores budget state snapshot."""
         queue = RetryQueue(BatchRetryConfig(enabled=True))
@@ -242,6 +258,7 @@ class TestRetryQueueBudgetState:
         assert state["failures"] == 1
         assert state["is_exhausted"] is False
 
+    @pytest.mark.fast
     def test_budget_state_in_stats(self):
         """Budget state is included in retry queue stats."""
         queue = RetryQueue(BatchRetryConfig(enabled=True))
@@ -252,6 +269,7 @@ class TestRetryQueueBudgetState:
         assert "budget_state" in stats
         assert stats["budget_state"]["is_exhausted"] is False
 
+    @pytest.mark.fast
     def test_budget_state_none_by_default(self):
         """Budget state is None by default."""
         queue = RetryQueue(BatchRetryConfig(enabled=True))
@@ -259,6 +277,7 @@ class TestRetryQueueBudgetState:
         stats = queue.get_stats()
         assert stats["budget_state"] is None
 
+    @pytest.mark.fast
     def test_budget_state_reflects_exhaustion(self):
         """Budget state correctly reflects exhausted budget."""
         queue = RetryQueue(BatchRetryConfig(enabled=True))
@@ -286,6 +305,7 @@ class TestRetryQueueBudgetState:
 class TestBudgetConsultationFlow:
     """Test the full budget consultation flow in retry scenarios."""
 
+    @pytest.mark.fast
     def test_budget_tracks_success_and_failure_sequence(self):
         """Budget correctly tracks a sequence of successes and failures."""
         budget = RateLimitBudget()
@@ -308,6 +328,7 @@ class TestBudgetConsultationFlow:
         assert budget.backoff_time_spent == 15.0
         assert len(budget.keywords_rate_limited) == 2  # kw_b and kw_c (backoff tracked both)
 
+    @pytest.mark.fast
     def test_budget_consultation_prevents_waste(self):
         """Budget consultation prevents wasting retries when budget exhausted."""
         budget = RateLimitBudget()
@@ -322,6 +343,7 @@ class TestBudgetConsultationFlow:
         # Should recommend cookie rotation since backoff is exhausted
         assert recommended == "cookie"
 
+    @pytest.mark.fast
     def test_from_dict_preserves_success_failure(self):
         """Checkpoint restore preserves success/failure counts."""
         budget = RateLimitBudget()

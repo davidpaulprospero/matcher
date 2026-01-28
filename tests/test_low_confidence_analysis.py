@@ -102,27 +102,32 @@ def create_match_result(
 class TestAnalyzeLowConfidenceSegmentsFunction:
     """Test that the analyze function exists and has correct signature."""
 
+    @pytest.mark.fast
     def test_function_exists(self):
         """analyze_low_confidence_segments should be importable."""
         from src.matching.main import analyze_low_confidence_segments
         assert analyze_low_confidence_segments is not None
 
+    @pytest.mark.fast
     def test_function_callable(self):
         """analyze_low_confidence_segments should be callable."""
         assert callable(analyze_low_confidence_segments)
 
+    @pytest.mark.fast
     def test_accepts_results_list(self):
         """Function should accept a list of MatchResult objects."""
         results = []
         analysis = analyze_low_confidence_segments(results)
         assert isinstance(analysis, LowConfidenceAnalysis)
 
+    @pytest.mark.fast
     def test_accepts_threshold_parameter(self):
         """Function should accept optional threshold parameter."""
         results = []
         analysis = analyze_low_confidence_segments(results, threshold=0.5)
         assert analysis.threshold == 0.5
 
+    @pytest.mark.fast
     def test_default_threshold_is_0_6(self):
         """Default threshold should be 0.6."""
         results = []
@@ -137,11 +142,13 @@ class TestAnalyzeLowConfidenceSegmentsFunction:
 class TestLowConfidenceAnalysisDataclass:
     """Test the LowConfidenceAnalysis dataclass structure."""
 
+    @pytest.mark.fast
     def test_dataclass_exists(self):
         """LowConfidenceAnalysis should be importable."""
         from src.matching.main import LowConfidenceAnalysis
         assert LowConfidenceAnalysis is not None
 
+    @pytest.mark.fast
     def test_has_low_confidence_count(self):
         """Should have low_confidence_count field."""
         analysis = LowConfidenceAnalysis(
@@ -154,6 +161,7 @@ class TestLowConfidenceAnalysisDataclass:
         )
         assert analysis.low_confidence_count == 5
 
+    @pytest.mark.fast
     def test_has_total_segments(self):
         """Should have total_segments field."""
         analysis = LowConfidenceAnalysis(
@@ -166,6 +174,7 @@ class TestLowConfidenceAnalysisDataclass:
         )
         assert analysis.total_segments == 10
 
+    @pytest.mark.fast
     def test_has_patterns_list(self):
         """Should have patterns list field."""
         analysis = LowConfidenceAnalysis(
@@ -178,6 +187,7 @@ class TestLowConfidenceAnalysisDataclass:
         )
         assert isinstance(analysis.patterns, list)
 
+    @pytest.mark.fast
     def test_has_suggestions_list(self):
         """Should have suggestions list field."""
         analysis = LowConfidenceAnalysis(
@@ -198,11 +208,13 @@ class TestLowConfidenceAnalysisDataclass:
 class TestLowConfidencePatternDataclass:
     """Test the LowConfidencePattern dataclass structure."""
 
+    @pytest.mark.fast
     def test_dataclass_exists(self):
         """LowConfidencePattern should be importable."""
         from src.matching.main import LowConfidencePattern
         assert LowConfidencePattern is not None
 
+    @pytest.mark.fast
     def test_has_pattern_type(self):
         """Should have pattern_type field."""
         pattern = LowConfidencePattern(
@@ -213,6 +225,7 @@ class TestLowConfidencePatternDataclass:
         )
         assert pattern.pattern_type == "short_voiceover"
 
+    @pytest.mark.fast
     def test_has_count(self):
         """Should have count field."""
         pattern = LowConfidencePattern(
@@ -223,6 +236,7 @@ class TestLowConfidencePatternDataclass:
         )
         assert pattern.count == 3
 
+    @pytest.mark.fast
     def test_has_segment_indices(self):
         """Should have segment_indices field."""
         pattern = LowConfidencePattern(
@@ -233,6 +247,7 @@ class TestLowConfidencePatternDataclass:
         )
         assert pattern.segment_indices == [0, 1, 2]
 
+    @pytest.mark.fast
     def test_has_description(self):
         """Should have description field."""
         pattern = LowConfidencePattern(
@@ -251,6 +266,7 @@ class TestLowConfidencePatternDataclass:
 class TestIdentifyLowConfidenceSegments:
     """Test identification of segments below confidence threshold."""
 
+    @pytest.mark.fast
     def test_identifies_segments_below_threshold(self):
         """Should identify segments with confidence < threshold."""
         results = [
@@ -262,6 +278,7 @@ class TestIdentifyLowConfidenceSegments:
         analysis = analyze_low_confidence_segments(results, threshold=0.6)
         assert analysis.low_confidence_count == 1
 
+    @pytest.mark.fast
     def test_threshold_0_6_default(self):
         """Default threshold of 0.6 should be applied."""
         results = [
@@ -273,12 +290,14 @@ class TestIdentifyLowConfidenceSegments:
         analysis = analyze_low_confidence_segments(results)  # default 0.6
         assert analysis.low_confidence_count == 1  # only 0.55 is below 0.6
 
+    @pytest.mark.fast
     def test_empty_results_returns_zero(self):
         """Empty results should return 0 low confidence segments."""
         analysis = analyze_low_confidence_segments([])
         assert analysis.low_confidence_count == 0
         assert analysis.total_segments == 0
 
+    @pytest.mark.fast
     def test_no_low_confidence_returns_zero(self):
         """All high confidence should return 0 low confidence segments."""
         results = [
@@ -289,6 +308,7 @@ class TestIdentifyLowConfidenceSegments:
         analysis = analyze_low_confidence_segments(results)
         assert analysis.low_confidence_count == 0
 
+    @pytest.mark.fast
     def test_calculates_avg_low_confidence(self):
         """Should calculate average confidence of low segments."""
         results = [
@@ -309,6 +329,7 @@ class TestIdentifyLowConfidenceSegments:
 class TestShortVoiceoverPattern:
     """Test detection of short voiceover pattern."""
 
+    @pytest.mark.fast
     def test_detects_short_voiceover(self):
         """Should detect segments with < 20 character voiceover."""
         results = [
@@ -321,6 +342,7 @@ class TestShortVoiceoverPattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "short_voiceover" in pattern_types
 
+    @pytest.mark.fast
     def test_short_voiceover_count(self):
         """Should count all short voiceover segments."""
         results = [
@@ -335,6 +357,7 @@ class TestShortVoiceoverPattern:
         assert short_pattern is not None
         assert short_pattern.count == 2
 
+    @pytest.mark.fast
     def test_short_voiceover_adds_suggestion(self):
         """Should add suggestion for merging short segments."""
         results = [
@@ -353,6 +376,7 @@ class TestShortVoiceoverPattern:
 class TestMissingKeywordsPattern:
     """Test detection of missing keywords pattern."""
 
+    @pytest.mark.fast
     def test_detects_missing_keywords(self):
         """Should detect segments with no keywords."""
         results = [
@@ -364,6 +388,7 @@ class TestMissingKeywordsPattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "missing_keywords" in pattern_types
 
+    @pytest.mark.fast
     def test_does_not_flag_segments_with_keywords(self):
         """Should not flag segments that have keywords."""
         results = [
@@ -375,6 +400,7 @@ class TestMissingKeywordsPattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "missing_keywords" not in pattern_types
 
+    @pytest.mark.fast
     def test_missing_keywords_suggestion(self):
         """Should suggest running keyword extraction."""
         results = [
@@ -393,6 +419,7 @@ class TestMissingKeywordsPattern:
 class TestAbstractContentPattern:
     """Test detection of abstract content pattern."""
 
+    @pytest.mark.fast
     def test_detects_abstract_content(self):
         """Should detect voiceover with abstract words and few matched keywords."""
         results = [
@@ -409,6 +436,7 @@ class TestAbstractContentPattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "abstract_content" in pattern_types
 
+    @pytest.mark.fast
     def test_does_not_flag_concrete_content(self):
         """Should not flag content with specific terminology and matched keywords."""
         results = [
@@ -425,6 +453,7 @@ class TestAbstractContentPattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "abstract_content" not in pattern_types
 
+    @pytest.mark.fast
     def test_abstract_suggestion(self):
         """Should suggest adding specific terminology."""
         results = [
@@ -448,6 +477,7 @@ class TestAbstractContentPattern:
 class TestHighVariancePattern:
     """Test detection of high confidence variance pattern."""
 
+    @pytest.mark.fast
     def test_detects_high_variance(self):
         """Should detect segments with confidence variance > 0.15."""
         results = [
@@ -464,6 +494,7 @@ class TestHighVariancePattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "high_variance" in pattern_types
 
+    @pytest.mark.fast
     def test_does_not_flag_low_variance(self):
         """Should not flag segments with low variance."""
         results = [
@@ -480,6 +511,7 @@ class TestHighVariancePattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "high_variance" not in pattern_types
 
+    @pytest.mark.fast
     def test_variance_threshold(self):
         """Variance threshold should be 0.15."""
         # At 0.15 exactly - should not flag
@@ -506,6 +538,7 @@ class TestHighVariancePattern:
 class TestNoKeywordOverlapPattern:
     """Test detection of no keyword overlap pattern."""
 
+    @pytest.mark.fast
     def test_detects_no_keyword_overlap(self):
         """Should detect segments with no matched keywords (but has VO keywords)."""
         results = [
@@ -523,6 +556,7 @@ class TestNoKeywordOverlapPattern:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "no_keyword_overlap" in pattern_types
 
+    @pytest.mark.fast
     def test_does_not_double_count_with_missing_keywords(self):
         """Should not double-count segments with missing VO keywords."""
         results = [
@@ -555,6 +589,7 @@ class TestNoKeywordOverlapPattern:
 class TestLogging:
     """Test logging output of analysis."""
 
+    @pytest.mark.fast
     def test_logs_analysis_header(self, caplog):
         """Should log LOW CONFIDENCE SEGMENT ANALYSIS header."""
         results = [
@@ -566,6 +601,7 @@ class TestLogging:
 
         assert "LOW CONFIDENCE SEGMENT ANALYSIS" in caplog.text
 
+    @pytest.mark.fast
     def test_logs_threshold(self, caplog):
         """Should log the threshold value."""
         results = [
@@ -577,6 +613,7 @@ class TestLogging:
 
         assert "0.7" in caplog.text
 
+    @pytest.mark.fast
     def test_logs_segment_count(self, caplog):
         """Should log low confidence segment count."""
         results = [
@@ -589,6 +626,7 @@ class TestLogging:
 
         assert "1/2" in caplog.text or "1 / 2" in caplog.text or "Low confidence segments:" in caplog.text
 
+    @pytest.mark.fast
     def test_logs_pattern_types(self, caplog):
         """Should log detected pattern types."""
         results = [
@@ -600,6 +638,7 @@ class TestLogging:
 
         assert "short_voiceover" in caplog.text
 
+    @pytest.mark.fast
     def test_logs_suggestions(self, caplog):
         """Should log improvement suggestions."""
         results = [
@@ -611,6 +650,7 @@ class TestLogging:
 
         assert "Suggestions" in caplog.text or "suggestion" in caplog.text.lower()
 
+    @pytest.mark.fast
     def test_logs_sample_segments(self, caplog):
         """Should log sample of low confidence segments."""
         results = [
@@ -622,6 +662,7 @@ class TestLogging:
 
         assert "Sample low confidence" in caplog.text or "low confidence segment sample" in caplog.text
 
+    @pytest.mark.fast
     def test_no_low_confidence_logs_info(self, caplog):
         """Should log info when no low confidence segments found."""
         results = [
@@ -641,6 +682,7 @@ class TestLogging:
 class TestSuggestions:
     """Test that appropriate suggestions are generated."""
 
+    @pytest.mark.fast
     def test_short_voiceover_suggestion(self):
         """Should suggest merging short segments."""
         results = [
@@ -652,6 +694,7 @@ class TestSuggestions:
         assert len(analysis.suggestions) > 0
         assert any("merge" in s.lower() or "short" in s.lower() for s in analysis.suggestions)
 
+    @pytest.mark.fast
     def test_missing_keywords_suggestion(self):
         """Should suggest keyword extraction."""
         results = [
@@ -662,6 +705,7 @@ class TestSuggestions:
 
         assert any("keyword" in s.lower() for s in analysis.suggestions)
 
+    @pytest.mark.fast
     def test_abstract_content_suggestion(self):
         """Should suggest adding specific terminology."""
         results = [
@@ -674,6 +718,7 @@ class TestSuggestions:
         assert any("specific" in s.lower() or "terminology" in s.lower() or "entity" in s.lower()
                    for s in analysis.suggestions)
 
+    @pytest.mark.fast
     def test_multiple_patterns_multiple_suggestions(self):
         """Should generate multiple suggestions for multiple patterns."""
         results = [
@@ -693,6 +738,7 @@ class TestSuggestions:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
+    @pytest.mark.fast
     def test_all_segments_low_confidence(self):
         """Should handle all segments being low confidence."""
         results = [
@@ -706,6 +752,7 @@ class TestEdgeCases:
         assert analysis.low_confidence_count == 3
         assert analysis.total_segments == 3
 
+    @pytest.mark.fast
     def test_custom_threshold(self):
         """Should respect custom threshold."""
         results = [
@@ -721,6 +768,7 @@ class TestEdgeCases:
         analysis_custom = analyze_low_confidence_segments(results, threshold=0.7)
         assert analysis_custom.low_confidence_count == 1
 
+    @pytest.mark.fast
     def test_exactly_at_threshold(self):
         """Segments exactly at threshold should not be flagged."""
         results = [
@@ -731,6 +779,7 @@ class TestEdgeCases:
 
         assert analysis.low_confidence_count == 0
 
+    @pytest.mark.fast
     def test_very_long_voiceover(self):
         """Should handle very long voiceover text."""
         long_text = "A" * 500  # 500 character voiceover
@@ -744,6 +793,7 @@ class TestEdgeCases:
         pattern_types = [p.pattern_type for p in analysis.patterns]
         assert "short_voiceover" not in pattern_types
 
+    @pytest.mark.fast
     def test_handles_none_matched_keywords(self):
         """Should handle None matched_keywords gracefully."""
         results = [
@@ -756,6 +806,7 @@ class TestEdgeCases:
         analysis = analyze_low_confidence_segments(results)
         assert analysis is not None
 
+    @pytest.mark.fast
     def test_mixed_high_and_low_confidence(self):
         """Should correctly handle mix of high and low confidence."""
         results = [
@@ -779,6 +830,7 @@ class TestEdgeCases:
 class TestIntegrationWithMatchAllSegments:
     """Test integration with match_all_segments function."""
 
+    @pytest.mark.fast
     def test_function_is_called_in_match_all_segments(self):
         """analyze_low_confidence_segments should be called in match_all_segments."""
         # This tests that the function is integrated in the main matching flow
@@ -788,6 +840,7 @@ class TestIntegrationWithMatchAllSegments:
         assert analyze_low_confidence_segments is not None
         assert match_all_segments is not None
 
+    @pytest.mark.fast
     def test_returns_analysis_object(self):
         """Should return LowConfidenceAnalysis object."""
         results = [

@@ -43,6 +43,7 @@ def create_mock_config(enabled=True, cache_dir=None, fuzzy_threshold=0.85,
 class TestCachedEntityDataclass:
     """Test CachedEntity dataclass methods."""
 
+    @pytest.mark.fast
     def test_to_dict_returns_dict(self):
         """Test CachedEntity.to_dict() method."""
         from src.entity_cache import CachedEntity
@@ -63,6 +64,7 @@ class TestCachedEntityDataclass:
         assert result['entity_type'] == "GPE"
         assert len(result['images']) == 2
 
+    @pytest.mark.fast
     def test_from_dict_creates_entity(self):
         """Test CachedEntity.from_dict() method."""
         from src.entity_cache import CachedEntity
@@ -86,6 +88,7 @@ class TestCachedEntityDataclass:
 class TestEntityCacheSerializeMethods:
     """Test _serialize_entry and _deserialize_entry methods."""
 
+    @pytest.mark.fast
     def test_serialize_entry(self, tmp_path):
         """Test _serialize_entry converts CacheEntry to dict."""
         from src.entity_cache import EntityCache
@@ -108,6 +111,7 @@ class TestEntityCacheSerializeMethods:
         assert 'metadata' in result
         assert result['data']['entity_name'] == 'Test'
 
+    @pytest.mark.fast
     def test_deserialize_entry_new_format(self, tmp_path):
         """Test _deserialize_entry with new BaseCache format."""
         from src.entity_cache import EntityCache
@@ -126,6 +130,7 @@ class TestEntityCacheSerializeMethods:
         assert entry.data['entity_name'] == 'Test'
         assert entry.cached_at == '2026-01-10T12:00:00'
 
+    @pytest.mark.fast
     def test_deserialize_entry_legacy_format(self, tmp_path):
         """Test _deserialize_entry with legacy format (entity_name at top level)."""
         from src.entity_cache import EntityCache
@@ -148,6 +153,7 @@ class TestEntityCacheSerializeMethods:
         assert entry.data == data
         assert entry.cached_at == '2025-12-01T12:00:00'
 
+    @pytest.mark.fast
     def test_deserialize_entry_unknown_format_logs_warning(self, tmp_path, caplog):
         """Test _deserialize_entry with unknown format returns empty entry."""
         from src.entity_cache import EntityCache
@@ -172,6 +178,7 @@ class TestEntityCacheSerializeMethods:
 class TestEntityCacheLoadIndex:
     """Test _load_index with various scenarios."""
 
+    @pytest.mark.fast
     def test_load_index_old_format_migration(self, tmp_path):
         """Test _load_index migrates old 'entities' format to new format."""
         from src.entity_cache import EntityCache
@@ -204,6 +211,7 @@ class TestEntityCacheLoadIndex:
         assert 'Paris' in cache.index
         assert 'data' in cache.index['Paris']  # New format has 'data' wrapper
 
+    @pytest.mark.fast
     def test_load_index_json_error_starts_fresh(self, tmp_path, caplog):
         """Test _load_index starts fresh on JSON decode error."""
         from src.entity_cache import EntityCache
@@ -228,6 +236,7 @@ class TestEntityCacheLoadIndex:
 class TestEntityCacheFindEntity:
     """Test find_entity with various matching scenarios."""
 
+    @pytest.mark.fast
     def test_find_entity_type_mismatch_skipped(self, tmp_path):
         """Test that entities with wrong type are skipped."""
         from src.entity_cache import EntityCache, CachedEntity
@@ -262,6 +271,7 @@ class TestEntityCacheFindEntity:
 class TestEntityCacheIsValid:
     """Test _is_valid with edge cases."""
 
+    @pytest.mark.fast
     def test_is_valid_date_parse_error_considers_valid(self, tmp_path):
         """Test that invalid date format is considered valid."""
         from src.entity_cache import EntityCache, CachedEntity
@@ -296,6 +306,7 @@ class TestEntityCacheIsValid:
 class TestEntityCacheAddEntity:
     """Test add_entity with various scenarios."""
 
+    @pytest.mark.fast
     def test_add_entity_copy_failure_continues(self, tmp_path, caplog):
         """Test that copy failure logs warning and continues."""
         from src.entity_cache import EntityCache
@@ -327,6 +338,7 @@ class TestEntityCacheAddEntity:
 
         assert "Failed to cache image" in caplog.text
 
+    @pytest.mark.fast
     def test_add_entity_disabled_does_nothing(self, tmp_path):
         """Test that add_entity does nothing when cache disabled."""
         from src.entity_cache import EntityCache
@@ -349,6 +361,7 @@ class TestEntityCacheAddEntity:
 class TestEntityCacheGetImagesForProject:
     """Test get_images_for_project with various strategies."""
 
+    @pytest.mark.fast
     def test_symlink_fallback_to_copy(self, tmp_path):
         """Test that symlink failure falls back to copy."""
         from src.entity_cache import EntityCache, CachedEntity
@@ -389,6 +402,7 @@ class TestEntityCacheGetImagesForProject:
         assert Path(result[0]).exists()
         assert Path(result[0]).read_bytes() == b"fake image data"
 
+    @pytest.mark.fast
     def test_reference_strategy_returns_absolute_paths(self, tmp_path):
         """Test that 'reference' strategy returns absolute cache paths."""
         from src.entity_cache import EntityCache, CachedEntity
@@ -429,6 +443,7 @@ class TestEntityCacheGetImagesForProject:
 class TestEntityCacheCleanup:
     """Test cleanup method."""
 
+    @pytest.mark.fast
     def test_cleanup_disabled_returns_zero(self, tmp_path):
         """Test that cleanup returns 0 when cache disabled."""
         from src.entity_cache import EntityCache
@@ -444,6 +459,7 @@ class TestEntityCacheCleanup:
 class TestEntityCacheGetStats:
     """Test get_stats method."""
 
+    @pytest.mark.fast
     def test_get_stats_disabled_returns_minimal(self, tmp_path):
         """Test that get_stats returns minimal info when disabled."""
         from src.entity_cache import EntityCache
@@ -460,6 +476,7 @@ class TestEntityCacheGetStats:
 class TestEntityCacheSafeName:
     """Test _safe_name method."""
 
+    @pytest.mark.fast
     def test_safe_name_removes_special_chars(self, tmp_path):
         """Test that _safe_name removes special characters."""
         from src.entity_cache import EntityCache
@@ -474,6 +491,7 @@ class TestEntityCacheSafeName:
         assert ':' not in result
         assert '!' not in result
 
+    @pytest.mark.fast
     def test_safe_name_limits_length(self, tmp_path):
         """Test that _safe_name limits string length to 50."""
         from src.entity_cache import EntityCache
@@ -490,6 +508,7 @@ class TestEntityCacheSafeName:
 class TestEntityCacheNewFormatLoading:
     """Test loading already-new-format cache index (lines 147-149)."""
 
+    @pytest.mark.fast
     def test_load_index_new_format_direct(self, tmp_path):
         """Test _load_index loads new format directly without migration."""
         from src.entity_cache import EntityCache
@@ -528,6 +547,7 @@ class TestEntityCacheNewFormatLoading:
 class TestEntityCacheGetImagesForProjectEdgeCases:
     """Test get_images_for_project edge cases."""
 
+    @pytest.mark.fast
     def test_get_images_skips_nonexistent_cache_files(self, tmp_path):
         """Test that missing cache files are skipped (line 333)."""
         from src.entity_cache import EntityCache, CachedEntity
@@ -567,6 +587,7 @@ class TestEntityCacheGetImagesForProjectEdgeCases:
         assert len(result) == 1
         assert "real.jpg" in result[0]
 
+    @pytest.mark.fast
     def test_get_images_copy_failure_continues(self, tmp_path, caplog):
         """Test that copy failure skips file and continues (lines 356-358)."""
         from src.entity_cache import EntityCache, CachedEntity
@@ -625,6 +646,7 @@ class TestEntityCacheGetImagesForProjectEdgeCases:
 class TestEntityCacheFuzzyMatching:
     """Test fuzzy matching edge cases."""
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_empty_strings(self, tmp_path):
         """Test _fuzzy_similarity with empty strings (line 215-216)."""
         from src.entity_cache import EntityCache
@@ -637,6 +659,7 @@ class TestEntityCacheFuzzyMatching:
         # Two empty strings are identical, so similarity is 1.0
         assert cache._fuzzy_similarity("", "") == 1.0
 
+    @pytest.mark.fast
     def test_fuzzy_similarity_identical_strings(self, tmp_path):
         """Test _fuzzy_similarity with identical strings."""
         from src.entity_cache import EntityCache
@@ -647,6 +670,7 @@ class TestEntityCacheFuzzyMatching:
         assert cache._fuzzy_similarity("test", "test") == 1.0
         assert cache._fuzzy_similarity("TEST", "test") == 1.0  # Case insensitive
 
+    @pytest.mark.fast
     def test_find_entity_fuzzy_match_below_threshold(self, tmp_path):
         """Test that fuzzy matches below threshold are not returned."""
         from src.entity_cache import EntityCache
@@ -683,6 +707,7 @@ class TestEntityCacheFuzzyMatching:
 class TestEntityCacheCleanupRemovesInvalid:
     """Test cleanup removes invalid entries."""
 
+    @pytest.mark.fast
     def test_cleanup_removes_expired_entries(self, tmp_path):
         """Test that cleanup removes entries with missing files."""
         from src.entity_cache import EntityCache

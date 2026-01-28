@@ -14,6 +14,7 @@ from src.downloader.rate_limit_budget import RateLimitBudget
 class TestScaleForKeywordsBase:
     """Test scale_for_keywords(1) returns base limits unchanged."""
 
+    @pytest.mark.fast
     def test_single_keyword_no_scaling(self):
         """ceil(1/5) = 1x multiplier, limits unchanged."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -22,6 +23,7 @@ class TestScaleForKeywordsBase:
         assert budget.max_backoff_time == 600.0
         assert budget.max_vpn_switches == 3
 
+    @pytest.mark.fast
     def test_five_keywords_no_scaling(self):
         """ceil(5/5) = 1x multiplier, limits unchanged."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -30,6 +32,7 @@ class TestScaleForKeywordsBase:
         assert budget.max_backoff_time == 600.0
         assert budget.max_vpn_switches == 3
 
+    @pytest.mark.fast
     def test_zero_keywords_no_scaling(self):
         """ceil(0/5) = 0, clipped to 1x by min, no scaling."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -43,6 +46,7 @@ class TestScaleForKeywordsBase:
 class TestScaleForKeywords2x:
     """Test scale_for_keywords(10) returns 2x base limits."""
 
+    @pytest.mark.fast
     def test_ten_keywords_doubles_limits(self):
         """ceil(10/5) = 2x multiplier."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -51,6 +55,7 @@ class TestScaleForKeywords2x:
         assert budget.max_backoff_time == 1200.0
         assert budget.max_vpn_switches == 6
 
+    @pytest.mark.fast
     def test_six_keywords_doubles_limits(self):
         """ceil(6/5) = 2x multiplier."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -63,6 +68,7 @@ class TestScaleForKeywords2x:
 class TestScaleForKeywords5x:
     """Test scale_for_keywords(25) returns 5x base limits."""
 
+    @pytest.mark.fast
     def test_25_keywords_5x_limits(self):
         """ceil(25/5) = 5x multiplier."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -71,6 +77,7 @@ class TestScaleForKeywords5x:
         assert budget.max_backoff_time == 3000.0
         assert budget.max_vpn_switches == 15
 
+    @pytest.mark.fast
     def test_21_keywords_5x_limits(self):
         """ceil(21/5) = 5x multiplier."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -83,6 +90,7 @@ class TestScaleForKeywords5x:
 class TestScaleForKeywordsCapped:
     """Test scale_for_keywords(100) is capped at 5x."""
 
+    @pytest.mark.fast
     def test_100_keywords_capped_at_5x(self):
         """ceil(100/5) = 20, but capped at 5x. max_rotations <= 50, max_backoff_time <= 3000."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -93,6 +101,7 @@ class TestScaleForKeywordsCapped:
         assert budget.max_backoff_time <= 3000.0
         assert budget.max_vpn_switches == 15
 
+    @pytest.mark.fast
     def test_500_keywords_capped_at_5x(self):
         """Even 500 keywords only get 5x."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -101,6 +110,7 @@ class TestScaleForKeywordsCapped:
         assert budget.max_backoff_time == 3000.0
         assert budget.max_vpn_switches == 15
 
+    @pytest.mark.fast
     def test_cap_prevents_20x(self):
         """Explicit check that 100 keywords don't produce 20x."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -114,6 +124,7 @@ class TestScaleForKeywordsCapped:
 class TestAutoScaleDisabled:
     """Test auto_scale_budget=false ignores keyword count."""
 
+    @pytest.mark.fast
     def test_auto_scale_false_preserves_base(self):
         """When auto_scale=False, limits stay at base regardless of keyword count."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -122,6 +133,7 @@ class TestAutoScaleDisabled:
         assert budget.max_backoff_time == 600.0
         assert budget.max_vpn_switches == 3
 
+    @pytest.mark.fast
     def test_auto_scale_false_with_25_keywords(self):
         """Even 25 keywords don't scale when disabled."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -130,6 +142,7 @@ class TestAutoScaleDisabled:
         assert budget.max_backoff_time == 600.0
         assert budget.max_vpn_switches == 3
 
+    @pytest.mark.fast
     def test_auto_scale_false_with_10_keywords(self):
         """10 keywords also don't scale when disabled."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -142,6 +155,7 @@ class TestAutoScaleDisabled:
 class TestScaleForKeywordsLogging:
     """Test scaled budget logged at INFO level."""
 
+    @pytest.mark.fast
     def test_scaling_logs_info(self, caplog):
         """Verify INFO log: 'Rate limit budget auto-scaled for {n} keywords: rotations={x}, backoff={y}s'."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -151,6 +165,7 @@ class TestScaleForKeywordsLogging:
         assert any("rotations=20" in r.message for r in caplog.records)
         assert any("backoff=1200.0s" in r.message for r in caplog.records)
 
+    @pytest.mark.fast
     def test_no_log_when_no_scaling(self, caplog):
         """No INFO log when multiplier is 1x (no scaling needed)."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -158,6 +173,7 @@ class TestScaleForKeywordsLogging:
             budget.scale_for_keywords(1)
         assert not any("auto-scaled" in r.message for r in caplog.records)
 
+    @pytest.mark.fast
     def test_no_log_when_disabled(self, caplog):
         """No INFO log when auto_scale=False."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -165,6 +181,7 @@ class TestScaleForKeywordsLogging:
             budget.scale_for_keywords(100, auto_scale=False)
         assert not any("auto-scaled" in r.message for r in caplog.records)
 
+    @pytest.mark.fast
     def test_log_contains_keyword_count(self, caplog):
         """Log message contains the actual keyword count."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=3)
@@ -176,12 +193,14 @@ class TestScaleForKeywordsLogging:
 class TestScaleForKeywordsEdgeCases:
     """Edge case tests for scale_for_keywords."""
 
+    @pytest.mark.fast
     def test_unlimited_rotations_not_scaled(self):
         """max_rotations=0 (unlimited) stays unlimited after scaling."""
         budget = RateLimitBudget(max_rotations=0, max_backoff_time=600.0, max_vpn_switches=3)
         budget.scale_for_keywords(25)
         assert budget.max_rotations == 0  # Still unlimited
 
+    @pytest.mark.fast
     def test_unlimited_backoff_not_scaled(self):
         """max_backoff_time=0 (unlimited) stays unlimited after scaling."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=0, max_vpn_switches=3)
@@ -189,12 +208,14 @@ class TestScaleForKeywordsEdgeCases:
         assert budget.max_backoff_time == 0  # Still unlimited
         assert budget.max_rotations == 50  # Other limits still scale
 
+    @pytest.mark.fast
     def test_unlimited_vpn_not_scaled(self):
         """max_vpn_switches=0 (unlimited) stays unlimited after scaling."""
         budget = RateLimitBudget(max_rotations=10, max_backoff_time=600.0, max_vpn_switches=0)
         budget.scale_for_keywords(25)
         assert budget.max_vpn_switches == 0  # Still unlimited
 
+    @pytest.mark.fast
     def test_multiplier_math_correctness(self):
         """Verify ceil(n/5) math for various keyword counts."""
         test_cases = [
@@ -219,6 +240,7 @@ class TestScaleForKeywordsEdgeCases:
 class TestAutoScaleConfigIntegration:
     """Test that auto_scale_budget config field exists and works."""
 
+    @pytest.mark.fast
     def test_config_field_exists(self):
         """RateLimitBudgetConfig has auto_scale_budget field."""
         from src.config.sections.download import RateLimitBudgetConfig
@@ -226,12 +248,14 @@ class TestAutoScaleConfigIntegration:
         assert hasattr(config, 'auto_scale_budget')
         assert config.auto_scale_budget is True  # Default is True
 
+    @pytest.mark.fast
     def test_config_field_false(self):
         """RateLimitBudgetConfig accepts auto_scale_budget=False."""
         from src.config.sections.download import RateLimitBudgetConfig
         config = RateLimitBudgetConfig(auto_scale_budget=False)
         assert config.auto_scale_budget is False
 
+    @pytest.mark.fast
     def test_from_config_then_scale(self):
         """Full integration: create budget from config, then scale."""
         from src.config.sections.download import RateLimitBudgetConfig
@@ -241,6 +265,7 @@ class TestAutoScaleConfigIntegration:
         assert budget.max_rotations == 20
         assert budget.max_backoff_time == 1200.0
 
+    @pytest.mark.fast
     def test_from_config_disabled_no_scale(self):
         """Integration: config with auto_scale_budget=False prevents scaling."""
         from src.config.sections.download import RateLimitBudgetConfig

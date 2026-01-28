@@ -66,6 +66,7 @@ def exhausted_budget():
 class TestRecording:
     """Test recording rate limit recovery actions."""
 
+    @pytest.mark.fast
     def test_record_rotation_increments_count(self, budget):
         """Recording a rotation increments the counter."""
         assert budget.rotations_used == 0
@@ -74,12 +75,14 @@ class TestRecording:
         budget.record_rotation()
         assert budget.rotations_used == 2
 
+    @pytest.mark.fast
     def test_record_rotation_with_keyword(self, budget):
         """Recording a rotation tracks the keyword."""
         budget.record_rotation(keyword="sunset")
         assert "sunset" in budget.keywords_rate_limited
         assert budget.last_escalation_level == "cookie"
 
+    @pytest.mark.fast
     def test_record_rotation_tracks_unique_keywords(self, budget):
         """Keywords are tracked uniquely (no duplicates)."""
         budget.record_rotation(keyword="sunset")
@@ -88,18 +91,21 @@ class TestRecording:
         assert len(budget.keywords_rate_limited) == 2
         assert set(budget.keywords_rate_limited) == {"sunset", "ocean"}
 
+    @pytest.mark.fast
     def test_record_vpn_switch_increments_count(self, budget):
         """Recording a VPN switch increments the counter."""
         assert budget.vpn_switches_used == 0
         budget.record_vpn_switch()
         assert budget.vpn_switches_used == 1
 
+    @pytest.mark.fast
     def test_record_vpn_switch_with_keyword(self, budget):
         """Recording a VPN switch tracks the keyword."""
         budget.record_vpn_switch(keyword="mountain")
         assert "mountain" in budget.keywords_rate_limited
         assert budget.last_escalation_level == "vpn"
 
+    @pytest.mark.fast
     def test_record_backoff_accumulates_time(self, budget):
         """Recording backoff accumulates total time spent."""
         assert budget.backoff_time_spent == 0.0
@@ -108,6 +114,7 @@ class TestRecording:
         budget.record_backoff(10.5)
         assert budget.backoff_time_spent == 15.5
 
+    @pytest.mark.fast
     def test_record_backoff_with_keyword(self, budget):
         """Recording backoff tracks the keyword."""
         budget.record_backoff(5.0, keyword="forest")
@@ -122,52 +129,61 @@ class TestRecording:
 class TestLimitChecking:
     """Test checking if budget resources are available."""
 
+    @pytest.mark.fast
     def test_can_rotate_within_budget(self, budget):
         """Can rotate when under limit."""
         assert budget.can_rotate() is True
         budget.rotations_used = 4
         assert budget.can_rotate() is True  # Still have 1 left
 
+    @pytest.mark.fast
     def test_can_rotate_at_limit(self, budget):
         """Cannot rotate when at limit."""
         budget.rotations_used = 5  # At max_rotations
         assert budget.can_rotate() is False
 
+    @pytest.mark.fast
     def test_can_rotate_unlimited(self, empty_budget):
         """Can always rotate when unlimited (max_rotations=0)."""
         empty_budget.max_rotations = 0
         empty_budget.rotations_used = 1000
         assert empty_budget.can_rotate() is True
 
+    @pytest.mark.fast
     def test_can_switch_vpn_within_budget(self, budget):
         """Can switch VPN when under limit."""
         assert budget.can_switch_vpn() is True
         budget.vpn_switches_used = 2
         assert budget.can_switch_vpn() is True  # Still have 1 left
 
+    @pytest.mark.fast
     def test_can_switch_vpn_at_limit(self, budget):
         """Cannot switch VPN when at limit."""
         budget.vpn_switches_used = 3  # At max_vpn_switches
         assert budget.can_switch_vpn() is False
 
+    @pytest.mark.fast
     def test_can_switch_vpn_unlimited(self, empty_budget):
         """Can always switch VPN when unlimited (max_vpn_switches=0)."""
         empty_budget.max_vpn_switches = 0
         empty_budget.vpn_switches_used = 1000
         assert empty_budget.can_switch_vpn() is True
 
+    @pytest.mark.fast
     def test_can_backoff_within_budget(self, budget):
         """Can backoff when under limit."""
         assert budget.can_backoff(5.0) is True
         budget.backoff_time_spent = 50.0
         assert budget.can_backoff(5.0) is True  # 50 + 5 = 55 < 60
 
+    @pytest.mark.fast
     def test_can_backoff_at_limit(self, budget):
         """Cannot backoff when would exceed limit."""
         budget.backoff_time_spent = 55.0
         assert budget.can_backoff(10.0) is False  # 55 + 10 = 65 > 60
         assert budget.can_backoff(5.0) is True   # 55 + 5 = 60 <= 60
 
+    @pytest.mark.fast
     def test_can_backoff_unlimited(self, empty_budget):
         """Can always backoff when unlimited (max_backoff_time=0)."""
         empty_budget.max_backoff_time = 0
@@ -182,6 +198,7 @@ class TestLimitChecking:
 class TestRemainingCalculations:
     """Test calculating remaining budget resources."""
 
+    @pytest.mark.fast
     def test_rotations_remaining(self, budget):
         """Calculate remaining rotations."""
         assert budget.rotations_remaining() == 5
@@ -192,28 +209,33 @@ class TestRemainingCalculations:
         budget.rotations_used = 7  # Over limit
         assert budget.rotations_remaining() == 0  # Clamped to 0
 
+    @pytest.mark.fast
     def test_rotations_remaining_unlimited(self, empty_budget):
         """Remaining rotations is None when unlimited."""
         empty_budget.max_rotations = 0
         assert empty_budget.rotations_remaining() is None
 
+    @pytest.mark.fast
     def test_vpn_switches_remaining(self, budget):
         """Calculate remaining VPN switches."""
         assert budget.vpn_switches_remaining() == 3
         budget.vpn_switches_used = 2
         assert budget.vpn_switches_remaining() == 1
 
+    @pytest.mark.fast
     def test_vpn_switches_remaining_unlimited(self, empty_budget):
         """Remaining VPN switches is None when unlimited."""
         empty_budget.max_vpn_switches = 0
         assert empty_budget.vpn_switches_remaining() is None
 
+    @pytest.mark.fast
     def test_backoff_time_remaining(self, budget):
         """Calculate remaining backoff time."""
         assert budget.backoff_time_remaining() == 60.0
         budget.backoff_time_spent = 25.5
         assert budget.backoff_time_remaining() == 34.5
 
+    @pytest.mark.fast
     def test_backoff_time_remaining_unlimited(self, empty_budget):
         """Remaining backoff time is None when unlimited."""
         empty_budget.max_backoff_time = 0
@@ -227,29 +249,35 @@ class TestRemainingCalculations:
 class TestEscalationRecommendations:
     """Test escalation level recommendations based on budget state."""
 
+    @pytest.mark.fast
     def test_recommend_backoff_when_available(self, budget):
         """Recommend backoff when backoff budget is available."""
         assert budget.get_recommended_escalation() == "backoff"
 
+    @pytest.mark.fast
     def test_recommend_cookie_when_backoff_exhausted(self, budget):
         """Recommend cookie rotation when backoff budget exhausted."""
         budget.backoff_time_spent = 60.0  # Exhausted
         assert budget.get_recommended_escalation() == "cookie"
 
+    @pytest.mark.fast
     def test_recommend_vpn_when_cookies_exhausted(self, budget):
         """Recommend VPN when both backoff and cookies exhausted."""
         budget.backoff_time_spent = 60.0
         budget.rotations_used = 5
         assert budget.get_recommended_escalation() == "vpn"
 
+    @pytest.mark.fast
     def test_recommend_exhausted_when_all_depleted(self, exhausted_budget):
         """Recommend 'exhausted' when all resources depleted."""
         assert exhausted_budget.get_recommended_escalation() == "exhausted"
 
+    @pytest.mark.fast
     def test_is_exhausted_true_when_depleted(self, exhausted_budget):
         """is_exhausted returns True when all resources depleted."""
         assert exhausted_budget.is_exhausted() is True
 
+    @pytest.mark.fast
     def test_is_exhausted_false_with_resources(self, budget):
         """is_exhausted returns False when resources available."""
         assert budget.is_exhausted() is False
@@ -262,6 +290,7 @@ class TestEscalationRecommendations:
 class TestSerialization:
     """Test budget serialization for checkpoint persistence."""
 
+    @pytest.mark.fast
     def test_to_dict_includes_all_fields(self, budget):
         """to_dict includes all budget state."""
         budget.rotations_used = 2
@@ -281,6 +310,7 @@ class TestSerialization:
         assert data["max_vpn_switches"] == 3
         assert data["max_backoff_time"] == 60.0
 
+    @pytest.mark.fast
     def test_from_dict_restores_state(self):
         """from_dict restores budget state from checkpoint."""
         data = {
@@ -305,6 +335,7 @@ class TestSerialization:
         assert budget.max_vpn_switches == 5
         assert budget.max_backoff_time == 120.0
 
+    @pytest.mark.fast
     def test_from_dict_with_none_creates_default(self):
         """from_dict with None creates a default budget."""
         budget = RateLimitBudget.from_dict(None)
@@ -315,6 +346,7 @@ class TestSerialization:
         assert budget.keywords_rate_limited == []
         assert budget.last_escalation_level == "none"
 
+    @pytest.mark.fast
     def test_from_dict_with_empty_dict_creates_default(self):
         """from_dict with empty dict creates default values."""
         budget = RateLimitBudget.from_dict({})
@@ -323,6 +355,7 @@ class TestSerialization:
         assert budget.vpn_switches_used == 0
         assert budget.backoff_time_spent == 0.0
 
+    @pytest.mark.fast
     def test_roundtrip_serialization(self, budget):
         """Serialization roundtrip preserves state."""
         budget.rotations_used = 3
@@ -351,6 +384,7 @@ class TestSerialization:
 class TestClear:
     """Test clearing budget state."""
 
+    @pytest.mark.fast
     def test_clear_resets_all_counters(self, budget):
         """Clear resets all usage counters."""
         budget.rotations_used = 5
@@ -367,6 +401,7 @@ class TestClear:
         assert budget.keywords_rate_limited == []
         assert budget.last_escalation_level == "none"
 
+    @pytest.mark.fast
     def test_clear_preserves_limits(self, budget):
         """Clear does not reset budget limits."""
         budget.clear()
@@ -383,6 +418,7 @@ class TestClear:
 class TestSummary:
     """Test budget summary for reporting."""
 
+    @pytest.mark.fast
     def test_get_summary_includes_usage(self, budget):
         """Summary includes usage statistics."""
         budget.rotations_used = 2
@@ -403,6 +439,7 @@ class TestSummary:
         assert summary["last_escalation"] == "cookie"
         assert summary["is_exhausted"] is False
 
+    @pytest.mark.fast
     def test_get_summary_with_exhausted_budget(self, exhausted_budget):
         """Summary correctly reports exhausted state."""
         summary = exhausted_budget.get_summary()
@@ -425,6 +462,7 @@ class TestCrossKeywordBudgetSharing:
     skip directly to VPN switching instead of trying rotations again.
     """
 
+    @pytest.mark.fast
     def test_keyword_a_exhausts_rotations_keyword_b_skips(self, budget):
         """When keyword A exhausts rotations, keyword B sees no rotations available."""
         # Keyword A exhausts all rotations
@@ -443,6 +481,7 @@ class TestCrossKeywordBudgetSharing:
         # The key point is can_rotate() returns False.
         assert budget.get_recommended_escalation() == "backoff"
 
+    @pytest.mark.fast
     def test_keyword_a_exhausts_all_keyword_b_goes_to_vpn(self, budget):
         """When keyword A exhausts backoff AND rotations, keyword B goes to VPN."""
         # Keyword A exhausts backoff budget
@@ -459,6 +498,7 @@ class TestCrossKeywordBudgetSharing:
         # Keyword B should go directly to VPN
         assert budget.get_recommended_escalation() == "vpn"
 
+    @pytest.mark.fast
     def test_keyword_a_uses_backoff_keyword_b_has_reduced_budget(self, budget):
         """When keyword A uses backoff, keyword B has reduced backoff budget."""
         # Keyword A uses 40 seconds of backoff
@@ -469,6 +509,7 @@ class TestCrossKeywordBudgetSharing:
         assert budget.can_backoff(15.0) is True  # 40 + 15 = 55 < 60
         assert budget.can_backoff(25.0) is False  # 40 + 25 = 65 > 60
 
+    @pytest.mark.fast
     def test_keywords_affect_different_resources(self, budget):
         """Different keywords can affect different budget resources."""
         # Keyword A uses backoff
@@ -489,6 +530,7 @@ class TestCrossKeywordBudgetSharing:
         assert budget.rotations_used == 2
         assert budget.vpn_switches_used == 1
 
+    @pytest.mark.fast
     def test_session_budget_persists_across_keywords(self, budget):
         """Budget state persists across multiple keywords in a session."""
         # Process keyword 1
@@ -521,12 +563,14 @@ class TestCrossKeywordBudgetSharing:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
+    @pytest.mark.fast
     def test_zero_backoff_time(self, budget):
         """Zero backoff time is handled correctly."""
         assert budget.can_backoff(0.0) is True
         budget.record_backoff(0.0)
         assert budget.backoff_time_spent == 0.0
 
+    @pytest.mark.fast
     def test_negative_budget_remaining_clamped(self):
         """Over-budget usage is clamped to 0 remaining."""
         budget = RateLimitBudget()
@@ -536,17 +580,20 @@ class TestEdgeCases:
         assert budget.rotations_remaining() == 0
         assert budget.can_rotate() is False
 
+    @pytest.mark.fast
     def test_empty_keyword_not_tracked(self, budget):
         """Empty string keyword is not specially handled."""
         budget.record_rotation(keyword="")
         assert "" in budget.keywords_rate_limited
 
+    @pytest.mark.fast
     def test_none_keyword_not_added(self, budget):
         """None keyword is not added to tracking list."""
         budget.record_rotation(keyword=None)
         assert budget.rotations_used == 1
         assert len(budget.keywords_rate_limited) == 0
 
+    @pytest.mark.fast
     def test_large_backoff_value(self, budget):
         """Large backoff values are handled correctly."""
         budget.max_backoff_time = 1000000.0
@@ -563,6 +610,7 @@ class TestEdgeCases:
 class TestConfigLoading:
     """Test RateLimitBudget initialization from RateLimitBudgetConfig."""
 
+    @pytest.mark.fast
     def test_from_config_with_dataclass(self):
         """from_config reads limits from RateLimitBudgetConfig dataclass."""
         from src.config.sections.download import RateLimitBudgetConfig
@@ -579,6 +627,7 @@ class TestConfigLoading:
         assert budget.max_backoff_time == 900.0
         assert budget.max_vpn_switches == 5
 
+    @pytest.mark.fast
     def test_from_config_with_defaults(self):
         """from_config uses RateLimitBudgetConfig defaults correctly."""
         from src.config.sections.download import RateLimitBudgetConfig
@@ -590,6 +639,7 @@ class TestConfigLoading:
         assert budget.max_backoff_time == 600.0
         assert budget.max_vpn_switches == 3
 
+    @pytest.mark.fast
     def test_from_config_with_none_returns_default(self):
         """from_config with None returns default budget (safe fallback)."""
         budget = RateLimitBudget.from_config(None)
@@ -598,6 +648,7 @@ class TestConfigLoading:
         assert budget.max_backoff_time == 300.0
         assert budget.max_vpn_switches == 10
 
+    @pytest.mark.fast
     def test_from_config_starts_with_clean_state(self):
         """from_config creates budget with zero usage counters."""
         from src.config.sections.download import RateLimitBudgetConfig
@@ -612,6 +663,7 @@ class TestConfigLoading:
         assert budget.successes == 0
         assert budget.failures == 0
 
+    @pytest.mark.fast
     def test_budget_config_in_download_config(self):
         """RateLimitBudgetConfig is properly nested in DownloadConfig."""
         from src.config.sections.download import DownloadConfig, RateLimitBudgetConfig
@@ -621,6 +673,7 @@ class TestConfigLoading:
         assert dc.rate_limit_budget.enabled is True
         assert dc.rate_limit_budget.max_rotations == 10
 
+    @pytest.mark.fast
     def test_download_config_post_init_converts_dict(self):
         """DownloadConfig __post_init__ converts rate_limit_budget dict to dataclass."""
         from src.config.sections.download import DownloadConfig, RateLimitBudgetConfig
@@ -636,6 +689,7 @@ class TestConfigLoading:
         assert dc.rate_limit_budget.max_backoff_time == 1200.0
         assert dc.rate_limit_budget.max_vpn_switches == 7
 
+    @pytest.mark.fast
     def test_from_config_budget_limits_are_functional(self):
         """Budget created from config enforces the configured limits."""
         from src.config.sections.download import RateLimitBudgetConfig
@@ -663,6 +717,7 @@ class TestConfigLoading:
         # All exhausted
         assert budget.is_exhausted() is True
 
+    @pytest.mark.fast
     def test_config_roundtrip_through_serialization(self):
         """Config-created budget can be serialized and deserialized."""
         from src.config.sections.download import RateLimitBudgetConfig

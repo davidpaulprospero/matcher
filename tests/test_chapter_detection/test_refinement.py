@@ -17,17 +17,20 @@ from src.chapter_detection.models import ChapterCandidate
 class TestComputeBoundaryScores:
     """Test boundary score computation."""
 
+    @pytest.mark.fast
     def test_returns_empty_for_none(self):
         """Test returns empty list for None embeddings."""
         result = compute_boundary_scores(None)
         assert result == []
 
+    @pytest.mark.fast
     def test_returns_empty_for_single_embedding(self):
         """Test returns empty list for single embedding."""
         embeddings = np.array([[1.0, 0.0, 0.0]])
         result = compute_boundary_scores(embeddings)
         assert result == []
 
+    @pytest.mark.fast
     def test_computes_gap_scores(self):
         """Test computes gap scores between adjacent embeddings."""
         # Two identical vectors should have similarity=1, gap=0
@@ -39,6 +42,7 @@ class TestComputeBoundaryScores:
         assert len(result) == 1
         assert result[0] == pytest.approx(0.0, abs=0.01)
 
+    @pytest.mark.fast
     def test_high_gap_for_different_vectors(self):
         """Test high gap score for very different vectors."""
         # Orthogonal vectors should have similarity=0, gap=1
@@ -50,6 +54,7 @@ class TestComputeBoundaryScores:
         assert len(result) == 1
         assert result[0] == pytest.approx(1.0, abs=0.01)
 
+    @pytest.mark.fast
     def test_multiple_boundaries(self):
         """Test multiple boundary scores."""
         embeddings = np.array([
@@ -67,12 +72,14 @@ class TestComputeBoundaryScores:
 class TestCosineSimilarity:
     """Test cosine similarity computation."""
 
+    @pytest.mark.fast
     def test_identical_vectors(self):
         """Test similarity of identical vectors."""
         a = np.array([1.0, 2.0, 3.0])
         result = _cosine_similarity(a, a)
         assert result == pytest.approx(1.0, abs=0.01)
 
+    @pytest.mark.fast
     def test_orthogonal_vectors(self):
         """Test similarity of orthogonal vectors."""
         a = np.array([1.0, 0.0, 0.0])
@@ -80,6 +87,7 @@ class TestCosineSimilarity:
         result = _cosine_similarity(a, b)
         assert result == pytest.approx(0.0, abs=0.01)
 
+    @pytest.mark.fast
     def test_opposite_vectors(self):
         """Test similarity of opposite vectors."""
         a = np.array([1.0, 0.0, 0.0])
@@ -87,6 +95,7 @@ class TestCosineSimilarity:
         result = _cosine_similarity(a, b)
         assert result == pytest.approx(-1.0, abs=0.01)
 
+    @pytest.mark.fast
     def test_zero_vector(self):
         """Test similarity with zero vector."""
         a = np.array([1.0, 0.0, 0.0])
@@ -98,23 +107,28 @@ class TestCosineSimilarity:
 class TestHasTransitionPhrase:
     """Test transition phrase detection."""
 
+    @pytest.mark.fast
     def test_detects_now_let(self):
         """Test detects 'now let' phrase."""
         assert _has_transition_phrase("Now let's move to the next topic")
 
+    @pytest.mark.fast
     def test_detects_moving_on(self):
         """Test detects 'moving on' phrase."""
         assert _has_transition_phrase("Moving on to the city center")
 
+    @pytest.mark.fast
     def test_detects_finally(self):
         """Test detects 'finally' phrase."""
         assert _has_transition_phrase("Finally, we reach our destination")
 
+    @pytest.mark.fast
     def test_case_insensitive(self):
         """Test case insensitive matching."""
         assert _has_transition_phrase("FIRST, let me show you")
         assert _has_transition_phrase("In Conclusion, this was amazing")
 
+    @pytest.mark.fast
     def test_no_transition(self):
         """Test returns false for no transition."""
         assert not _has_transition_phrase("The weather is nice today")
@@ -124,6 +138,7 @@ class TestHasTransitionPhrase:
 class TestRunBoundaryRefinement:
     """Test full boundary refinement pass."""
 
+    @pytest.mark.fast
     def test_single_chapter_unchanged(self, mock_config):
         """Test single chapter is returned unchanged."""
         chapters = [ChapterCandidate(
@@ -141,6 +156,7 @@ class TestRunBoundaryRefinement:
         assert result[0].start_segment_idx == 0
         assert result[0].end_segment_idx == 5
 
+    @pytest.mark.fast
     def test_empty_chapters(self, mock_config):
         """Test empty list returned for empty input."""
         result = run_boundary_refinement(
@@ -150,6 +166,7 @@ class TestRunBoundaryRefinement:
         )
         assert result == []
 
+    @pytest.mark.fast
     def test_with_embeddings(self, mock_config):
         """Test refinement with provided embeddings."""
         chapters = [
@@ -196,6 +213,7 @@ class TestRunBoundaryRefinement:
 class TestRefineChapterBoundary:
     """Test individual chapter boundary refinement."""
 
+    @pytest.mark.fast
     def test_no_change_without_scores(self):
         """Test chapter unchanged when no boundary scores."""
         chapter = ChapterCandidate(
@@ -214,6 +232,7 @@ class TestRefineChapterBoundary:
         assert result.start_segment_idx == 0
         assert result.end_segment_idx == 5
 
+    @pytest.mark.fast
     def test_refines_to_high_score_boundary(self):
         """Test boundary moves to highest score position."""
         chapter = ChapterCandidate(

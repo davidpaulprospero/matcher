@@ -83,6 +83,7 @@ def budget_manager(imp_manager, ext_config):
 class TestConcurrentKeywordIndependentTiers:
     """Keyword A escalates to Tier 2 while B stays at Tier 1."""
 
+    @pytest.mark.fast
     def test_keyword_a_tier2_keyword_b_tier1(self, escalation_manager):
         """Escalate keyword A via failures while B remains untouched."""
         em = escalation_manager
@@ -113,6 +114,7 @@ class TestConcurrentKeywordIndependentTiers:
         # Keyword B should still be at Tier 1 (untouched)
         assert results["b"].tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_10_keywords_independent_tiers_concurrent(self, escalation_manager):
         """10 concurrent threads each managing a separate keyword — verify independence."""
         em = escalation_manager
@@ -190,6 +192,7 @@ class TestConcurrentKeywordIndependentTiers:
 class TestConcurrentRecordFailure:
     """Verify consecutive_failures count is accurate under concurrent access."""
 
+    @pytest.mark.fast
     def test_concurrent_failures_same_keyword_count_accurate(self, escalation_manager):
         """10 threads each record 1 failure for the same keyword — count must be exact."""
         em = escalation_manager
@@ -216,6 +219,7 @@ class TestConcurrentRecordFailure:
             f"Expected {num_threads} failures but got {state.consecutive_403s}"
         )
 
+    @pytest.mark.fast
     def test_concurrent_failures_100_iterations(self, escalation_manager):
         """10 threads each record 10 failures — total 100, count must be accurate."""
         em = escalation_manager
@@ -244,6 +248,7 @@ class TestConcurrentRecordFailure:
             f"Expected {expected} failures but got {state.consecutive_403s}"
         )
 
+    @pytest.mark.fast
     def test_total_403s_accurate_across_keywords(self, escalation_manager):
         """Multiple threads recording failures for different keywords — total_403s accurate."""
         em = escalation_manager
@@ -279,6 +284,7 @@ class TestConcurrentRecordFailure:
 class TestPerKeywordLockIsolation:
     """Verify per-keyword locks prevent cross-keyword interference."""
 
+    @pytest.mark.fast
     def test_concurrent_escalations_different_keywords(self, escalation_manager):
         """Two keywords escalate simultaneously — verify each gets correct tier."""
         em = escalation_manager
@@ -305,6 +311,7 @@ class TestPerKeywordLockIsolation:
         assert "beta" in em._keyword_locks
         assert em._keyword_locks["alpha"] is not em._keyword_locks["beta"]
 
+    @pytest.mark.fast
     def test_interleaved_failure_success_different_keywords(self, escalation_manager):
         """Failures on keyword A don't reset when keyword B succeeds."""
         em = escalation_manager
@@ -336,6 +343,7 @@ class TestPerKeywordLockIsolation:
         state_b = em._keyword_states["kw_b"]
         assert state_b.consecutive_403s == 0
 
+    @pytest.mark.fast
     def test_20_keywords_concurrent_no_lock_contention(self, escalation_manager):
         """20 concurrent keywords — verify all complete without deadlock."""
         em = escalation_manager
@@ -364,6 +372,7 @@ class TestPerKeywordLockIsolation:
         assert len(errors) == 0, f"Errors occurred: {errors}"
         assert em.get_active_keyword_count() == num_keywords
 
+    @pytest.mark.fast
     def test_lock_creation_is_thread_safe(self, escalation_manager):
         """Multiple threads requesting locks for same keyword — only one lock created."""
         em = escalation_manager
@@ -434,6 +443,7 @@ class TestSharedBudgetDepletion:
             f"Expected >=2 rotations used but got {budget.rotations_used}"
         )
 
+    @pytest.mark.fast
     def test_concurrent_budget_consumption_exact_limit(self, imp_manager, ext_config):
         """Two keywords escalate concurrently — total rotations must not exceed budget."""
         budget = RateLimitBudget()
@@ -464,6 +474,7 @@ class TestSharedBudgetDepletion:
         )
         assert budget.can_rotate() is True  # 5 < 10
 
+    @pytest.mark.fast
     def test_budget_exhaustion_forces_max_tier_skip(self, imp_manager, ext_config):
         """When budget is exhausted, escalation skips directly to FULL_BYPASS."""
         budget = RateLimitBudget()
@@ -493,6 +504,7 @@ class TestSharedBudgetDepletion:
 class TestConcurrentGetEscalationArgs:
     """Verify no partial reads of tier state during concurrent escalation."""
 
+    @pytest.mark.fast
     def test_concurrent_reads_return_valid_tier_args(self, escalation_manager):
         """Multiple threads reading args for same keyword — each returns valid result."""
         em = escalation_manager
@@ -528,6 +540,7 @@ class TestConcurrentGetEscalationArgs:
                 f"Tier 2 args missing --extractor-args: {r.args}"
             )
 
+    @pytest.mark.fast
     def test_concurrent_read_during_escalation(self, escalation_manager):
         """One thread escalates while others read — reads must return valid tier."""
         em = escalation_manager
@@ -585,6 +598,7 @@ class TestConcurrentGetEscalationArgs:
                 assert any("--extractor-args" in arg for arg in r.args)
                 assert r.rotate_cookies is True
 
+    @pytest.mark.fast
     def test_concurrent_different_keywords_consistent(self, escalation_manager):
         """Multiple keywords read concurrently — each gets its own correct tier."""
         em = escalation_manager
@@ -634,6 +648,7 @@ class TestConcurrentGetEscalationArgs:
             f"Tier 3 keyword returned unexpected tiers: {set(results['tier3'])}"
         )
 
+    @pytest.mark.fast
     def test_args_never_contain_partial_state(self, escalation_manager):
         """Stress test: 50 threads reading same keyword — no partial/corrupt args."""
         em = escalation_manager

@@ -77,16 +77,19 @@ def temp_project_dir(tmp_path):
 class TestTranscribeStageInit:
     """Test TranscribeStage initialization"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name is correct"""
         stage = TranscribeStage()
         assert stage.name == "TRANSCRIBE"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = TranscribeStage()
         assert "Transcribe" in stage.description or "transcribe" in stage.description
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered"""
         from src.stages import get_stage
@@ -101,6 +104,7 @@ class TestTranscribeStageInit:
 class TestTranscribeInputValidation:
     """Test validate_inputs method"""
 
+    @pytest.mark.fast
     def test_validate_no_videos_or_audio(self, mock_config):
         """Test validation fails when no videos or audio"""
         stage = TranscribeStage()
@@ -113,6 +117,7 @@ class TestTranscribeInputValidation:
         assert error is not None
         assert "videos" in error.lower() or "audio" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_with_videos(self, mock_config):
         """Test validation succeeds with videos"""
         stage = TranscribeStage()
@@ -124,6 +129,7 @@ class TestTranscribeInputValidation:
 
         assert error is None
 
+    @pytest.mark.fast
     def test_validate_with_audio(self, mock_config):
         """Test validation succeeds with audio files"""
         stage = TranscribeStage()
@@ -143,6 +149,7 @@ class TestTranscribeInputValidation:
 class TestVideoFileDiscovery:
     """Test _get_video_files method"""
 
+    @pytest.mark.fast
     def test_get_audio_first_files(self, mock_config):
         """Test getting files from audio downloads"""
         stage = TranscribeStage()
@@ -158,6 +165,7 @@ class TestVideoFileDiscovery:
         assert all(isinstance(f, Path) for f in files)
         assert str(files[0]) == "audio1.mp3"
 
+    @pytest.mark.fast
     def test_get_video_files(self, mock_config):
         """Test getting files from downloaded videos"""
         stage = TranscribeStage()
@@ -172,6 +180,7 @@ class TestVideoFileDiscovery:
         assert len(files) == 2
         assert str(files[0]) == "video1.mp4"
 
+    @pytest.mark.fast
     def test_get_files_from_directory(self, mock_config, temp_project_dir):
         """Test scanning directory for video files"""
         stage = TranscribeStage()
@@ -200,6 +209,7 @@ class TestTranscription:
 
     @patch('src.transcription.transcribe_videos_parallel')
     @patch('src.transcription.DeltaAwareIndex')
+    @pytest.mark.fast
     def test_transcribe_videos_parallel(self, mock_delta_class, mock_transcribe, mock_config):
         """Test parallel transcription"""
         stage = TranscribeStage()
@@ -224,6 +234,7 @@ class TestTranscription:
     @patch('src.transcription.transcribe_videos_parallel', side_effect=ImportError("no parallel"))
     @patch('src.transcription.transcribe_video')
     @patch('src.transcription.TranscriptCache')
+    @pytest.mark.fast
     def test_transcribe_parallel_fallback_to_sequential(self, mock_cache_class, mock_transcribe,
                                                        mock_parallel, mock_config):
         """Test fallback to sequential when parallel unavailable"""
@@ -243,6 +254,7 @@ class TestTranscription:
 
     @patch('src.transcription.transcribe_video')
     @patch('src.transcription.TranscriptCache')
+    @pytest.mark.fast
     def test_transcribe_sequential(self, mock_cache_class, mock_transcribe, mock_config):
         """Test sequential transcription"""
         stage = TranscribeStage()
@@ -264,6 +276,7 @@ class TestTranscription:
     @patch('src.transcription.transcribe_video')
     @patch('src.transcription.TranscriptCache')
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_transcribe_sequential_with_error(self, mock_logger, mock_cache_class,
                                               mock_transcribe, mock_config):
         """Test sequential transcription handles errors"""
@@ -293,6 +306,7 @@ class TestTranscription:
 class TestSilentVideoHandling:
     """Test silent video handling"""
 
+    @pytest.mark.fast
     def test_handle_silent_videos_disabled(self, mock_config):
         """Test silent video handling when disabled"""
         stage = TranscribeStage()
@@ -301,6 +315,7 @@ class TestSilentVideoHandling:
         # Should not raise
         stage._handle_silent_videos([], {}, mock_config)
 
+    @pytest.mark.fast
     def test_handle_silent_videos_finds_silent(self, mock_config):
         """Test finding silent videos"""
         stage = TranscribeStage()
@@ -331,6 +346,7 @@ class TestSilentVideoHandling:
 class TestEmbeddingComputation:
     """Test embedding computation"""
 
+    @pytest.mark.fast
     def test_compute_embeddings_disabled(self, mock_config):
         """Test embeddings disabled"""
         stage = TranscribeStage()
@@ -345,6 +361,7 @@ class TestEmbeddingComputation:
     @patch('src.embeddings.build_embedding_index')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_compute_embeddings_success(self, mock_cache_class, mock_provider,
                                        mock_build_index, mock_compute, mock_config):
         """Test successful embedding computation"""
@@ -373,6 +390,7 @@ class TestEmbeddingComputation:
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.embeddings.compute_embeddings', side_effect=Exception("embedding error"))
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_compute_embeddings_import_error(self, mock_logger, mock_compute, mock_provider, mock_config):
         """Test embedding computation handles errors gracefully"""
         stage = TranscribeStage()
@@ -387,6 +405,7 @@ class TestEmbeddingComputation:
         assert result is False
         mock_logger.error.assert_called()  # Uses logger.error for generic exceptions
 
+    @pytest.mark.fast
     def test_compute_embeddings_no_text(self, mock_config):
         """Test embedding computation with no text segments"""
         stage = TranscribeStage()
@@ -405,6 +424,7 @@ class TestFacePreDetection:
     """Test face pre-detection"""
 
     @patch('src.face_detection.FaceDetector')
+    @pytest.mark.fast
     def test_predetect_faces_all_cached(self, mock_detector_class, mock_config):
         """Test face detection when all videos cached"""
         stage = TranscribeStage()
@@ -419,6 +439,7 @@ class TestFacePreDetection:
         stage._predetect_faces(video_files, mock_config)
 
     @patch('src.face_detection.FaceDetector')
+    @pytest.mark.fast
     def test_predetect_faces_with_uncached(self, mock_detector_class, mock_config):
         """Test face detection with uncached videos"""
         stage = TranscribeStage()
@@ -436,6 +457,7 @@ class TestFacePreDetection:
 
     @patch('src.face_detection.FaceDetector', side_effect=Exception("detector error"))
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_predetect_faces_error(self, mock_logger, mock_detector, mock_config):
         """Test face detection handles errors gracefully"""
         stage = TranscribeStage()
@@ -452,6 +474,7 @@ class TestFacePreDetection:
 class TestVideoTopicExtraction:
     """Test video topic extraction"""
 
+    @pytest.mark.fast
     def test_extract_topics_empty_transcripts(self, mock_config):
         """Test topic extraction with no transcripts"""
         stage = TranscribeStage()
@@ -460,6 +483,7 @@ class TestVideoTopicExtraction:
         stage._extract_video_topics({}, mock_config)
 
     @patch('src.topic_extraction.TopicExtractor')
+    @pytest.mark.fast
     def test_extract_topics_success(self, mock_extractor_class, mock_config):
         """Test successful topic extraction"""
         stage = TranscribeStage()
@@ -477,6 +501,7 @@ class TestVideoTopicExtraction:
 
     @patch('src.topic_extraction.TopicExtractor', side_effect=Exception("extraction failed"))
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_extract_topics_error(self, mock_logger, mock_extractor, mock_config):
         """Test topic extraction handles errors"""
         stage = TranscribeStage()
@@ -496,6 +521,7 @@ class TestSkipTranscription:
     """Test skip transcription behavior"""
 
     @patch('src.transcription.TranscriptCache')
+    @pytest.mark.fast
     def test_skip_transcription_loads_cache(self, mock_cache_class, mock_config, mock_checkpoint,
                                            temp_project_dir):
         """Test skipping transcription loads from cache"""
@@ -527,6 +553,7 @@ class TestTranscribeStageExecution:
 
     @patch('src.transcription.transcribe_videos_parallel')
     @patch('src.transcription.DeltaAwareIndex')
+    @pytest.mark.fast
     def test_run_success(self, mock_delta_class, mock_transcribe, mock_config, mock_checkpoint):
         """Test successful stage execution"""
         stage = TranscribeStage()
@@ -549,6 +576,7 @@ class TestTranscribeStageExecution:
         assert result.success is True
         assert len(state.transcripts) > 0
 
+    @pytest.mark.fast
     def test_run_no_video_files(self, mock_config, mock_checkpoint):
         """Test run with no video files"""
         stage = TranscribeStage()
@@ -563,6 +591,7 @@ class TestTranscribeStageExecution:
         assert result.success is True
         assert len(result.warnings) > 0
 
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_config, mock_checkpoint):
         """Test run handles exceptions gracefully"""
         stage = TranscribeStage()
@@ -582,6 +611,7 @@ class TestTranscribeStageExecution:
 class TestTranscribeCheckpoint:
     """Test checkpoint operations"""
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = TranscribeStage()
@@ -593,6 +623,7 @@ class TestTranscribeCheckpoint:
         assert result is False
 
     @patch.object(TranscribeStage, '_rebuild_text_metadata')
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_rebuild, mock_checkpoint):
         """Test can_skip returns True and rebuilds metadata"""
         stage = TranscribeStage()
@@ -604,6 +635,7 @@ class TestTranscribeCheckpoint:
         assert result is True
         mock_rebuild.assert_called_once()
 
+    @pytest.mark.fast
     def test_restore_success(self, mock_checkpoint):
         """Test restore with checkpoint data"""
         stage = TranscribeStage()
@@ -618,6 +650,7 @@ class TestTranscribeCheckpoint:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore with no checkpoint data"""
         stage = TranscribeStage()
@@ -629,6 +662,7 @@ class TestTranscribeCheckpoint:
         assert result is False
 
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_logger, mock_checkpoint):
         """Test restore handles exceptions"""
         stage = TranscribeStage()
@@ -648,6 +682,7 @@ class TestTranscribeCheckpoint:
 class TestTextMetadataRebuilding:
     """Test text metadata rebuilding for --match-only mode"""
 
+    @pytest.mark.fast
     def test_rebuild_text_metadata_no_cache(self, mock_checkpoint):
         """Test rebuilding when no cache available"""
         stage = TranscribeStage()
@@ -661,6 +696,7 @@ class TestTextMetadataRebuilding:
         assert state.text_metadata == []
 
     @patch('glob.glob')
+    @pytest.mark.fast
     def test_rebuild_text_metadata_with_transcripts(self, mock_glob, mock_checkpoint,
                                                     temp_project_dir):
         """Test rebuilding text metadata from cached transcripts"""
@@ -692,6 +728,7 @@ class TestTextMetadataRebuilding:
 class TestTranscribeEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_get_video_files_prefers_audio_over_videos(self, mock_config):
         """Test that audio files take precedence over videos"""
         stage = TranscribeStage()
@@ -706,6 +743,7 @@ class TestTranscribeEdgeCases:
 
     @patch('src.transcription.transcribe_videos_parallel')
     @patch('src.transcription.DeltaAwareIndex')
+    @pytest.mark.fast
     def test_transcribe_all_videos_cached(self, mock_delta_class, mock_transcribe, mock_config):
         """Test transcription when all videos are cached"""
         stage = TranscribeStage()
@@ -721,6 +759,7 @@ class TestTranscribeEdgeCases:
         assert transcripts == {}
         mock_transcribe.assert_not_called()
 
+    @pytest.mark.fast
     def test_handle_transcripts_with_dict_segments(self, mock_config):
         """Test handling transcripts that are dicts instead of objects"""
         stage = TranscribeStage()
@@ -762,6 +801,7 @@ class TestCaptionFirstFallback:
         mock_config.download.caption_first.enabled = False
         return mock_config
 
+    @pytest.mark.fast
     def test_get_videos_with_captions_caption_disabled(self, caption_disabled_config):
         """Test _get_videos_with_captions returns empty when caption-first disabled"""
         stage = TranscribeStage()
@@ -775,6 +815,7 @@ class TestCaptionFirstFallback:
         assert len(videos) == 0
         assert stats['total'] == 0
 
+    @pytest.mark.fast
     def test_get_videos_with_captions_finds_youtube(self, caption_enabled_config):
         """Test _get_videos_with_captions identifies YouTube captions"""
         stage = TranscribeStage()
@@ -793,6 +834,7 @@ class TestCaptionFirstFallback:
         assert stats['whisper'] == 1
         assert stats['total'] == 1  # Unique video IDs with captions
 
+    @pytest.mark.fast
     def test_get_videos_with_captions_counts_sources(self, caption_enabled_config):
         """Test _get_videos_with_captions counts all source types"""
         stage = TranscribeStage()
@@ -811,6 +853,7 @@ class TestCaptionFirstFallback:
         assert stats['manual'] == 1
         assert stats['needs_transcription'] == 3  # vid2, vid3, vid4 need transcription
 
+    @pytest.mark.fast
     def test_filter_videos_with_captions_skips_captioned(self, caption_enabled_config):
         """Test _filter_videos_with_captions skips videos with YouTube captions"""
         stage = TranscribeStage()
@@ -828,6 +871,7 @@ class TestCaptionFirstFallback:
         assert len(filtered) == 1
         assert filtered[0].stem == "jkl789mno03"
 
+    @pytest.mark.fast
     def test_filter_videos_with_captions_all_when_disabled(self, caption_disabled_config):
         """Test _filter_videos_with_captions returns all when caption-first disabled"""
         stage = TranscribeStage()
@@ -840,6 +884,7 @@ class TestCaptionFirstFallback:
 
         assert len(filtered) == 2
 
+    @pytest.mark.fast
     def test_filter_videos_with_captions_empty_set(self, caption_enabled_config):
         """Test _filter_videos_with_captions returns all when no captions"""
         stage = TranscribeStage()
@@ -851,6 +896,7 @@ class TestCaptionFirstFallback:
 
         assert len(filtered) == 2
 
+    @pytest.mark.fast
     def test_extract_video_id_from_path(self):
         """Test _extract_video_id_from_path extracts 11-char video ID"""
         stage = TranscribeStage()
@@ -872,6 +918,7 @@ class TestCaptionFirstFallback:
         result = stage._extract_video_id_from_path("video_dQw4w9WgXcQ.mp4")
         assert len(result) == 11  # Should find an 11-char sequence
 
+    @pytest.mark.fast
     def test_mark_transcription_source_dict_segments(self):
         """Test _mark_transcription_source marks dict segments"""
         stage = TranscribeStage()
@@ -889,6 +936,7 @@ class TestCaptionFirstFallback:
         for seg in transcripts["video1.mp4"]:
             assert seg['caption_source'] == 'whisper'
 
+    @pytest.mark.fast
     def test_mark_transcription_source_updates_text_metadata(self):
         """Test _mark_transcription_source updates text_metadata entries"""
         stage = TranscribeStage()
@@ -903,6 +951,7 @@ class TestCaptionFirstFallback:
 
         assert state.text_metadata[0]['caption_source'] == 'whisper'
 
+    @pytest.mark.fast
     def test_mark_transcription_source_preserves_existing(self):
         """Test _mark_transcription_source preserves existing caption_source"""
         stage = TranscribeStage()
@@ -920,6 +969,7 @@ class TestCaptionFirstFallback:
 
     @patch('src.transcription.transcribe_videos_parallel')
     @patch('src.transcription.DeltaAwareIndex')
+    @pytest.mark.fast
     def test_run_with_caption_data_skips_transcription(
         self, mock_delta_class, mock_transcribe, caption_enabled_config, mock_checkpoint
     ):
@@ -952,6 +1002,7 @@ class TestCaptionFirstFallback:
         assert 'caption_count' in result.data
         assert 'transcription_count' in result.data
 
+    @pytest.mark.fast
     def test_run_logs_caption_vs_transcription_summary(
         self, caption_enabled_config, mock_checkpoint, capsys
     ):
@@ -974,6 +1025,7 @@ class TestCaptionFirstFallback:
         captured = capsys.readouterr()
         assert "2 videos with existing captions" in captured.out or "Found 2 videos" in captured.out
 
+    @pytest.mark.fast
     def test_fallback_disabled_logs_warning(self, caption_enabled_config):
         """Test that disabling fallback logs appropriate message"""
         stage = TranscribeStage()
@@ -1012,6 +1064,7 @@ class TestCaptionSourceTracking:
         config.download.caption_first.fallback_to_transcription = True
         return config
 
+    @pytest.mark.fast
     def test_youtube_source_preserved_in_metadata(self):
         """Test that caption_source='youtube' is preserved in text_metadata"""
         stage = TranscribeStage()
@@ -1027,6 +1080,7 @@ class TestCaptionSourceTracking:
         # YouTube source should remain unchanged
         assert state.text_metadata[0]['caption_source'] == 'youtube'
 
+    @pytest.mark.fast
     def test_whisper_source_added_to_transcripts(self):
         """Test that caption_source='whisper' is added to new transcripts"""
         stage = TranscribeStage()
@@ -1046,6 +1100,7 @@ class TestCaptionSourceTracking:
         for seg in transcripts['video1.mp4']:
             assert seg['caption_source'] == 'whisper'
 
+    @pytest.mark.fast
     def test_manual_source_supported(self):
         """Test that caption_source='manual' is recognized"""
         stage = TranscribeStage()

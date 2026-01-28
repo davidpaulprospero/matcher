@@ -62,16 +62,19 @@ def mock_keywords():
 class TestStockVideoStageInit:
     """Test stage initialization"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name"""
         stage = StockVideoStage()
         assert stage.name == "STOCK"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = StockVideoStage()
         assert "stock footage" in stage.description.lower()
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered in stage registry"""
         from src.stages import get_stage
@@ -86,6 +89,7 @@ class TestStockVideoStageInit:
 class TestInputValidation:
     """Test input validation"""
 
+    @pytest.mark.fast
     def test_validate_no_hard_requirements(self, mock_config):
         """Test validation has no hard requirements (optional stage)"""
         stage = StockVideoStage()
@@ -102,6 +106,7 @@ class TestInputValidation:
 class TestSkipConditions:
     """Test various skip conditions"""
 
+    @pytest.mark.fast
     def test_skip_when_download_disabled(self, mock_config, mock_checkpoint):
         """Test skipping when pipeline.skip_download is True"""
         stage = StockVideoStage()
@@ -114,6 +119,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'skip_download_enabled'
 
+    @pytest.mark.fast
     def test_skip_when_enhanced_disabled(self, mock_config, mock_checkpoint):
         """Test skipping when enhanced features disabled"""
         stage = StockVideoStage()
@@ -126,6 +132,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'enhanced_disabled'
 
+    @pytest.mark.fast
     def test_skip_when_no_enhanced_config(self, mock_config, mock_checkpoint):
         """Test skipping when enhanced config not present"""
         stage = StockVideoStage()
@@ -138,6 +145,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'enhanced_disabled'
 
+    @pytest.mark.fast
     def test_skip_when_no_stock_sources_enabled(self, mock_config, mock_checkpoint):
         """Test skipping when neither Pexels nor Pixabay enabled"""
         stage = StockVideoStage()
@@ -151,6 +159,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'no_stock_sources_enabled'
 
+    @pytest.mark.fast
     def test_skip_when_no_keywords(self, mock_config, mock_checkpoint):
         """Test skipping when no keywords available"""
         stage = StockVideoStage()
@@ -173,6 +182,7 @@ class TestKeywordLimiting:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_keyword_limit_15(self, mock_pixabay, mock_pexels, mock_config,
                              mock_checkpoint):
         """Test keywords are limited to 15 for API rate limits"""
@@ -203,6 +213,7 @@ class TestPexelsDownload:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_pexels_only(self, mock_pixabay, mock_pexels, mock_config,
                         mock_checkpoint, mock_keywords):
         """Test download from Pexels only"""
@@ -226,6 +237,7 @@ class TestPexelsDownload:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_pexels_failed_keyword_tracking(self, mock_pixabay, mock_pexels,
                                            mock_config, mock_checkpoint, mock_keywords):
         """Test tracking of failed keywords"""
@@ -257,6 +269,7 @@ class TestPixabayDownload:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_pixabay_only(self, mock_pixabay, mock_pexels, mock_config,
                          mock_checkpoint, mock_keywords):
         """Test download from Pixabay only"""
@@ -288,6 +301,7 @@ class TestCombinedDownload:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_both_sources(self, mock_pixabay, mock_pexels, mock_config,
                          mock_checkpoint, mock_keywords):
         """Test download from both Pexels and Pixabay"""
@@ -318,6 +332,7 @@ class TestVideoDeduplication:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_no_duplicate_videos(self, mock_pixabay, mock_pexels, mock_config,
                                 mock_checkpoint, mock_keywords):
         """Test that videos already in downloaded_videos are not added again"""
@@ -361,6 +376,7 @@ class TestDownloadedVideoCreation:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_downloaded_video_attributes(self, mock_pixabay, mock_pexels,
                                         mock_config, mock_checkpoint, mock_keywords):
         """Test DownloadedVideo objects have correct attributes"""
@@ -396,6 +412,7 @@ class TestStockDirectory:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_stock_directory_created(self, mock_pixabay, mock_pexels,
                                     mock_config, mock_checkpoint, mock_keywords, tmp_path):
         """Test stock directory is created"""
@@ -427,6 +444,7 @@ class TestStageExecution:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_run_success(self, mock_pixabay, mock_pexels, mock_config,
                         mock_checkpoint, mock_keywords):
         """Test successful full execution"""
@@ -446,6 +464,7 @@ class TestStageExecution:
         assert len(result.data['stock_paths']) == 2
 
     @patch.object(StockVideoStage, '_download_pexels')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_pexels, mock_config,
                                    mock_checkpoint, mock_keywords):
         """Test exception handling in main run"""
@@ -469,6 +488,7 @@ class TestStageExecution:
 class TestCheckpointOperations:
     """Test checkpoint save/restore"""
 
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_checkpoint):
         """Test can_skip returns True when checkpoint exists"""
         stage = StockVideoStage()
@@ -480,6 +500,7 @@ class TestCheckpointOperations:
         assert result is True
         mock_checkpoint.should_skip_stage.assert_called_with("STOCK")
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = StockVideoStage()
@@ -490,6 +511,7 @@ class TestCheckpointOperations:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_success(self, mock_checkpoint, tmp_path):
         """Test successful restore from checkpoint"""
         stage = StockVideoStage()
@@ -516,6 +538,7 @@ class TestCheckpointOperations:
         assert len(state.downloaded_videos) == 2
         assert all(v.source == 'stock' for v in state.downloaded_videos)
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore fails when no checkpoint data"""
         stage = StockVideoStage()
@@ -526,6 +549,7 @@ class TestCheckpointOperations:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_missing_video_files(self, mock_checkpoint):
         """Test restore with missing video files"""
         stage = StockVideoStage()
@@ -545,6 +569,7 @@ class TestCheckpointOperations:
         assert result is False
         assert len(state.downloaded_videos) == 0
 
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_checkpoint):
         """Test restore handles exceptions gracefully"""
         stage = StockVideoStage()
@@ -565,6 +590,7 @@ class TestHelperMethods:
     """Test internal helper methods"""
 
     @patch('src.pexels.download_pexels_footage')
+    @pytest.mark.fast
     def test_download_pexels_success(self, mock_download):
         """Test _download_pexels with successful download"""
         stage = StockVideoStage()
@@ -579,6 +605,7 @@ class TestHelperMethods:
         assert mock_download.called
 
     @patch('src.pexels.download_pexels_footage')
+    @pytest.mark.fast
     def test_download_pexels_import_error(self, mock_download):
         """Test _download_pexels with ImportError"""
         stage = StockVideoStage()
@@ -593,6 +620,7 @@ class TestHelperMethods:
         assert counts == {}
 
     @patch('src.pexels.download_pexels_footage')
+    @pytest.mark.fast
     def test_download_pexels_exception(self, mock_download):
         """Test _download_pexels with general exception"""
         stage = StockVideoStage()
@@ -607,6 +635,7 @@ class TestHelperMethods:
         assert counts == {}
 
     @patch('src.pixabay.download_pixabay_footage')
+    @pytest.mark.fast
     def test_download_pixabay_success(self, mock_download):
         """Test _download_pixabay with successful download"""
         stage = StockVideoStage()
@@ -621,6 +650,7 @@ class TestHelperMethods:
         assert mock_download.called
 
     @patch('src.pixabay.download_pixabay_footage')
+    @pytest.mark.fast
     def test_download_pixabay_import_error(self, mock_download):
         """Test _download_pixabay with ImportError"""
         stage = StockVideoStage()
@@ -644,6 +674,7 @@ class TestEdgeCases:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_default_stock_per_keyword(self, mock_pixabay, mock_pexels,
                                        mock_config, mock_checkpoint, mock_keywords):
         """Test default stock_per_keyword value"""
@@ -665,6 +696,7 @@ class TestEdgeCases:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_empty_download_results(self, mock_pixabay, mock_pexels,
                                    mock_config, mock_checkpoint, mock_keywords):
         """Test handling when both sources return no videos"""
@@ -684,6 +716,7 @@ class TestEdgeCases:
 
     @patch.object(StockVideoStage, '_download_pexels')
     @patch.object(StockVideoStage, '_download_pixabay')
+    @pytest.mark.fast
     def test_no_duplicate_failed_keywords(self, mock_pixabay, mock_pexels,
                                          mock_config, mock_checkpoint):
         """Test failed keywords are not duplicated"""

@@ -27,6 +27,7 @@ class TestRateLimitMetricsInit:
         assert metrics.cookie_rotations == 0
         assert metrics.vpn_switches == 0
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test creating metrics with custom values."""
         metrics = RateLimitMetrics(
@@ -51,6 +52,7 @@ class TestDownloadRecording:
         metrics.record_download_attempt()
         assert metrics.total_downloads == 1
 
+    @pytest.mark.fast
     def test_record_download_success(self):
         """Test recording a successful download."""
         metrics = RateLimitMetrics()
@@ -60,6 +62,7 @@ class TestDownloadRecording:
         assert metrics.successful_downloads == 1
         assert metrics.failed_downloads == 0
 
+    @pytest.mark.fast
     def test_record_download_failure(self):
         """Test recording a failed download."""
         metrics = RateLimitMetrics()
@@ -69,6 +72,7 @@ class TestDownloadRecording:
         assert metrics.successful_downloads == 0
         assert metrics.failed_downloads == 1
 
+    @pytest.mark.fast
     def test_multiple_downloads(self):
         """Test recording multiple downloads."""
         metrics = RateLimitMetrics()
@@ -95,6 +99,7 @@ class TestRetryRecording:
         assert metrics.retry_attempts == 1
         assert metrics.retries_by_error_type == {'timeout': 1}
 
+    @pytest.mark.fast
     def test_record_multiple_retries_same_type(self):
         """Test recording multiple retries of same type."""
         metrics = RateLimitMetrics()
@@ -104,6 +109,7 @@ class TestRetryRecording:
         assert metrics.retry_attempts == 3
         assert metrics.retries_by_error_type == {'transient': 3}
 
+    @pytest.mark.fast
     def test_record_retries_different_types(self):
         """Test recording retries of different types."""
         metrics = RateLimitMetrics()
@@ -119,6 +125,7 @@ class TestRetryRecording:
             'network': 1
         }
 
+    @pytest.mark.fast
     def test_record_retries_exhausted(self):
         """Test recording retries exhaustion."""
         metrics = RateLimitMetrics()
@@ -136,6 +143,7 @@ class TestRateLimitRecording:
         metrics.record_rate_limit_event()
         assert metrics.rate_limit_events == 1
 
+    @pytest.mark.fast
     def test_record_backoff(self):
         """Test recording a backoff delay."""
         metrics = RateLimitMetrics()
@@ -143,6 +151,7 @@ class TestRateLimitRecording:
         assert metrics.backoff_attempts == 1
         assert metrics.time_spent_backing_off == 5.0
 
+    @pytest.mark.fast
     def test_record_multiple_backoffs(self):
         """Test recording multiple backoff delays."""
         metrics = RateLimitMetrics()
@@ -152,12 +161,14 @@ class TestRateLimitRecording:
         assert metrics.backoff_attempts == 3
         assert metrics.time_spent_backing_off == 35.0
 
+    @pytest.mark.fast
     def test_record_cookie_rotation(self):
         """Test recording a cookie rotation."""
         metrics = RateLimitMetrics()
         metrics.record_cookie_rotation()
         assert metrics.cookie_rotations == 1
 
+    @pytest.mark.fast
     def test_record_vpn_switch(self):
         """Test recording a VPN switch."""
         metrics = RateLimitMetrics()
@@ -176,6 +187,7 @@ class TestCircuitBreakerRecording:
         assert metrics.circuit_breaker_trips == 1
         assert metrics.circuit_breaker_pause_seconds == 60.0
 
+    @pytest.mark.fast
     def test_record_multiple_trips(self):
         """Test recording multiple circuit breaker trips."""
         metrics = RateLimitMetrics()
@@ -197,6 +209,7 @@ class TestBatchRetryRecording:
         assert metrics.batch_retry_successes == 5
         assert metrics.batch_retry_failures == 2
 
+    @pytest.mark.fast
     def test_record_multiple_passes(self):
         """Test recording multiple batch retry passes."""
         metrics = RateLimitMetrics()
@@ -218,6 +231,7 @@ class TestSpeedRecording:
         assert metrics.speed_samples == 1
         assert metrics.avg_speed_mbps == 5.0
 
+    @pytest.mark.fast
     def test_record_multiple_speed_samples(self):
         """Test recording multiple speed samples uses running average."""
         metrics = RateLimitMetrics()
@@ -227,6 +241,7 @@ class TestSpeedRecording:
         assert metrics.speed_samples == 3
         assert metrics.avg_speed_mbps == 15.0
 
+    @pytest.mark.fast
     def test_record_timeout_extension(self):
         """Test recording a timeout extension."""
         metrics = RateLimitMetrics()
@@ -243,26 +258,31 @@ class TestCalculatedProperties:
         metrics = RateLimitMetrics()
         assert metrics.avg_retry_count == 0.0
 
+    @pytest.mark.fast
     def test_avg_retry_count_with_downloads(self):
         """Test average retry count with downloads."""
         metrics = RateLimitMetrics(total_downloads=10, retry_attempts=20)
         assert metrics.avg_retry_count == 2.0
 
+    @pytest.mark.fast
     def test_rate_limit_percentage_no_downloads(self):
         """Test rate limit percentage with no downloads."""
         metrics = RateLimitMetrics()
         assert metrics.rate_limit_percentage == 0.0
 
+    @pytest.mark.fast
     def test_rate_limit_percentage_with_downloads(self):
         """Test rate limit percentage with downloads."""
         metrics = RateLimitMetrics(total_downloads=100, rate_limit_events=15)
         assert metrics.rate_limit_percentage == 15.0
 
+    @pytest.mark.fast
     def test_success_rate_no_downloads(self):
         """Test success rate with no downloads."""
         metrics = RateLimitMetrics()
         assert metrics.success_rate == 0.0
 
+    @pytest.mark.fast
     def test_success_rate_with_downloads(self):
         """Test success rate with downloads."""
         metrics = RateLimitMetrics(total_downloads=100, successful_downloads=85)
@@ -285,6 +305,7 @@ class TestSubsystemIntegration:
         assert metrics.circuit_breaker_trips == 3
         assert metrics.circuit_breaker_pause_seconds == 180.0
 
+    @pytest.mark.fast
     def test_update_from_circuit_breaker_disabled(self):
         """Test updating from circuit breaker stats when disabled."""
         metrics = RateLimitMetrics()
@@ -292,6 +313,7 @@ class TestSubsystemIntegration:
         metrics.update_from_circuit_breaker(stats)
         assert metrics.circuit_breaker_trips == 0
 
+    @pytest.mark.fast
     def test_update_from_retry_queue_enabled(self):
         """Test updating from retry queue stats when enabled."""
         metrics = RateLimitMetrics()
@@ -306,6 +328,7 @@ class TestSubsystemIntegration:
         assert metrics.batch_retry_successes == 10
         assert metrics.batch_retry_failures == 3
 
+    @pytest.mark.fast
     def test_update_from_retry_queue_disabled(self):
         """Test updating from retry queue stats when disabled."""
         metrics = RateLimitMetrics()
@@ -313,6 +336,7 @@ class TestSubsystemIntegration:
         metrics.update_from_retry_queue(stats)
         assert metrics.batch_retry_passes == 0
 
+    @pytest.mark.fast
     def test_update_from_speed_tracker(self):
         """Test updating from speed tracker stats."""
         metrics = RateLimitMetrics()
@@ -340,6 +364,7 @@ class TestConfigRecommendations:
         recommendations = metrics.get_config_recommendations()
         assert len(recommendations) == 0
 
+    @pytest.mark.fast
     def test_recommendation_high_rate_limiting(self):
         """Test recommendation for high rate limiting (>10%)."""
         metrics = RateLimitMetrics(
@@ -350,6 +375,7 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert 'rate limiting' in recommendations[0].lower()
 
+    @pytest.mark.fast
     def test_recommendation_high_retry_exhaustion(self):
         """Test recommendation for high retry exhaustion rate."""
         metrics = RateLimitMetrics(
@@ -360,6 +386,7 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert any('retry' in r.lower() for r in recommendations)
 
+    @pytest.mark.fast
     def test_recommendation_many_circuit_breaker_trips(self):
         """Test recommendation for frequent circuit breaker trips."""
         metrics = RateLimitMetrics(
@@ -369,6 +396,7 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert any('circuit' in r.lower() for r in recommendations)
 
+    @pytest.mark.fast
     def test_recommendation_no_cookie_rotation(self):
         """Test recommendation when rate limits but no cookie rotation."""
         metrics = RateLimitMetrics(
@@ -379,6 +407,7 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert any('cookie' in r.lower() for r in recommendations)
 
+    @pytest.mark.fast
     def test_recommendation_many_timeout_extensions(self):
         """Test recommendation for many timeout extensions."""
         metrics = RateLimitMetrics(
@@ -388,6 +417,7 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert any('timeout' in r.lower() for r in recommendations)
 
+    @pytest.mark.fast
     def test_recommendation_low_batch_retry_recovery(self):
         """Test recommendation for low batch retry recovery rate."""
         metrics = RateLimitMetrics(
@@ -399,6 +429,7 @@ class TestConfigRecommendations:
         assert len(recommendations) >= 1
         assert any('batch' in r.lower() for r in recommendations)
 
+    @pytest.mark.fast
     def test_returns_list_of_strings_when_no_recommendations(self):
         """AC6: get_config_recommendations() returns list of strings even when empty."""
         metrics = RateLimitMetrics()
@@ -409,6 +440,7 @@ class TestConfigRecommendations:
         assert not isinstance(recommendations, dict)
         assert len(recommendations) == 0
 
+    @pytest.mark.fast
     def test_returns_list_of_strings_when_recommendations_present(self):
         """AC6: All items in recommendations are strings."""
         metrics = RateLimitMetrics(
@@ -424,6 +456,7 @@ class TestConfigRecommendations:
         for rec in recommendations:
             assert isinstance(rec, str), f"Expected str, got {type(rec)}: {rec}"
 
+    @pytest.mark.fast
     def test_recommendation_rate_limit_mentions_backoff_or_cookies(self):
         """AC1: Rate limit recommendation suggests increasing backoff or adding cookies."""
         metrics = RateLimitMetrics(
@@ -435,6 +468,7 @@ class TestConfigRecommendations:
         assert len(rate_rec) == 1
         assert 'backoff' in rate_rec[0].lower() or 'cookie' in rate_rec[0].lower()
 
+    @pytest.mark.fast
     def test_recommendation_retry_mentions_max_retries(self):
         """AC2: Retry exhaustion recommendation suggests increasing max_retries."""
         metrics = RateLimitMetrics(
@@ -446,6 +480,7 @@ class TestConfigRecommendations:
         assert len(retry_rec) == 1
         assert 'max_retries' in retry_rec[0] or 'retry' in retry_rec[0].lower()
 
+    @pytest.mark.fast
     def test_recommendation_cb_mentions_pause_or_vpn(self):
         """AC3: Circuit breaker recommendation suggests longer pauses or VPN."""
         metrics = RateLimitMetrics(
@@ -456,6 +491,7 @@ class TestConfigRecommendations:
         assert len(cb_rec) == 1
         assert 'pause' in cb_rec[0].lower() or 'vpn' in cb_rec[0].lower()
 
+    @pytest.mark.fast
     def test_recommendation_no_cookies_mentions_enable_rotation(self):
         """AC4: No cookie rotation recommendation suggests enabling rotation."""
         metrics = RateLimitMetrics(
@@ -478,6 +514,7 @@ class TestSummary:
         summary = metrics.summary()
         assert 'Downloads: 0 total' in summary
 
+    @pytest.mark.fast
     def test_summary_with_downloads(self):
         """Test summary with downloads."""
         metrics = RateLimitMetrics(
@@ -491,6 +528,7 @@ class TestSummary:
         assert '10 failed' in summary
         assert 'Success rate: 90.0%' in summary
 
+    @pytest.mark.fast
     def test_summary_with_retries(self):
         """Test summary with retries."""
         metrics = RateLimitMetrics(
@@ -503,6 +541,7 @@ class TestSummary:
         assert 'timeout: 15' in summary
         assert 'transient: 10' in summary
 
+    @pytest.mark.fast
     def test_summary_with_rate_limiting(self):
         """Test summary with rate limiting metrics."""
         metrics = RateLimitMetrics(
@@ -515,6 +554,7 @@ class TestSummary:
         assert '3 backoffs' in summary
         assert '45.0s total' in summary
 
+    @pytest.mark.fast
     def test_summary_with_escalations(self):
         """Test summary with cookie/VPN escalations."""
         metrics = RateLimitMetrics(
@@ -526,6 +566,7 @@ class TestSummary:
         assert 'cookie rotations: 3' in summary
         assert 'VPN switches: 2' in summary
 
+    @pytest.mark.fast
     def test_summary_with_circuit_breaker(self):
         """Test summary with circuit breaker activity."""
         metrics = RateLimitMetrics(
@@ -536,6 +577,7 @@ class TestSummary:
         assert 'Circuit breaker: 2 trips' in summary
         assert '120.0s paused' in summary
 
+    @pytest.mark.fast
     def test_summary_with_batch_retry(self):
         """Test summary with batch retry activity."""
         metrics = RateLimitMetrics(
@@ -548,6 +590,7 @@ class TestSummary:
         assert '5 recovered' in summary
         assert '3 failed' in summary
 
+    @pytest.mark.fast
     def test_summary_with_speed_data(self):
         """Test summary with speed data."""
         metrics = RateLimitMetrics(
@@ -579,6 +622,7 @@ class TestPersistence:
         assert data['rate_limit_events'] == 10
         assert data['retries_by_error_type'] == {'timeout': 5}
 
+    @pytest.mark.fast
     def test_from_dict(self):
         """Test deserialization from dict."""
         data = {
@@ -593,17 +637,20 @@ class TestPersistence:
         assert metrics.failed_downloads == 10
         assert metrics.rate_limit_events == 5
 
+    @pytest.mark.fast
     def test_from_dict_empty(self):
         """Test deserialization from empty dict."""
         metrics = RateLimitMetrics.from_dict({})
         assert metrics.total_downloads == 0
         assert metrics.rate_limit_events == 0
 
+    @pytest.mark.fast
     def test_from_dict_none(self):
         """Test deserialization from None."""
         metrics = RateLimitMetrics.from_dict(None)
         assert metrics.total_downloads == 0
 
+    @pytest.mark.fast
     def test_from_dict_missing_fields(self):
         """Test deserialization handles missing fields."""
         data = {'total_downloads': 50}  # Most fields missing
@@ -612,6 +659,7 @@ class TestPersistence:
         assert metrics.successful_downloads == 0  # Default
         assert metrics.rate_limit_events == 0  # Default
 
+    @pytest.mark.fast
     def test_roundtrip(self):
         """Test serialization roundtrip preserves data."""
         original = RateLimitMetrics(
@@ -674,6 +722,7 @@ class TestVideoDownloaderIntegration:
         metrics = RateLimitMetrics()
         assert metrics.total_downloads == 0
 
+    @pytest.mark.fast
     def test_metrics_in_downloader_all(self):
         """Test that RateLimitMetrics is in __all__."""
         from src.downloader import __all__
@@ -704,6 +753,7 @@ class TestHealingOrchestratorIntegration:
 
         assert orchestrator._rate_limit_metrics == metrics
 
+    @pytest.mark.fast
     def test_print_report_includes_rate_limiting(self, capsys):
         """Test that print_report includes rate limiting section."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -731,6 +781,7 @@ class TestHealingOrchestratorIntegration:
         assert 'Downloads: 100 total' in captured.out
         assert 'Success rate: 80.0%' in captured.out
 
+    @pytest.mark.fast
     def test_print_report_includes_recommendations(self, capsys):
         """Test that print_report includes recommendations when warranted."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -757,6 +808,7 @@ class TestHealingOrchestratorIntegration:
         captured = capsys.readouterr()
         assert 'Recommendations:' in captured.out
 
+    @pytest.mark.fast
     def test_reset_clears_rate_limit_metrics(self):
         """Test that reset clears rate limit metrics."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -790,6 +842,7 @@ class TestKeywordRateLimitTracking:
         assert metrics.rate_limit_events == 1
         assert metrics.keyword_rate_limit_events == {"sunset beach": 1}
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_with_tier_and_keyword(self):
         """Test recording rate limit event with both tier and keyword."""
         metrics = RateLimitMetrics()
@@ -798,6 +851,7 @@ class TestKeywordRateLimitTracking:
         assert metrics.tier_rate_limit_events == {"long": 1}
         assert metrics.keyword_rate_limit_events == {"drone footage": 1}
 
+    @pytest.mark.fast
     def test_record_multiple_events_same_keyword(self):
         """Test recording multiple events for the same keyword."""
         metrics = RateLimitMetrics()
@@ -807,6 +861,7 @@ class TestKeywordRateLimitTracking:
         assert metrics.rate_limit_events == 3
         assert metrics.keyword_rate_limit_events == {"nature documentary": 3}
 
+    @pytest.mark.fast
     def test_record_events_different_keywords(self):
         """Test recording events for different keywords."""
         metrics = RateLimitMetrics()
@@ -821,6 +876,7 @@ class TestKeywordRateLimitTracking:
             "mountain landscape": 1
         }
 
+    @pytest.mark.fast
     def test_record_event_without_keyword_does_not_add_to_dict(self):
         """Test that events without keyword don't add to keyword dict."""
         metrics = RateLimitMetrics()
@@ -829,6 +885,7 @@ class TestKeywordRateLimitTracking:
         assert metrics.rate_limit_events == 2
         assert metrics.keyword_rate_limit_events == {}
 
+    @pytest.mark.fast
     def test_keyword_events_in_to_dict(self):
         """Test that keyword events are serialized to dict."""
         metrics = RateLimitMetrics()
@@ -836,6 +893,7 @@ class TestKeywordRateLimitTracking:
         data = metrics.to_dict()
         assert data["keyword_rate_limit_events"] == {"test keyword": 1}
 
+    @pytest.mark.fast
     def test_keyword_events_from_dict(self):
         """Test that keyword events are restored from dict."""
         data = {
@@ -846,6 +904,7 @@ class TestKeywordRateLimitTracking:
         assert metrics.rate_limit_events == 5
         assert metrics.keyword_rate_limit_events == {"sunset": 3, "ocean": 2}
 
+    @pytest.mark.fast
     def test_keyword_events_from_dict_missing(self):
         """Test backward compatibility when keyword_rate_limit_events is missing."""
         data = {"rate_limit_events": 5}
@@ -853,6 +912,7 @@ class TestKeywordRateLimitTracking:
         assert metrics.rate_limit_events == 5
         assert metrics.keyword_rate_limit_events == {}
 
+    @pytest.mark.fast
     def test_keyword_events_cleared(self):
         """Test that clear() resets keyword events."""
         metrics = RateLimitMetrics()
@@ -860,6 +920,7 @@ class TestKeywordRateLimitTracking:
         metrics.clear()
         assert metrics.keyword_rate_limit_events == {}
 
+    @pytest.mark.fast
     def test_keyword_events_roundtrip(self):
         """Test keyword events survive checkpoint roundtrip."""
         original = RateLimitMetrics()
@@ -885,6 +946,7 @@ class TestKeywordSummaryDisplay:
         summary = metrics.summary()
         assert "Top keywords:" not in summary
 
+    @pytest.mark.fast
     def test_summary_shows_keywords_over_10_events(self):
         """Test that top keywords are shown when > 10 total events."""
         metrics = RateLimitMetrics()
@@ -896,6 +958,7 @@ class TestKeywordSummaryDisplay:
         assert "Top keywords:" in summary
         assert '"problematic keyword": 8' in summary
 
+    @pytest.mark.fast
     def test_summary_shows_top_5_keywords_only(self):
         """Test that only top 5 keywords are shown (sorted by count)."""
         metrics = RateLimitMetrics()
@@ -920,6 +983,7 @@ class TestKeywordSummaryDisplay:
         assert '"kw6": 3' not in summary
         assert '"kw7": 2' not in summary
 
+    @pytest.mark.fast
     def test_summary_keywords_sorted_by_count_descending(self):
         """Test that keywords are sorted by count in descending order."""
         metrics = RateLimitMetrics()
@@ -954,6 +1018,7 @@ class TestKeywordConfigRecommendations:
         assert not any("keyword" in r.lower() and "rate limit" in r.lower()
                       for r in recommendations)
 
+    @pytest.mark.fast
     def test_no_recommendation_when_no_high_rate_keyword(self):
         """Test no recommendation when no keyword exceeds 30% threshold."""
         metrics = RateLimitMetrics()
@@ -966,6 +1031,7 @@ class TestKeywordConfigRecommendations:
                        if "keyword" in r.lower() and "rate limit" in r.lower()]
         assert len(keyword_recs) == 0
 
+    @pytest.mark.fast
     def test_recommendation_for_high_rate_limit_keyword(self):
         """Test recommendation when a keyword exceeds 30% threshold."""
         metrics = RateLimitMetrics()
@@ -981,6 +1047,7 @@ class TestKeywordConfigRecommendations:
         assert len(keyword_recs) == 1
         assert "skip_keywords" in keyword_recs[0]
 
+    @pytest.mark.fast
     def test_recommendation_shows_multiple_high_rate_keywords(self):
         """Test recommendation shows up to 3 high-rate-limit keywords."""
         metrics = RateLimitMetrics()
@@ -1004,6 +1071,7 @@ class TestKeywordConfigRecommendations:
         assert '"bad1"' in rec_text
         assert '"bad2"' in rec_text
 
+    @pytest.mark.fast
     def test_recommendation_suggests_skip_keywords_config(self):
         """Test that recommendation suggests keyword.skip_keywords config."""
         metrics = RateLimitMetrics()
@@ -1032,6 +1100,7 @@ class TestKeywordCrossSessionPersistence:
         assert metrics.keyword_rate_limit_events == {"sunset": 10, "ocean": 5}
         assert metrics.session_count == 2  # Incremented
 
+    @pytest.mark.fast
     def test_keyword_events_accumulate_across_sessions(self):
         """Test that keyword events accumulate across multiple sessions."""
         # Session 1: Record some events
@@ -1068,12 +1137,14 @@ class TestExportToJson:
         export = metrics.export_to_json()
         assert isinstance(export, dict)
 
+    @pytest.mark.fast
     def test_export_schema_version(self):
         """Test that export includes schema version."""
         metrics = RateLimitMetrics()
         export = metrics.export_to_json()
         assert export["schema_version"] == "1.0"
 
+    @pytest.mark.fast
     def test_export_timestamp(self):
         """Test that export includes export timestamp."""
         metrics = RateLimitMetrics()
@@ -1082,6 +1153,7 @@ class TestExportToJson:
         # Should be ISO format
         assert "T" in export["export_timestamp"]
 
+    @pytest.mark.fast
     def test_export_session_info(self):
         """Test that export includes session information."""
         metrics = RateLimitMetrics(session_count=3)
@@ -1094,6 +1166,7 @@ class TestExportToJson:
         assert export["session"]["session_start_time"] == "2026-01-25T10:00:00Z"
         assert export["session"]["session_end_time"] == "2026-01-25T12:00:00Z"
 
+    @pytest.mark.fast
     def test_export_downloads_section(self):
         """Test that export includes download statistics."""
         metrics = RateLimitMetrics(
@@ -1109,6 +1182,7 @@ class TestExportToJson:
         assert export["downloads"]["failed"] == 10
         assert export["downloads"]["success_rate_percent"] == 90.0
 
+    @pytest.mark.fast
     def test_export_retries_section(self):
         """Test that export includes retry statistics."""
         metrics = RateLimitMetrics(
@@ -1125,6 +1199,7 @@ class TestExportToJson:
         assert export["retries"]["max_reached_count"] == 5
         assert export["retries"]["by_error_type"] == {"timeout": 15, "transient": 10}
 
+    @pytest.mark.fast
     def test_export_rate_limiting_section(self):
         """Test that export includes rate limiting statistics."""
         metrics = RateLimitMetrics(
@@ -1148,6 +1223,7 @@ class TestExportToJson:
         assert rl["backoff"]["total_seconds"] == 120.57  # Rounded to 2 decimals
         assert rl["backoff"]["by_severity"] == {"low": 3, "medium": 5, "high": 2}
 
+    @pytest.mark.fast
     def test_export_escalation_section(self):
         """Test that export includes escalation statistics."""
         metrics = RateLimitMetrics(
@@ -1160,6 +1236,7 @@ class TestExportToJson:
         assert export["escalation"]["cookie_rotations"] == 3
         assert export["escalation"]["vpn_switches"] == 2
 
+    @pytest.mark.fast
     def test_export_circuit_breaker_section(self):
         """Test that export includes circuit breaker statistics."""
         metrics = RateLimitMetrics(
@@ -1172,6 +1249,7 @@ class TestExportToJson:
         assert export["circuit_breaker"]["total_trips"] == 2
         assert export["circuit_breaker"]["total_pause_seconds"] == 120.5
 
+    @pytest.mark.fast
     def test_export_batch_retry_section(self):
         """Test that export includes batch retry statistics."""
         metrics = RateLimitMetrics(
@@ -1186,6 +1264,7 @@ class TestExportToJson:
         assert export["batch_retry"]["total_recovered"] == 10
         assert export["batch_retry"]["total_failed"] == 2
 
+    @pytest.mark.fast
     def test_export_network_section(self):
         """Test that export includes network statistics."""
         metrics = RateLimitMetrics(
@@ -1200,6 +1279,7 @@ class TestExportToJson:
         assert export["network"]["avg_speed_mbps"] == 5.568  # Rounded to 3 decimals
         assert export["network"]["timeout_extensions"] == 3
 
+    @pytest.mark.fast
     def test_export_includes_recommendations(self):
         """Test that export includes recommendations."""
         metrics = RateLimitMetrics(
@@ -1214,6 +1294,7 @@ class TestExportToJson:
         # Should have recommendation about high rate limiting
         assert len(export["recommendations"]) > 0
 
+    @pytest.mark.fast
     def test_export_without_config(self):
         """Test that export works without config."""
         metrics = RateLimitMetrics()
@@ -1221,6 +1302,7 @@ class TestExportToJson:
 
         assert "config_snapshot" not in export
 
+    @pytest.mark.fast
     def test_export_with_config_includes_snapshot(self):
         """Test that export includes config snapshot when config provided."""
         metrics = RateLimitMetrics()
@@ -1293,6 +1375,7 @@ class TestExportToJson:
         assert "cookie_rotation" in cs
         assert "vpn" in cs
 
+    @pytest.mark.fast
     def test_export_json_serializable(self):
         """Test that export is JSON serializable."""
         import json
@@ -1329,6 +1412,7 @@ class TestExportToJsonFile:
             data = json.load(f)
         assert data["downloads"]["total"] == 50
 
+    @pytest.mark.fast
     def test_export_to_json_file_creates_parent_dirs(self, tmp_path):
         """Test that export_to_json_file creates parent directories."""
         import json
@@ -1342,6 +1426,7 @@ class TestExportToJsonFile:
             data = json.load(f)
         assert data["schema_version"] == "1.0"
 
+    @pytest.mark.fast
     def test_export_to_json_file_with_config(self, tmp_path):
         """Test that export_to_json_file includes config when provided."""
         import json
@@ -1379,6 +1464,7 @@ class TestExportToJsonFile:
         assert "config_snapshot" in data
         assert data["config_snapshot"]["rate_limit"]["initial_backoff_seconds"] == 10.0
 
+    @pytest.mark.fast
     def test_export_to_json_file_utf8_encoding(self, tmp_path):
         """Test that export uses UTF-8 encoding."""
         metrics = RateLimitMetrics()
@@ -1392,6 +1478,7 @@ class TestExportToJsonFile:
             content = f.read()
         assert "日本語キーワード" in content
 
+    @pytest.mark.fast
     def test_export_to_json_file_pretty_printed(self, tmp_path):
         """Test that export is pretty-printed with indentation."""
         metrics = RateLimitMetrics()

@@ -90,11 +90,13 @@ class MockProvider:
 class TestParallelEmbedBatchFunction:
     """Test parallel_embed_batch() function exists and has correct signature."""
 
+    @pytest.mark.fast
     def test_function_exists(self):
         """parallel_embed_batch should exist in embeddings module."""
         from src.embeddings import parallel_embed_batch
         assert callable(parallel_embed_batch)
 
+    @pytest.mark.fast
     def test_function_accepts_required_args(self):
         """parallel_embed_batch should accept texts and provider args."""
         from src.embeddings import parallel_embed_batch
@@ -106,6 +108,7 @@ class TestParallelEmbedBatchFunction:
         assert 'texts' in params
         assert 'provider' in params
 
+    @pytest.mark.fast
     def test_function_accepts_config_arg(self):
         """parallel_embed_batch should accept optional config arg."""
         from src.embeddings import parallel_embed_batch
@@ -116,6 +119,7 @@ class TestParallelEmbedBatchFunction:
 
         assert 'config' in params
 
+    @pytest.mark.fast
     def test_function_returns_list(self):
         """parallel_embed_batch should return a list."""
         from src.embeddings import parallel_embed_batch
@@ -129,6 +133,7 @@ class TestParallelEmbedBatchFunction:
 class TestParallelEmbedBatchWithConfig:
     """Test parallel_embed_batch uses config.embedding.max_workers."""
 
+    @pytest.mark.fast
     def test_uses_max_workers_from_config(self):
         """Should use max_workers from config.embedding."""
         from src.embeddings import parallel_embed_batch
@@ -144,6 +149,7 @@ class TestParallelEmbedBatchWithConfig:
 
         assert len(result) == 50
 
+    @pytest.mark.fast
     def test_uses_batch_size_from_config(self):
         """Should use batch_size from config.embedding."""
         from src.embeddings import parallel_embed_batch
@@ -160,6 +166,7 @@ class TestParallelEmbedBatchWithConfig:
         assert len(provider.embed_calls) == 5
         assert len(result) == 100
 
+    @pytest.mark.fast
     def test_default_max_workers_without_config(self):
         """Should default to 4 workers when no config provided."""
         from src.embeddings import parallel_embed_batch
@@ -175,6 +182,7 @@ class TestParallelEmbedBatchWithConfig:
 class TestParallelEmbedBatchResultOrder:
     """Test that parallel_embed_batch maintains original text order."""
 
+    @pytest.mark.fast
     def test_maintains_order_with_single_batch(self):
         """Results should match input order with single batch."""
         from src.embeddings import parallel_embed_batch
@@ -188,6 +196,7 @@ class TestParallelEmbedBatchResultOrder:
         # Each embedding should be based on its text (deterministic mock)
         assert result[0] == [[float(hash("first") % 100) / 100.0] * 3][0]
 
+    @pytest.mark.fast
     def test_maintains_order_with_multiple_batches(self):
         """Results should match input order across multiple batches."""
         from src.embeddings import parallel_embed_batch
@@ -210,6 +219,7 @@ class TestParallelEmbedBatchResultOrder:
         assert result[0] == expected_first
         assert result[49] == expected_last
 
+    @pytest.mark.fast
     def test_maintains_order_with_parallel_processing(self):
         """Order preserved even when batches complete out of order."""
         from src.embeddings import parallel_embed_batch
@@ -236,6 +246,7 @@ class TestParallelEmbedBatchResultOrder:
 class TestParallelEmbedBatchErrorHandling:
     """Test error handling and retries in parallel_embed_batch."""
 
+    @pytest.mark.fast
     def test_returns_zeros_on_batch_failure(self):
         """Should return zero embeddings when batch fails after retries."""
         from src.embeddings import parallel_embed_batch
@@ -260,6 +271,7 @@ class TestParallelEmbedBatchErrorHandling:
         for i in range(10, 20):
             assert result[i] == [0.0] * 768  # Default dimension on failure
 
+    @pytest.mark.fast
     def test_successful_batches_not_affected_by_failures(self):
         """Successful batches should return correct embeddings despite other failures."""
         from src.embeddings import parallel_embed_batch
@@ -291,6 +303,7 @@ class TestParallelEmbedBatchErrorHandling:
 class TestParallelEmbedBatchEmptyInput:
     """Test parallel_embed_batch with empty or minimal input."""
 
+    @pytest.mark.fast
     def test_empty_list_returns_empty(self):
         """Should return empty list for empty input."""
         from src.embeddings import parallel_embed_batch
@@ -300,6 +313,7 @@ class TestParallelEmbedBatchEmptyInput:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_single_text(self):
         """Should handle single text correctly."""
         from src.embeddings import parallel_embed_batch
@@ -310,6 +324,7 @@ class TestParallelEmbedBatchEmptyInput:
         assert len(result) == 1
         assert len(result[0]) == 5
 
+    @pytest.mark.fast
     def test_cleans_empty_strings(self):
         """Should clean empty strings to '[silence]'."""
         from src.embeddings import parallel_embed_batch
@@ -329,6 +344,7 @@ class TestParallelEmbedBatchEmptyInput:
 class TestParallelEmbedBatchPerformance:
     """Test that parallel processing improves performance for 200+ texts."""
 
+    @pytest.mark.fast
     def test_parallel_faster_than_sequential_for_200_texts(self):
         """Parallel processing should be faster than sequential for 200+ texts."""
         from src.embeddings import parallel_embed_batch
@@ -353,6 +369,7 @@ class TestParallelEmbedBatchPerformance:
         # We just verify it completes in reasonable time
         assert parallel_time < 0.5  # Should be much faster than 0.5s
 
+    @pytest.mark.fast
     def test_processes_all_batches(self):
         """Should process all batches for large input."""
         from src.embeddings import parallel_embed_batch
@@ -374,6 +391,7 @@ class TestParallelEmbedBatchPerformance:
 class TestParallelEmbedBatchLogging:
     """Test logging behavior in parallel_embed_batch."""
 
+    @pytest.mark.fast
     def test_logs_progress_when_show_progress_true(self, caplog):
         """Should log progress when show_progress=True."""
         from src.embeddings import parallel_embed_batch
@@ -394,6 +412,7 @@ class TestParallelEmbedBatchLogging:
         assert "Completed batch" in caplog.text
         assert "Parallel embedding complete:" in caplog.text
 
+    @pytest.mark.fast
     def test_no_progress_logs_when_show_progress_false(self, caplog):
         """Should not log progress when show_progress=False."""
         from src.embeddings import parallel_embed_batch
@@ -409,6 +428,7 @@ class TestParallelEmbedBatchLogging:
         # Should not have progress messages
         assert "Parallel embedding:" not in caplog.text
 
+    @pytest.mark.fast
     def test_logs_rate_in_completion_message(self, caplog):
         """Completion log should include processing rate."""
         from src.embeddings import parallel_embed_batch
@@ -428,6 +448,7 @@ class TestParallelEmbedBatchLogging:
 class TestMaxWorkersConfiguration:
     """Test max_workers configuration options."""
 
+    @pytest.mark.fast
     def test_max_workers_1_processes_sequentially(self):
         """With max_workers=1, should process batches sequentially."""
         from src.embeddings import parallel_embed_batch
@@ -445,6 +466,7 @@ class TestMaxWorkersConfiguration:
         # With 1 worker, batches should complete in order
         # (though ThreadPoolExecutor doesn't guarantee this, the result order is guaranteed)
 
+    @pytest.mark.fast
     def test_max_workers_8_uses_8_workers(self):
         """Should use 8 workers when max_workers=8."""
         from src.embeddings import parallel_embed_batch
@@ -466,6 +488,7 @@ class TestMaxWorkersConfiguration:
 class TestEmbeddingConfigMaxWorkers:
     """Test max_workers field in EmbeddingConfig dataclass."""
 
+    @pytest.mark.fast
     def test_embedding_config_has_max_workers(self):
         """EmbeddingConfig should have max_workers field."""
         from src.config.sections.core import EmbeddingConfig
@@ -473,6 +496,7 @@ class TestEmbeddingConfigMaxWorkers:
         config = EmbeddingConfig()
         assert hasattr(config, 'max_workers')
 
+    @pytest.mark.fast
     def test_max_workers_default_is_4(self):
         """Default max_workers should be 4."""
         from src.config.sections.core import EmbeddingConfig
@@ -480,6 +504,7 @@ class TestEmbeddingConfigMaxWorkers:
         config = EmbeddingConfig()
         assert config.max_workers == 4
 
+    @pytest.mark.fast
     def test_max_workers_can_be_set(self):
         """max_workers should be settable."""
         from src.config.sections.core import EmbeddingConfig
@@ -487,6 +512,7 @@ class TestEmbeddingConfigMaxWorkers:
         config = EmbeddingConfig(max_workers=8)
         assert config.max_workers == 8
 
+    @pytest.mark.fast
     def test_max_workers_type_is_int(self):
         """max_workers should be an integer."""
         from src.config.sections.core import EmbeddingConfig

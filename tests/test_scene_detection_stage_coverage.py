@@ -81,6 +81,7 @@ def create_mock_config(skip_scene_detection=False, vision_enabled=False):
 class TestSceneDetectionRunCoverage:
     """Test run method for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_run_skip_scene_detection_prints_message(self, capsys):
         """Test skip message is printed (line 56-58)"""
         stage = SceneDetectionStage()
@@ -97,6 +98,7 @@ class TestSceneDetectionRunCoverage:
         assert result.data['reason'] == 'skip_pipeline_config'
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_no_video_files_warning(self, mock_detector_class, capsys):
         """Test warning when no video files (lines 65-68)"""
         stage = SceneDetectionStage()
@@ -114,6 +116,7 @@ class TestSceneDetectionRunCoverage:
         assert "No video files" in result.warnings[0]
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_scene_detection_returns_none(self, mock_detector_class, capsys):
         """Test handling when process_video returns None (lines 98-99)"""
         mock_detector = Mock()
@@ -133,6 +136,7 @@ class TestSceneDetectionRunCoverage:
         assert len(state.scene_data) == 0
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_scene_detection_exception_per_video(self, mock_detector_class, capsys):
         """Test exception handling per video (lines 101-103)"""
         mock_detector = Mock()
@@ -151,6 +155,7 @@ class TestSceneDetectionRunCoverage:
         assert "Error processing" in result.warnings[0]
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_prints_progress_per_video(self, mock_detector_class, capsys):
         """Test progress printing per video (lines 82-84, 97)"""
         scene = MockScene(scene_index=0, start_time=0, end_time=5, is_broll=True, face_score=0.1)
@@ -175,6 +180,7 @@ class TestSceneDetectionRunCoverage:
         assert "2 B-roll" in captured.out
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_summary_statistics(self, mock_detector_class, capsys):
         """Test summary statistics output (lines 112-115)"""
         scene1 = MockScene(scene_index=0, start_time=0, end_time=5, is_broll=True, face_score=0.1)
@@ -201,6 +207,7 @@ class TestSceneDetectionRunCoverage:
         assert "50.0%" in captured.out
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_zero_scenes_percentage(self, mock_detector_class, capsys):
         """Test 0 scenes case for percentage calculation (line 115)"""
         scene_data = MockSceneData(scene_count=0, scenes=[])
@@ -221,6 +228,7 @@ class TestSceneDetectionRunCoverage:
         assert "0.0%" in captured.out  # Should handle division by zero
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_checkpoint_data_structure(self, mock_detector_class):
         """Test checkpoint data is correctly structured (lines 117-129)"""
         scene1 = MockScene(scene_index=0, start_time=0, end_time=5, is_broll=True, face_score=0.1)
@@ -247,6 +255,7 @@ class TestSceneDetectionRunCoverage:
         assert result.data['scene_data']['video']['has_speech'] is True
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_run_main_exception_handler(self, mock_detector_class):
         """Test main try/except block (lines 133-135)"""
         mock_detector_class.side_effect = Exception("Critical failure")
@@ -270,6 +279,7 @@ class TestSceneDetectionRunCoverage:
 class TestRestoreMethodCoverage:
     """Test restore method for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_restore_no_stage_data(self):
         """Test restore with no checkpoint data (line 153-154)"""
         stage = SceneDetectionStage()
@@ -281,6 +291,7 @@ class TestRestoreMethodCoverage:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_skipped_stage(self):
         """Test restore when stage was skipped (line 153-154)"""
         stage = SceneDetectionStage()
@@ -292,6 +303,7 @@ class TestRestoreMethodCoverage:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_with_valid_data(self):
         """Test restore with valid data (lines 163-164)"""
         stage = SceneDetectionStage()
@@ -314,6 +326,7 @@ class TestRestoreMethodCoverage:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_restore_exception_handling(self):
         """Test restore exception handling (lines 166-168)"""
         stage = SceneDetectionStage()
@@ -333,6 +346,7 @@ class TestRestoreMethodCoverage:
 class TestMergeSceneDataCoverage:
     """Test _merge_scene_data_to_transcripts for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_merge_no_transcripts_early_return(self):
         """Test early return when transcripts empty (lines 212-214)"""
         stage = SceneDetectionStage()
@@ -343,6 +357,7 @@ class TestMergeSceneDataCoverage:
         # Should return early without error
         stage._merge_scene_data_to_transcripts(state, {}, config)
 
+    @pytest.mark.fast
     def test_merge_video_not_in_scene_data(self):
         """Test when video has no scene data (lines 220-221)"""
         stage = SceneDetectionStage()
@@ -360,6 +375,7 @@ class TestMergeSceneDataCoverage:
         # Segment should not have scene metadata added
         assert segment.is_broll is False  # Default value unchanged
 
+    @pytest.mark.fast
     def test_merge_segment_matches_scene(self):
         """Test segment matching scene by midpoint (lines 227-237)"""
         stage = SceneDetectionStage()
@@ -383,6 +399,7 @@ class TestMergeSceneDataCoverage:
         assert segment.face_score == 0.15
         assert segment.scene_index == 1
 
+    @pytest.mark.fast
     def test_merge_skips_text_metadata_update_no_embeddings(self):
         """Test text_metadata update skipped when no embeddings (lines 254, 323-324)"""
         stage = SceneDetectionStage()
@@ -402,6 +419,7 @@ class TestMergeSceneDataCoverage:
         # text_metadata should NOT be updated (embeddings empty)
         assert 'is_broll' not in state.text_metadata[0]
 
+    @pytest.mark.fast
     def test_merge_non_dict_text_metadata_entries(self):
         """Test handling non-dict entries in text_metadata (lines 260-261)"""
         stage = SceneDetectionStage()
@@ -428,6 +446,7 @@ class TestMergeSceneDataCoverage:
         # Only the dict entry should be updated
         assert state.text_metadata[3].get('is_broll') is True
 
+    @pytest.mark.fast
     def test_merge_text_metadata_missing_video_path(self):
         """Test handling text_metadata entries without video_path (lines 263-265)"""
         stage = SceneDetectionStage()
@@ -454,6 +473,7 @@ class TestMergeSceneDataCoverage:
         assert 'is_broll' not in state.text_metadata[1]
         assert state.text_metadata[2].get('is_broll') is True
 
+    @pytest.mark.fast
     def test_merge_direct_update_for_silent_video(self):
         """Test direct update from scene data for silent videos (lines 289-310)"""
         stage = SceneDetectionStage()
@@ -479,6 +499,7 @@ class TestMergeSceneDataCoverage:
         assert state.text_metadata[0].get('face_score') == 0.15
         assert state.text_metadata[0].get('scene_index') == 0
 
+    @pytest.mark.fast
     def test_merge_no_scene_data_for_silent_video(self):
         """Test when silent video has no scene data (line 309-310)"""
         stage = SceneDetectionStage()
@@ -497,6 +518,7 @@ class TestMergeSceneDataCoverage:
         # Should not have is_broll set
         assert 'is_broll' not in state.text_metadata[0]
 
+    @pytest.mark.fast
     def test_merge_broll_data_lost_warning(self):
         """Test B-roll data lost warning (lines 321-322)"""
         stage = SceneDetectionStage()
@@ -527,6 +549,7 @@ class TestMergeSceneDataCoverage:
 class TestCreateTextMetadataForSilentVideosCoverage:
     """Test _create_text_metadata_for_silent_videos for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_no_silent_videos_returns_zero(self):
         """Test returns 0 when no silent videos (lines 358-359)"""
         stage = SceneDetectionStage()
@@ -540,6 +563,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
 
         assert result == 0
 
+    @pytest.mark.fast
     def test_video_without_file_attribute(self):
         """Test handling videos without file attribute (lines 348-349)"""
         stage = SceneDetectionStage()
@@ -556,6 +580,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
 
         assert result == 0
 
+    @pytest.mark.fast
     def test_creates_entries_for_each_scene(self):
         """Test creates one entry per scene (lines 387-419)"""
         stage = SceneDetectionStage()
@@ -582,6 +607,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert state.text_metadata[1]['scene_index'] == 1
         assert "[Silent video: silent]" in state.text_metadata[0]['text']
 
+    @pytest.mark.fast
     def test_text_metadata_initially_none(self):
         """Test when text_metadata is None (lines 423-424)"""
         stage = SceneDetectionStage()
@@ -601,6 +627,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert state.text_metadata is not None
         assert len(state.text_metadata) == 1
 
+    @pytest.mark.fast
     def test_no_scene_data_for_video(self):
         """Test when video has no scene data (lines 383-385)"""
         stage = SceneDetectionStage()
@@ -616,6 +643,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert result == 0  # Video not in scene_data
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_api_available(self, mock_vision_class):
         """Test vision API available and used (lines 365-373)"""
         mock_vision = Mock()
@@ -642,6 +670,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         mock_vision.describe_scene.assert_called_once()
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_api_not_available(self, mock_vision_class):
         """Test vision API not available fallback (lines 369-371)"""
         mock_vision = Mock()
@@ -665,6 +694,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert "[Silent video:" in state.text_metadata[0]['text']
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_api_init_exception(self, mock_vision_class):
         """Test vision API initialization exception (lines 374-376)"""
         mock_vision_class.side_effect = Exception("API key invalid")
@@ -686,6 +716,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert "[Silent video:" in state.text_metadata[0]['text']
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_api_describe_scene_exception(self, mock_vision_class):
         """Test vision API describe_scene exception (lines 404-405)"""
         mock_vision = Mock()
@@ -711,6 +742,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert "[Silent video:" in state.text_metadata[0]['text']
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_api_returns_none(self, mock_vision_class):
         """Test vision API returns None (line 402)"""
         mock_vision = Mock()
@@ -736,6 +768,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
         assert "[Silent video:" in state.text_metadata[0]['text']
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_vision_stats_logging(self, mock_vision_class):
         """Test vision API stats logging (lines 430-432)"""
         mock_vision = Mock()
@@ -767,6 +800,7 @@ class TestCreateTextMetadataForSilentVideosCoverage:
 class TestComputeEmbeddingsForSilentVideosCoverage:
     """Test _compute_embeddings_for_silent_videos for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_empty_entries_early_return(self):
         """Test early return with empty entries (lines 450-451)"""
         stage = SceneDetectionStage()
@@ -778,6 +812,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
 
         assert state.embeddings.shape == original_shape
 
+    @pytest.mark.fast
     def test_no_existing_embeddings_warning(self):
         """Test warning when no existing embeddings (lines 458-460)"""
         stage = SceneDetectionStage()
@@ -790,6 +825,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
         # Should return early without modifying embeddings
         assert len(state.embeddings) == 0
 
+    @pytest.mark.fast
     def test_none_embeddings_warning(self):
         """Test warning when embeddings is None (lines 458-460)"""
         stage = SceneDetectionStage()
@@ -801,6 +837,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
 
         assert state.embeddings is None
 
+    @pytest.mark.fast
     def test_computes_and_appends_embeddings(self):
         """Test embeddings are computed and appended (lines 463-472)"""
         mock_model = Mock()
@@ -822,6 +859,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
                 convert_to_numpy=True
             )
 
+    @pytest.mark.fast
     def test_rebuilds_faiss_index(self):
         """Test FAISS index is rebuilt (lines 475-480)"""
         mock_model = Mock()
@@ -846,6 +884,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
             mock_index.add.assert_called_once()
             assert state.embedding_index == mock_index
 
+    @pytest.mark.fast
     def test_no_faiss_index_no_rebuild(self):
         """Test no FAISS rebuild when index is None (line 475)"""
         mock_model = Mock()
@@ -864,6 +903,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
             assert state.embeddings.shape[0] == 2
             assert state.embedding_index is None
 
+    @pytest.mark.fast
     def test_exception_handling(self):
         """Test exception handling (lines 484-485)"""
         mock_st_module = Mock()
@@ -890,6 +930,7 @@ class TestComputeEmbeddingsForSilentVideosCoverage:
 class TestGetVideoFilesCoverage:
     """Test _get_video_files for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_empty_downloaded_videos(self):
         """Test with empty downloaded_videos list"""
         stage = SceneDetectionStage()
@@ -900,6 +941,7 @@ class TestGetVideoFilesCoverage:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_downloaded_video_with_file(self):
         """Test with DownloadedVideo having file attribute"""
         stage = SceneDetectionStage()
@@ -914,6 +956,7 @@ class TestGetVideoFilesCoverage:
         assert len(result) == 2
         assert all(isinstance(p, Path) for p in result)
 
+    @pytest.mark.fast
     def test_downloaded_video_without_file(self):
         """Test with mock that has no file attribute (line 188)"""
         stage = SceneDetectionStage()
@@ -935,6 +978,7 @@ class TestGetVideoFilesCoverage:
 class TestValidateInputsCoverage:
     """Test validate_inputs for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_no_videos_no_audio(self):
         """Test validation with no videos and no audio (lines 176-177)"""
         stage = SceneDetectionStage()
@@ -948,6 +992,7 @@ class TestValidateInputsCoverage:
         assert error is not None
         assert "No videos" in error
 
+    @pytest.mark.fast
     def test_has_downloaded_videos(self):
         """Test validation with downloaded_videos (line 178)"""
         stage = SceneDetectionStage()
@@ -960,6 +1005,7 @@ class TestValidateInputsCoverage:
 
         assert error is None
 
+    @pytest.mark.fast
     def test_has_downloaded_audio(self):
         """Test validation with downloaded_audio only (line 176)"""
         stage = SceneDetectionStage()
@@ -980,6 +1026,7 @@ class TestValidateInputsCoverage:
 class TestCanSkipCoverage:
     """Test can_skip for comprehensive coverage"""
 
+    @pytest.mark.fast
     def test_can_skip_true(self):
         """Test can_skip returns True (line 143)"""
         stage = SceneDetectionStage()
@@ -992,6 +1039,7 @@ class TestCanSkipCoverage:
         assert result is True
         checkpoint.should_skip_stage.assert_called_with("SCENE_DETECTION")
 
+    @pytest.mark.fast
     def test_can_skip_false(self):
         """Test can_skip returns False (line 143)"""
         stage = SceneDetectionStage()
@@ -1012,6 +1060,7 @@ class TestSceneDetectionStageIntegration:
     """Integration tests for SceneDetectionStage"""
 
     @patch('src.scene_detection.SceneDetector')
+    @pytest.mark.fast
     def test_full_pipeline_with_transcripts_and_embeddings(self, mock_detector_class):
         """Test complete pipeline with transcripts, embeddings, and text_metadata"""
         # Setup mock scene detector
@@ -1062,6 +1111,7 @@ class TestSceneDetectionStageIntegration:
 
     @patch('src.scene_detection.SceneDetector')
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_full_pipeline_with_silent_video_and_vision(
         self, mock_vision_class, mock_detector_class
     ):

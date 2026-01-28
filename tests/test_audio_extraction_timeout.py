@@ -28,6 +28,7 @@ pytestmark = pytest.mark.unit
 class TestTranscriptionConfigTimeout:
     """Tests for audio_extraction_timeout field in TranscriptionConfig."""
 
+    @pytest.mark.fast
     def test_transcription_config_has_audio_extraction_timeout_field(self):
         """TranscriptionConfig should have audio_extraction_timeout field."""
         from src.config.sections.core import TranscriptionConfig
@@ -36,6 +37,7 @@ class TestTranscriptionConfigTimeout:
         fields = {f.name for f in dataclasses.fields(TranscriptionConfig)}
         assert "audio_extraction_timeout" in fields
 
+    @pytest.mark.fast
     def test_audio_extraction_timeout_default_is_60(self):
         """audio_extraction_timeout should default to 60 seconds."""
         from src.config.sections.core import TranscriptionConfig
@@ -43,6 +45,7 @@ class TestTranscriptionConfigTimeout:
         config = TranscriptionConfig()
         assert config.audio_extraction_timeout == 60
 
+    @pytest.mark.fast
     def test_audio_extraction_timeout_can_be_set(self):
         """audio_extraction_timeout should accept custom values."""
         from src.config.sections.core import TranscriptionConfig
@@ -50,6 +53,7 @@ class TestTranscriptionConfigTimeout:
         config = TranscriptionConfig(audio_extraction_timeout=120)
         assert config.audio_extraction_timeout == 120
 
+    @pytest.mark.fast
     def test_audio_extraction_timeout_type_is_int(self):
         """audio_extraction_timeout should be an integer."""
         from src.config.sections.core import TranscriptionConfig
@@ -69,6 +73,7 @@ class TestTranscriptionConfigTimeout:
 class TestExtractAudioTimeoutParameter:
     """Tests for timeout parameter in extract_audio() function."""
 
+    @pytest.mark.fast
     def test_extract_audio_accepts_timeout_parameter(self):
         """extract_audio() should accept timeout parameter."""
         from src.transcription.utils import extract_audio
@@ -77,6 +82,7 @@ class TestExtractAudioTimeoutParameter:
         sig = inspect.signature(extract_audio)
         assert "timeout" in sig.parameters
 
+    @pytest.mark.fast
     def test_extract_audio_timeout_default_is_60(self):
         """extract_audio() timeout should default to 60."""
         from src.transcription.utils import extract_audio
@@ -86,6 +92,7 @@ class TestExtractAudioTimeoutParameter:
         timeout_param = sig.parameters["timeout"]
         assert timeout_param.default == 60
 
+    @pytest.mark.integration
     def test_extract_audio_passes_timeout_to_subprocess(self, tmp_path):
         """extract_audio() should pass timeout to subprocess.run()."""
         from src.transcription.utils import extract_audio
@@ -110,6 +117,7 @@ class TestExtractAudioTimeoutParameter:
 class TestTimeoutErrorBehavior:
     """Tests for TimeoutError raising when extraction times out."""
 
+    @pytest.mark.integration
     def test_timeout_raises_timeout_error(self, tmp_path):
         """extract_audio() should raise TimeoutError on timeout."""
         from src.transcription.utils import extract_audio
@@ -123,6 +131,7 @@ class TestTimeoutErrorBehavior:
             with pytest.raises(TimeoutError):
                 extract_audio(str(video_path), timeout=5)
 
+    @pytest.mark.integration
     def test_timeout_error_message_includes_video_path(self, tmp_path):
         """TimeoutError message should include video path."""
         from src.transcription.utils import extract_audio
@@ -138,6 +147,7 @@ class TestTimeoutErrorBehavior:
 
             assert str(video_path) in str(exc_info.value)
 
+    @pytest.mark.integration
     def test_timeout_error_message_includes_timeout_value(self, tmp_path):
         """TimeoutError message should include timeout value."""
         from src.transcription.utils import extract_audio
@@ -153,6 +163,7 @@ class TestTimeoutErrorBehavior:
 
             assert "45" in str(exc_info.value)
 
+    @pytest.mark.integration
     def test_timeout_cleans_up_partial_file(self, tmp_path):
         """extract_audio() should attempt cleanup on timeout if partial file exists."""
         from src.transcription.utils import extract_audio
@@ -208,6 +219,7 @@ class TestTimeoutErrorBehavior:
 class TestTimeoutWarningLogging:
     """Tests for warning logging when timeout occurs."""
 
+    @pytest.mark.integration
     def test_timeout_logs_warning(self, tmp_path, caplog):
         """extract_audio() should log warning on timeout."""
         from src.transcription.utils import extract_audio
@@ -228,6 +240,7 @@ class TestTimeoutWarningLogging:
             # Check warning was logged
             assert any("timed out" in record.message.lower() for record in caplog.records)
 
+    @pytest.mark.integration
     def test_timeout_warning_includes_video_path(self, tmp_path, caplog):
         """Timeout warning should include video path."""
         from src.transcription.utils import extract_audio
@@ -249,6 +262,7 @@ class TestTimeoutWarningLogging:
             warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
             assert any(str(video_path) in msg for msg in warning_messages)
 
+    @pytest.mark.integration
     def test_timeout_warning_includes_timeout_seconds(self, tmp_path, caplog):
         """Timeout warning should include timeout value in seconds."""
         from src.transcription.utils import extract_audio
@@ -278,6 +292,7 @@ class TestTimeoutWarningLogging:
 class TestExtractionWithTimeout:
     """Tests for successful extraction with custom timeout."""
 
+    @pytest.mark.integration
     def test_extraction_succeeds_within_timeout(self, tmp_path):
         """extract_audio() should succeed when extraction completes within timeout."""
         from src.transcription.utils import extract_audio
@@ -299,6 +314,7 @@ class TestExtractionWithTimeout:
                 # Should not raise, should return a path
                 assert result is not None or True  # Path returned or extraction succeeded
 
+    @pytest.mark.integration
     def test_extraction_respects_custom_timeout(self, tmp_path):
         """extract_audio() should use custom timeout value."""
         from src.transcription.utils import extract_audio
@@ -323,6 +339,7 @@ class TestExtractionWithTimeout:
 class TestConfigIntegration:
     """Tests for config integration with audio extraction timeout."""
 
+    @pytest.mark.fast
     def test_config_timeout_can_be_used_with_extract_audio(self):
         """Config timeout value can be passed to extract_audio()."""
         from src.config.sections.core import TranscriptionConfig
@@ -338,6 +355,7 @@ class TestConfigIntegration:
         sig = inspect.signature(extract_audio)
         assert "timeout" in sig.parameters
 
+    @pytest.mark.fast
     def test_default_config_matches_extract_audio_default(self):
         """TranscriptionConfig default should match extract_audio default."""
         from src.config.sections.core import TranscriptionConfig
@@ -357,6 +375,7 @@ class TestConfigIntegration:
 class TestEdgeCases:
     """Tests for edge cases in timeout handling."""
 
+    @pytest.mark.integration
     def test_zero_timeout_passed_to_subprocess(self, tmp_path):
         """extract_audio() should handle timeout=0 (immediate timeout)."""
         from src.transcription.utils import extract_audio
@@ -370,6 +389,7 @@ class TestEdgeCases:
             with pytest.raises(TimeoutError):
                 extract_audio(str(video_path), timeout=0)
 
+    @pytest.mark.integration
     def test_very_large_timeout(self, tmp_path):
         """extract_audio() should handle very large timeout values."""
         from src.transcription.utils import extract_audio
@@ -385,6 +405,7 @@ class TestEdgeCases:
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs["timeout"] == 3600
 
+    @pytest.mark.integration
     def test_extraction_skipped_if_audio_exists(self, tmp_path):
         """extract_audio() should skip extraction if audio file exists."""
         from src.transcription.utils import extract_audio

@@ -127,6 +127,7 @@ class MockMatchResult:
 class TestTrackBuilderFactory:
     """Test get_track_builder factory function."""
 
+    @pytest.mark.fast
     def test_factory_creates_primary_builder(self):
         """Test factory creates PrimaryTrackBuilder for track 0."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -139,6 +140,7 @@ class TestTrackBuilderFactory:
         assert builder.config == config
         assert builder.frame_rate == 30.0
 
+    @pytest.mark.fast
     def test_factory_creates_alternative_builders(self):
         """Test factory creates AlternativeTrackBuilder for tracks 1-2."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -150,6 +152,7 @@ class TestTrackBuilderFactory:
         assert isinstance(builder1, AlternativeTrackBuilder)
         assert isinstance(builder2, AlternativeTrackBuilder)
 
+    @pytest.mark.fast
     def test_factory_creates_diversity_builders(self):
         """Test factory creates DiversityTrackBuilder for tracks 3-5."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -163,6 +166,7 @@ class TestTrackBuilderFactory:
         assert isinstance(builder4, DiversityTrackBuilder)
         assert isinstance(builder5, DiversityTrackBuilder)
 
+    @pytest.mark.fast
     def test_factory_creates_embedding_diversity_builder(self):
         """Test factory creates EmbeddingDiversityTrackBuilder for track 6."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -172,6 +176,7 @@ class TestTrackBuilderFactory:
 
         assert isinstance(builder, EmbeddingDiversityTrackBuilder)
 
+    @pytest.mark.fast
     def test_factory_creates_broll_builder(self):
         """Test factory creates BRollTrackBuilder for track 7."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -181,6 +186,7 @@ class TestTrackBuilderFactory:
 
         assert isinstance(builder, BRollTrackBuilder)
 
+    @pytest.mark.fast
     def test_factory_creates_entity_image_builder(self):
         """Test factory creates EntityImageTrackBuilder for track 8."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -190,6 +196,7 @@ class TestTrackBuilderFactory:
 
         assert isinstance(builder, EntityImageTrackBuilder)
 
+    @pytest.mark.fast
     def test_factory_creates_entity_video_builder(self):
         """Test factory creates EntityVideoTrackBuilder for track 9."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -199,6 +206,7 @@ class TestTrackBuilderFactory:
 
         assert isinstance(builder, EntityVideoTrackBuilder)
 
+    @pytest.mark.fast
     def test_factory_raises_error_for_invalid_track(self):
         """Test factory raises ValueError for invalid track index."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -207,6 +215,7 @@ class TestTrackBuilderFactory:
         with pytest.raises(ValueError, match="No builder for track index"):
             get_track_builder(99, matches, config, 30.0)
 
+    @pytest.mark.fast
     def test_factory_passes_kwargs_to_builder(self):
         """Test factory passes kwargs to builder."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -226,6 +235,7 @@ class TestTrackBuilderFactory:
 class TestTrackNames:
     """Test _get_track_name method."""
 
+    @pytest.mark.fast
     def test_track_names_are_correct(self):
         """Test that track names match expected values."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -249,6 +259,7 @@ class TestTrackNames:
             name = builder._get_track_name(idx)
             assert name == expected
 
+    @pytest.mark.fast
     def test_track_name_fallback_for_high_indices(self):
         """Test that track names fallback to generic name for high indices."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -263,6 +274,7 @@ class TestTrackNames:
 class TestPrimaryTrackBuilder:
     """Test PrimaryTrackBuilder class."""
 
+    @pytest.mark.fast
     def test_primary_builder_creates_tracks(self):
         """Test that PrimaryTrackBuilder creates video and audio tracks."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -276,6 +288,7 @@ class TestPrimaryTrackBuilder:
         assert video_track.kind == otio.schema.TrackKind.Video
         assert audio_track.kind == otio.schema.TrackKind.Audio
 
+    @pytest.mark.fast
     def test_primary_tracks_are_enabled(self):
         """Test that primary tracks are enabled by default."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -287,6 +300,7 @@ class TestPrimaryTrackBuilder:
         assert video_track.enabled is True
         assert audio_track.enabled is True
 
+    @pytest.mark.fast
     def test_primary_track_name(self):
         """Test that primary track has correct name."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -301,6 +315,7 @@ class TestPrimaryTrackBuilder:
 class TestAlternativeTrackBuilder:
     """Test AlternativeTrackBuilder class."""
 
+    @pytest.mark.fast
     def test_alternative_tracks_are_disabled(self):
         """Test that alternative tracks are disabled by default."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -312,6 +327,7 @@ class TestAlternativeTrackBuilder:
         assert video_track.enabled is False
         assert audio_track.enabled is False
 
+    @pytest.mark.fast
     def test_alternative_track_names(self):
         """Test that alternative tracks have correct names."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -330,6 +346,7 @@ class TestAlternativeTrackBuilder:
 class TestDiversityTrackBuilder:
     """Test DiversityTrackBuilder class."""
 
+    @pytest.mark.fast
     def test_diversity_tracks_are_disabled(self):
         """Test that diversity tracks are disabled by default."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -345,6 +362,7 @@ class TestDiversityTrackBuilder:
 class TestStrategyTrackBuilders:
     """Test strategy-specific track builders."""
 
+    @pytest.mark.fast
     def test_embedding_diversity_track_disabled(self):
         """Test that embedding diversity track is disabled by default."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -356,6 +374,7 @@ class TestStrategyTrackBuilders:
         assert video_track.enabled is False
         assert audio_track.enabled is False
 
+    @pytest.mark.fast
     def test_broll_track_disabled(self):
         """Test that B-roll track is disabled by default."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -371,6 +390,7 @@ class TestStrategyTrackBuilders:
 class TestEntityTrackBuilders:
     """Test entity image and video track builders."""
 
+    @pytest.mark.fast
     def test_entity_image_track_without_images(self):
         """Test EntityImageTrackBuilder without entity images."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -385,6 +405,7 @@ class TestEntityTrackBuilders:
     # NOTE: Testing with entity images requires complex config mocking (image_search attribute)
     # Entity image integration is tested in test_otio_integration.py
 
+    @pytest.mark.fast
     def test_entity_video_track_without_videos(self):
         """Test EntityVideoTrackBuilder without entity videos."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -403,6 +424,7 @@ class TestEntityTrackBuilders:
 class TestTrackBuilderAbstract:
     """Test TrackBuilder abstract base class."""
 
+    @pytest.mark.fast
     def test_cannot_instantiate_abstract_class(self):
         """Test that TrackBuilder cannot be instantiated directly."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -412,6 +434,7 @@ class TestTrackBuilderAbstract:
         with pytest.raises(TypeError):
             TrackBuilder(matches, config, 30.0)
 
+    @pytest.mark.fast
     def test_subclass_must_implement_build(self):
         """Test that subclass must implement build method."""
         class IncompleteBuilder(TrackBuilder):
@@ -427,6 +450,7 @@ class TestTrackBuilderAbstract:
 class TestHelperMethods:
     """Test TrackBuilder helper methods."""
 
+    @pytest.mark.fast
     def test_create_clip_basic(self):
         """Test _create_clip with basic match."""
         match = MockMatch("C:/Videos/test.mp4", 1.0, 6.0)
@@ -445,6 +469,7 @@ class TestHelperMethods:
         assert "S001" in clip.name
         assert "PRIMARY" in clip.name
 
+    @pytest.mark.fast
     def test_create_clip_with_metadata(self):
         """Test _create_clip with custom metadata."""
         match = MockMatch("C:/Videos/test.mp4", 0.0, 5.0, confidence=0.95)
@@ -464,6 +489,7 @@ class TestHelperMethods:
         assert clip.metadata["test_key"] == "test_value"
         assert clip.metadata["confidence"] == 0.95
 
+    @pytest.mark.fast
     def test_create_clip_with_resolve_function(self):
         """Test _create_clip with audio-first resolution."""
         match = MockMatch("audio.mp3", 0.0, 5.0)
@@ -489,6 +515,7 @@ class TestHelperMethods:
         # Clip should reference resolved video file
         assert "video.mp4" in clip.media_reference.target_url or "video" in clip.name
 
+    @pytest.mark.fast
     def test_create_gap(self):
         """Test _create_gap creates proper gap clip."""
         matches = [MockMatchResult(primary=MockMatch("test.mp4", 0.0, 5.0))]
@@ -501,6 +528,7 @@ class TestHelperMethods:
         assert gap.source_range.duration.value == 150
         assert gap.source_range.duration.rate == 30.0
 
+    @pytest.mark.fast
     def test_create_clip_with_segment_offset(self):
         """Test _create_clip with segment file offset."""
         # Simulate segment file name pattern: video_0120.mp4 (offset = 120.0s)
@@ -524,6 +552,7 @@ class TestHelperMethods:
 class TestAlternativeBuilderWithMatches:
     """Test AlternativeTrackBuilder with actual alternative matches."""
 
+    @pytest.mark.fast
     def test_alternative_builder_with_alternatives(self):
         """Test alternative track with alternatives present."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -545,6 +574,7 @@ class TestAlternativeBuilderWithMatches:
         assert isinstance(video_track[0], otio.schema.Clip)
         assert "ALT1" in video_track[0].name
 
+    @pytest.mark.fast
     def test_alternative_builder_without_alternatives(self):
         """Test alternative track without alternatives (creates gaps)."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -563,6 +593,7 @@ class TestAlternativeBuilderWithMatches:
 class TestDiversityBuilderWithMatches:
     """Test DiversityTrackBuilder with actual secondary matches."""
 
+    @pytest.mark.fast
     def test_diversity_builder_with_secondaries(self):
         """Test diversity track with secondary matches."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -584,6 +615,7 @@ class TestDiversityBuilderWithMatches:
         assert isinstance(video_track[0], otio.schema.Clip)
         assert "Secondary" in video_track[0].name
 
+    @pytest.mark.fast
     def test_diversity_builder_without_secondaries(self):
         """Test diversity track without secondary matches (creates gaps)."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -602,6 +634,7 @@ class TestDiversityBuilderWithMatches:
 class TestStrategyBuildersWithMatches:
     """Test strategy builders with actual strategy matches."""
 
+    @pytest.mark.fast
     def test_embedding_diversity_with_strategy_match(self):
         """Test embedding diversity track with strategy match."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -621,6 +654,7 @@ class TestStrategyBuildersWithMatches:
         assert isinstance(video_track[0], otio.schema.Clip)
         assert video_track[0].metadata.get("strategy") == "embedding_diversity"
 
+    @pytest.mark.fast
     def test_embedding_diversity_without_strategy_match(self):
         """Test embedding diversity track without strategy match (creates gap)."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -635,6 +669,7 @@ class TestStrategyBuildersWithMatches:
         assert len(video_track) == 1
         assert isinstance(video_track[0], otio.schema.Gap)
 
+    @pytest.mark.fast
     def test_broll_with_strategy_match(self):
         """Test B-roll track with strategy match."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -654,6 +689,7 @@ class TestStrategyBuildersWithMatches:
         assert isinstance(video_track[0], otio.schema.Clip)
         assert video_track[0].metadata.get("strategy") == "broll_only"
 
+    @pytest.mark.fast
     def test_broll_without_strategy_match(self):
         """Test B-roll track without strategy match (creates gap)."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -668,6 +704,7 @@ class TestStrategyBuildersWithMatches:
         assert len(video_track) == 1
         assert isinstance(video_track[0], otio.schema.Gap)
 
+    @pytest.mark.fast
     def test_mixed_strategies_in_strategy_matches(self):
         """Test finding correct strategy when multiple strategies present."""
         primary = MockMatch("primary.mp4", 0.0, 5.0, confidence=0.9)
@@ -696,6 +733,7 @@ class TestStrategyBuildersWithMatches:
 class TestPrimaryBuilderClipCreation:
     """Test PrimaryTrackBuilder clip creation logic."""
 
+    @pytest.mark.fast
     def test_primary_builder_creates_clips_with_metadata(self):
         """Test that primary builder creates clips with all metadata fields."""
         match = MockMatch(
@@ -726,6 +764,7 @@ class TestPrimaryBuilderClipCreation:
         assert "voiceover_text" in clip.metadata
         assert "video_text" in clip.metadata
 
+    @pytest.mark.fast
     def test_primary_builder_creates_audio_track(self):
         """Test that primary builder creates matching audio track."""
         match = MockMatch("C:/Videos/test.mp4", 0.0, 5.0)
@@ -740,6 +779,7 @@ class TestPrimaryBuilderClipCreation:
         assert isinstance(audio_clip, otio.schema.Clip)
         assert audio_clip.metadata.get("from_track") == "V1"
 
+    @pytest.mark.fast
     def test_primary_builder_with_segment_offset(self):
         """Test primary builder with segment file offset."""
         # Simulate segment file name pattern: video_0120.mp4 (offset = 120.0s)
@@ -757,6 +797,7 @@ class TestPrimaryBuilderClipCreation:
         assert len(video_track) == 1
         assert isinstance(video_track[0], otio.schema.Clip)
 
+    @pytest.mark.fast
     def test_primary_builder_with_audio_first_resolution(self):
         """Test primary builder with audio-first mode resolution."""
         match = MockMatch("audio.mp3", 0.0, 5.0)
@@ -784,6 +825,7 @@ class TestPrimaryBuilderClipCreation:
 class TestEntityBuildersDelegation:
     """Test entity builders delegate to entity module functions."""
 
+    @pytest.mark.fast
     def test_entity_image_builder_with_entity_images(self):
         """Test EntityImageTrackBuilder with entity images provided."""
         primary = MockMatch("primary.mp4", 0.0, 5.0)
@@ -803,6 +845,7 @@ class TestEntityBuildersDelegation:
         assert isinstance(video_track, otio.schema.Track)
         assert isinstance(audio_track, otio.schema.Track)
 
+    @pytest.mark.fast
     def test_entity_video_builder_with_entity_videos(self):
         """Test EntityVideoTrackBuilder with entity videos provided."""
         primary = MockMatch("primary.mp4", 0.0, 5.0)

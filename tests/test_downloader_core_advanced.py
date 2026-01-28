@@ -98,6 +98,7 @@ def downloader(mock_config):
 class TestCleanupPartialFiles:
     """Test partial file cleanup logic"""
 
+    @pytest.mark.fast
     def test_cleanup_part_files(self, downloader, temp_dir):
         """Test cleanup removes .part files"""
         directory = temp_dir / "videos"
@@ -116,6 +117,7 @@ class TestCleanupPartialFiles:
         # Should keep unrelated files
         assert (directory / "video456.webm.part").exists()
 
+    @pytest.mark.fast
     def test_cleanup_nonexistent_directory(self, downloader, temp_dir):
         """Test cleanup handles nonexistent directory gracefully"""
         nonexistent = temp_dir / "nonexistent"
@@ -123,6 +125,7 @@ class TestCleanupPartialFiles:
         # Should not raise exception
         downloader._cleanup_partial_files(nonexistent, "video123")
 
+    @pytest.mark.fast
     def test_cleanup_locked_files(self, downloader, temp_dir):
         """Test cleanup handles locked files gracefully"""
         directory = temp_dir / "videos"
@@ -144,6 +147,7 @@ class TestCleanupPartialFiles:
 class TestFindCookiesFile:
     """Test cookie file discovery logic"""
 
+    @pytest.mark.fast
     def test_find_cookies_in_project_dir(self, downloader, temp_dir):
         """Test finds cookies.txt in project directory"""
         downloader.config.project_dir = str(temp_dir)
@@ -154,6 +158,7 @@ class TestFindCookiesFile:
 
         assert result == cookies_file
 
+    @pytest.mark.fast
     def test_find_cookies_explicit_path(self, downloader, temp_dir):
         """Test uses explicit path from config"""
         cookies_file = temp_dir / "custom_cookies.txt"
@@ -165,6 +170,7 @@ class TestFindCookiesFile:
 
         assert result == cookies_file
 
+    @pytest.mark.fast
     def test_find_cookies_cwd(self, downloader, temp_dir):
         """Test finds cookies.txt in current working directory"""
         with patch('src.downloader.core.Path.cwd', return_value=temp_dir):
@@ -175,6 +181,7 @@ class TestFindCookiesFile:
 
             assert result == cookies_file
 
+    @pytest.mark.fast
     def test_find_cookies_not_found(self, downloader, temp_dir):
         """Test returns None when no cookies found"""
         downloader.config.project_dir = str(temp_dir)
@@ -191,6 +198,7 @@ class TestFindCookiesFile:
 class TestDownloadAll:
     """Test download_all orchestration method"""
 
+    @pytest.mark.fast
     def test_download_all_basic(self, downloader, temp_dir):
         """Test basic download_all execution"""
         downloader.download_for_keyword = Mock(return_value=[
@@ -212,6 +220,7 @@ class TestDownloadAll:
         assert len(failed) == 0
         assert downloader.download_for_keyword.call_count == 2
 
+    @pytest.mark.fast
     def test_download_all_with_failures(self, downloader, temp_dir):
         """Test download_all tracks failed keywords"""
         downloader.download_for_keyword = Mock(side_effect=[
@@ -229,6 +238,7 @@ class TestDownloadAll:
         assert len(failed) == 1
         assert "beach" in failed
 
+    @pytest.mark.fast
     def test_download_all_resume_from_checkpoint(self, downloader, temp_dir):
         """Test resume skips completed keywords"""
         checkpoint = DownloadCheckpoint(
@@ -256,6 +266,7 @@ class TestDownloadAll:
         assert "beach" in calls
         assert "sunset" in calls
 
+    @pytest.mark.fast
     def test_download_all_existing_videos_skip(self, downloader, temp_dir):
         """Test scans and reports existing videos"""
         output_dir = temp_dir / "videos"
@@ -271,6 +282,7 @@ class TestDownloadAll:
         # Should log existing videos (captured in logs, not tested here)
         assert downloader.download_for_keyword.call_count == 1
 
+    @pytest.mark.fast
     def test_download_all_checkpoint_cleared_on_success(self, downloader, temp_dir):
         """Test checkpoint is cleared after successful completion"""
         downloader.download_for_keyword = Mock(return_value=[
@@ -292,6 +304,7 @@ class TestDownloadAll:
 class TestDownloadForKeyword:
     """Test download_for_keyword tier iteration and retry logic"""
 
+    @pytest.mark.fast
     def test_download_for_keyword_all_tiers(self, downloader, temp_dir):
         """Test downloads across all tiers"""
         downloader.DURATION_TIERS = {'short': {}, 'medium': {}, 'long': {}}
@@ -306,6 +319,7 @@ class TestDownloadForKeyword:
         assert len(result) == 3  # One per tier
         assert downloader._download_single.call_count == 3
 
+    @pytest.mark.fast
     def test_download_for_keyword_skip_zero_per_keyword(self, downloader, temp_dir):
         """Test skips tiers with per_keyword=0"""
         downloader.DURATION_TIERS = {'short': {}, 'medium': {}, 'long': {}}
@@ -321,6 +335,7 @@ class TestDownloadForKeyword:
         # Should download short and long, skip medium
         assert downloader._download_single.call_count == 2
 
+    @pytest.mark.fast
     def test_download_for_keyword_max_total_limit(self, downloader, temp_dir):
         """Test respects max_total tier limit"""
         downloader.DURATION_TIERS = {'short': {}}
@@ -335,6 +350,7 @@ class TestDownloadForKeyword:
         # Should skip tier due to max_total reached
         assert downloader._download_single.call_count == 0
 
+    @pytest.mark.fast
     def test_download_for_keyword_file_based_skip(self, downloader, temp_dir):
         """Test skips download if files already exist"""
         downloader.DURATION_TIERS = {'short': {}}
@@ -353,6 +369,7 @@ class TestDownloadForKeyword:
         # Should skip download (already have 2 videos, per_keyword=2)
         assert downloader._download_single.call_count == 0
 
+    @pytest.mark.fast
     def test_download_for_keyword_retry_on_timeout(self, downloader, temp_dir):
         """Test retries with modified keyword on timeout"""
         downloader.DURATION_TIERS = {'short': {}}
@@ -374,6 +391,7 @@ class TestDownloadForKeyword:
         # Should try original keyword once (timeout handled inside download_for_keyword)
         assert downloader._download_single.call_count >= 1
 
+    @pytest.mark.fast
     def test_download_for_keyword_remix_on_zero_results(self, downloader, temp_dir):
         """Test uses remix keyword when 0 results"""
         downloader.DURATION_TIERS = {'short': {}}
@@ -400,6 +418,7 @@ class TestDownloadForKeyword:
 class TestDownloadSingle:
     """Test _download_single method with LLM filtering and direct flows"""
 
+    @pytest.mark.fast
     def test_download_single_llm_enabled_flow(self, downloader, temp_dir):
         """Test LLM filtering flow"""
         downloader.download_config.llm_title_filter = Mock()
@@ -432,6 +451,7 @@ class TestDownloadSingle:
         assert call_args[3] == "travel"  # keyword
         assert call_args[4] == "short"  # tier
 
+    @pytest.mark.fast
     def test_download_single_no_search_results(self, downloader, temp_dir):
         """Test handles no search results gracefully"""
         downloader.download_config.llm_title_filter = Mock()
@@ -445,6 +465,7 @@ class TestDownloadSingle:
         assert result == []
         downloader._filter_titles_with_llm.assert_not_called()
 
+    @pytest.mark.fast
     def test_download_single_blacklist_filter(self, downloader, temp_dir):
         """Test applies title blacklist before LLM"""
         downloader.download_config.llm_title_filter = Mock()
@@ -469,6 +490,7 @@ class TestDownloadSingle:
         assert len(filtered_videos) == 1
         assert filtered_videos[0]['id'] == 'vid1'
 
+    @pytest.mark.fast
     def test_download_single_speech_screening(self, downloader, temp_dir):
         """Test applies speech screening for long tiers"""
         downloader.download_config.llm_title_filter = Mock()
@@ -497,6 +519,7 @@ class TestDownloadSingle:
         call_args = downloader._download_by_ids.call_args[0]
         assert call_args[0] == ['vid1']  # Only vid1 passed screening
 
+    @pytest.mark.fast
     def test_download_single_direct_flow(self, downloader, temp_dir):
         """Test direct yt-dlp flow (LLM disabled)"""
         downloader.download_config.llm_title_filter = Mock()
@@ -523,6 +546,7 @@ class TestDownloadSingle:
 class TestDownloadByIds:
     """Test _download_by_ids method"""
 
+    @pytest.mark.fast
     def test_download_by_ids_all_new(self, downloader, temp_dir):
         """Test downloads all new video IDs"""
         downloader._run_download_cmd = Mock(return_value=[
@@ -541,11 +565,13 @@ class TestDownloadByIds:
         assert len(result) == 2
         downloader._run_download_cmd.assert_called_once()
 
+    @pytest.mark.fast
     def test_download_by_ids_skip_existing(self, downloader, temp_dir):
         """Test skips already-downloaded videos"""
         # Skip this test - requires unwrapping mock and complex setup
         pass
 
+    @pytest.mark.fast
     def test_download_by_ids_all_existing(self, downloader, temp_dir):
         """Test returns existing videos when all already downloaded"""
         # Skip this test - complex existing file logic
@@ -559,6 +585,7 @@ class TestDownloadByIds:
 class TestAddCookiesToCmd:
     """Test cookie authentication command building"""
 
+    @pytest.mark.fast
     def test_add_cookies_from_browser(self, downloader, temp_dir):
         """Test adds --cookies-from-browser argument"""
         downloader._cookies_from_browser = "firefox"
@@ -570,6 +597,7 @@ class TestAddCookiesToCmd:
         assert '--cookies-from-browser' in cmd
         assert 'firefox' in cmd
 
+    @pytest.mark.fast
     def test_add_cookies_from_file(self, downloader, temp_dir):
         """Test adds --cookies argument with file path"""
         downloader._cookies_from_browser = ''
@@ -583,6 +611,7 @@ class TestAddCookiesToCmd:
         assert '--cookies' in cmd
         assert str(cookies_file) in cmd
 
+    @pytest.mark.fast
     def test_add_cookies_none_configured(self, downloader, temp_dir):
         """Test no cookies added when none configured"""
         downloader._cookies_from_browser = ''
@@ -597,6 +626,7 @@ class TestAddCookiesToCmd:
         assert '--cookies' not in cmd
         assert '--cookies-from-browser' not in cmd
 
+    @pytest.mark.fast
     def test_add_cookies_browser_priority(self, downloader, temp_dir):
         """Test browser cookies take priority over file cookies"""
         downloader._cookies_from_browser = "chrome"
@@ -620,6 +650,7 @@ class TestAddCookiesToCmd:
 class TestGetDownloadEstimate:
     """Test download estimation calculations"""
 
+    @pytest.mark.fast
     def test_download_estimate_basic(self, downloader, temp_dir):
         """Test calculates download estimates"""
         downloader.DURATION_TIERS = {'short': {}, 'medium': {}, 'long': {}}
@@ -634,6 +665,7 @@ class TestGetDownloadEstimate:
         assert 'est_storage_gb' in estimate
         assert 'est_time_minutes' in estimate
 
+    @pytest.mark.fast
     def test_download_estimate_single_tier(self, downloader, temp_dir):
         """Test estimates with varying per_keyword values"""
         downloader.DURATION_TIERS = {'short': {}}
@@ -650,6 +682,7 @@ class TestGetDownloadEstimate:
         # 5 keywords × 10 videos = 50 total
         assert estimate['total_videos'] == 50
 
+    @pytest.mark.fast
     def test_download_estimate_zero_keywords(self, downloader, temp_dir):
         """Test handles zero keywords"""
         downloader.DURATION_TIERS = {'short': {}}
@@ -668,18 +701,21 @@ class TestGetDownloadEstimate:
 class TestRunDownloadCmd:
     """Test _run_download_cmd subprocess execution and timeout logic"""
 
+    @pytest.mark.fast
     def test_run_download_cmd_success(self, downloader, temp_dir):
         """Test successful download execution - simplified"""
         # Skip complex test - requires careful mocking of file creation + subprocess
         # Actual method is tested indirectly through integration tests
         pass
 
+    @pytest.mark.fast
     def test_run_download_cmd_timeout(self, downloader, temp_dir):
         """Test handles timeout gracefully - simplified"""
         # Skip complex test - timeout handling is complex with try/except wrapper
         # Actual timeout logic is tested indirectly
         pass
 
+    @pytest.mark.integration
     def test_run_download_cmd_tier_specific_timeout(self, downloader, temp_dir):
         """Test uses tier-specific timeout configuration.
 
@@ -721,6 +757,7 @@ class TestRunDownloadCmd:
                 # max_timeout is 1.5x the tier timeout
                 assert max_timeout == 450
 
+    @pytest.mark.integration
     def test_run_download_cmd_cleanup_partial_files(self, downloader, temp_dir):
         """Test cleans up .part files before download"""
         output_dir = temp_dir / "videos"

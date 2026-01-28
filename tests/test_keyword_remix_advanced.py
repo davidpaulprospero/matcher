@@ -70,6 +70,7 @@ def sample_keywords():
 class TestProcessVideos:
     """Test process_videos method with various scenarios"""
 
+    @pytest.mark.fast
     def test_process_videos_empty(self, temp_dir, remix_config, sample_keywords):
         """Test process_videos with empty directory"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -81,6 +82,7 @@ class TestProcessVideos:
         assert result.excluded_files == 0
         assert result.avg_match_score == 0.0
 
+    @pytest.mark.fast
     def test_process_videos_with_files(self, temp_dir, remix_config, sample_keywords):
         """Test process_videos with actual video files"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -96,6 +98,7 @@ class TestProcessVideos:
         assert result.included_files >= 2  # At least 2 should match keywords
         assert result.processing_time_seconds >= 0
 
+    @pytest.mark.fast
     def test_process_videos_parallel_scoring(self, temp_dir, sample_keywords):
         """Test parallel scoring with many files"""
         config = RemixConfig(
@@ -119,6 +122,7 @@ class TestProcessVideos:
         assert result.total_files == 15
         assert result.included_files > 0
 
+    @pytest.mark.fast
     def test_process_videos_sequential_scoring(self, temp_dir, sample_keywords):
         """Test sequential scoring with few files"""
         config = RemixConfig(
@@ -139,6 +143,7 @@ class TestProcessVideos:
         assert result.total_files == 5
         assert result.included_files > 0
 
+    @pytest.mark.fast
     def test_process_videos_with_progress(self, temp_dir, remix_config, sample_keywords, capsys):
         """Test show_progress output"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -153,6 +158,7 @@ class TestProcessVideos:
         assert "Scoring" in captured.out
         assert "videos" in captured.out
 
+    @pytest.mark.fast
     def test_process_videos_scoring_error(self, temp_dir, remix_config, sample_keywords):
         """Test handling of scoring errors during processing"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -169,6 +175,7 @@ class TestProcessVideos:
         assert result.included_files == 0  # No successful scores
         assert processor.metrics['scoring_errors'] >= 1
 
+    @pytest.mark.fast
     def test_process_videos_filtering(self, temp_dir, sample_keywords):
         """Test relevance filtering in process_videos"""
         config = RemixConfig(
@@ -187,6 +194,7 @@ class TestProcessVideos:
         assert result.included_files >= 1
         assert all(v.match_score >= 0.5 for v in result.included_videos)
 
+    @pytest.mark.fast
     def test_process_videos_max_files_limit(self, temp_dir, sample_keywords):
         """Test max_files_to_include limit in process_videos"""
         config = RemixConfig(
@@ -205,6 +213,7 @@ class TestProcessVideos:
         assert result.included_files == 2
         assert result.excluded_files == 3
 
+    @pytest.mark.fast
     def test_process_videos_sort_by_score(self, temp_dir, remix_config, sample_keywords):
         """Test that videos are sorted by score (highest first)"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)
@@ -228,6 +237,7 @@ class TestProcessVideos:
 class TestKeywordRemixerInit:
     """Test KeywordRemixer initialization (simpler, no LLM mocking)"""
 
+    @pytest.mark.fast
     def test_init_with_none_config(self):
         """Test initialization with None config"""
         remixer = KeywordRemixer(
@@ -240,6 +250,7 @@ class TestKeywordRemixerInit:
         assert remixer.stats['total_remixes'] == 0
         assert remixer.stats['successful_remixes'] == 0
 
+    @pytest.mark.fast
     def test_init_with_topic_context(self):
         """Test initialization with topic context"""
         remixer = KeywordRemixer(
@@ -250,6 +261,7 @@ class TestKeywordRemixerInit:
 
         assert "beach vacation" in remixer.topic_context
 
+    @pytest.mark.fast
     def test_stats_initialization(self):
         """Test stats dictionary is properly initialized"""
         remixer = KeywordRemixer(
@@ -271,6 +283,7 @@ class TestKeywordRemixerInit:
 class TestConvenienceFunctionsAdvanced:
     """Test convenience functions with detailed code paths"""
 
+    @pytest.mark.fast
     def test_remix_downloaded_videos_with_config(self, temp_dir):
         """Test remix_downloaded_videos with full config"""
         config = RemixConfig(
@@ -297,6 +310,7 @@ class TestConvenienceFunctionsAdvanced:
         assert result.included_files >= 1
         assert len(selected) >= 1
 
+    @pytest.mark.fast
     def test_remix_downloaded_videos_disabled(self, temp_dir):
         """Test remix_downloaded_videos when disabled"""
         config = RemixConfig(enabled=False)
@@ -314,6 +328,7 @@ class TestConvenienceFunctionsAdvanced:
         assert result is None
         assert len(selected) >= 1  # Should return all videos
 
+    @pytest.mark.fast
     def test_remix_downloaded_videos_no_keywords(self, temp_dir):
         """Test remix_downloaded_videos with empty keywords"""
         # Create a video file
@@ -337,6 +352,7 @@ class TestConvenienceFunctionsAdvanced:
         assert result.total_files == 1
         assert result.excluded_files == 1  # All excluded due to no keywords
 
+    @pytest.mark.fast
     def test_remix_audio_files_basic(self, temp_dir):
         """Test remix_audio_files with audio files"""
         # Create audio files
@@ -362,6 +378,7 @@ class TestConvenienceFunctionsAdvanced:
         assert result.total_files == 3
         assert len(selected) >= 2  # travel and beach files should match
 
+    @pytest.mark.fast
     def test_remix_audio_files_with_filtering(self, temp_dir):
         """Test remix_audio_files with relevance filtering"""
         config = RemixConfig(
@@ -397,6 +414,7 @@ class TestConvenienceFunctionsAdvanced:
 class TestProcessVideosEdgeCases:
     """Test edge cases in process_videos"""
 
+    @pytest.mark.fast
     def test_process_videos_parallel_with_errors(self, temp_dir, sample_keywords):
         """Test parallel scoring with some files causing errors"""
         config = RemixConfig(
@@ -427,6 +445,7 @@ class TestProcessVideosEdgeCases:
         assert result.total_files == 15
         assert processor.metrics['scoring_errors'] > 0
 
+    @pytest.mark.fast
     def test_process_videos_all_excluded(self, temp_dir, sample_keywords):
         """Test when all files are excluded by filtering"""
         config = RemixConfig(
@@ -445,6 +464,7 @@ class TestProcessVideosEdgeCases:
         assert result.excluded_files == 2
         assert result.avg_match_score == 0.0
 
+    @pytest.mark.fast
     def test_process_videos_metrics_tracking(self, temp_dir, remix_config, sample_keywords):
         """Test that metrics are properly tracked"""
         processor = KeywordRemixProcessor(remix_config, sample_keywords)

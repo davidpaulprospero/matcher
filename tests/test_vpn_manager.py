@@ -30,6 +30,7 @@ class TestVPNManager:
         config = MockVPNConfig()
         return VPNManager(config)
 
+    @pytest.mark.fast
     def test_init_enabled(self):
         """Test initialization when enabled."""
         from src.downloader.vpn_manager import VPNManager
@@ -40,6 +41,7 @@ class TestVPNManager:
         assert manager.is_enabled
         assert manager.switch_count == 0
 
+    @pytest.mark.fast
     def test_init_disabled(self):
         """Test initialization when disabled."""
         from src.downloader.vpn_manager import VPNManager
@@ -49,6 +51,7 @@ class TestVPNManager:
 
         assert not manager.is_enabled
 
+    @pytest.mark.fast
     def test_init_no_command(self):
         """Test initialization with no switch command."""
         from src.downloader.vpn_manager import VPNManager
@@ -58,10 +61,12 @@ class TestVPNManager:
 
         assert not manager.is_enabled
 
+    @pytest.mark.fast
     def test_can_switch(self, manager):
         """Test can_switch check."""
         assert manager.can_switch()
 
+    @pytest.mark.fast
     def test_can_switch_at_limit(self):
         """Test can_switch when at limit."""
         from src.downloader.vpn_manager import VPNManager
@@ -74,6 +79,7 @@ class TestVPNManager:
 
         assert not manager.can_switch()
 
+    @pytest.mark.fast
     def test_can_switch_unlimited(self):
         """Test can_switch with unlimited (0) limit."""
         from src.downloader.vpn_manager import VPNManager
@@ -86,6 +92,7 @@ class TestVPNManager:
         assert manager.can_switch()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_success(self, mock_run, manager):
         """Test successful VPN switch."""
         mock_run.return_value = MagicMock(returncode=0, stdout="Connected", stderr="")
@@ -97,6 +104,7 @@ class TestVPNManager:
         mock_run.assert_called_once()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_failure(self, mock_run, manager):
         """Test failed VPN switch."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Connection failed")
@@ -107,6 +115,7 @@ class TestVPNManager:
         assert manager.switch_count == 0  # Not incremented on failure
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_timeout(self, mock_run, manager):
         """Test VPN switch timeout."""
         mock_run.side_effect = subprocess.TimeoutExpired("cmd", 60)
@@ -116,6 +125,7 @@ class TestVPNManager:
         assert result is False
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_increments_count(self, mock_run, manager):
         """Test that switch increments count."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -130,6 +140,7 @@ class TestVPNManager:
         assert manager.switch_count == 3
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_respects_limit(self, mock_run):
         """Test that switch respects max_switches_per_session."""
         from src.downloader.vpn_manager import VPNManager
@@ -147,6 +158,7 @@ class TestVPNManager:
         assert manager.switch_count == 2
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_disconnect_success(self, mock_run, manager):
         """Test successful VPN disconnect."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -156,6 +168,7 @@ class TestVPNManager:
         assert result is True
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_disconnect_no_command(self, mock_run):
         """Test disconnect with no command configured."""
         from src.downloader.vpn_manager import VPNManager
@@ -168,6 +181,7 @@ class TestVPNManager:
         assert result is True  # Should succeed (no-op)
         mock_run.assert_not_called()
 
+    @pytest.mark.fast
     def test_reset(self, manager):
         """Test reset clears state."""
         manager._switch_count = 5
@@ -178,6 +192,7 @@ class TestVPNManager:
         assert manager.switch_count == 0
         assert manager._last_switch_time is None
 
+    @pytest.mark.fast
     def test_get_status(self, manager):
         """Test status reporting."""
         status = manager.get_status()
@@ -188,6 +203,7 @@ class TestVPNManager:
         assert status["can_switch"] is True
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_with_delay(self, mock_run):
         """Test that switch respects delay setting."""
         from src.downloader.vpn_manager import VPNManager
@@ -205,6 +221,7 @@ class TestVPNManager:
         assert elapsed >= 0.9  # Allow small margin
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_with_verification(self, mock_run):
         """Test switch with connection verification."""
         from src.downloader.vpn_manager import VPNManager
@@ -230,6 +247,7 @@ class TestVPNCheckpointPersistence:
         """Create a VPN config for testing."""
         return MockVPNConfig(max_switches_per_session=5)
 
+    @pytest.mark.fast
     def test_to_checkpoint_state_initial(self, config):
         """Test serialization of initial state (no switches)."""
         from src.downloader.vpn_manager import VPNManager
@@ -240,6 +258,7 @@ class TestVPNCheckpointPersistence:
         assert state["switch_count"] == 0
         assert state["last_switch_timestamp"] is None
 
+    @pytest.mark.fast
     def test_to_checkpoint_state_after_switches(self, config):
         """Test serialization after switches."""
         from src.downloader.vpn_manager import VPNManager
@@ -257,6 +276,7 @@ class TestVPNCheckpointPersistence:
         from datetime import datetime
         datetime.fromisoformat(state["last_switch_timestamp"])
 
+    @pytest.mark.fast
     def test_from_checkpoint_state_restores_switch_count(self, config):
         """Test that from_checkpoint_state restores switch count."""
         from src.downloader.vpn_manager import VPNManager
@@ -266,6 +286,7 @@ class TestVPNCheckpointPersistence:
 
         assert manager.switch_count == 3
 
+    @pytest.mark.fast
     def test_from_checkpoint_state_restores_timestamp(self, config):
         """Test that from_checkpoint_state restores timestamp."""
         from src.downloader.vpn_manager import VPNManager
@@ -278,6 +299,7 @@ class TestVPNCheckpointPersistence:
         assert manager._last_switch_time is not None
         assert isinstance(manager._last_switch_time, float)  # Epoch time
 
+    @pytest.mark.fast
     def test_from_checkpoint_state_empty_state(self, config):
         """Test from_checkpoint_state with empty state."""
         from src.downloader.vpn_manager import VPNManager
@@ -287,6 +309,7 @@ class TestVPNCheckpointPersistence:
         assert manager.switch_count == 0
         assert manager._last_switch_time is None
 
+    @pytest.mark.fast
     def test_from_checkpoint_state_none_state(self, config):
         """Test from_checkpoint_state with None state."""
         from src.downloader.vpn_manager import VPNManager
@@ -295,6 +318,7 @@ class TestVPNCheckpointPersistence:
 
         assert manager.switch_count == 0
 
+    @pytest.mark.fast
     def test_restore_from_checkpoint(self, config):
         """Test restore_from_checkpoint updates existing instance."""
         from src.downloader.vpn_manager import VPNManager
@@ -307,6 +331,7 @@ class TestVPNCheckpointPersistence:
 
         assert manager.switch_count == 4
 
+    @pytest.mark.fast
     def test_restore_from_checkpoint_logs_status(self, config, caplog):
         """Test that restore_from_checkpoint logs status message."""
         from src.downloader.vpn_manager import VPNManager
@@ -319,6 +344,7 @@ class TestVPNCheckpointPersistence:
 
         assert any("Resuming VPN manager: 2/5 switches used" in msg for msg in caplog.messages)
 
+    @pytest.mark.fast
     def test_restore_from_checkpoint_empty_state(self, config):
         """Test restore_from_checkpoint with empty state is no-op."""
         from src.downloader.vpn_manager import VPNManager
@@ -331,6 +357,7 @@ class TestVPNCheckpointPersistence:
         # Empty state should not change anything
         assert manager.switch_count == 5
 
+    @pytest.mark.fast
     def test_restore_from_checkpoint_none_state(self, config):
         """Test restore_from_checkpoint with None state is no-op."""
         from src.downloader.vpn_manager import VPNManager
@@ -343,6 +370,7 @@ class TestVPNCheckpointPersistence:
         # None state should not change anything
         assert manager.switch_count == 3
 
+    @pytest.mark.fast
     def test_roundtrip_serialization(self, config):
         """Test full roundtrip: to_checkpoint_state -> from_checkpoint_state."""
         from src.downloader.vpn_manager import VPNManager
@@ -363,6 +391,7 @@ class TestVPNCheckpointPersistence:
         # Timestamps should be close (within 1 second due to ISO format precision)
         assert abs(restored._last_switch_time - original._last_switch_time) < 1.0
 
+    @pytest.mark.fast
     def test_max_switches_enforced_across_resume(self, config):
         """Test that max_switches_per_session is enforced across resume boundaries."""
         from src.downloader.vpn_manager import VPNManager
@@ -388,6 +417,7 @@ class TestVPNCheckpointPersistence:
 class TestVPNCheckpointTimestampHelpers:
     """Tests for VPN manager timestamp helper methods."""
 
+    @pytest.mark.fast
     def test_format_timestamp(self):
         """Test _format_timestamp converts epoch to ISO."""
         from src.downloader.vpn_manager import VPNManager
@@ -400,6 +430,7 @@ class TestVPNCheckpointTimestampHelpers:
         parsed = datetime.fromisoformat(iso)
         assert abs(parsed.timestamp() - epoch) < 1.0
 
+    @pytest.mark.fast
     def test_parse_timestamp_valid(self):
         """Test _parse_timestamp with valid ISO string."""
         from src.downloader.vpn_manager import VPNManager
@@ -412,6 +443,7 @@ class TestVPNCheckpointTimestampHelpers:
         parsed = datetime.fromisoformat(iso)
         assert abs(epoch - parsed.timestamp()) < 1.0
 
+    @pytest.mark.fast
     def test_parse_timestamp_invalid(self):
         """Test _parse_timestamp with invalid string."""
         from src.downloader.vpn_manager import VPNManager
@@ -420,6 +452,7 @@ class TestVPNCheckpointTimestampHelpers:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_parse_timestamp_none(self):
         """Test _parse_timestamp with None."""
         from src.downloader.vpn_manager import VPNManager
@@ -432,6 +465,7 @@ class TestVPNCheckpointTimestampHelpers:
 class TestDownloadCheckpointVPNState:
     """Tests for DownloadCheckpoint vpn_manager_state field."""
 
+    @pytest.mark.fast
     def test_checkpoint_has_vpn_manager_state_field(self):
         """Test that DownloadCheckpoint has vpn_manager_state field."""
         from src.downloader.checkpoint import DownloadCheckpoint
@@ -448,6 +482,7 @@ class TestDownloadCheckpointVPNState:
 
         assert checkpoint.vpn_manager_state == {"switch_count": 2, "last_switch_timestamp": None}
 
+    @pytest.mark.fast
     def test_checkpoint_to_dict_includes_vpn_state(self):
         """Test that to_dict includes vpn_manager_state."""
         from src.downloader.checkpoint import DownloadCheckpoint
@@ -467,6 +502,7 @@ class TestDownloadCheckpointVPNState:
         assert "vpn_manager_state" in data
         assert data["vpn_manager_state"] == {"switch_count": 3}
 
+    @pytest.mark.fast
     def test_checkpoint_from_dict_restores_vpn_state(self):
         """Test that from_dict restores vpn_manager_state."""
         from src.downloader.checkpoint import DownloadCheckpoint
@@ -485,6 +521,7 @@ class TestDownloadCheckpointVPNState:
 
         assert checkpoint.vpn_manager_state == {"switch_count": 4, "last_switch_timestamp": "2024-01-25T11:00:00"}
 
+    @pytest.mark.fast
     def test_checkpoint_from_dict_handles_missing_vpn_state(self):
         """Test from_dict handles checkpoints without vpn_manager_state (backward compat)."""
         from src.downloader.checkpoint import DownloadCheckpoint
@@ -503,6 +540,7 @@ class TestDownloadCheckpointVPNState:
 
         assert checkpoint.vpn_manager_state is None
 
+    @pytest.mark.fast
     def test_checkpoint_roundtrip_with_vpn_state(self):
         """Test full roundtrip serialization with vpn_manager_state."""
         from src.downloader.checkpoint import DownloadCheckpoint
@@ -540,6 +578,7 @@ class TestVideoDownloaderVPNCheckpointIntegration:
         config.cache_dir = "/tmp/test_cache"
         return config
 
+    @pytest.mark.fast
     def test_vpn_state_saved_in_checkpoint(self, mock_config, tmp_path):
         """Test that VPN state is saved when checkpoint is saved."""
         from src.downloader.vpn_manager import VPNManager
@@ -563,6 +602,7 @@ class TestVideoDownloaderVPNCheckpointIntegration:
 
         assert checkpoint.vpn_manager_state["switch_count"] == 3
 
+    @pytest.mark.fast
     def test_vpn_state_restored_on_resume(self, mock_config):
         """Test that VPN state is restored when resuming from checkpoint."""
         from src.downloader.vpn_manager import VPNManager
@@ -604,6 +644,7 @@ class TestVPNManagerIntegration:
         return config
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_healer_uses_vpn_after_cookie_exhaustion(self, mock_run, mock_config):
         """Test that healer tries VPN when cookies are exhausted."""
         from src.agents.healers.download import DownloadHealer
@@ -666,6 +707,7 @@ class TestVPNVerificationEndpoints:
             verify_connection=True  # Should still be skipped
         )
 
+    @pytest.mark.fast
     def test_default_endpoints_used(self, config_default):
         """Test that default Google endpoints are used when not configured."""
         from src.downloader.vpn_manager import VPNManager
@@ -676,6 +718,7 @@ class TestVPNVerificationEndpoints:
         assert manager.config.verification_endpoint == "https://www.google.com"
         assert manager.config.verification_ip == "8.8.8.8"
 
+    @pytest.mark.fast
     def test_custom_endpoints_used(self, config_custom):
         """Test that custom endpoints are used when configured."""
         from src.downloader.vpn_manager import VPNManager
@@ -686,6 +729,7 @@ class TestVPNVerificationEndpoints:
         assert manager.config.verification_ip == "1.1.1.1"
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_verification_uses_custom_endpoint(self, mock_run, config_custom):
         """Test that verification curl uses custom endpoint."""
         from src.downloader.vpn_manager import VPNManager
@@ -702,6 +746,7 @@ class TestVPNVerificationEndpoints:
         assert "https://cloudflare.com" in call_args
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_verification_uses_custom_ip_on_curl_failure(self, mock_run, config_custom):
         """Test that ping uses custom IP when curl fails."""
         from src.downloader.vpn_manager import VPNManager
@@ -723,6 +768,7 @@ class TestVPNVerificationEndpoints:
         assert "1.1.1.1" in ping_call
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_skip_verification_option(self, mock_run, config_skip_verification):
         """Test that skip_verification=True skips verification entirely."""
         from src.downloader.vpn_manager import VPNManager
@@ -739,6 +785,7 @@ class TestVPNVerificationEndpoints:
         assert mock_run.call_count == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_verification_failure_logs_endpoints(self, mock_run, config_custom, caplog):
         """Test that verification failure logs which endpoints were tried."""
         from src.downloader.vpn_manager import VPNManager
@@ -761,6 +808,7 @@ class TestVPNVerificationEndpoints:
         assert any("1.1.1.1" in msg for msg in caplog.messages)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_switch_with_skip_verification_logs_skip(self, mock_run, config_skip_verification, caplog):
         """Test that switch logs when verification is skipped."""
         from src.downloader.vpn_manager import VPNManager
@@ -774,6 +822,7 @@ class TestVPNVerificationEndpoints:
 
         assert any("skip_verification=True" in msg for msg in caplog.messages)
 
+    @pytest.mark.fast
     def test_config_dataclass_has_new_fields(self):
         """Test that VPNConfig dataclass has new US-010 fields."""
         from src.config.sections.download import VPNConfig
@@ -790,6 +839,7 @@ class TestVPNVerificationEndpoints:
         assert hasattr(config, 'verification_ip')
         assert config.verification_ip == "8.8.8.8"
 
+    @pytest.mark.fast
     def test_config_dataclass_custom_values(self):
         """Test that VPNConfig dataclass accepts custom values."""
         from src.config.sections.download import VPNConfig
@@ -805,6 +855,7 @@ class TestVPNVerificationEndpoints:
         assert config.verification_ip == "9.9.9.9"
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_verification_with_opendns(self, mock_run):
         """Test verification with OpenDNS endpoints."""
         from src.downloader.vpn_manager import VPNManager
@@ -823,6 +874,7 @@ class TestVPNVerificationEndpoints:
         assert "opendns.com" in call_args
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_verification_timeout_continues_to_next(self, mock_run, config_custom, caplog):
         """Test that timeout on curl continues to ping."""
         from src.downloader.vpn_manager import VPNManager
@@ -844,6 +896,7 @@ class TestVPNVerificationEndpoints:
         assert any("timed out" in msg for msg in caplog.messages)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_backward_compatibility_no_new_fields(self, mock_run):
         """Test backward compatibility when config lacks new fields."""
         from src.downloader.vpn_manager import VPNManager
@@ -863,6 +916,7 @@ class TestVPNVerificationEndpoints:
         assert "google.com" in call_args
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_skip_verification_takes_precedence_over_verify_connection(self, mock_run):
         """Test that skip_verification=True overrides verify_connection=True."""
         from src.downloader.vpn_manager import VPNManager
@@ -881,6 +935,7 @@ class TestVPNVerificationEndpoints:
         # Only switch command, no verification
         assert mock_run.call_count == 1
 
+    @pytest.mark.fast
     def test_verification_endpoint_examples_in_docstring(self):
         """Test that docstring mentions alternative endpoints."""
         from src.config.sections.download import VPNConfig
@@ -891,6 +946,7 @@ class TestVPNVerificationEndpoints:
         assert "cloudflare" in docstring.lower() or "verification_endpoint" in docstring
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_verification_debug_logging(self, mock_run, config_custom, caplog):
         """Test that verification logs endpoints at debug level."""
         from src.downloader.vpn_manager import VPNManager

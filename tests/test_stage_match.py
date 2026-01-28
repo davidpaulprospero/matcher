@@ -80,16 +80,19 @@ def mock_text_metadata():
 class TestMatchStageInit:
     """Test stage initialization"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name"""
         stage = MatchStage()
         assert stage.name == "MATCH"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = MatchStage()
         assert "match" in stage.description.lower() or "Match" in stage.description
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered"""
         from src.stages import get_stage
@@ -104,6 +107,7 @@ class TestMatchStageInit:
 class TestInputValidation:
     """Test input validation"""
 
+    @pytest.mark.fast
     def test_validate_no_voiceover_segments(self, mock_config):
         """Test validation fails when no voiceover segments"""
         stage = MatchStage()
@@ -116,6 +120,7 @@ class TestInputValidation:
         assert error is not None
         assert "voiceover" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_no_embeddings(self, mock_config, mock_voiceover_segments):
         """Test validation fails when no embeddings"""
         stage = MatchStage()
@@ -129,6 +134,7 @@ class TestInputValidation:
         assert error is not None
         assert "embedding" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_success(self, mock_config, mock_voiceover_segments):
         """Test successful validation"""
         stage = MatchStage()
@@ -145,6 +151,7 @@ class TestInputValidation:
 class TestInputValidationErrorMessages:
     """Test validation error messages contain specific field names and suggestions"""
 
+    @pytest.mark.fast
     def test_validate_error_contains_field_name_voiceover_segments(self, mock_config):
         """Test error message contains 'voiceover_segments' field name"""
         stage = MatchStage()
@@ -159,6 +166,7 @@ class TestInputValidationErrorMessages:
         assert "voiceover_segments" in error
         assert "Missing required fields" in error
 
+    @pytest.mark.fast
     def test_validate_error_contains_field_name_embeddings(self, mock_config, mock_voiceover_segments):
         """Test error message contains 'embeddings' field name"""
         stage = MatchStage()
@@ -173,6 +181,7 @@ class TestInputValidationErrorMessages:
         assert "embeddings" in error
         assert "Missing required fields" in error
 
+    @pytest.mark.fast
     def test_validate_error_contains_field_name_text_metadata(self, mock_config, mock_voiceover_segments):
         """Test error message contains 'text_metadata' field name"""
         stage = MatchStage()
@@ -187,6 +196,7 @@ class TestInputValidationErrorMessages:
         assert "text_metadata" in error
         assert "Missing required fields" in error
 
+    @pytest.mark.fast
     def test_validate_error_contains_multiple_field_names(self, mock_config):
         """Test error message contains multiple missing field names"""
         stage = MatchStage()
@@ -203,6 +213,7 @@ class TestInputValidationErrorMessages:
         assert "text_metadata" in error
         assert "Missing required fields" in error
 
+    @pytest.mark.fast
     def test_validate_error_suggests_analyze_stage(self, mock_config):
         """Test error suggests running ANALYZE stage for voiceover_segments"""
         stage = MatchStage()
@@ -217,6 +228,7 @@ class TestInputValidationErrorMessages:
         assert "Suggestion:" in error
         assert "ANALYZE" in error
 
+    @pytest.mark.fast
     def test_validate_error_suggests_transcribe_stage(self, mock_config, mock_voiceover_segments):
         """Test error suggests running TRANSCRIBE stage for embeddings"""
         stage = MatchStage()
@@ -231,6 +243,7 @@ class TestInputValidationErrorMessages:
         assert "Suggestion:" in error
         assert "TRANSCRIBE" in error
 
+    @pytest.mark.fast
     def test_validate_error_suggests_multiple_stages(self, mock_config):
         """Test error suggests multiple stages when multiple fields missing"""
         stage = MatchStage()
@@ -254,6 +267,7 @@ class TestInputValidationErrorMessages:
 class TestSegmentPreparation:
     """Test segment preparation"""
 
+    @pytest.mark.fast
     def test_prepare_voiceover_segments(self, mock_voiceover_segments):
         """Test preparing voiceover segments"""
         stage = MatchStage()
@@ -268,6 +282,7 @@ class TestSegmentPreparation:
         assert vo_segs[0].start_time == 0.0
         assert vo_segs[0].end_time == 3.0
 
+    @pytest.mark.fast
     def test_prepare_dict_voiceover_segments(self):
         """Test preparing dict-based voiceover segments"""
         stage = MatchStage()
@@ -282,6 +297,7 @@ class TestSegmentPreparation:
         assert len(vo_segs) == 1
         assert vo_segs[0].text == "Test segment"
 
+    @pytest.mark.fast
     def test_prepare_video_segments(self, mock_voiceover_segments, mock_text_metadata):
         """Test preparing video segments"""
         stage = MatchStage()
@@ -296,6 +312,7 @@ class TestSegmentPreparation:
         assert 'video1.mp4' in video_paths
         assert 'video2.mp4' in video_paths
 
+    @pytest.mark.fast
     def test_prepare_video_segments_with_broll(self, mock_voiceover_segments, mock_text_metadata):
         """Test B-roll flag propagation in video segments"""
         stage = MatchStage()
@@ -309,6 +326,7 @@ class TestSegmentPreparation:
         broll_count = sum(1 for seg in vid_segs if hasattr(seg, 'is_broll') and seg.is_broll)
         assert broll_count == 1  # One segment has is_broll=True
 
+    @pytest.mark.fast
     def test_prepare_video_segments_with_face_score(self, mock_voiceover_segments, mock_text_metadata):
         """Test face_score propagation in video segments"""
         stage = MatchStage()
@@ -334,6 +352,7 @@ class TestMatchingExecution:
     @patch('src.embeddings.compute_embeddings')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_run_matching_success(self, mock_cache_class, mock_provider, mock_compute,
                                   mock_match_all, mock_voiceover_segments,
                                   mock_text_metadata):
@@ -377,6 +396,7 @@ class TestMatchingExecution:
     @patch('src.embeddings.compute_embeddings')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_run_matching_no_vo_embeddings(self, mock_cache_class, mock_provider, mock_compute,
                                            mock_voiceover_segments, mock_text_metadata):
         """Test handling when voiceover embeddings fail"""
@@ -409,6 +429,7 @@ class TestMatchingExecution:
 class TestSkipMatching:
     """Test skip matching behavior"""
 
+    @pytest.mark.fast
     def test_skip_when_configured(self, mock_config, mock_checkpoint):
         """Test skipping matching when config says so"""
         stage = MatchStage()
@@ -421,6 +442,7 @@ class TestSkipMatching:
         assert result.success is True
         assert result.data.get('skipped') is True
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = MatchStage()
@@ -430,6 +452,7 @@ class TestSkipMatching:
 
         assert stage.can_skip(state, mock_checkpoint) is False
 
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_checkpoint):
         """Test can_skip returns True when checkpoint exists"""
         stage = MatchStage()
@@ -447,6 +470,7 @@ class TestSkipMatching:
 class TestMatchStageExecution:
     """Test full stage execution"""
 
+    @pytest.mark.fast
     def test_run_no_voiceover_segments(self, mock_config, mock_checkpoint):
         """Test running with no voiceover segments"""
         stage = MatchStage()
@@ -460,6 +484,7 @@ class TestMatchStageExecution:
         assert len(result.warnings) > 0
         assert "voiceover" in result.warnings[0].lower()
 
+    @pytest.mark.fast
     def test_run_no_video_data(self, mock_config, mock_checkpoint, mock_voiceover_segments):
         """Test running with no video data"""
         stage = MatchStage()
@@ -478,6 +503,7 @@ class TestMatchStageExecution:
     @patch('src.embeddings.compute_embeddings')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_run_success(self, mock_cache_class, mock_provider, mock_compute,
                         mock_match_all, mock_config, mock_checkpoint,
                         mock_voiceover_segments, mock_text_metadata):
@@ -514,6 +540,7 @@ class TestMatchStageExecution:
 
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.matching.match_all_segments')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_match_all, mock_provider, mock_config,
                                    mock_checkpoint, mock_voiceover_segments, mock_text_metadata):
         """Test exception handling in main run method"""
@@ -540,6 +567,7 @@ class TestMatchStageExecution:
 class TestMatchCheckpoint:
     """Test checkpoint operations"""
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore returns False when no checkpoint data"""
         stage = MatchStage()
@@ -551,6 +579,7 @@ class TestMatchCheckpoint:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_success(self, mock_checkpoint):
         """Test successful restore from checkpoint"""
         stage = MatchStage()
@@ -565,6 +594,7 @@ class TestMatchCheckpoint:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_checkpoint):
         """Test restore handles exceptions"""
         stage = MatchStage()
@@ -584,6 +614,7 @@ class TestMatchCheckpoint:
 class TestRestoreErrorHandling:
     """Test restore() error handling with corrupt/incomplete checkpoint data"""
 
+    @pytest.mark.fast
     def test_restore_logs_warning_on_no_data(self, mock_checkpoint, caplog):
         """Test restore logs specific warning when checkpoint data is missing"""
         import logging
@@ -598,6 +629,7 @@ class TestRestoreErrorHandling:
         assert result is False
         assert "No checkpoint data for MATCH" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_validates_matches_is_list(self, mock_checkpoint, caplog):
         """Test restore returns False when matches is not a list"""
         import logging
@@ -614,6 +646,7 @@ class TestRestoreErrorHandling:
         assert result is False
         assert "not a list" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_validates_match_objects(self, mock_checkpoint, caplog):
         """Test restore validates individual match objects are dicts"""
         import logging
@@ -634,6 +667,7 @@ class TestRestoreErrorHandling:
         assert result is False  # No valid matches
         assert "is not a dict" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_validates_video_file_required(self, mock_checkpoint, caplog):
         """Test restore validates video_file is non-empty string"""
         import logging
@@ -654,6 +688,7 @@ class TestRestoreErrorHandling:
         assert result is False  # No valid matches
         assert "invalid video_file" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_validates_segment_index_type(self, mock_checkpoint, caplog):
         """Test restore validates segment_index is numeric"""
         import logging
@@ -672,6 +707,7 @@ class TestRestoreErrorHandling:
         assert result is False
         assert "invalid segment_index" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_validates_confidence_type(self, mock_checkpoint, caplog):
         """Test restore validates confidence is numeric"""
         import logging
@@ -690,6 +726,7 @@ class TestRestoreErrorHandling:
         assert result is False
         assert "invalid confidence" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_clamps_confidence_to_valid_range(self, mock_checkpoint, caplog):
         """Test restore clamps out-of-range confidence values"""
         import logging
@@ -711,6 +748,7 @@ class TestRestoreErrorHandling:
         assert state.matches[0].confidence == 1.0  # Clamped to max
         assert state.matches[1].confidence == 0.0  # Clamped to min
 
+    @pytest.mark.fast
     def test_restore_partial_valid_data(self, mock_checkpoint, caplog):
         """Test restore succeeds with partial valid data, logs validation errors"""
         import logging
@@ -735,6 +773,7 @@ class TestRestoreErrorHandling:
         # Should log validation errors
         assert "validation errors" in caplog.text
 
+    @pytest.mark.fast
     def test_restore_returns_false_not_exception(self, mock_checkpoint):
         """Test restore returns False instead of raising exception on validation failure"""
         stage = MatchStage()
@@ -753,6 +792,7 @@ class TestRestoreErrorHandling:
             result = stage.restore(state, mock_checkpoint)
             assert result is False, f"Expected False for data: {data}"
 
+    @pytest.mark.fast
     def test_restore_handles_legacy_source_file_field(self, mock_checkpoint):
         """Test restore handles legacy 'source_file' field name"""
         stage = MatchStage()
@@ -778,6 +818,7 @@ class TestRestoreErrorHandling:
 class TestSettingsDisplay:
     """Test settings display"""
 
+    @pytest.mark.fast
     def test_print_settings(self, mock_config, capsys):
         """Test printing matching settings"""
         stage = MatchStage()
@@ -800,6 +841,7 @@ class TestConfidenceCalculation:
     @patch('src.embeddings.compute_embeddings')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_average_confidence_calculation(self, mock_cache_class, mock_provider,
                                            mock_compute, mock_match_all, mock_config,
                                            mock_checkpoint, mock_voiceover_segments,
@@ -836,6 +878,7 @@ class TestConfidenceCalculation:
     @patch('src.embeddings.compute_embeddings')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_average_confidence_with_match_result(self, mock_cache_class, mock_provider,
                                                   mock_compute, mock_match_all, mock_config,
                                                   mock_checkpoint, mock_voiceover_segments,
@@ -873,6 +916,7 @@ class TestConfidenceCalculation:
 class TestMatchEdgeCases:
     """Test edge cases and error conditions"""
 
+    @pytest.mark.fast
     def test_empty_text_metadata(self, mock_config, mock_checkpoint, mock_voiceover_segments):
         """Test handling empty text_metadata"""
         stage = MatchStage()
@@ -886,6 +930,7 @@ class TestMatchEdgeCases:
         assert result.success is True
         assert len(result.warnings) > 0
 
+    @pytest.mark.fast
     def test_no_matches_returned(self, mock_config, mock_checkpoint, mock_voiceover_segments,
                                 mock_text_metadata):
         """Test handling when matching returns no matches"""
@@ -906,6 +951,7 @@ class TestMatchEdgeCases:
         assert result.data['match_count'] == 0
         assert result.data['avg_confidence'] == 0
 
+    @pytest.mark.fast
     def test_non_dict_text_metadata(self, mock_voiceover_segments):
         """Test handling non-dict entries in text_metadata"""
         stage = MatchStage()
@@ -922,6 +968,7 @@ class TestMatchEdgeCases:
         # Second entry should be processed
         assert len(vid_segs) == 2  # Non-dict is passed through as-is
 
+    @pytest.mark.fast
     def test_matches_without_confidence_attribute(self, mock_config, mock_checkpoint,
                                                   mock_voiceover_segments, mock_text_metadata):
         """Test handling matches without confidence attribute"""
@@ -948,6 +995,7 @@ class TestMatchEdgeCases:
     @patch('src.embeddings.compute_embeddings')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_empty_voiceover_embeddings(self, mock_cache_class, mock_provider, mock_compute,
                                        mock_voiceover_segments, mock_text_metadata):
         """Test handling when voiceover embeddings are empty array"""
@@ -972,6 +1020,7 @@ class TestMatchEdgeCases:
 
         assert matches == []
 
+    @pytest.mark.fast
     def test_delta_matching_flags(self, mock_voiceover_segments, mock_text_metadata):
         """Test delta matching and force rematch flags"""
         stage = MatchStage()
@@ -997,6 +1046,7 @@ class TestMatchEdgeCases:
                         # match_all_segments should be called
                         assert mock_match.called
 
+    @pytest.mark.fast
     def test_location_chapters_in_matching(self, mock_voiceover_segments, mock_text_metadata):
         """Test location chapters are passed to matching"""
         stage = MatchStage()
@@ -1038,6 +1088,7 @@ class TestProviderCombinations:
         ("embedding_only", True),
         ("invalid_provider", False),
     ])
+    @pytest.mark.fast
     def test_provider_initialization(self, provider_name, expected_valid):
         """Test that different provider configurations initialize correctly"""
         config = MagicMock()
@@ -1060,6 +1111,7 @@ class TestProviderCombinations:
         ("ollama", None, "single_provider_no_fallback"),
         ("gemini", "gemini", "same_provider_retry"),
     ])
+    @pytest.mark.fast
     def test_provider_fallback_scenarios(self, provider, fallback_provider, scenario):
         """Test provider fallback behavior in different scenarios"""
         config = MagicMock()
@@ -1083,6 +1135,7 @@ class TestProviderCombinations:
         "llm",
         "hybrid",
     ])
+    @pytest.mark.fast
     def test_matching_strategy_types(self, strategy_type):
         """Test different matching strategy types"""
         config = MagicMock()
@@ -1114,6 +1167,7 @@ class TestConfidenceThresholdBoundaries:
         0.75,  # High threshold
         1.0,   # Maximum boundary - accept only perfect matches
     ])
+    @pytest.mark.fast
     def test_min_confidence_threshold_values(self, min_confidence):
         """Test matching with different min_confidence threshold values"""
         config = MagicMock()
@@ -1143,6 +1197,7 @@ class TestConfidenceThresholdBoundaries:
         (0.9, True),   # High threshold - fewer segments skip LLM
         (1.0, False),  # Maximum - nothing skips LLM (impossible to achieve 1.0 embedding sim)
     ])
+    @pytest.mark.fast
     def test_skip_llm_threshold_behavior(self, high_conf_threshold, expected_skip_llm):
         """Test skip_llm threshold affects LLM usage appropriately"""
         config = MagicMock()
@@ -1168,6 +1223,7 @@ class TestConfidenceThresholdBoundaries:
         (1.0, True),    # Maximum valid
         (1.1, False),   # Above valid range
     ])
+    @pytest.mark.fast
     def test_confidence_value_validation(self, confidence, expected_valid):
         """Test confidence values are validated correctly in restore"""
         stage = MatchStage()
@@ -1208,6 +1264,7 @@ class TestMatchCountVariations:
         5,   # Five alternatives
         10,  # Ten alternatives
     ])
+    @pytest.mark.fast
     def test_num_alternatives_config(self, num_alternatives):
         """Test different num_alternatives configurations"""
         config = MagicMock()
@@ -1233,6 +1290,7 @@ class TestMatchCountVariations:
         (5, 3, 2),   # 3 candidates but requesting 5, limited to 2
         (10, 5, 4),  # 5 candidates but requesting 10, limited to 4
     ])
+    @pytest.mark.fast
     def test_alternatives_limited_by_candidates(self, num_alternatives, num_candidates, expected_alt_count):
         """Test that alternatives are limited by available candidates"""
         # Simulate the logic: alternatives = min(num_alternatives, num_candidates - 1)
@@ -1245,6 +1303,7 @@ class TestMatchCountVariations:
         (50, 15),   # Large pool
         (100, 20),  # Very large pool
     ])
+    @pytest.mark.fast
     def test_candidate_pool_sizes(self, embedding_candidates, llm_candidates):
         """Test different candidate pool size configurations"""
         config = MagicMock()
@@ -1261,6 +1320,7 @@ class TestMatchCountVariations:
         5,   # More permissive
         10,  # Very permissive
     ])
+    @pytest.mark.fast
     def test_max_clip_reuse_settings(self, max_clip_reuse):
         """Test different max_clip_reuse configurations"""
         config = MagicMock()
@@ -1285,6 +1345,7 @@ class TestStrategyFallbackScenarios:
         ("broll_only", False, True, "different_source"),  # No B-roll, must use different strategy
         ("embedding_diversity", True, True, None),  # All data available
     ])
+    @pytest.mark.fast
     def test_strategy_fallback_conditions(self, primary_strategy, has_broll, has_scenes, expected_fallback):
         """Test strategy fallback based on available data"""
         config = MagicMock()
@@ -1315,6 +1376,7 @@ class TestStrategyFallbackScenarios:
         ("keyword_only", ["different_source"]),
         ("different_source", ["source_rotation"]),
     ])
+    @pytest.mark.fast
     def test_strategy_fallback_chains(self, strategy, fallback_chain):
         """Test expected fallback chain for each strategy"""
         # Each strategy should have a defined fallback chain
@@ -1333,6 +1395,7 @@ class TestStrategyFallbackScenarios:
         (5, True),    # Many sources available
         (10, True),   # Large variety of sources
     ])
+    @pytest.mark.fast
     def test_different_source_strategy_availability(self, num_sources, expect_different_source_success):
         """Test different_source strategy success based on source count"""
         # Generate mock sources
@@ -1348,6 +1411,7 @@ class TestStrategyFallbackScenarios:
         (4, 5, False),   # Most used, still 1 available
         (5, 5, True),    # All used, need fallback
     ])
+    @pytest.mark.fast
     def test_source_exhaustion_fallback(self, used_sources_count, available_count, expect_fallback):
         """Test fallback when available sources are exhausted"""
         sources = [f"video{i}.mp4" for i in range(available_count)]
@@ -1372,6 +1436,7 @@ class TestParametrizedEdgeCases:
         50,   # Many segments
         100,  # Large count
     ])
+    @pytest.mark.fast
     def test_varying_segment_counts(self, segment_count):
         """Test matching with different numbers of voiceover segments"""
         stage = MatchStage()
@@ -1397,6 +1462,7 @@ class TestParametrizedEdgeCases:
         (5, 10),    # Medium videos, more segments
         (10, 5),    # Many videos, moderate segments
     ])
+    @pytest.mark.fast
     def test_varying_video_distributions(self, video_count, segment_per_video):
         """Test matching with different video/segment distributions"""
         text_metadata = []
@@ -1422,6 +1488,7 @@ class TestParametrizedEdgeCases:
         0.2,    # Larger penalty
         0.5,    # Heavy penalty
     ])
+    @pytest.mark.fast
     def test_reuse_penalty_values(self, reuse_penalty):
         """Test different reuse penalty configurations"""
         config = MagicMock()

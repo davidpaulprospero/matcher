@@ -55,16 +55,19 @@ class MockCookieRotator:
 class TestCookieCooldownConfig:
     """Test BatchRetryConfig wait_for_cookie_cooldown option."""
 
+    @pytest.mark.fast
     def test_default_value_true(self):
         """Test wait_for_cookie_cooldown defaults to True."""
         config = BatchRetryConfig()
         assert config.wait_for_cookie_cooldown is True
 
+    @pytest.mark.fast
     def test_custom_value_false(self):
         """Test wait_for_cookie_cooldown can be set to False."""
         config = BatchRetryConfig(wait_for_cookie_cooldown=False)
         assert config.wait_for_cookie_cooldown is False
 
+    @pytest.mark.fast
     def test_config_in_stats(self):
         """Test wait_for_cookie_cooldown appears in stats."""
         queue = RetryQueue(BatchRetryConfig(wait_for_cookie_cooldown=True))
@@ -76,6 +79,7 @@ class TestCookieCooldownConfig:
 class TestSetCookieRotator:
     """Test RetryQueue.set_cookie_rotator() method."""
 
+    @pytest.mark.fast
     def test_set_cookie_rotator(self):
         """Test linking cookie rotator to retry queue."""
         queue = RetryQueue()
@@ -85,6 +89,7 @@ class TestSetCookieRotator:
 
         assert queue._cookie_rotator is rotator
 
+    @pytest.mark.fast
     def test_set_cookie_rotator_logs(self):
         """Test set_cookie_rotator logs debug message."""
         queue = RetryQueue()
@@ -99,6 +104,7 @@ class TestSetCookieRotator:
 class TestWaitForCookieCooldown:
     """Test _wait_for_cookie_cooldown method."""
 
+    @pytest.mark.fast
     def test_no_rotator_returns_zero(self):
         """Test returns 0 when no cookie rotator is linked."""
         queue = RetryQueue()
@@ -107,6 +113,7 @@ class TestWaitForCookieCooldown:
 
         assert wait_time == 0.0
 
+    @pytest.mark.fast
     def test_disabled_config_returns_zero(self):
         """Test returns 0 when wait_for_cookie_cooldown is disabled."""
         queue = RetryQueue(BatchRetryConfig(wait_for_cookie_cooldown=False))
@@ -117,6 +124,7 @@ class TestWaitForCookieCooldown:
 
         assert wait_time == 0.0
 
+    @pytest.mark.fast
     def test_rotator_disabled_returns_zero(self):
         """Test returns 0 when cookie rotator is disabled."""
         queue = RetryQueue()
@@ -128,6 +136,7 @@ class TestWaitForCookieCooldown:
 
         assert wait_time == 0.0
 
+    @pytest.mark.fast
     def test_cookies_available_returns_zero(self):
         """Test returns 0 when cookies are available."""
         queue = RetryQueue()
@@ -138,6 +147,7 @@ class TestWaitForCookieCooldown:
 
         assert wait_time == 0.0
 
+    @pytest.mark.fast
     def test_no_failed_cookies_returns_zero(self):
         """Test returns 0 when no cookies are in failed state."""
         queue = RetryQueue()
@@ -149,6 +159,7 @@ class TestWaitForCookieCooldown:
 
         assert wait_time == 0.0
 
+    @pytest.mark.fast
     def test_waits_for_shortest_cooldown(self):
         """Test waits for shortest cooldown when all cookies unavailable."""
         queue = RetryQueue()
@@ -172,6 +183,7 @@ class TestWaitForCookieCooldown:
         assert wait_time < 1.0  # Should be close to 0.1s
         mock_sleep.assert_called_once()
 
+    @pytest.mark.fast
     def test_logs_waiting_message(self):
         """Test logs INFO message when waiting for cooldown."""
         queue = RetryQueue()
@@ -191,6 +203,7 @@ class TestWaitForCookieCooldown:
                 assert len(info_calls) >= 1
                 assert 'cookie cooldown' in info_calls[0][0][0].lower()
 
+    @pytest.mark.fast
     def test_accumulates_wait_time(self):
         """Test cookie cooldown wait time is accumulated."""
         queue = RetryQueue()
@@ -212,6 +225,7 @@ class TestWaitForCookieCooldown:
 class TestStartRetryPassCookieCooldown:
     """Test start_retry_pass includes cookie cooldown check via _wait_combined."""
 
+    @pytest.mark.fast
     def test_checks_cookie_cooldown_via_combined(self):
         """Test start_retry_pass calls _wait_combined which checks cooldown."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -223,6 +237,7 @@ class TestStartRetryPassCookieCooldown:
 
         mock_wait.assert_called_once()
 
+    @pytest.mark.fast
     def test_logs_both_waits(self):
         """Test logs both circuit breaker and cookie cooldown waits."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -249,6 +264,7 @@ class TestStartRetryPassCookieCooldown:
         # Combined wait path logs about both CB and cooldown
         assert 'Batch retry pass' in all_logs
 
+    @pytest.mark.fast
     def test_logs_only_cookie_wait(self):
         """Test logs cookie cooldown info when only cooldown is active."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -271,6 +287,7 @@ class TestStartRetryPassCookieCooldown:
 class TestCookieCooldownStats:
     """Test cookie cooldown tracking in stats."""
 
+    @pytest.mark.fast
     def test_stats_include_cookie_cooldown_wait_time(self):
         """Test stats include cookie_cooldown_wait_time."""
         queue = RetryQueue()
@@ -281,6 +298,7 @@ class TestCookieCooldownStats:
         assert 'cookie_cooldown_wait_time' in stats
         assert stats['cookie_cooldown_wait_time'] == 15.5
 
+    @pytest.mark.fast
     def test_stats_rounds_wait_time(self):
         """Test cookie_cooldown_wait_time is rounded to 1 decimal."""
         queue = RetryQueue()
@@ -294,6 +312,7 @@ class TestCookieCooldownStats:
 class TestCookieCooldownCheckpoint:
     """Test cookie cooldown persistence in checkpoint."""
 
+    @pytest.mark.fast
     def test_checkpoint_includes_cookie_cooldown(self):
         """Test checkpoint dict includes cookie_cooldown_wait_time."""
         queue = RetryQueue()
@@ -304,6 +323,7 @@ class TestCookieCooldownCheckpoint:
         assert 'cookie_cooldown_wait_time' in data
         assert data['cookie_cooldown_wait_time'] == 30.0
 
+    @pytest.mark.fast
     def test_restore_from_checkpoint(self):
         """Test cookie_cooldown_wait_time is restored from checkpoint."""
         queue = RetryQueue()
@@ -322,6 +342,7 @@ class TestCookieCooldownCheckpoint:
 
         assert queue._cookie_cooldown_wait_time == 25.0
 
+    @pytest.mark.fast
     def test_restore_missing_field_defaults_zero(self):
         """Test missing cookie_cooldown_wait_time defaults to 0."""
         queue = RetryQueue()
@@ -339,6 +360,7 @@ class TestCookieCooldownCheckpoint:
 
         assert queue._cookie_cooldown_wait_time == 0.0
 
+    @pytest.mark.fast
     def test_checkpoint_roundtrip(self):
         """Test save and restore roundtrip preserves cookie cooldown."""
         queue1 = RetryQueue()
@@ -355,6 +377,7 @@ class TestCookieCooldownCheckpoint:
 class TestCookieCooldownClear:
     """Test clear() resets cookie cooldown state."""
 
+    @pytest.mark.fast
     def test_clear_resets_cookie_cooldown(self):
         """Test clear() resets cookie_cooldown_wait_time to 0."""
         queue = RetryQueue()
@@ -368,6 +391,7 @@ class TestCookieCooldownClear:
 class TestVideoDownloaderCookieRotatorIntegration:
     """Integration tests for cookie rotator linking in VideoDownloader."""
 
+    @pytest.mark.fast
     def test_cookie_rotator_linked_to_retry_queue(self):
         """Test cookie rotator is linked to retry queue when enabled."""
         from src.downloader.core import VideoDownloader
@@ -417,6 +441,7 @@ class TestVideoDownloaderCookieRotatorIntegration:
         # Verify cookie rotator was linked to retry queue
         assert downloader.retry_queue._cookie_rotator is mock_rotator_instance
 
+    @pytest.mark.fast
     def test_cookie_rotator_not_linked_when_disabled(self):
         """Test cookie rotator is not linked when cookie rotation disabled."""
         from src.downloader.core import VideoDownloader
@@ -457,6 +482,7 @@ class TestVideoDownloaderCookieRotatorIntegration:
 class TestConfigSectionIntegration:
     """Test config section includes wait_for_cookie_cooldown."""
 
+    @pytest.mark.fast
     def test_config_section_has_option(self):
         """Test BatchRetryConfig in download config has option."""
         from src.config.sections.download import BatchRetryConfig
@@ -465,6 +491,7 @@ class TestConfigSectionIntegration:
         assert hasattr(config, 'wait_for_cookie_cooldown')
         assert config.wait_for_cookie_cooldown is True
 
+    @pytest.mark.fast
     def test_config_dict_conversion(self):
         """Test dict is converted properly with new option."""
         from src.config.sections.download import DownloadConfig

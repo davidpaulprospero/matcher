@@ -35,26 +35,31 @@ pytestmark = pytest.mark.unit
 class TestDownloadConfigParallelWorkers:
     """Test parallel_workers field in DownloadConfig dataclass"""
 
+    @pytest.mark.fast
     def test_parallel_workers_field_exists(self):
         """parallel_workers field should exist on DownloadConfig"""
         config = DownloadConfig()
         assert hasattr(config, 'parallel_workers')
 
+    @pytest.mark.fast
     def test_parallel_workers_default_value(self):
         """Default parallel_workers should be 4"""
         config = DownloadConfig()
         assert config.parallel_workers == 4
 
+    @pytest.mark.fast
     def test_parallel_workers_can_be_set_to_8(self):
         """parallel_workers should accept value of 8"""
         config = DownloadConfig(parallel_workers=8)
         assert config.parallel_workers == 8
 
+    @pytest.mark.fast
     def test_parallel_workers_can_be_set_to_1(self):
         """parallel_workers should accept value of 1 (sequential)"""
         config = DownloadConfig(parallel_workers=1)
         assert config.parallel_workers == 1
 
+    @pytest.mark.fast
     def test_parallel_workers_type_is_int(self):
         """parallel_workers should be an integer"""
         config = DownloadConfig()
@@ -92,6 +97,7 @@ class TestVideoDownloaderParallelWorkers:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_download_all_uses_config_parallel_workers(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path
     ):
@@ -134,6 +140,7 @@ class TestVideoDownloaderParallelWorkers:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_download_all_explicit_max_concurrent_overrides_config(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path
     ):
@@ -177,6 +184,7 @@ class TestVideoDownloaderParallelWorkers:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_download_all_falls_back_to_default_if_no_config(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, mock_config, tmp_path
     ):
@@ -221,6 +229,7 @@ class TestVideoDownloaderParallelWorkers:
 class TestParallelWorkers8Configuration:
     """Test that setting parallel_workers=8 in config results in 8 workers"""
 
+    @pytest.mark.fast
     def test_config_with_parallel_workers_8(self):
         """DownloadConfig with parallel_workers=8 should use 8 workers"""
         config = DownloadConfig(parallel_workers=8)
@@ -232,6 +241,7 @@ class TestParallelWorkers8Configuration:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    @pytest.mark.fast
     def test_downloader_with_8_workers_in_config(
         self, mock_audio, mock_search, mock_speech, mock_title, mock_transcode, mock_checkpoint, tmp_path
     ):

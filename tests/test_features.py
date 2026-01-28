@@ -239,6 +239,7 @@ def download_test_videos(output_dir: Path, cookies_path: str = None) -> dict:
 # FEATURE TESTS
 # =============================================================================
 
+@pytest.mark.fast
 def test_imports():
     """Test that all required modules can be imported"""
     required_modules = [
@@ -260,6 +261,7 @@ def test_imports():
         assert False, f"Import failures: {', '.join(failed)}"
 
 
+@pytest.mark.fast
 def test_config_loading():
     """Test config loading with new fields (face_preference, root_dir)"""
     from src.config import load_config
@@ -282,6 +284,7 @@ def test_config_loading():
         assert False, "config.image_search.root_dir not found"
 
 
+@pytest.mark.fast
 def test_face_detector_init():
     """Test FaceDetector initialization and backend detection"""
     from src.face_detection import FaceDetector
@@ -471,6 +474,7 @@ def test_logger_stage_timing(temp_dir: Path):
         assert False, f"Total timing wrong: {total}"
 
 
+@pytest.mark.fast
 def test_apply_face_preference():
     """Test face preference score adjustment"""
     from src.face_detection import apply_face_preference, FaceDetector

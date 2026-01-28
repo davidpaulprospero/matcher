@@ -36,6 +36,7 @@ from src.config.sections.infrastructure import (
 class TestHealingLogger:
     """Tests for HealingLogger."""
 
+    @pytest.mark.integration
     def test_init_creates_log_files(self):
         """Logger creates log directory and files."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -45,6 +46,7 @@ class TestHealingLogger:
             assert log_dir.exists()
             assert logger.session_id  # Has a session ID
 
+    @pytest.mark.integration
     def test_log_classification(self):
         """Logger records classification events."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,6 +77,7 @@ class TestHealingLogger:
             assert entry.details["category"] == "api"
             assert entry.details["confidence"] == 0.92
 
+    @pytest.mark.integration
     def test_log_healer_attempt(self):
         """Logger records healer attempts."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -112,6 +115,7 @@ class TestHealingLogger:
             assert entry.result == "success"
             assert entry.details["healer"] == "api-healer"
 
+    @pytest.mark.integration
     def test_log_fallback(self):
         """Logger records fallback events."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,6 +135,7 @@ class TestHealingLogger:
             assert entry.details["from"] == "watcher"
             assert entry.details["to"] == "pattern_routing"
 
+    @pytest.mark.integration
     def test_generate_report(self):
         """Logger generates summary report."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,6 +168,7 @@ class TestHealingLogger:
             assert "DOWNLOAD" in report
             assert "api-healer" in report or "healer" in report.lower()
 
+    @pytest.mark.integration
     def test_thread_safety(self):
         """Logger is thread-safe for concurrent writes."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,6 +211,7 @@ class TestPatternRouting:
         ("OTIO: Invalid time range", "otio", "otio-healer"),
         ("Timeline generation failed", "otio", "otio-healer"),
     ])
+    @pytest.mark.fast
     def test_pattern_routing(self, error_msg, expected_category, expected_healer):
         """Pattern routing correctly classifies known error patterns."""
         result = pattern_route(error_msg)
@@ -212,6 +219,7 @@ class TestPatternRouting:
         assert result.category == expected_category
         assert result.suggested_healer == expected_healer
 
+    @pytest.mark.fast
     def test_pattern_routing_unknown(self):
         """Unknown errors set needs_llm_healer flag."""
         result = pattern_route("Some completely unknown error XYZ123")
@@ -242,6 +250,7 @@ class TestFallbackChain:
             self.log_dir = Path(tmp) / "logs"
             self.logger = HealingLogger(self.log_dir)
 
+    @pytest.mark.integration
     def test_watcher_unavailable_after_failures(self):
         """Watcher disabled after max_failures consecutive failures."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -259,6 +268,7 @@ class TestFallbackChain:
             # Should be disabled
             assert chain.fallback_state["watcher_available"] is False
 
+    @pytest.mark.integration
     def test_llm_healer_unavailable_after_failures(self):
         """LLM healer disabled after max_failures consecutive failures."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -271,6 +281,7 @@ class TestFallbackChain:
 
             assert chain.fallback_state["llm_healer_available"] is False
 
+    @pytest.mark.integration
     def test_success_resets_failure_count(self):
         """Success resets the failure counter."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -285,6 +296,7 @@ class TestFallbackChain:
             chain.record_watcher_success()
             assert chain.fallback_state["watcher_failures"] == 0
 
+    @pytest.mark.integration
     def test_recheck_after_interval(self):
         """Availability re-checked after recheck_interval."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -315,6 +327,7 @@ class TestFallbackChain:
             # The state might still be False if Ollama isn't running,
             # but the recheck should have been attempted
 
+    @pytest.mark.integration
     def test_thread_safety(self):
         """FallbackChain is thread-safe."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,6 +356,7 @@ class TestFallbackChain:
 class TestWatcherAgent:
     """Tests for WatcherAgent."""
 
+    @pytest.mark.fast
     def test_error_classification_dataclass(self):
         """ErrorClassification dataclass works correctly."""
         classification = ErrorClassification(
@@ -358,6 +372,7 @@ class TestWatcherAgent:
         assert classification.confidence == 0.92
         assert not classification.needs_llm_healer
 
+    @pytest.mark.fast
     def test_should_escalate_no_classification(self):
         """Escalate when no classification available."""
         config = WatcherConfig()
@@ -365,6 +380,7 @@ class TestWatcherAgent:
 
         assert watcher.should_escalate(None) is True
 
+    @pytest.mark.fast
     def test_should_escalate_low_confidence(self):
         """Escalate when confidence is low."""
         config = WatcherConfig(escalate_threshold=0.7)
@@ -381,6 +397,7 @@ class TestWatcherAgent:
 
         assert watcher.should_escalate(classification) is True
 
+    @pytest.mark.fast
     def test_should_escalate_explicit_request(self):
         """Escalate when watcher explicitly requests LLM healer."""
         config = WatcherConfig()
@@ -397,6 +414,7 @@ class TestWatcherAgent:
 
         assert watcher.should_escalate(classification) is True
 
+    @pytest.mark.fast
     def test_get_healer_priority(self):
         """Healer priority based on classification."""
         config = WatcherConfig()
@@ -414,6 +432,7 @@ class TestWatcherAgent:
         priority = watcher.get_healer_priority(classification)
         assert "api-healer" in priority
 
+    @pytest.mark.fast
     def test_get_healer_priority_with_custom_suggestion(self):
         """Healer priority includes custom suggestion."""
         config = WatcherConfig()
@@ -432,6 +451,7 @@ class TestWatcherAgent:
         assert priority[0] == "custom-healer"
 
     @patch('src.agents.watcher.WatcherAgent._init_client')
+    @pytest.mark.fast
     def test_warmup_success(self, mock_init):
         """Warmup returns True on success."""
         config = WatcherConfig()
@@ -455,6 +475,7 @@ class TestWatcherAgent:
 class TestLLMHealer:
     """Tests for LLMHealer."""
 
+    @pytest.mark.integration
     def test_context_truncation(self):
         """Context is truncated to stay within budget."""
         config = LLMHealerConfig(max_context_chars=1000)
@@ -472,6 +493,7 @@ class TestLLMHealer:
             # Context should be truncated
             assert len(context) <= config.max_context_chars + 500  # Some buffer for headers
 
+    @pytest.mark.integration
     def test_provider_fallback_order(self):
         """Provider fallback order is correct."""
         config = LLMHealerConfig()
@@ -482,6 +504,7 @@ class TestLLMHealer:
 
             assert healer.FALLBACK_PROVIDERS == ["anthropic", "gemini", "ollama"]
 
+    @pytest.mark.integration
     def test_timeout_configuration(self):
         """Timeout is configurable and has proper limits."""
         config = LLMHealerConfig(timeout=60.0)
@@ -494,6 +517,7 @@ class TestLLMHealer:
             assert healer.MAX_TIMEOUT == 300.0
             assert healer.INITIAL_TIMEOUT == 60.0
 
+    @pytest.mark.integration
     def test_backoff_configuration(self):
         """Backoff is configurable and initialized correctly."""
         config = LLMHealerConfig()
@@ -506,6 +530,7 @@ class TestLLMHealer:
             assert healer.INITIAL_BACKOFF == 2.0
 
     @patch('src.agents.healers.llm_healer.LLMHealer._init_client')
+    @pytest.mark.integration
     def test_can_handle_any_error(self, mock_init):
         """LLM healer can handle any error type."""
         config = LLMHealerConfig()
@@ -527,6 +552,7 @@ class TestLLMHealer:
 class TestIntegration:
     """Integration tests for two-tier LLM delegation."""
 
+    @pytest.mark.fast
     def test_config_loading_with_nested_configs(self):
         """Config loads with nested HealingConfig correctly."""
         config = HealingConfig(
@@ -544,6 +570,7 @@ class TestIntegration:
         assert config.watcher.model == "llama3.2"
         assert config.llm_healer.model == "claude-sonnet-4-20250514"
 
+    @pytest.mark.integration
     def test_full_classification_to_healing_flow(self):
         """Full flow from error to classification to healing."""
         # This is a mock test - in real usage, Ollama would be running

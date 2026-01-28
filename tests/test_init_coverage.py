@@ -15,6 +15,7 @@ import sys
 class TestLazyImportFunctions:
     """Test lazy import functions with ImportError paths."""
 
+    @pytest.mark.fast
     def test_get_transcription_functions_success(self):
         """Test successful import of transcription functions."""
         from src import get_transcription_functions
@@ -23,6 +24,7 @@ class TestLazyImportFunctions:
         # Should return dict with functions (may be empty if module not available)
         assert isinstance(result, dict)
 
+    @pytest.mark.fast
     def test_get_transcription_functions_import_error(self):
         """Test ImportError path returns empty dict."""
         import src
@@ -32,6 +34,7 @@ class TestLazyImportFunctions:
             mock_func.return_value = {}
             assert mock_func() == {}
 
+    @pytest.mark.fast
     def test_get_embedding_functions_success(self):
         """Test successful import of embedding functions."""
         from src import get_embedding_functions
@@ -39,6 +42,7 @@ class TestLazyImportFunctions:
         result = get_embedding_functions()
         assert isinstance(result, dict)
 
+    @pytest.mark.fast
     def test_get_embedding_functions_import_error(self):
         """Test ImportError path returns empty dict."""
         # Create a test that triggers the ImportError branch
@@ -60,6 +64,7 @@ class TestLazyImportFunctions:
             # Restore modules
             sys.modules.update(original_modules)
 
+    @pytest.mark.fast
     def test_get_matching_functions_success(self):
         """Test successful import of matching functions."""
         from src import get_matching_functions
@@ -67,6 +72,7 @@ class TestLazyImportFunctions:
         result = get_matching_functions()
         assert isinstance(result, dict)
 
+    @pytest.mark.fast
     def test_get_matching_functions_import_error(self):
         """Test ImportError path returns empty dict."""
         import src
@@ -77,6 +83,7 @@ class TestLazyImportFunctions:
 class TestLazyImportDirectMocking:
     """Test lazy imports by directly testing the exception handling."""
 
+    @pytest.mark.fast
     def test_transcription_import_error_branch(self):
         """Directly test the ImportError branch in get_transcription_functions."""
         # This test ensures the except ImportError branch is covered
@@ -89,6 +96,7 @@ class TestLazyImportDirectMocking:
         result = mock_get_transcription_functions()
         assert result == {}
 
+    @pytest.mark.fast
     def test_embedding_import_error_branch(self):
         """Directly test the ImportError branch in get_embedding_functions."""
         def mock_get_embedding_functions():
@@ -100,6 +108,7 @@ class TestLazyImportDirectMocking:
         result = mock_get_embedding_functions()
         assert result == {}
 
+    @pytest.mark.fast
     def test_matching_import_error_branch(self):
         """Directly test the ImportError branch in get_matching_functions."""
         def mock_get_matching_functions():
@@ -115,6 +124,7 @@ class TestLazyImportDirectMocking:
 class TestCheckModuleAvailability:
     """Test check_module_availability function."""
 
+    @pytest.mark.fast
     def test_check_module_availability_returns_dict(self):
         """Test that check_module_availability returns a dictionary."""
         from src import check_module_availability
@@ -132,6 +142,7 @@ class TestCheckModuleAvailability:
             assert mod in result
             assert isinstance(result[mod], bool)
 
+    @pytest.mark.fast
     def test_check_module_availability_import_error_path(self):
         """Test that ImportError sets module to False."""
         from src import check_module_availability
@@ -150,6 +161,7 @@ class TestCheckModuleAvailability:
             # (this may already be False if module doesn't exist)
             assert 'watcher' in result
 
+    @pytest.mark.fast
     def test_check_module_availability_missing_export(self):
         """Test that missing export sets module to False."""
         from src import check_module_availability
@@ -162,6 +174,7 @@ class TestCheckModuleAvailability:
 class TestGetVersionInfo:
     """Test get_version_info function."""
 
+    @pytest.mark.fast
     def test_get_version_info_basic(self):
         """Test basic get_version_info functionality."""
         from src import get_version_info
@@ -173,6 +186,7 @@ class TestGetVersionInfo:
         assert 'modules' in result
         assert result['version'] == '3.0.0'
 
+    @pytest.mark.fast
     def test_get_version_info_with_config(self):
         """Test get_version_info when config is loaded."""
         from src import get_version_info, load_config, get_config
@@ -186,6 +200,7 @@ class TestGetVersionInfo:
         result = get_version_info()
         assert 'config_loaded' in result
 
+    @pytest.mark.fast
     def test_get_version_info_no_config(self):
         """Test get_version_info when no config is loaded."""
         from src import get_version_info
@@ -206,6 +221,7 @@ class TestGetVersionInfo:
             if original:
                 set_config(original)
 
+    @pytest.mark.fast
     def test_get_version_info_modules_dict(self):
         """Test that modules in get_version_info is a dict."""
         from src import get_version_info
@@ -217,6 +233,7 @@ class TestGetVersionInfo:
 class TestSuccessfulImportPaths:
     """Tests for successful import paths (lines 105, 142)."""
 
+    @pytest.mark.fast
     def test_get_matching_functions_direct_import(self):
         """Test line 105: Direct import of TieredMatcher."""
         # Import directly to ensure modules are loaded
@@ -225,6 +242,7 @@ class TestSuccessfulImportPaths:
         # Verify it exists and is callable
         assert TieredMatcher is not None
 
+    @pytest.mark.fast
     def test_check_module_availability_structure(self):
         """Test line 142: check_module_availability returns proper structure."""
         from src import check_module_availability
@@ -236,6 +254,7 @@ class TestSuccessfulImportPaths:
         for module_name, available in result.items():
             assert isinstance(available, bool), f"{module_name} should be bool"
 
+    @pytest.mark.fast
     def test_check_module_availability_watcher_false(self):
         """Test line 142: watcher module doesn't exist."""
         from src import check_module_availability
@@ -245,6 +264,7 @@ class TestSuccessfulImportPaths:
         # watcher doesn't exist, so import fails and returns False
         assert result.get('watcher') is False
 
+    @pytest.mark.fast
     def test_direct_transcription_import(self):
         """Test direct import of transcription functions."""
         from src.transcription import (
@@ -258,6 +278,7 @@ class TestSuccessfulImportPaths:
         assert transcribe_voiceover_audio is not None
         assert DeltaAwareIndex is not None
 
+    @pytest.mark.fast
     def test_direct_embedding_import(self):
         """Test direct import of embedding functions."""
         from src.embeddings import (
@@ -278,6 +299,7 @@ class TestImportErrorBranchCoverage:
     in the lazy import functions.
     """
 
+    @pytest.mark.fast
     def test_transcription_import_fails(self):
         """Force ImportError in get_transcription_functions."""
         import importlib
@@ -298,6 +320,7 @@ class TestImportErrorBranchCoverage:
         result = patched_func()
         assert result == {}
 
+    @pytest.mark.fast
     def test_embedding_import_fails(self):
         """Force ImportError in get_embedding_functions."""
         def patched_func():
@@ -309,6 +332,7 @@ class TestImportErrorBranchCoverage:
         result = patched_func()
         assert result == {}
 
+    @pytest.mark.fast
     def test_matching_import_fails(self):
         """Force ImportError in get_matching_functions."""
         def patched_func():
@@ -324,6 +348,7 @@ class TestImportErrorBranchCoverage:
 class TestModuleImportWithPatch:
     """Test module imports with sys.modules patching."""
 
+    @pytest.mark.fast
     def test_get_transcription_with_broken_import(self):
         """Test get_transcription_functions when import is broken."""
         import sys
@@ -352,6 +377,7 @@ class TestModuleImportWithPatch:
             elif 'src.transcription' in sys.modules:
                 del sys.modules['src.transcription']
 
+    @pytest.mark.fast
     def test_check_availability_with_import_failure(self):
         """Test check_module_availability handles import failures gracefully."""
         from src import check_module_availability
@@ -370,6 +396,7 @@ class TestImportErrorBranchesDirectly:
     before calling the actual functions.
     """
 
+    @pytest.mark.fast
     def test_embedding_import_error_via_sys_modules(self):
         """Force ImportError in get_embedding_functions by removing module."""
         import sys
@@ -410,6 +437,7 @@ class TestImportErrorBranchesDirectly:
             import src
             importlib.reload(src)
 
+    @pytest.mark.fast
     def test_matching_import_error_via_sys_modules(self):
         """Force ImportError in get_matching_functions by removing module."""
         import sys
@@ -443,6 +471,7 @@ class TestImportErrorBranchesDirectly:
             import src
             importlib.reload(src)
 
+    @pytest.mark.fast
     def test_check_module_hasattr_false(self):
         """Test check_module_availability when hasattr returns False."""
         from src import check_module_availability
@@ -457,6 +486,7 @@ class TestImportErrorBranchesDirectly:
         for k, v in result.items():
             assert isinstance(v, bool)
 
+    @pytest.mark.fast
     def test_check_module_import_error_for_nonexistent(self):
         """Test that ImportError is caught for non-existent modules."""
         import sys

@@ -22,6 +22,7 @@ from src.caption_fetcher import (
 class TestSegmentQualityMetrics:
     """Test suite for SegmentQualityMetrics dataclass (US-006 Sprint 8)."""
 
+    @pytest.mark.fast
     def test_metrics_dataclass_creation(self):
         """Test SegmentQualityMetrics can be created with all fields."""
         metrics = SegmentQualityMetrics(
@@ -40,6 +41,7 @@ class TestSegmentQualityMetrics:
         assert metrics.segment_count == 12
         assert metrics.total_duration == 60.0
 
+    @pytest.mark.fast
     def test_metrics_to_dict(self):
         """Test SegmentQualityMetrics serialization to dict."""
         metrics = SegmentQualityMetrics(
@@ -60,6 +62,7 @@ class TestSegmentQualityMetrics:
         assert data['segment_count'] == 12
         assert data['total_duration'] == 60.0
 
+    @pytest.mark.fast
     def test_metrics_from_dict(self):
         """Test SegmentQualityMetrics deserialization from dict."""
         data = {
@@ -80,6 +83,7 @@ class TestSegmentQualityMetrics:
         assert metrics.segment_count == 15
         assert metrics.total_duration == 90.0
 
+    @pytest.mark.fast
     def test_metrics_from_dict_defaults(self):
         """Test SegmentQualityMetrics from_dict with missing fields uses defaults."""
         data = {'density_score': 0.5}  # Only partial data
@@ -97,6 +101,7 @@ class TestSegmentQualityMetrics:
 class TestCalculateSegmentMetrics:
     """Test suite for calculate_segment_metrics() function (US-006 Sprint 8)."""
 
+    @pytest.mark.fast
     def test_empty_segments_returns_zero_metrics(self):
         """Test empty segment list returns all-zero metrics."""
         metrics = calculate_segment_metrics([])
@@ -108,6 +113,7 @@ class TestCalculateSegmentMetrics:
         assert metrics.segment_count == 0
         assert metrics.total_duration == 0.0
 
+    @pytest.mark.fast
     def test_single_segment_calculates_metrics(self):
         """Test single segment produces valid metrics."""
         segments = [
@@ -123,6 +129,7 @@ class TestCalculateSegmentMetrics:
         # |1 - 12| / 12 = 11/12 = 0.917, 0.917 * 0.5 = 0.458, 1.0 - 0.458 = 0.542
         assert metrics.density_score < 0.6  # Below optimal
 
+    @pytest.mark.fast
     def test_density_score_optimal_12_segments_per_minute(self):
         """Test density_score is 1.0 for ~12 segments per minute (optimal).
 
@@ -140,6 +147,7 @@ class TestCalculateSegmentMetrics:
         assert metrics.density_score == 1.0
         assert metrics.segment_count == 12
 
+    @pytest.mark.fast
     def test_density_score_too_sparse(self):
         """Test density_score drops for sparse captions (<5 segments/minute)."""
         # Create only 2 segments over 60 seconds
@@ -154,6 +162,7 @@ class TestCalculateSegmentMetrics:
         assert metrics.density_score < 0.6
         assert metrics.segment_count == 2
 
+    @pytest.mark.fast
     def test_density_score_too_dense(self):
         """Test density_score drops for very dense captions (>25 segments/minute)."""
         # Create 60 segments over 60 seconds (1 per second)
@@ -168,6 +177,7 @@ class TestCalculateSegmentMetrics:
         assert metrics.density_score < 0.7
         assert metrics.segment_count == 60
 
+    @pytest.mark.fast
     def test_timing_precision_round_numbers(self):
         """Test timing_precision for captions with round timestamps (human style).
 
@@ -185,6 +195,7 @@ class TestCalculateSegmentMetrics:
         # All timestamps are round 100ms intervals, so precision should be 0.0
         assert metrics.timing_precision == 0.0
 
+    @pytest.mark.fast
     def test_timing_precision_millisecond_timestamps(self):
         """Test timing_precision for captions with precise millisecond timestamps (auto style)."""
         # Auto-generated style: precise timestamps (1.234, 2.891, etc.)
@@ -199,6 +210,7 @@ class TestCalculateSegmentMetrics:
         # All timestamps have sub-100ms precision, so timing_precision should be 1.0
         assert metrics.timing_precision == 1.0
 
+    @pytest.mark.fast
     def test_timing_precision_mixed(self):
         """Test timing_precision for mixed round and precise timestamps."""
         segments = [
@@ -211,6 +223,7 @@ class TestCalculateSegmentMetrics:
         # 1/2 segments have precise timestamps
         assert 0.4 < metrics.timing_precision < 0.6
 
+    @pytest.mark.fast
     def test_text_completeness_optimal_range(self):
         """Test text_completeness = 1.0 for average 50-200 chars per segment.
 
@@ -228,6 +241,7 @@ class TestCalculateSegmentMetrics:
 
         assert metrics.text_completeness == 1.0
 
+    @pytest.mark.fast
     def test_text_completeness_too_short(self):
         """Test text_completeness drops for very short segments (<50 chars avg)."""
         # Create segments with ~20 chars each
@@ -242,6 +256,7 @@ class TestCalculateSegmentMetrics:
         # Avg ~15 chars, well below 50 minimum
         assert metrics.text_completeness < 0.5
 
+    @pytest.mark.fast
     def test_text_completeness_too_long(self):
         """Test text_completeness drops for very long segments (>200 chars avg)."""
         # Create segments with ~300 chars each
@@ -257,6 +272,7 @@ class TestCalculateSegmentMetrics:
         # Avg 300 chars, above 200 maximum
         assert metrics.text_completeness < 1.0
 
+    @pytest.mark.fast
     def test_quality_score_weights_correct(self):
         """Test combined quality_score uses weights: 0.4*density + 0.3*precision + 0.3*completeness.
 
@@ -282,6 +298,7 @@ class TestCalculateSegmentMetrics:
         # Allow small floating point tolerance
         assert abs(metrics.quality_score - expected_quality) < 0.01
 
+    @pytest.mark.fast
     def test_quality_score_bounded_0_to_1(self):
         """Test quality_score is always bounded between 0.0 and 1.0."""
         # Test with various edge cases
@@ -295,6 +312,7 @@ class TestCalculateSegmentMetrics:
             metrics = calculate_segment_metrics(segments)
             assert 0.0 <= metrics.quality_score <= 1.0
 
+    @pytest.mark.fast
     def test_auto_calculates_duration_from_segments(self):
         """Test total_duration is calculated from segments if not provided."""
         segments = [
@@ -317,6 +335,7 @@ class TestSparseHumanVsDenseAuto:
     identify human-curated captions as higher quality for matching purposes.
     """
 
+    @pytest.mark.fast
     def test_sparse_human_scores_higher_than_dense_auto(self):
         """Test sparse human captions score higher than dense auto-generated.
 
@@ -364,6 +383,7 @@ class TestSparseHumanVsDenseAuto:
         # Human has better text completeness (full sentences vs fragments)
         assert human_metrics.text_completeness > auto_metrics.text_completeness
 
+    @pytest.mark.fast
     def test_human_with_round_timestamps_scores_well(self):
         """Test human captions with round timestamps get good precision_quality score.
 
@@ -383,6 +403,7 @@ class TestSparseHumanVsDenseAuto:
         # The precision_quality formula gives ~0.4 for all-round timestamps
         assert metrics.quality_score > 0.3
 
+    @pytest.mark.fast
     def test_optimal_human_captions_score_near_perfect(self):
         """Test that optimal human captions (12/min, good text) score very high."""
         # Optimal: 12 segments/minute, round times, ~100 chars each
@@ -398,6 +419,7 @@ class TestSparseHumanVsDenseAuto:
         assert metrics.quality_score > 0.8
         assert metrics.density_score == 1.0  # Optimal 12/min
 
+    @pytest.mark.fast
     def test_very_dense_auto_penalized(self):
         """Test very dense auto-generated captions (60+/min) are penalized."""
         # 60 segments per minute with precise timestamps and short text

@@ -28,18 +28,21 @@ def reset_global_state():
 class TestWhisperClientInit:
     """Test WhisperClient initialization"""
 
+    @pytest.mark.fast
     def test_init_defaults(self):
         """Test initialization with default parameters"""
         client = WhisperClient()
         assert client.model_name == "base"
         assert client.compute_type == "auto"
 
+    @pytest.mark.fast
     def test_init_custom_model(self):
         """Test initialization with custom model name"""
         client = WhisperClient(model_name="medium")
         assert client.model_name == "medium"
         assert client.compute_type == "auto"
 
+    @pytest.mark.fast
     def test_init_custom_compute_type(self):
         """Test initialization with custom compute type"""
         client = WhisperClient(model_name="small", compute_type="int8")
@@ -51,6 +54,7 @@ class TestModelInitialization:
     """Test WhisperModel initialization and caching"""
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_with_cuda(self, mock_logger):
         """Test model initialization with CUDA available"""
         mock_model_instance = Mock()
@@ -93,6 +97,7 @@ class TestModelInitialization:
             )
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_without_cuda(self, mock_logger):
         """Test model initialization without CUDA (CPU fallback)"""
         mock_model_instance = Mock()
@@ -125,6 +130,7 @@ class TestModelInitialization:
             )
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_explicit_int8(self, mock_logger):
         """Test model initialization with explicit int8 compute type"""
         mock_model_instance = Mock()
@@ -159,6 +165,7 @@ class TestModelInitialization:
             )
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_cached(self, mock_logger):
         """Test model caching (should not recreate on subsequent calls)"""
         mock_model_instance = Mock()
@@ -186,6 +193,7 @@ class TestModelInitialization:
             assert model1 is model2
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_reinitialize_on_config_change(self, mock_logger):
         """Test model reinitialization when config changes"""
         mock_model1 = Mock()
@@ -214,6 +222,7 @@ class TestModelInitialization:
             assert model1 is not model2
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_initialization_error(self, mock_logger):
         """Test error handling during model initialization"""
         with patch('faster_whisper.WhisperModel', side_effect=RuntimeError("Model load failed")):
@@ -227,6 +236,7 @@ class TestTranscription:
     """Test transcription with GPU lock"""
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_success(self, mock_logger):
         """Test successful transcription"""
         # Create mock segments
@@ -260,6 +270,7 @@ class TestTranscription:
             assert result[1]['text'] == "Second segment"
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_with_word_timestamps(self, mock_logger):
         """Test transcription with word-level timestamps"""
         # Create mock word
@@ -290,6 +301,7 @@ class TestTranscription:
             assert result[0]['words'][0]['start'] == 0.0
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_with_language(self, mock_logger):
         """Test transcription with explicit language"""
         mock_model = Mock()
@@ -304,6 +316,7 @@ class TestTranscription:
             assert call_args[1]['language'] == "en"
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_vad_parameters(self, mock_logger):
         """Test transcription with VAD parameters"""
         mock_model = Mock()
@@ -324,6 +337,7 @@ class TestTranscription:
             assert call_args[1]['vad_parameters']['speech_pad_ms'] == 50
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_error_handling(self, mock_logger):
         """Test error handling during transcription"""
         mock_model = Mock()
@@ -337,6 +351,7 @@ class TestTranscription:
             assert result == []
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_empty_result(self, mock_logger):
         """Test transcription with no segments returned"""
         mock_model = Mock()
@@ -353,6 +368,7 @@ class TestGPULocking:
     """Test GPU lock thread safety"""
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_gpu_lock_acquired(self, mock_logger):
         """Test that GPU lock is acquired during transcription"""
         import src.transcription.whisper_client as wc
@@ -384,6 +400,7 @@ class TestCleanup:
     """Test model cleanup and memory management"""
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_cleanup_with_model_loaded(self, mock_logger):
         """Test cleanup when model is loaded"""
         import src.transcription.whisper_client as wc
@@ -404,6 +421,7 @@ class TestCleanup:
             assert wc._model_config == {}
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_cleanup_without_model(self, mock_logger):
         """Test cleanup when no model is loaded"""
         import src.transcription.whisper_client as wc
@@ -419,6 +437,7 @@ class TestCleanup:
         assert wc._shared_model is None
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_cleanup_with_cuda(self, mock_logger):
         """Test cleanup with CUDA cache clearing"""
         import src.transcription.whisper_client as wc
@@ -460,6 +479,7 @@ class TestCleanup:
             mock_torch.cuda.synchronize.assert_called_once()
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_cleanup_model_function(self, mock_logger):
         """Test module-level cleanup_model() function"""
         import src.transcription.whisper_client as wc
@@ -480,6 +500,7 @@ class TestThreadSafety:
     """Test thread safety of shared model access"""
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_concurrent_model_access(self, mock_logger):
         """Test that concurrent access doesn't create multiple models"""
         mock_model = Mock()
@@ -514,6 +535,7 @@ class TestCoverageGaps:
     # by the thread safety test in TestThreadSafety.test_concurrent_model_access.
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_get_model_cuda_not_available_lines_98_99(self, mock_logger):
         """Test lines 98-99: device='cpu', actual_compute='int8' when CUDA is False"""
         mock_model_instance = Mock()
@@ -545,6 +567,7 @@ class TestCoverageGaps:
             )
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_cleanup_torch_import_error_lines_237_238(self, mock_logger):
         """Test lines 237-238: pass when torch ImportError during cleanup"""
         import src.transcription.whisper_client as wc
@@ -590,6 +613,7 @@ class TestEdgeCases:
     """Test edge cases and error conditions"""
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_no_words_attribute(self, mock_logger):
         """Test segment without words attribute (shouldn't crash)"""
         mock_seg = Mock()
@@ -611,6 +635,7 @@ class TestEdgeCases:
             assert 'words' not in result[0]
 
     @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_empty_words_list(self, mock_logger):
         """Test segment with empty words list"""
         mock_seg = Mock()

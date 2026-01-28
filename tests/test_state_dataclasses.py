@@ -43,6 +43,7 @@ class TestVoiceoverSegment:
         assert segment.end == 5.0
         assert segment.text == "Test voiceover text"
 
+    @pytest.mark.fast
     def test_voiceover_duration_auto_calculated(self):
         """Test duration is auto-calculated in post_init."""
         segment = VoiceoverSegment(
@@ -54,6 +55,7 @@ class TestVoiceoverSegment:
 
         assert segment.duration == 15.0
 
+    @pytest.mark.fast
     def test_voiceover_custom_duration(self):
         """Test providing custom duration."""
         segment = VoiceoverSegment(
@@ -85,6 +87,7 @@ class TestTranscriptSegment:
         assert segment.end_time == 10.0
         assert segment.text == "Transcribed text"
 
+    @pytest.mark.fast
     def test_transcript_with_source_file(self):
         """Test transcript with source file."""
         segment = TranscriptSegment(
@@ -97,6 +100,7 @@ class TestTranscriptSegment:
 
         assert segment.source_file == "/path/to/video.mp4"
 
+    @pytest.mark.fast
     def test_transcript_broll_flag(self):
         """Test B-roll flag."""
         segment = TranscriptSegment(
@@ -109,6 +113,7 @@ class TestTranscriptSegment:
 
         assert segment.is_broll is True
 
+    @pytest.mark.fast
     def test_transcript_description_source(self):
         """Test description source field."""
         segment = TranscriptSegment(
@@ -140,6 +145,7 @@ class TestDownloadedVideo:
         assert video.title == "Test Video"
         assert video.duration == 120.5
 
+    @pytest.mark.fast
     def test_video_with_metadata(self):
         """Test video with complete metadata."""
         video = DownloadedVideo(
@@ -157,6 +163,7 @@ class TestDownloadedVideo:
         assert video.keyword == "test keyword"
         assert video.source == "download"
 
+    @pytest.mark.fast
     def test_video_face_score(self):
         """Test video face score field."""
         video = DownloadedVideo(
@@ -185,6 +192,7 @@ class TestAudioDownload:
         assert audio.url == "https://youtube.com/watch?v=abc123"
         assert audio.title == "Test Audio"
 
+    @pytest.mark.fast
     def test_audio_with_duration_and_keyword(self):
         """Test audio with duration and keyword."""
         audio = AudioDownload(
@@ -218,6 +226,7 @@ class TestMatch:
         assert match.video_end == 20.0
         assert match.confidence == 0.85
 
+    @pytest.mark.fast
     def test_match_with_strategy_and_reason(self):
         """Test match with strategy and reason."""
         match = Match(
@@ -233,6 +242,7 @@ class TestMatch:
         assert match.strategy == "primary"
         assert match.reason == "High similarity score"
 
+    @pytest.mark.fast
     def test_match_face_score(self):
         """Test match face score."""
         match = Match(
@@ -263,6 +273,7 @@ class TestEntityImage:
         assert image.file == "/path/to/eiffel.jpg"
         assert image.source_url == "https://example.com/image.jpg"
 
+    @pytest.mark.fast
     def test_entity_image_dimensions(self):
         """Test entity image with dimensions."""
         image = EntityImage(
@@ -294,6 +305,7 @@ class TestEntityVideo:
         assert video.source == "pexels"
         assert video.duration == 15.0
 
+    @pytest.mark.fast
     def test_entity_video_sources(self):
         """Test different entity video sources."""
         for source in ["pexels", "pixabay"]:
@@ -319,6 +331,7 @@ class TestPipelineState:
         assert state.downloaded_videos == []
         assert state.matches == []
 
+    @pytest.mark.fast
     def test_pipeline_state_input_fields(self):
         """Test input state fields."""
         state = PipelineState()
@@ -331,6 +344,7 @@ class TestPipelineState:
         assert len(state.keywords) == 2
         assert state.topic_context == "Technology"
 
+    @pytest.mark.fast
     def test_pipeline_state_download_fields(self):
         """Test download state fields."""
         state = PipelineState()
@@ -341,6 +355,7 @@ class TestPipelineState:
         assert len(state.downloaded_videos) == 1
         assert state.downloaded_videos[0].file == "/path/video.mp4"
 
+    @pytest.mark.fast
     def test_pipeline_state_matching_fields(self):
         """Test matching state fields."""
         state = PipelineState()
@@ -357,6 +372,7 @@ class TestPipelineState:
         assert len(state.matches) == 1
         assert state.matches[0].segment_index == 0
 
+    @pytest.mark.fast
     def test_pipeline_state_helper_methods(self):
         """Test pipeline state helper methods."""
         state = PipelineState()
@@ -377,6 +393,7 @@ class TestPipelineState:
         assert state.get_video_count() == 1
         assert state.get_match_count() == 1
 
+    @pytest.mark.fast
     def test_pipeline_state_clear_downloads(self):
         """Test clearing download state."""
         state = PipelineState()
@@ -395,6 +412,7 @@ class TestPipelineState:
         assert len(state.downloaded_videos) == 0
         assert len(state.downloaded_audio) == 0
 
+    @pytest.mark.fast
     def test_pipeline_state_entity_media(self):
         """Test entity media state."""
         state = PipelineState()
@@ -408,6 +426,7 @@ class TestPipelineState:
         assert "Test" in state.entity_images
         assert "Test" in state.entity_videos
 
+    @pytest.mark.fast
     def test_pipeline_state_runtime_fields(self):
         """Test runtime state fields."""
         state = PipelineState()
@@ -445,6 +464,7 @@ class TestTranscriptSegmentToDict:
         assert result['is_broll'] is False
         assert result['description_source'] == ""
 
+    @pytest.mark.fast
     def test_to_dict_with_all_fields(self):
         """Test to_dict with all fields populated."""
         segment = TranscriptSegment(
@@ -484,6 +504,7 @@ class TestPipelineStateClearMatches:
         assert state.matches == []
         assert state.alternatives == {}
 
+    @pytest.mark.fast
     def test_clear_matches_with_data(self):
         """Test clearing matches when data exists."""
         state = PipelineState()
@@ -558,6 +579,7 @@ class TestPipelineStateFromLegacy:
         assert state.face_preference == "more"
         assert state.stage_timings["DOWNLOAD"] == 45.2
 
+    @pytest.mark.fast
     def test_from_legacy_voiceover_segments_dict(self):
         """Test converting voiceover segments from dicts."""
         legacy = Mock()
@@ -589,6 +611,7 @@ class TestPipelineStateFromLegacy:
         assert state.voiceover_segments[1].index == 1
         assert state.voiceover_segments[1].end == 10.0
 
+    @pytest.mark.fast
     def test_from_legacy_voiceover_segments_objects(self):
         """Test converting voiceover segments when already objects."""
         legacy = Mock()
@@ -617,6 +640,7 @@ class TestPipelineStateFromLegacy:
         assert len(state.voiceover_segments) == 1
         assert state.voiceover_segments[0] is seg
 
+    @pytest.mark.fast
     def test_from_legacy_downloaded_videos_dict(self):
         """Test converting downloaded videos from dicts."""
         legacy = Mock()
@@ -649,6 +673,7 @@ class TestPipelineStateFromLegacy:
         assert state.downloaded_videos[1].file == "video2.mp4"  # 'path' -> 'file'
         assert state.downloaded_videos[1].duration_tier == "short"  # 'tier' -> 'duration_tier'
 
+    @pytest.mark.fast
     def test_from_legacy_downloaded_videos_objects(self):
         """Test converting downloaded videos when already objects."""
         legacy = Mock()
@@ -676,6 +701,7 @@ class TestPipelineStateFromLegacy:
         assert len(state.downloaded_videos) == 1
         assert state.downloaded_videos[0] is video
 
+    @pytest.mark.fast
     def test_from_legacy_matches_dict(self):
         """Test converting matches from dicts."""
         legacy = Mock()
@@ -708,6 +734,7 @@ class TestPipelineStateFromLegacy:
         assert state.matches[1].segment_index == 1  # 'vo_index' -> 'segment_index'
         assert state.matches[1].video_file == "video2.mp4"  # 'file' -> 'video_file'
 
+    @pytest.mark.fast
     def test_from_legacy_matches_objects(self):
         """Test converting matches when already objects."""
         legacy = Mock()
@@ -736,6 +763,7 @@ class TestPipelineStateFromLegacy:
         assert len(state.matches) == 1
         assert state.matches[0] is match_obj
 
+    @pytest.mark.fast
     def test_from_legacy_entity_media(self):
         """Test copying entity media dicts."""
         legacy = Mock()
@@ -768,6 +796,7 @@ class TestPipelineStateFromLegacy:
         assert len(state.embeddings) == 1
         assert state.embedding_index is legacy.embedding_index
 
+    @pytest.mark.fast
     def test_from_legacy_missing_attributes(self):
         """Test handling missing attributes gracefully."""
         # Create minimal mock with getattr defaults
@@ -802,6 +831,7 @@ class TestPipelineStateToCheckpointDict:
         assert result['match_count'] == 0
         assert result['stage_timings'] == {}
 
+    @pytest.mark.fast
     def test_to_checkpoint_dict_with_data(self):
         """Test checkpoint dict with data."""
         state = PipelineState()
@@ -863,6 +893,7 @@ class TestTranscriptSegmentToDict:
         assert result['is_broll'] is True
         assert result['description_source'] == "vision"
 
+    @pytest.mark.fast
     def test_to_dict_with_defaults(self):
         """Test to_dict with default field values."""
         segment = TranscriptSegment(
@@ -899,6 +930,7 @@ class TestNumpyImportFallback:
             assert state.HAS_NUMPY is False
             assert state.np is None
 
+    @pytest.mark.fast
     def test_state_works_without_numpy_dependency(self):
         """Test state module doesn't require numpy for basic operations."""
         # The state module should work even if numpy operations aren't used
@@ -925,22 +957,26 @@ class TestVoiceoverSegmentPostInit:
         segment = VoiceoverSegment(index=0, start=10.0, end=25.0, text="Test")
         assert segment.duration == 15.0
 
+    @pytest.mark.fast
     def test_explicit_duration_not_overwritten(self):
         """Verify explicit duration=5.0 is NOT overwritten by auto-calculation."""
         segment = VoiceoverSegment(index=0, start=10.0, end=25.0, text="Test", duration=5.0)
         # __post_init__ only sets duration when it's 0.0, so 5.0 is preserved
         assert segment.duration == 5.0
 
+    @pytest.mark.fast
     def test_zero_duration_triggers_auto_calc(self):
         """Verify duration=0.0 (default) triggers auto-calculation."""
         segment = VoiceoverSegment(index=0, start=0.0, end=10.0, text="Test", duration=0.0)
         assert segment.duration == 10.0
 
+    @pytest.mark.fast
     def test_negative_range_produces_negative_duration(self):
         """Verify start > end produces negative duration (no clamping)."""
         segment = VoiceoverSegment(index=0, start=25.0, end=10.0, text="Reversed")
         assert segment.duration == -15.0
 
+    @pytest.mark.fast
     def test_same_start_end_zero_duration_auto_calc(self):
         """Verify start==end produces 0.0 duration (edge case: 0.0 - 0.0 = 0.0)."""
         # This is a quirk: end-start = 0.0, but __post_init__ checks if duration == 0.0
@@ -963,6 +999,7 @@ class TestTranscriptSegmentToDictBroll:
         assert result['is_broll'] is True
         assert result['description_source'] == "vision"
 
+    @pytest.mark.fast
     def test_to_dict_includes_is_broll_false_default(self):
         """Verify is_broll=False (default) appears in dict output."""
         segment = TranscriptSegment(index=0, start_time=0.0, end_time=5.0, text="Normal")
@@ -970,6 +1007,7 @@ class TestTranscriptSegmentToDictBroll:
         assert 'is_broll' in result
         assert result['is_broll'] is False
 
+    @pytest.mark.fast
     def test_to_dict_includes_description_source_empty_default(self):
         """Verify description_source='' (default) appears in dict output."""
         segment = TranscriptSegment(index=0, start_time=0.0, end_time=5.0, text="Normal")
@@ -977,6 +1015,7 @@ class TestTranscriptSegmentToDictBroll:
         assert 'description_source' in result
         assert result['description_source'] == ""
 
+    @pytest.mark.fast
     def test_to_dict_all_description_sources(self):
         """Verify description_source works for all known values."""
         for source in ["vision", "llm", "keyword", ""]:
@@ -987,6 +1026,7 @@ class TestTranscriptSegmentToDictBroll:
             result = segment.to_dict()
             assert result['description_source'] == source
 
+    @pytest.mark.fast
     def test_to_dict_round_trip_all_fields(self):
         """Verify to_dict() output can recreate the segment."""
         original = TranscriptSegment(
@@ -1031,6 +1071,7 @@ class TestDownloadedVideoEmptyStrings:
         assert video.source == ""
         assert video.video_hash == ""
 
+    @pytest.mark.fast
     def test_only_file_provided(self):
         """Verify DownloadedVideo works with only file field."""
         video = DownloadedVideo(file="video.mp4")
@@ -1039,6 +1080,7 @@ class TestDownloadedVideoEmptyStrings:
         assert video.title == ""
         assert video.channel == ""
 
+    @pytest.mark.fast
     def test_asdict_with_empty_strings(self):
         """Verify asdict serialization with empty strings doesn't drop fields."""
         video = DownloadedVideo(file="", url="", title="", channel="")
@@ -1050,6 +1092,7 @@ class TestDownloadedVideoEmptyStrings:
         assert d['file'] == ""
         assert d['url'] == ""
 
+    @pytest.mark.fast
     def test_numeric_defaults_with_empty_strings(self):
         """Verify numeric defaults are correct when string fields are empty."""
         video = DownloadedVideo(file="")
@@ -1082,6 +1125,7 @@ class TestPipelineStateDefaults:
         assert state.location_chapters == []
         assert state.pending_streams == []
 
+    @pytest.mark.fast
     def test_dict_fields_default_to_empty(self):
         """Verify all dict fields default to empty dicts."""
         state = PipelineState()
@@ -1093,6 +1137,7 @@ class TestPipelineStateDefaults:
         assert state.alternatives == {}
         assert state.stage_timings == {}
 
+    @pytest.mark.fast
     def test_no_shared_mutable_defaults_lists(self):
         """Verify no shared mutable defaults across instances for lists."""
         state1 = PipelineState()
@@ -1110,6 +1155,7 @@ class TestPipelineStateDefaults:
         assert state2.downloaded_videos == []
         assert state2.matches == []
 
+    @pytest.mark.fast
     def test_no_shared_mutable_defaults_dicts(self):
         """Verify no shared mutable defaults across instances for dicts."""
         state1 = PipelineState()
@@ -1127,6 +1173,7 @@ class TestPipelineStateDefaults:
         assert state2.stage_timings == {}
         assert state2.alternatives == {}
 
+    @pytest.mark.fast
     def test_string_defaults(self):
         """Verify string fields have correct defaults."""
         state = PipelineState()
@@ -1134,6 +1181,7 @@ class TestPipelineStateDefaults:
         assert state.topic_context == ""
         assert state.face_preference == "neutral"
 
+    @pytest.mark.fast
     def test_none_defaults(self):
         """Verify embedding_index defaults to None."""
         state = PipelineState()
@@ -1153,6 +1201,7 @@ class TestMatchBoundaryConfidence:
         assert match.confidence == 0.0
         assert match.confidence is not None
 
+    @pytest.mark.fast
     def test_confidence_one(self):
         """Verify confidence=1.0 is stored correctly."""
         match = Match(
@@ -1161,6 +1210,7 @@ class TestMatchBoundaryConfidence:
         )
         assert match.confidence == 1.0
 
+    @pytest.mark.fast
     def test_confidence_zero_not_falsy_issue(self):
         """Verify confidence=0.0 is not treated as falsy in boolean context."""
         match = Match(
@@ -1172,6 +1222,7 @@ class TestMatchBoundaryConfidence:
         assert isinstance(match.confidence, float)
         assert match.confidence >= 0.0  # Valid range check
 
+    @pytest.mark.fast
     def test_confidence_one_not_rounded(self):
         """Verify confidence=1.0 exact value preserved."""
         match = Match(
@@ -1181,6 +1232,7 @@ class TestMatchBoundaryConfidence:
         assert match.confidence == 1.0
         assert not (match.confidence > 1.0)
 
+    @pytest.mark.fast
     def test_asdict_preserves_boundary_confidence(self):
         """Verify to_dict() preserves exact float values for 0.0 and 1.0."""
         match_zero = Match(
@@ -1200,6 +1252,7 @@ class TestMatchBoundaryConfidence:
         assert isinstance(d_zero['confidence'], float)
         assert isinstance(d_one['confidence'], float)
 
+    @pytest.mark.fast
     def test_near_boundary_float_precision(self):
         """Verify near-boundary floats are preserved without comparison issues."""
         match = Match(
@@ -1209,6 +1262,7 @@ class TestMatchBoundaryConfidence:
         assert match.confidence == 0.9999999999
         assert match.confidence < 1.0
 
+    @pytest.mark.fast
     def test_confidence_small_epsilon(self):
         """Verify very small confidence near 0 is preserved."""
         match = Match(

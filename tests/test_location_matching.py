@@ -173,6 +173,7 @@ def sample_candidates(sample_video_locations):
 class TestLocationMatcherInit:
     """Test LocationMatcher initialization"""
 
+    @pytest.mark.fast
     def test_init_without_location_service(self):
         """Test initialization without location service"""
         matcher = LocationMatcher(location_service=None)
@@ -181,6 +182,7 @@ class TestLocationMatcherInit:
         assert matcher.location_chapters == {}
         assert matcher.video_locations == {}
 
+    @pytest.mark.fast
     def test_init_with_location_service(self, mock_location_service):
         """Test initialization with location service"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -197,6 +199,7 @@ class TestLocationMatcherInit:
 class TestSetLocationChapters:
     """Test location chapter setup"""
 
+    @pytest.mark.fast
     def test_set_location_chapters_empty(self, mock_location_service):
         """Test with empty location chapters"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -205,6 +208,7 @@ class TestSetLocationChapters:
 
         assert matcher.location_chapters == {}
 
+    @pytest.mark.fast
     def test_set_location_chapters_single(self, mock_location_service, sample_location_chapters):
         """Test with single location chapter"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -218,6 +222,7 @@ class TestSetLocationChapters:
         assert matcher.location_chapters[1] == sample_location_chapters[0]
         assert matcher.location_chapters[2] == sample_location_chapters[0]
 
+    @pytest.mark.fast
     def test_set_location_chapters_multiple(self, mock_location_service, sample_location_chapters):
         """Test with multiple location chapters"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -230,6 +235,7 @@ class TestSetLocationChapters:
         assert matcher.location_chapters[0].location_name == "Paris"
         assert matcher.location_chapters[3].location_name == "London"
 
+    @pytest.mark.fast
     def test_set_location_chapters_overlapping(self, mock_location_service):
         """Test with overlapping chapters (later chapter overwrites)"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -273,6 +279,7 @@ class TestSetLocationChapters:
 class TestSetVideoLocations:
     """Test video location setup"""
 
+    @pytest.mark.fast
     def test_set_video_locations_empty(self, mock_location_service):
         """Test with empty video locations"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -281,6 +288,7 @@ class TestSetVideoLocations:
 
         assert matcher.video_locations == {}
 
+    @pytest.mark.fast
     def test_set_video_locations_multiple(self, mock_location_service, sample_video_locations):
         """Test with multiple video locations"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -300,6 +308,7 @@ class TestSetVideoLocations:
 class TestGetLocationChapter:
     """Test location chapter retrieval"""
 
+    @pytest.mark.fast
     def test_get_location_chapter_found(self, mock_location_service, sample_location_chapters):
         """Test retrieving existing location chapter"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -311,6 +320,7 @@ class TestGetLocationChapter:
         assert chapter is not None
         assert chapter.location_name == "Paris"
 
+    @pytest.mark.fast
     def test_get_location_chapter_not_found(self, mock_location_service):
         """Test retrieving non-existent location chapter"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -327,6 +337,7 @@ class TestGetLocationChapter:
 class TestGetVideoLocation:
     """Test video location retrieval"""
 
+    @pytest.mark.fast
     def test_get_video_location_found(self, mock_location_service, sample_video_locations):
         """Test retrieving existing video location"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -337,6 +348,7 @@ class TestGetVideoLocation:
         assert location is not None
         assert location.name == 'Paris'
 
+    @pytest.mark.fast
     def test_get_video_location_not_found(self, mock_location_service):
         """Test retrieving non-existent video location"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -353,6 +365,7 @@ class TestGetVideoLocation:
 class TestApplyLocationFilterNoFilter:
     """Test cases where location filter is not applied"""
 
+    @pytest.mark.fast
     def test_apply_location_filter_disabled(self, mock_location_service, sample_vo_segment, sample_candidates):
         """Test with location matching disabled"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -369,6 +382,7 @@ class TestApplyLocationFilterNoFilter:
         assert applied is False
         assert reason == ""
 
+    @pytest.mark.fast
     def test_apply_location_filter_no_service(self, sample_vo_segment, sample_candidates):
         """Test without location service"""
         matcher = LocationMatcher(location_service=None)
@@ -385,6 +399,7 @@ class TestApplyLocationFilterNoFilter:
         assert applied is False
         assert reason == ""
 
+    @pytest.mark.fast
     def test_apply_location_filter_no_chapter(self, mock_location_service, sample_vo_segment, sample_candidates):
         """Test when segment has no location chapter"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -401,6 +416,7 @@ class TestApplyLocationFilterNoFilter:
         assert applied is False
         assert reason == ""
 
+    @pytest.mark.fast
     def test_apply_location_filter_chapter_no_location_data(self, mock_location_service, sample_vo_segment, sample_candidates):
         """Test when chapter exists but has no location data"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -437,6 +453,7 @@ class TestApplyLocationFilterNoFilter:
 class TestApplyLocationFilterHardCity:
     """Test hard filtering at city level"""
 
+    @pytest.mark.fast
     def test_hard_filter_city_same_city(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test city filter keeps same-city videos"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -465,6 +482,7 @@ class TestApplyLocationFilterHardCity:
         assert applied is True
         assert "location filter" in reason
 
+    @pytest.mark.fast
     def test_hard_filter_city_all_removed_fallback(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test fallback to soft penalty when all candidates removed"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -502,6 +520,7 @@ class TestApplyLocationFilterHardCity:
 class TestApplyLocationFilterHardLevels:
     """Test hard filtering at different geographic levels"""
 
+    @pytest.mark.fast
     def test_hard_filter_state_level(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test state/region level filtering"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -527,6 +546,7 @@ class TestApplyLocationFilterHardLevels:
         assert len(filtered) == 1
         assert filtered[0][0].source_file == '/videos/paris1.mp4'
 
+    @pytest.mark.fast
     def test_hard_filter_country_level(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test country level filtering"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -552,6 +572,7 @@ class TestApplyLocationFilterHardLevels:
         # Should keep Paris and London (both Europe), filter Tokyo
         assert len(filtered) == 2
 
+    @pytest.mark.fast
     def test_hard_filter_continent_level(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test continent level filtering (most lenient)"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -582,6 +603,7 @@ class TestApplyLocationFilterHardLevels:
 class TestApplyLocationFilterHierarchyBonus:
     """Test geographic hierarchy bonuses"""
 
+    @pytest.mark.fast
     def test_hierarchy_bonus_parent_region(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test bonus for parent region videos (e.g., country when chapter is city)"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -612,6 +634,7 @@ class TestApplyLocationFilterHierarchyBonus:
         # Bonus should increase score (but capped at 1.0)
         assert paris_result[1] >= paris_original[1]
 
+    @pytest.mark.fast
     def test_hierarchy_bonus_child_region(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test smaller bonus for child region videos"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -659,6 +682,7 @@ class TestApplyLocationFilterHierarchyBonus:
 class TestApplyLocationFilterNoVideoLocation:
     """Test handling of videos without location data"""
 
+    @pytest.mark.fast
     def test_video_no_location_small_penalty(self, mock_location_service, sample_location_chapters, sample_vo_segment):
         """Test that videos without location data get small penalty"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -699,6 +723,7 @@ class TestApplyLocationFilterNoVideoLocation:
 class TestApplyLocationFilterConfig:
     """Test different configuration scenarios"""
 
+    @pytest.mark.fast
     def test_config_as_dict(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test with config as dictionary"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -724,6 +749,7 @@ class TestApplyLocationFilterConfig:
 
         assert applied is True
 
+    @pytest.mark.fast
     def test_config_as_object(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test with config as object with attributes"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -748,6 +774,7 @@ class TestApplyLocationFilterConfig:
 
         assert applied is True
 
+    @pytest.mark.fast
     def test_config_defaults(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test default config values are used"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -778,6 +805,7 @@ class TestApplyLocationFilterConfig:
 class TestApplyLocationFilterSoftPenalty:
     """Test soft penalty fallback mode"""
 
+    @pytest.mark.fast
     def test_soft_penalty_city_level(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test soft penalty at city level (full penalty)"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -805,6 +833,7 @@ class TestApplyLocationFilterSoftPenalty:
         for orig, filt in zip(sample_candidates, filtered):
             assert filt[1] <= orig[1] - 0.3  # At least some penalty
 
+    @pytest.mark.fast
     def test_soft_penalty_state_level(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test soft penalty at state level (90% of full penalty)"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -826,6 +855,7 @@ class TestApplyLocationFilterSoftPenalty:
         assert len(filtered) == 3
         assert "soft penalty" in reason
 
+    @pytest.mark.fast
     def test_soft_penalty_preserves_order(self, mock_location_service, sample_location_chapters, sample_video_locations, sample_vo_segment, sample_candidates):
         """Test that soft penalty mode re-sorts by adjusted scores"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -856,6 +886,7 @@ class TestApplyLocationFilterSoftPenalty:
 class TestLocationMatcherCoverageGaps:
     """Test coverage gaps for location_matching.py"""
 
+    @pytest.mark.fast
     def test_unknown_filter_level_allows_all_line_147(self, mock_location_service, sample_location_chapters, sample_vo_segment):
         """Test line 147: Unknown filter level allows all candidates"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -889,6 +920,7 @@ class TestLocationMatcherCoverageGaps:
         assert applied is True
         assert len(filtered) > 0
 
+    @pytest.mark.fast
     def test_soft_penalty_country_level_lines_185_186(self, mock_location_service, sample_location_chapters, sample_vo_segment):
         """Test lines 185-186: Soft penalty mode with country level filter"""
         matcher = LocationMatcher(location_service=mock_location_service)
@@ -924,6 +956,7 @@ class TestLocationMatcherCoverageGaps:
         assert applied is True
         assert "fallback" in reason or len(filtered) > 0
 
+    @pytest.mark.fast
     def test_soft_penalty_continent_level_lines_187_188(self, mock_location_service, sample_location_chapters, sample_vo_segment):
         """Test lines 187-188: Soft penalty mode with continent level filter"""
         matcher = LocationMatcher(location_service=mock_location_service)

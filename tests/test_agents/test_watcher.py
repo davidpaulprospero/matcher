@@ -29,6 +29,7 @@ from src.agents.watcher import WatcherAgent, ErrorClassification, WATCHER_PROMPT
 class TestErrorClassificationDataclass:
     """Tests for ErrorClassification dataclass."""
 
+    @pytest.mark.fast
     def test_error_classification_all_fields(self):
         """Test ErrorClassification accepts all required fields."""
         classification = ErrorClassification(
@@ -47,6 +48,7 @@ class TestErrorClassificationDataclass:
         assert classification.needs_llm_healer is False
         assert classification.reasoning == "Rate limit detected"
 
+    @pytest.mark.fast
     def test_error_classification_categories(self):
         """Test ErrorClassification accepts valid categories."""
         valid_categories = ["api", "disk", "path", "checkpoint", "download", "otio", "config", "unknown"]
@@ -62,6 +64,7 @@ class TestErrorClassificationDataclass:
             )
             assert classification.category == category
 
+    @pytest.mark.fast
     def test_error_classification_severities(self):
         """Test ErrorClassification accepts valid severities."""
         valid_severities = ["critical", "recoverable", "transient"]
@@ -81,6 +84,7 @@ class TestErrorClassificationDataclass:
 class TestWatcherAgentInit:
     """Tests for WatcherAgent initialization."""
 
+    @pytest.mark.fast
     def test_watcher_agent_init_defaults(self):
         """Test WatcherAgent uses default values from config."""
         mock_config = Mock()
@@ -102,6 +106,7 @@ class TestWatcherAgentInit:
         assert agent.client is None
         assert agent._initialized is False
 
+    @pytest.mark.fast
     def test_watcher_agent_init_missing_config_attrs(self):
         """Test WatcherAgent handles missing config attributes with defaults."""
         mock_config = Mock(spec=[])  # Empty spec - no attributes
@@ -113,6 +118,7 @@ class TestWatcherAgentInit:
         assert agent.model == "llama3.2"
         assert agent.timeout == 30.0
 
+    @pytest.mark.fast
     def test_watcher_agent_init_with_project_dir(self, tmp_path):
         """Test WatcherAgent accepts project_dir parameter."""
         mock_config = Mock()
@@ -122,6 +128,7 @@ class TestWatcherAgentInit:
 
         assert agent.project_dir == project_dir
 
+    @pytest.mark.fast
     def test_watcher_agent_init_with_healing_logger(self):
         """Test WatcherAgent accepts healing_logger parameter."""
         mock_config = Mock()
@@ -131,6 +138,7 @@ class TestWatcherAgentInit:
 
         assert agent.healing_logger == mock_logger
 
+    @pytest.mark.fast
     def test_watcher_agent_init_with_fallback_chain(self):
         """Test WatcherAgent accepts fallback_chain parameter."""
         mock_config = Mock()
@@ -156,6 +164,7 @@ class TestWatcherAgentClassifyError:
         config.escalate_threshold = 0.7
         return config
 
+    @pytest.mark.fast
     def test_classify_error_returns_error_classification(self, mock_watcher_config):
         """Test classify_error() returns ErrorClassification on success."""
         agent = WatcherAgent(config=mock_watcher_config)
@@ -187,6 +196,7 @@ class TestWatcherAgentClassifyError:
         assert result.severity == "transient"
         assert result.confidence == 0.85
 
+    @pytest.mark.fast
     def test_classify_error_api_rate_limit(self, mock_watcher_config):
         """Test classify_error() handles API rate limit errors."""
         agent = WatcherAgent(config=mock_watcher_config)
@@ -216,6 +226,7 @@ class TestWatcherAgentClassifyError:
         assert result.severity == "transient"
         assert "api-healer" in result.suggested_healer
 
+    @pytest.mark.fast
     def test_classify_error_disk_space(self, mock_watcher_config):
         """Test classify_error() handles disk space errors."""
         agent = WatcherAgent(config=mock_watcher_config)
@@ -245,6 +256,7 @@ class TestWatcherAgentClassifyError:
         assert result.severity == "critical"
         assert "disk-healer" in result.suggested_healer
 
+    @pytest.mark.requires_network
     def test_classify_error_network_timeout(self, mock_watcher_config):
         """Test classify_error() handles network timeout errors."""
         agent = WatcherAgent(config=mock_watcher_config)
@@ -274,6 +286,7 @@ class TestWatcherAgentClassifyError:
         assert result.category == "api"
         assert result.severity == "transient"
 
+    @pytest.mark.fast
     def test_classify_error_returns_none_when_client_not_initialized(self, mock_watcher_config):
         """Test classify_error() returns None when client fails to initialize."""
         agent = WatcherAgent(config=mock_watcher_config)
@@ -289,6 +302,7 @@ class TestWatcherAgentClassifyError:
 
             assert result is None
 
+    @pytest.mark.fast
     def test_classify_error_records_fallback_on_failure(self, mock_watcher_config):
         """Test classify_error() records failure with fallback chain."""
         mock_fallback = Mock()
@@ -304,6 +318,7 @@ class TestWatcherAgentClassifyError:
 
             mock_fallback.record_watcher_failure.assert_called_once()
 
+    @pytest.mark.fast
     def test_classify_error_logs_classification_on_success(self, mock_watcher_config):
         """Test classify_error() logs to healing_logger on success."""
         mock_logger = Mock()
@@ -342,6 +357,7 @@ class TestWatcherAgentParseResponse:
         mock_config.escalate_threshold = 0.7
         return WatcherAgent(config=mock_config)
 
+    @pytest.mark.fast
     def test_parse_response_from_parsed_data(self, agent):
         """Test _parse_response() extracts from parsed_data attribute."""
         mock_response = Mock()
@@ -360,6 +376,7 @@ class TestWatcherAgentParseResponse:
         assert result.severity == "critical"
         assert result.confidence == 0.9
 
+    @pytest.mark.fast
     def test_parse_response_from_text_json(self, agent):
         """Test _parse_response() extracts from text attribute as JSON."""
         mock_response = Mock(spec=['text'])
@@ -371,6 +388,7 @@ class TestWatcherAgentParseResponse:
         assert result.category == "path"
         assert result.severity == "recoverable"
 
+    @pytest.mark.fast
     def test_parse_response_strips_markdown_code_blocks(self, agent):
         """Test _parse_response() handles markdown code blocks."""
         mock_response = Mock(spec=['text'])
@@ -382,6 +400,7 @@ class TestWatcherAgentParseResponse:
         assert result.category == "api"
         assert result.severity == "transient"
 
+    @pytest.mark.fast
     def test_parse_response_clamps_confidence(self, agent):
         """Test _parse_response() clamps confidence to [0, 1]."""
         mock_response = Mock()
@@ -398,6 +417,7 @@ class TestWatcherAgentParseResponse:
 
         assert result.confidence == 1.0  # Clamped to max
 
+    @pytest.mark.fast
     def test_parse_response_normalizes_invalid_category(self, agent):
         """Test _parse_response() normalizes invalid categories to unknown."""
         mock_response = Mock()
@@ -414,6 +434,7 @@ class TestWatcherAgentParseResponse:
 
         assert result.category == "unknown"
 
+    @pytest.mark.fast
     def test_parse_response_normalizes_invalid_severity(self, agent):
         """Test _parse_response() normalizes invalid severities to recoverable."""
         mock_response = Mock()
@@ -430,6 +451,7 @@ class TestWatcherAgentParseResponse:
 
         assert result.severity == "recoverable"
 
+    @pytest.mark.fast
     def test_parse_response_returns_none_on_invalid_json(self, agent):
         """Test _parse_response() returns None on invalid JSON."""
         mock_response = Mock(spec=['text'])
@@ -440,6 +462,7 @@ class TestWatcherAgentParseResponse:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_parse_response_defaults_needs_llm_healer_from_confidence(self, agent):
         """Test _parse_response() defaults needs_llm_healer based on confidence."""
         mock_response = Mock()
@@ -466,10 +489,12 @@ class TestWatcherAgentShouldEscalate:
         mock_config.escalate_threshold = 0.7
         return WatcherAgent(config=mock_config)
 
+    @pytest.mark.fast
     def test_should_escalate_no_classification(self, agent):
         """Test should_escalate() returns True when no classification."""
         assert agent.should_escalate(None) is True
 
+    @pytest.mark.fast
     def test_should_escalate_when_needs_llm_healer(self, agent):
         """Test should_escalate() returns True when needs_llm_healer is True."""
         classification = ErrorClassification(
@@ -483,6 +508,7 @@ class TestWatcherAgentShouldEscalate:
 
         assert agent.should_escalate(classification) is True
 
+    @pytest.mark.fast
     def test_should_escalate_low_confidence(self, agent):
         """Test should_escalate() returns True for low confidence."""
         classification = ErrorClassification(
@@ -496,6 +522,7 @@ class TestWatcherAgentShouldEscalate:
 
         assert agent.should_escalate(classification) is True
 
+    @pytest.mark.fast
     def test_should_not_escalate_high_confidence(self, agent):
         """Test should_escalate() returns False for high confidence, no LLM needed."""
         classification = ErrorClassification(
@@ -509,6 +536,7 @@ class TestWatcherAgentShouldEscalate:
 
         assert agent.should_escalate(classification) is False
 
+    @pytest.mark.fast
     def test_should_escalate_failed_healer_moderate_confidence(self, agent):
         """Test should_escalate() returns True when healer failed with moderate confidence."""
         classification = ErrorClassification(
@@ -525,6 +553,7 @@ class TestWatcherAgentShouldEscalate:
 
         assert agent.should_escalate(classification, failed_healer_result) is True
 
+    @pytest.mark.fast
     def test_should_not_escalate_failed_healer_high_confidence(self, agent):
         """Test should_escalate() returns False when healer failed but high confidence."""
         classification = ErrorClassification(
@@ -551,6 +580,7 @@ class TestWatcherAgentGetHealerPriority:
         mock_config = Mock()
         return WatcherAgent(config=mock_config)
 
+    @pytest.mark.fast
     def test_get_healer_priority_api_category(self, agent):
         """Test get_healer_priority() returns api-healer for api category."""
         classification = ErrorClassification(
@@ -566,6 +596,7 @@ class TestWatcherAgentGetHealerPriority:
 
         assert "api-healer" in result
 
+    @pytest.mark.fast
     def test_get_healer_priority_disk_category(self, agent):
         """Test get_healer_priority() returns disk-healer for disk category."""
         classification = ErrorClassification(
@@ -581,6 +612,7 @@ class TestWatcherAgentGetHealerPriority:
 
         assert "disk-healer" in result
 
+    @pytest.mark.fast
     def test_get_healer_priority_path_category(self, agent):
         """Test get_healer_priority() returns path-healer for path category."""
         classification = ErrorClassification(
@@ -596,6 +628,7 @@ class TestWatcherAgentGetHealerPriority:
 
         assert "path-healer" in result
 
+    @pytest.mark.fast
     def test_get_healer_priority_suggested_healer_first(self, agent):
         """Test get_healer_priority() puts suggested healer first."""
         classification = ErrorClassification(
@@ -612,6 +645,7 @@ class TestWatcherAgentGetHealerPriority:
         assert result[0] == "disk-healer"  # Suggested healer first
         assert "api-healer" in result  # Category default still included
 
+    @pytest.mark.fast
     def test_get_healer_priority_unknown_category(self, agent):
         """Test get_healer_priority() returns empty list for unknown category."""
         classification = ErrorClassification(
@@ -627,6 +661,7 @@ class TestWatcherAgentGetHealerPriority:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_get_healer_priority_config_category(self, agent):
         """Test get_healer_priority() returns empty list for config category."""
         classification = ErrorClassification(
@@ -646,6 +681,7 @@ class TestWatcherAgentGetHealerPriority:
 class TestWatcherPromptTemplate:
     """Tests for WATCHER_PROMPT template."""
 
+    @pytest.mark.fast
     def test_prompt_template_has_placeholders(self):
         """Test WATCHER_PROMPT has expected placeholders."""
         assert "{error_message}" in WATCHER_PROMPT
@@ -653,18 +689,21 @@ class TestWatcherPromptTemplate:
         assert "{stage_name}" in WATCHER_PROMPT
         assert "{context}" in WATCHER_PROMPT
 
+    @pytest.mark.fast
     def test_prompt_template_lists_categories(self):
         """Test WATCHER_PROMPT lists all valid categories."""
         categories = ["api", "disk", "path", "checkpoint", "download", "otio", "config", "unknown"]
         for category in categories:
             assert category in WATCHER_PROMPT
 
+    @pytest.mark.fast
     def test_prompt_template_lists_severities(self):
         """Test WATCHER_PROMPT lists all valid severities."""
         assert "critical" in WATCHER_PROMPT
         assert "recoverable" in WATCHER_PROMPT
         assert "transient" in WATCHER_PROMPT
 
+    @pytest.mark.fast
     def test_prompt_template_requests_json(self):
         """Test WATCHER_PROMPT requests JSON output."""
         assert "JSON" in WATCHER_PROMPT

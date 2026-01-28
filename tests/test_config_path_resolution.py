@@ -22,6 +22,7 @@ from src.cli.config_utils import load_project_config
 class TestPathResolutionToProjectDir:
     """Test that all paths resolve to project directory, not installation directory."""
 
+    @pytest.mark.fast
     def test_otio_output_dir_is_project_relative(self, tmp_path):
         """otio_output_dir should be relative to project_dir, not cwd."""
         # Create a mock project directory
@@ -43,6 +44,7 @@ project:
         # Should NOT be in the installation directory
         assert "voiceover-matcher" not in config.otio_output_dir.lower() or str(project_dir) in config.otio_output_dir
 
+    @pytest.mark.fast
     def test_cache_dir_is_project_relative(self, tmp_path):
         """cache.cache_dir should be relative to project_dir, not cwd."""
         project_dir = tmp_path / "my_project"
@@ -59,6 +61,7 @@ project:
         assert str(project_dir) in config.cache.cache_dir
         assert ".cache" in config.cache.cache_dir
 
+    @pytest.mark.fast
     def test_log_dir_is_project_relative(self, tmp_path):
         """logging.log_dir should be relative to project_dir, not cwd."""
         project_dir = tmp_path / "my_project"
@@ -75,6 +78,7 @@ project:
         assert str(project_dir) in config.logging.log_dir
         assert "logs" in config.logging.log_dir
 
+    @pytest.mark.fast
     def test_project_dir_is_set_correctly(self, tmp_path):
         """config.project_dir should be the actual project directory."""
         project_dir = tmp_path / "my_project"
@@ -91,6 +95,7 @@ project:
         assert config.project_dir == str(project_dir)
         assert config.project_dir != "."
 
+    @pytest.mark.fast
     def test_paths_not_in_cwd_when_different_from_project(self, tmp_path):
         """When cwd differs from project_dir, paths should NOT be in cwd."""
         project_dir = tmp_path / "my_project"
@@ -124,6 +129,7 @@ project:
 class TestPathResolutionWithCustomConfig:
     """Test path resolution when custom paths are specified in config."""
 
+    @pytest.mark.fast
     def test_absolute_paths_preserved(self, tmp_path):
         """Absolute paths in config should be preserved, not made relative."""
         project_dir = tmp_path / "my_project"
@@ -143,6 +149,7 @@ output:
         # Absolute path should be preserved
         # Note: The path resolution may still make it project-relative if it wasn't absolute in the YAML
 
+    @pytest.mark.fast
     def test_relative_paths_resolved_to_project(self, tmp_path):
         """Relative paths in config should resolve to project_dir."""
         project_dir = tmp_path / "my_project"
@@ -165,6 +172,7 @@ cache:
 class TestResolvePathsIdempotent:
     """Test that _resolve_paths can be called multiple times safely."""
 
+    @pytest.mark.fast
     def test_resolve_paths_multiple_calls(self, tmp_path):
         """Calling _resolve_paths multiple times should not change paths."""
         project_dir = tmp_path / "my_project"
@@ -194,6 +202,7 @@ project:
 class TestProjectDirReset:
     """Test that project_dir properly resets paths when changed."""
 
+    @pytest.mark.fast
     def test_changing_project_dir_updates_paths(self, tmp_path):
         """When project_dir changes, paths should update accordingly."""
         project_dir1 = tmp_path / "project1"

@@ -19,6 +19,7 @@ from src.downloader.utils import sanitize_filename_for_nle, format_time, get_coo
 class TestSanitizeFilenameForNLE:
     """Test filename sanitization for NLE compatibility."""
 
+    @pytest.mark.fast
     def test_sanitize_basic_filename(self):
         """Test sanitizing basic filename."""
         filepath = Path("video.mp4")
@@ -27,6 +28,7 @@ class TestSanitizeFilenameForNLE:
 
         assert sanitized.name == "video.mp4"
 
+    @pytest.mark.fast
     def test_sanitize_filename_with_spaces(self):
         """Test sanitizing filename with spaces."""
         filepath = Path("my video file.mp4")
@@ -36,6 +38,7 @@ class TestSanitizeFilenameForNLE:
         # Spaces should be replaced with underscores
         assert " " not in sanitized.name or sanitized.name == "my video file.mp4"
 
+    @pytest.mark.fast
     def test_sanitize_filename_with_special_chars(self):
         """Test sanitizing filename with special characters."""
         filepath = Path("video@#$.mp4")
@@ -45,6 +48,7 @@ class TestSanitizeFilenameForNLE:
         # Should handle special chars
         assert isinstance(sanitized, Path)
 
+    @pytest.mark.fast
     def test_sanitize_preserves_extension(self):
         """Test sanitization preserves file extension."""
         filepath = Path("test_video.mp4")
@@ -53,6 +57,7 @@ class TestSanitizeFilenameForNLE:
 
         assert sanitized.suffix == ".mp4"
 
+    @pytest.mark.fast
     def test_sanitize_preserves_directory(self):
         """Test sanitization preserves directory path."""
         filepath = Path("videos/subfolder/file.mp4")
@@ -62,6 +67,7 @@ class TestSanitizeFilenameForNLE:
         # Should preserve directory structure
         assert "videos" in str(sanitized) or "file" in str(sanitized)
 
+    @pytest.mark.fast
     def test_sanitize_long_filename(self):
         """Test sanitizing very long filename."""
         long_name = "a" * 300 + ".mp4"
@@ -72,6 +78,7 @@ class TestSanitizeFilenameForNLE:
         # Should handle long filenames
         assert isinstance(sanitized, Path)
 
+    @pytest.mark.fast
     def test_sanitize_unicode_filename(self):
         """Test sanitizing filename with unicode characters."""
         filepath = Path("日本語_video.mp4")
@@ -80,6 +87,7 @@ class TestSanitizeFilenameForNLE:
 
         assert isinstance(sanitized, Path)
 
+    @pytest.mark.fast
     def test_sanitize_multiple_extensions(self):
         """Test sanitizing filename with multiple extensions."""
         filepath = Path("video.backup.mp4")
@@ -92,6 +100,7 @@ class TestSanitizeFilenameForNLE:
 class TestFormatTime:
     """Test time formatting utility."""
 
+    @pytest.mark.fast
     def test_format_zero_seconds(self):
         """Test formatting 0 seconds."""
         formatted = format_time(0.0)
@@ -99,12 +108,14 @@ class TestFormatTime:
         assert formatted is not None
         assert isinstance(formatted, str)
 
+    @pytest.mark.fast
     def test_format_seconds_only(self):
         """Test formatting seconds only."""
         formatted = format_time(45.0)
 
         assert "45" in formatted or "0:45" in formatted
 
+    @pytest.mark.fast
     def test_format_minutes_and_seconds(self):
         """Test formatting minutes and seconds."""
         formatted = format_time(125.0)  # 2:05
@@ -113,6 +124,7 @@ class TestFormatTime:
         # Should contain minutes and seconds
         assert len(formatted) > 0
 
+    @pytest.mark.fast
     def test_format_hours_minutes_seconds(self):
         """Test formatting hours, minutes, and seconds."""
         formatted = format_time(3665.0)  # 1:01:05
@@ -121,18 +133,21 @@ class TestFormatTime:
         # Should be in hour format
         assert ":" in formatted
 
+    @pytest.mark.fast
     def test_format_fractional_seconds(self):
         """Test formatting with fractional seconds."""
         formatted = format_time(45.7)
 
         assert isinstance(formatted, str)
 
+    @pytest.mark.fast
     def test_format_large_time(self):
         """Test formatting very large time value."""
         formatted = format_time(36000.0)  # 10 hours
 
         assert isinstance(formatted, str)
 
+    @pytest.mark.fast
     def test_format_negative_time(self):
         """Test formatting negative time (edge case)."""
         # Should handle gracefully
@@ -144,6 +159,7 @@ class TestFormatTime:
 class TestTimeFormatting:
     """Test time formatting patterns."""
 
+    @pytest.mark.fast
     def test_format_includes_colon(self):
         """Test formatted time includes colon separator."""
         formatted = format_time(125.0)
@@ -151,6 +167,7 @@ class TestTimeFormatting:
         # Most time formats use colon
         assert ":" in formatted or formatted.isdigit()
 
+    @pytest.mark.fast
     def test_format_consistent_length(self):
         """Test formatted times have reasonable length."""
         times = [30.0, 90.0, 3600.0]
@@ -160,6 +177,7 @@ class TestTimeFormatting:
             # Should be reasonable length (not excessively long)
             assert len(formatted) < 50
 
+    @pytest.mark.fast
     def test_format_multiple_times(self):
         """Test formatting multiple time values."""
         times = [0.0, 30.0, 60.0, 90.0, 120.0]
@@ -173,6 +191,7 @@ class TestTimeFormatting:
 class TestFilenameEdgeCases:
     """Test edge cases in filename sanitization."""
 
+    @pytest.mark.fast
     def test_empty_filename(self):
         """Test sanitizing empty filename."""
         filepath = Path("")
@@ -184,6 +203,7 @@ class TestFilenameEdgeCases:
             # May raise for empty path
             pass
 
+    @pytest.mark.fast
     def test_dot_only_filename(self):
         """Test sanitizing dot-only filename."""
         filepath = Path(".")
@@ -194,6 +214,7 @@ class TestFilenameEdgeCases:
         except ValueError:
             pass
 
+    @pytest.mark.fast
     def test_double_dot_filename(self):
         """Test sanitizing double-dot filename."""
         filepath = Path("..")
@@ -204,6 +225,7 @@ class TestFilenameEdgeCases:
         except ValueError:
             pass
 
+    @pytest.mark.fast
     def test_filename_with_only_extension(self):
         """Test sanitizing filename that's only an extension."""
         filepath = Path(".mp4")
@@ -216,30 +238,35 @@ class TestFilenameEdgeCases:
 class TestTimeEdgeCases:
     """Test edge cases in time formatting."""
 
+    @pytest.mark.fast
     def test_format_zero_point_zero(self):
         """Test formatting exactly 0.0."""
         formatted = format_time(0.0)
 
         assert formatted is not None
 
+    @pytest.mark.fast
     def test_format_very_small_time(self):
         """Test formatting very small time."""
         formatted = format_time(0.001)
 
         assert isinstance(formatted, str)
 
+    @pytest.mark.fast
     def test_format_one_second(self):
         """Test formatting exactly one second."""
         formatted = format_time(1.0)
 
         assert "1" in formatted
 
+    @pytest.mark.fast
     def test_format_one_minute(self):
         """Test formatting exactly one minute."""
         formatted = format_time(60.0)
 
         assert isinstance(formatted, str)
 
+    @pytest.mark.fast
     def test_format_one_hour(self):
         """Test formatting exactly one hour."""
         formatted = format_time(3600.0)
@@ -251,6 +278,7 @@ class TestTimeEdgeCases:
 class TestGetCookiesArgs:
     """Test cookie argument generation for yt-dlp."""
 
+    @pytest.mark.fast
     def test_get_cookies_args_browser_cookies(self):
         """Test getting cookies from browser."""
         mock_config = Mock()
@@ -263,6 +291,7 @@ class TestGetCookiesArgs:
 
         assert args == ['--cookies-from-browser', 'firefox']
 
+    @pytest.mark.integration
     def test_get_cookies_args_file_path(self):
         """Test getting cookies from file."""
         # Create temporary cookies file
@@ -283,6 +312,7 @@ class TestGetCookiesArgs:
         finally:
             Path(cookies_path).unlink()
 
+    @pytest.mark.fast
     def test_get_cookies_args_no_cookies(self):
         """Test when no cookies are configured."""
         mock_config = Mock()
@@ -295,6 +325,7 @@ class TestGetCookiesArgs:
 
         assert args == []
 
+    @pytest.mark.integration
     def test_get_cookies_args_browser_priority(self):
         """Test browser cookies take priority over file."""
         # Create temporary cookies file
@@ -316,6 +347,7 @@ class TestGetCookiesArgs:
         finally:
             Path(cookies_path).unlink()
 
+    @pytest.mark.fast
     def test_get_cookies_args_nonexistent_file(self):
         """Test with nonexistent cookies file path."""
         mock_config = Mock()
@@ -329,6 +361,7 @@ class TestGetCookiesArgs:
         # Should return empty list if file doesn't exist
         assert args == []
 
+    @pytest.mark.fast
     def test_get_cookies_args_edge_browser(self):
         """Test with Edge browser."""
         mock_config = Mock()
@@ -341,6 +374,7 @@ class TestGetCookiesArgs:
 
         assert args == ['--cookies-from-browser', 'edge']
 
+    @pytest.mark.fast
     def test_get_cookies_args_safari_browser(self):
         """Test with Safari browser."""
         mock_config = Mock()
@@ -353,6 +387,7 @@ class TestGetCookiesArgs:
 
         assert args == ['--cookies-from-browser', 'safari']
 
+    @pytest.mark.fast
     def test_get_cookies_args_missing_attributes(self):
         """Test with missing config attributes (uses getattr defaults)."""
         mock_config = Mock()

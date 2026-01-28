@@ -20,6 +20,7 @@ from src.downloader.retry_queue import RetryQueue, BatchRetryConfig, RetryItem
 class TestBatchRetryConfig:
     """Test BatchRetryConfig dataclass."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Test default configuration values."""
         config = BatchRetryConfig()
@@ -27,6 +28,7 @@ class TestBatchRetryConfig:
         assert config.delay_seconds == 120.0
         assert config.max_passes == 2
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test custom configuration values."""
         config = BatchRetryConfig(
@@ -42,6 +44,7 @@ class TestBatchRetryConfig:
 class TestRetryItem:
     """Test RetryItem dataclass."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Test RetryItem default values."""
         item = RetryItem(
@@ -57,6 +60,7 @@ class TestRetryItem:
         assert item.retry_count == 0
         assert item.added_at > 0  # Should be set to current time
 
+    @pytest.mark.fast
     def test_custom_retry_count(self):
         """Test RetryItem with custom retry count."""
         item = RetryItem(
@@ -72,6 +76,7 @@ class TestRetryItem:
 class TestRetryQueueInitialization:
     """Test RetryQueue initialization."""
 
+    @pytest.mark.fast
     def test_default_config(self):
         """Test initialization with default config."""
         queue = RetryQueue()
@@ -80,6 +85,7 @@ class TestRetryQueueInitialization:
         assert queue.config.max_passes == 2
         assert len(queue.items) == 0
 
+    @pytest.mark.fast
     def test_custom_config(self):
         """Test initialization with custom config."""
         config = BatchRetryConfig(enabled=False, delay_seconds=60.0, max_passes=3)
@@ -88,6 +94,7 @@ class TestRetryQueueInitialization:
         assert queue.config.delay_seconds == 60.0
         assert queue.config.max_passes == 3
 
+    @pytest.mark.fast
     def test_disabled_queue(self):
         """Test disabled queue."""
         queue = RetryQueue(BatchRetryConfig(enabled=False))
@@ -97,6 +104,7 @@ class TestRetryQueueInitialization:
 class TestRetryQueueAdd:
     """Test adding items to retry queue."""
 
+    @pytest.mark.fast
     def test_add_single_item(self):
         """Test adding a single item."""
         queue = RetryQueue()
@@ -108,6 +116,7 @@ class TestRetryQueueAdd:
         assert queue.items["video1"].keyword == "keyword1"
         assert queue.items["video1"].tier == "short"
 
+    @pytest.mark.fast
     def test_add_multiple_items(self):
         """Test adding multiple items."""
         queue = RetryQueue()
@@ -117,6 +126,7 @@ class TestRetryQueueAdd:
 
         assert len(queue.items) == 3
 
+    @pytest.mark.fast
     def test_add_duplicate_item(self):
         """Test adding duplicate item updates error but doesn't duplicate."""
         queue = RetryQueue()
@@ -127,6 +137,7 @@ class TestRetryQueueAdd:
         assert len(queue.items) == 1
         assert queue.items["video1"].error_message == "Error 2 - updated"
 
+    @pytest.mark.fast
     def test_add_disabled(self):
         """Test adding to disabled queue returns False."""
         queue = RetryQueue(BatchRetryConfig(enabled=False))
@@ -135,6 +146,7 @@ class TestRetryQueueAdd:
         assert result is False
         assert len(queue.items) == 0
 
+    @pytest.mark.fast
     def test_add_already_completed(self):
         """Test adding already completed item is skipped."""
         queue = RetryQueue()
@@ -149,6 +161,7 @@ class TestRetryQueueAdd:
 class TestRetryQueueState:
     """Test retry queue state management."""
 
+    @pytest.mark.fast
     def test_has_pending(self):
         """Test has_pending method."""
         queue = RetryQueue()
@@ -157,6 +170,7 @@ class TestRetryQueueState:
         queue.add("video1", "keyword1", "short", "Error")
         assert queue.has_pending() is True
 
+    @pytest.mark.fast
     def test_has_pending_after_max_passes(self):
         """Test has_pending is False after max passes."""
         queue = RetryQueue(BatchRetryConfig(max_passes=1))
@@ -170,6 +184,7 @@ class TestRetryQueueState:
         assert queue.can_retry is False
         assert queue.has_pending() is False
 
+    @pytest.mark.fast
     def test_get_pending_items(self):
         """Test getting pending items."""
         queue = RetryQueue()
@@ -184,6 +199,7 @@ class TestRetryQueueState:
 class TestRetryQueueMarking:
     """Test marking items as success/failed."""
 
+    @pytest.mark.fast
     def test_mark_success(self):
         """Test marking item as success removes it from queue."""
         queue = RetryQueue()
@@ -193,12 +209,14 @@ class TestRetryQueueMarking:
         assert len(queue.items) == 0
         assert "video1" in queue._completed_ids
 
+    @pytest.mark.fast
     def test_mark_success_nonexistent(self):
         """Test marking nonexistent item is a no-op."""
         queue = RetryQueue()
         queue.mark_success("video1")  # Should not raise
         assert len(queue._completed_ids) == 0
 
+    @pytest.mark.fast
     def test_mark_failed(self):
         """Test marking item as failed increments retry count."""
         queue = RetryQueue()
@@ -211,6 +229,7 @@ class TestRetryQueueMarking:
 class TestRetryQueuePasses:
     """Test retry pass management."""
 
+    @pytest.mark.fast
     def test_start_retry_pass(self):
         """Test starting a retry pass."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))  # Fast for testing
@@ -220,6 +239,7 @@ class TestRetryQueuePasses:
         assert pass_num == 1
         assert queue.current_pass == 1
 
+    @pytest.mark.fast
     def test_start_retry_pass_disabled(self):
         """Test start_retry_pass returns 0 when disabled."""
         queue = RetryQueue(BatchRetryConfig(enabled=False))
@@ -228,12 +248,14 @@ class TestRetryQueuePasses:
         pass_num = queue.start_retry_pass()
         assert pass_num == 0
 
+    @pytest.mark.fast
     def test_start_retry_pass_empty_queue(self):
         """Test start_retry_pass returns 0 when queue is empty."""
         queue = RetryQueue()
         pass_num = queue.start_retry_pass()
         assert pass_num == 0
 
+    @pytest.mark.fast
     def test_finish_retry_pass_moves_to_failed(self):
         """Test finish_retry_pass moves exhausted items to failed."""
         queue = RetryQueue(BatchRetryConfig(max_passes=1))
@@ -249,6 +271,7 @@ class TestRetryQueuePasses:
 class TestRetryQueueStats:
     """Test retry queue statistics."""
 
+    @pytest.mark.fast
     def test_get_stats_empty(self):
         """Test stats on empty queue."""
         queue = RetryQueue()
@@ -260,6 +283,7 @@ class TestRetryQueueStats:
         assert stats['failed'] == 0
         assert stats['current_pass'] == 0
 
+    @pytest.mark.fast
     def test_get_stats_with_items(self):
         """Test stats with items in queue."""
         queue = RetryQueue()
@@ -277,6 +301,7 @@ class TestRetryQueueStats:
 class TestRetryQueueCheckpoint:
     """Test checkpoint persistence."""
 
+    @pytest.mark.fast
     def test_to_checkpoint_dict(self):
         """Test serializing to checkpoint dict."""
         queue = RetryQueue()
@@ -291,6 +316,7 @@ class TestRetryQueueCheckpoint:
         assert 'completed_ids' in data
         assert 'failed_ids' in data
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict(self):
         """Test restoring from checkpoint dict."""
         queue = RetryQueue()
@@ -313,6 +339,7 @@ class TestRetryQueueCheckpoint:
         assert 'video2' in queue._completed_ids
         assert 'video3' in queue._failed_ids
 
+    @pytest.mark.fast
     def test_from_checkpoint_dict_empty(self):
         """Test restoring from empty/None checkpoint."""
         queue = RetryQueue()
@@ -321,6 +348,7 @@ class TestRetryQueueCheckpoint:
 
         assert len(queue.items) == 0
 
+    @pytest.mark.fast
     def test_roundtrip_checkpoint(self):
         """Test save and restore roundtrip."""
         queue = RetryQueue()
@@ -341,6 +369,7 @@ class TestRetryQueueCheckpoint:
 class TestRetryQueueClear:
     """Test clearing the queue."""
 
+    @pytest.mark.fast
     def test_clear(self):
         """Test clearing all state."""
         queue = RetryQueue()
@@ -358,6 +387,7 @@ class TestRetryQueueClear:
 class TestVideoDownloaderBatchRetryIntegration:
     """Integration tests for batch retry in VideoDownloader."""
 
+    @pytest.mark.fast
     def test_retry_queue_initialized(self):
         """Test retry queue is initialized in VideoDownloader."""
         from src.downloader.core import VideoDownloader
@@ -391,6 +421,7 @@ class TestVideoDownloaderBatchRetryIntegration:
         assert hasattr(downloader, 'retry_queue')
         assert downloader.retry_queue.is_enabled is True
 
+    @pytest.mark.fast
     def test_retry_queue_disabled_when_config_disabled(self):
         """Test retry queue is disabled when config says so."""
         from src.downloader.core import VideoDownloader
@@ -425,6 +456,7 @@ class TestVideoDownloaderBatchRetryIntegration:
 class TestBatchRetryWithMultipleFailedVideos:
     """Test batch retry behavior with multiple failed videos."""
 
+    @pytest.mark.fast
     def test_multiple_videos_queued_and_retried(self):
         """Test that multiple failed videos are queued and retried together."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01, max_passes=2))
@@ -469,6 +501,7 @@ class TestBatchRetryWithMultipleFailedVideos:
         # No more retries allowed
         assert queue.has_pending() is False
 
+    @pytest.mark.fast
     def test_batch_retry_respects_max_passes(self):
         """Test that batch retry stops after max_passes."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01, max_passes=1))
@@ -489,6 +522,7 @@ class TestBatchRetryWithMultipleFailedVideos:
 class TestConfigYamlIntegration:
     """Test that config.yaml settings are properly loaded."""
 
+    @pytest.mark.fast
     def test_config_section_exists_in_download_config(self):
         """Test BatchRetryConfig is part of DownloadConfig."""
         from src.config.sections.download import DownloadConfig, BatchRetryConfig
@@ -497,6 +531,7 @@ class TestConfigYamlIntegration:
         assert hasattr(config, 'batch_retry')
         assert isinstance(config.batch_retry, BatchRetryConfig)
 
+    @pytest.mark.fast
     def test_config_dict_conversion(self):
         """Test that dict is converted to BatchRetryConfig in __post_init__."""
         from src.config.sections.download import DownloadConfig

@@ -145,6 +145,7 @@ def esc_mgr(imp_mgr):
 class TestAudioDownloadEscalationArgs:
     """download_audio_for_keyword() integrates with EscalationManager."""
 
+    @pytest.mark.integration
     def test_tier1_impersonate_args_in_ytdlp_command(self, temp_dir, esc_mgr):
         """At Tier 1, yt-dlp command includes --impersonate from escalation."""
         pipeline = _make_pipeline(escalation_manager=esc_mgr)
@@ -173,6 +174,7 @@ class TestAudioDownloadEscalationArgs:
             f"Expected --impersonate in command at Tier 1, got: {cmd}"
         )
 
+    @pytest.mark.integration
     def test_tier1_no_extractor_args(self, temp_dir, esc_mgr):
         """At Tier 1, yt-dlp command does NOT include --extractor-args."""
         pipeline = _make_pipeline(escalation_manager=esc_mgr)
@@ -209,6 +211,7 @@ class TestAudioDownloadEscalationArgs:
 class TestAudioDownloadCookieRotation:
     """download_audio_for_keyword() rotates cookies on Tier 3 escalation."""
 
+    @pytest.mark.integration
     def test_rotate_cookies_called_on_tier3(self, temp_dir, imp_mgr):
         """When escalation reaches Tier 3 (rotate_cookies=True),
         cookie_rotator.rotate() is called before the download."""
@@ -249,6 +252,7 @@ class TestAudioDownloadCookieRotation:
         # Cookie rotation should have been triggered due to Tier 3
         cookie_rotator.rotate.assert_called()
 
+    @pytest.mark.integration
     def test_no_cookie_rotation_at_tier1(self, temp_dir, esc_mgr):
         """At Tier 1, cookie_rotator.rotate() is NOT called proactively."""
         cookie_rotator = MagicMock()
@@ -288,6 +292,7 @@ class TestAudioDownloadCookieRotation:
 class TestSegmentDownloadEscalationArgs:
     """download_video_segments() applies escalation args per tier."""
 
+    @pytest.mark.integration
     def test_tier2_extractor_args_in_segment_command(self, temp_dir, imp_mgr):
         """At Tier 2, segment download includes --extractor-args."""
         ext_config = FakeExtractorArgsConfig()
@@ -331,6 +336,7 @@ class TestSegmentDownloadEscalationArgs:
             f"Tier 2 should also include --impersonate, got: {cmd}"
         )
 
+    @pytest.mark.integration
     def test_segment_records_success_on_completion(self, temp_dir, esc_mgr):
         """After successful segment download, escalation_manager.record_success() is called."""
         pipeline = _make_pipeline(escalation_manager=esc_mgr)
@@ -373,6 +379,7 @@ class TestSegmentDownloadEscalationArgs:
 class TestFallbackEscalationIndependence:
     """_download_full_video_fallback() uses escalation independently."""
 
+    @pytest.mark.integration
     def test_fallback_preserves_tier_from_segment_escalation(self, temp_dir, imp_mgr):
         """After segment download escalates vid1 to Tier 2, fallback still
         uses Tier 2 args (tier state preserved across fallback transition)."""
@@ -428,6 +435,7 @@ class TestFallbackEscalationIndependence:
         )
         assert "--impersonate" in cmd
 
+    @pytest.mark.integration
     def test_fallback_records_failure_on_403(self, temp_dir, imp_mgr):
         """Fallback records 403 failure with escalation manager."""
         ext_config = FakeExtractorArgsConfig()
@@ -465,6 +473,7 @@ class TestFallbackEscalationIndependence:
         metrics = esc_mgr.get_metrics()
         assert metrics["total_403s"] >= 1, "Fallback should record 403 failure"
 
+    @pytest.mark.integration
     def test_fallback_escalation_independent_from_other_keywords(
         self, temp_dir, imp_mgr
     ):
@@ -521,6 +530,7 @@ class TestFallbackEscalationIndependence:
 class TestRetryLoopEscalation:
     """Consecutive 403s in download_audio_for_keyword() trigger tier escalation."""
 
+    @pytest.mark.integration
     def test_two_403s_escalate_tier1_to_tier2(self, temp_dir, imp_mgr):
         """Two consecutive 403 errors during audio download trigger
         escalation from Tier 1 to Tier 2.
@@ -568,6 +578,7 @@ class TestRetryLoopEscalation:
             f"Expected Tier 2 after consecutive 403s, got {result.tier}"
         )
 
+    @pytest.mark.integration
     def test_escalation_reflected_in_subsequent_download_commands(
         self, temp_dir, imp_mgr
     ):
@@ -629,6 +640,7 @@ class TestRetryLoopEscalation:
             vid2_cmd = captured_cmds_by_vid['vid2'][0]
             assert "--extractor-args" not in vid2_cmd
 
+    @pytest.mark.fast
     def test_success_after_403_resets_counter_but_keeps_tier(
         self, temp_dir, imp_mgr
     ):

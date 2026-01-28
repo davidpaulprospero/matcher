@@ -24,22 +24,27 @@ from src.matching.scoring import (
 class TestConstants:
     """Tests for semantic coherence constants."""
 
+    @pytest.mark.fast
     def test_smooth_threshold_value(self):
         """Smooth flow threshold is 0.6."""
         assert SEMANTIC_COHERENCE_SMOOTH_THRESHOLD == 0.6
 
+    @pytest.mark.fast
     def test_abrupt_threshold_value(self):
         """Abrupt flow threshold is 0.3."""
         assert SEMANTIC_COHERENCE_ABRUPT_THRESHOLD == 0.3
 
+    @pytest.mark.fast
     def test_smooth_boost_value(self):
         """Smooth flow boost is +0.03."""
         assert SEMANTIC_COHERENCE_SMOOTH_BOOST == 0.03
 
+    @pytest.mark.fast
     def test_abrupt_penalty_value(self):
         """Abrupt flow penalty is 0.05."""
         assert SEMANTIC_COHERENCE_ABRUPT_PENALTY == 0.05
 
+    @pytest.mark.fast
     def test_thresholds_ordering(self):
         """Abrupt threshold should be less than smooth threshold."""
         assert SEMANTIC_COHERENCE_ABRUPT_THRESHOLD < SEMANTIC_COHERENCE_SMOOTH_THRESHOLD
@@ -48,6 +53,7 @@ class TestConstants:
 class TestDisabledMode:
     """Tests for when semantic coherence is disabled."""
 
+    @pytest.mark.fast
     def test_disabled_returns_zero_adjustment(self):
         """When disabled, returns 0.0 adjustment."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -60,6 +66,7 @@ class TestDisabledMode:
         assert adjustment == 0.0
         assert reason == "semantic_coherence_disabled"
 
+    @pytest.mark.fast
     def test_disabled_with_similar_embeddings(self):
         """When disabled, similar embeddings still get no adjustment."""
         emb = np.array([1.0, 0.0, 0.0])
@@ -75,6 +82,7 @@ class TestDisabledMode:
 class TestMissingEmbeddings:
     """Tests for handling None/missing embeddings."""
 
+    @pytest.mark.fast
     def test_none_current_embedding(self):
         """None current embedding returns 0.0 with reason."""
         previous_emb = np.array([1.0, 0.0, 0.0])
@@ -86,6 +94,7 @@ class TestMissingEmbeddings:
         assert adjustment == 0.0
         assert reason == "missing_embedding"
 
+    @pytest.mark.fast
     def test_none_previous_embedding(self):
         """None previous embedding returns 0.0 with reason."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -97,6 +106,7 @@ class TestMissingEmbeddings:
         assert adjustment == 0.0
         assert reason == "missing_embedding"
 
+    @pytest.mark.fast
     def test_both_embeddings_none(self):
         """Both embeddings None returns 0.0 with reason."""
         adjustment, reason = compute_semantic_coherence(
@@ -110,6 +120,7 @@ class TestMissingEmbeddings:
 class TestSmoothTopicFlow:
     """Tests for smooth topic flow detection (similarity > 0.6)."""
 
+    @pytest.mark.fast
     def test_identical_embeddings_get_boost(self):
         """Identical embeddings (similarity=1.0) get smooth flow boost."""
         emb = np.array([1.0, 0.0, 0.0])
@@ -122,6 +133,7 @@ class TestSmoothTopicFlow:
         assert "smooth_topic_flow" in reason
         assert "+0.03" in reason
 
+    @pytest.mark.fast
     def test_high_similarity_embeddings_get_boost(self):
         """High similarity embeddings (sim=0.9) get smooth flow boost."""
         # Create embeddings with ~0.9 cosine similarity
@@ -135,6 +147,7 @@ class TestSmoothTopicFlow:
         assert adjustment == SEMANTIC_COHERENCE_SMOOTH_BOOST
         assert "smooth_topic_flow" in reason
 
+    @pytest.mark.fast
     def test_similarity_just_above_threshold(self):
         """Similarity just above 0.6 threshold gets boost."""
         # Create embeddings with similarity ~0.65
@@ -157,6 +170,7 @@ class TestSmoothTopicFlow:
 class TestAbruptTopicFlow:
     """Tests for abrupt topic flow detection (similarity < 0.3)."""
 
+    @pytest.mark.fast
     def test_orthogonal_embeddings_get_penalty(self):
         """Orthogonal embeddings (similarity=0) get abrupt flow penalty."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -170,6 +184,7 @@ class TestAbruptTopicFlow:
         assert "abrupt_topic_flow" in reason
         assert "-0.05" in reason
 
+    @pytest.mark.fast
     def test_opposite_embeddings_get_penalty(self):
         """Opposite embeddings (similarity=-1) get abrupt flow penalty."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -182,6 +197,7 @@ class TestAbruptTopicFlow:
         assert adjustment == -SEMANTIC_COHERENCE_ABRUPT_PENALTY
         assert "abrupt_topic_flow" in reason
 
+    @pytest.mark.fast
     def test_low_similarity_embeddings_get_penalty(self):
         """Low similarity embeddings (sim=0.2) get abrupt flow penalty."""
         # Create embeddings with ~0.2 cosine similarity
@@ -199,6 +215,7 @@ class TestAbruptTopicFlow:
 class TestNeutralTopicFlow:
     """Tests for neutral topic flow (0.3 <= similarity <= 0.6)."""
 
+    @pytest.mark.fast
     def test_medium_similarity_no_adjustment(self):
         """Medium similarity embeddings (sim=0.5) get no adjustment."""
         # Create embeddings with ~0.5 cosine similarity
@@ -212,6 +229,7 @@ class TestNeutralTopicFlow:
         assert adjustment == 0.0
         assert "neutral_topic_flow" in reason
 
+    @pytest.mark.fast
     def test_similarity_at_lower_boundary(self):
         """Similarity at exactly 0.3 is neutral (not abrupt)."""
         # Create embeddings with ~0.3 cosine similarity
@@ -233,6 +251,7 @@ class TestNeutralTopicFlow:
             else:
                 assert adjustment == 0.0
 
+    @pytest.mark.fast
     def test_similarity_at_upper_boundary(self):
         """Similarity at exactly 0.6 is neutral (not smooth)."""
         # Create embeddings with ~0.6 cosine similarity
@@ -257,6 +276,7 @@ class TestNeutralTopicFlow:
 class TestListInputs:
     """Tests for list inputs (not just numpy arrays)."""
 
+    @pytest.mark.fast
     def test_list_inputs_work(self):
         """Function works with Python lists, not just numpy arrays."""
         current_emb = [1.0, 0.0, 0.0]
@@ -269,6 +289,7 @@ class TestListInputs:
         assert adjustment == SEMANTIC_COHERENCE_SMOOTH_BOOST
         assert "smooth_topic_flow" in reason
 
+    @pytest.mark.fast
     def test_mixed_list_and_numpy(self):
         """Function works with mixed list and numpy array inputs."""
         current_emb = [1.0, 0.0, 0.0]
@@ -284,6 +305,7 @@ class TestListInputs:
 class TestHighDimensionalEmbeddings:
     """Tests with high-dimensional embeddings (typical for models)."""
 
+    @pytest.mark.fast
     def test_768_dim_embeddings(self):
         """Works with 768-dimensional embeddings (BERT-like)."""
         np.random.seed(42)
@@ -299,6 +321,7 @@ class TestHighDimensionalEmbeddings:
         assert adjustment == SEMANTIC_COHERENCE_SMOOTH_BOOST
         assert "smooth_topic_flow" in reason
 
+    @pytest.mark.fast
     def test_384_dim_embeddings(self):
         """Works with 384-dimensional embeddings (sentence-transformers)."""
         np.random.seed(123)
@@ -318,6 +341,7 @@ class TestHighDimensionalEmbeddings:
 class TestReasonStrings:
     """Tests for reason string formatting."""
 
+    @pytest.mark.fast
     def test_smooth_reason_includes_similarity(self):
         """Smooth flow reason includes similarity value."""
         emb = np.array([1.0, 0.0, 0.0])
@@ -329,6 +353,7 @@ class TestReasonStrings:
         assert "sim=" in reason
         assert "1.000" in reason  # cos(0) = 1.0
 
+    @pytest.mark.fast
     def test_abrupt_reason_includes_similarity(self):
         """Abrupt flow reason includes similarity value."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -341,6 +366,7 @@ class TestReasonStrings:
         assert "sim=" in reason
         assert "0.000" in reason  # orthogonal = 0
 
+    @pytest.mark.fast
     def test_neutral_reason_includes_similarity(self):
         """Neutral flow reason includes similarity value."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -356,6 +382,7 @@ class TestReasonStrings:
 class TestEdgeCases:
     """Tests for edge cases and error handling."""
 
+    @pytest.mark.fast
     def test_empty_array_handling(self):
         """Empty arrays are handled gracefully."""
         current_emb = np.array([])
@@ -371,6 +398,7 @@ class TestEdgeCases:
         assert isinstance(adjustment, float)
         assert isinstance(reason, str)
 
+    @pytest.mark.fast
     def test_mismatched_dimensions(self):
         """Mismatched embedding dimensions are handled."""
         current_emb = np.array([1.0, 0.0, 0.0])
@@ -384,6 +412,7 @@ class TestEdgeCases:
         assert isinstance(adjustment, float)
         assert isinstance(reason, str)
 
+    @pytest.mark.fast
     def test_zero_vector_handling(self):
         """Zero vectors are handled gracefully."""
         current_emb = np.array([0.0, 0.0, 0.0])
@@ -400,6 +429,7 @@ class TestEdgeCases:
 class TestIntegrationWithConfig:
     """Tests for integration with MatchingConfig."""
 
+    @pytest.mark.fast
     def test_config_option_exists(self):
         """semantic_coherence_enabled config option exists."""
         from src.config.sections.matching import MatchingConfig
@@ -408,6 +438,7 @@ class TestIntegrationWithConfig:
         assert hasattr(config, 'semantic_coherence_enabled')
         assert config.semantic_coherence_enabled is True  # Default enabled
 
+    @pytest.mark.fast
     def test_config_default_is_true(self):
         """semantic_coherence_enabled defaults to True."""
         from src.config.sections.matching import MatchingConfig
@@ -415,6 +446,7 @@ class TestIntegrationWithConfig:
         config = MatchingConfig()
         assert config.semantic_coherence_enabled is True
 
+    @pytest.mark.fast
     def test_config_can_be_disabled(self):
         """semantic_coherence_enabled can be set to False."""
         from src.config.sections.matching import MatchingConfig
@@ -426,6 +458,7 @@ class TestIntegrationWithConfig:
 class TestSimilarityCalculation:
     """Tests verifying correct similarity calculation."""
 
+    @pytest.mark.fast
     def test_cosine_similarity_range(self):
         """Cosine similarity should be between -1 and 1."""
         from src.embeddings import cosine_similarity
@@ -441,6 +474,7 @@ class TestSimilarityCalculation:
             sim = cosine_similarity(emb1, emb2)
             assert -1.0 <= sim <= 1.0
 
+    @pytest.mark.fast
     def test_adjustment_applied_correctly(self):
         """Verify adjustment is applied based on actual similarity."""
         from src.embeddings import cosine_similarity

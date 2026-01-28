@@ -90,12 +90,14 @@ def sample_candidates():
 class TestFacePreferenceConfig:
     """Test face preference configuration"""
 
+    @pytest.mark.fast
     def test_face_preference_neutral_default(self, mock_config, mock_cache):
         """Test neutral face preference is default"""
         matcher = TieredMatcher(mock_config, mock_cache)
 
         assert matcher.face_preference == "neutral"
 
+    @pytest.mark.fast
     def test_face_preference_more_config(self, mock_config, mock_cache):
         """Test 'more' face preference configuration"""
         mock_config.matching.face_preference = "more"
@@ -104,6 +106,7 @@ class TestFacePreferenceConfig:
 
         assert matcher.face_preference == "more"
 
+    @pytest.mark.fast
     def test_face_preference_none_config(self, mock_config, mock_cache):
         """Test 'none' face preference configuration"""
         mock_config.matching.face_preference = "none"
@@ -116,6 +119,7 @@ class TestFacePreferenceConfig:
 class TestGapMatchCreation:
     """Test gap match creation when no candidates (lines 343-351)"""
 
+    @pytest.mark.fast
     def test_gap_match_when_no_candidates(self, mock_config, mock_cache, sample_vo_segment):
         """Test gap match creation when no candidates provided"""
         matcher = TieredMatcher(mock_config, mock_cache)
@@ -131,6 +135,7 @@ class TestGapMatchCreation:
         assert result.gap_reason == "No candidates"
         assert result.primary_match.confidence == 0.0
 
+    @pytest.mark.fast
     def test_reuse_tracker_initialized(self, mock_config, mock_cache):
         """Test reuse tracker is initialized properly"""
         mock_config.matching.max_clip_reuse = 5
@@ -146,6 +151,7 @@ class TestGapMatchCreation:
 class TestLLMProviderFallback:
     """Test LLM provider initialization and fallback (lines 136-166, 496-519)"""
 
+    @pytest.mark.fast
     def test_primary_gemini_provider_init(self, mock_config, mock_cache):
         """Test Gemini primary provider initialization"""
         mock_config.matching.primary_provider = "gemini"
@@ -156,6 +162,7 @@ class TestLLMProviderFallback:
         assert matcher.primary_provider is not None
         assert matcher.primary_provider.__class__.__name__ == "GeminiMatcher"
 
+    @pytest.mark.fast
     def test_primary_anthropic_provider_init(self, mock_config, mock_cache):
         """Test Claude primary provider initialization"""
         mock_config.matching.primary_provider = "anthropic"
@@ -166,6 +173,7 @@ class TestLLMProviderFallback:
         assert matcher.primary_provider is not None
         assert matcher.primary_provider.__class__.__name__ == "ClaudeMatcher"
 
+    @pytest.mark.fast
     def test_auto_fallback_to_gemini(self, mock_config, mock_cache):
         """Test auto-fallback to Gemini when primary not specified"""
         mock_config.matching.primary_provider = "unknown"
@@ -176,6 +184,7 @@ class TestLLMProviderFallback:
         # Should fallback to Gemini (lines 142-144)
         assert matcher.primary_provider is not None
 
+    @pytest.mark.fast
     def test_auto_fallback_to_anthropic(self, mock_config, mock_cache):
         """Test auto-fallback to Anthropic when Gemini unavailable"""
         mock_config.matching.primary_provider = "unknown"
@@ -187,6 +196,7 @@ class TestLLMProviderFallback:
         # Should fallback to Anthropic (lines 145-147)
         assert matcher.primary_provider is not None
 
+    @pytest.mark.fast
     def test_secondary_provider_init(self, mock_config, mock_cache):
         """Test secondary provider initialization"""
         mock_config.matching.secondary_provider = "anthropic"
@@ -196,6 +206,7 @@ class TestLLMProviderFallback:
 
         assert matcher.secondary_provider is not None
 
+    @pytest.mark.fast
     def test_local_provider_disabled(self, mock_config, mock_cache):
         """Test local provider when disabled"""
         mock_config.matching.use_local_for_review = False
@@ -205,6 +216,7 @@ class TestLLMProviderFallback:
         # Should not initialize local provider
         assert matcher.local_provider is None
 
+    @pytest.mark.fast
     def test_use_local_for_review_config(self, mock_config, mock_cache):
         """Test use_local_for_review configuration"""
         mock_config.matching.use_local_for_review = True
@@ -219,6 +231,7 @@ class TestLLMProviderFallback:
 class TestLocationMethods:
     """Test location delegation methods (lines 169-179)"""
 
+    @pytest.mark.fast
     def test_set_location_chapters_with_matcher(self, mock_config, mock_cache):
         """Test setting location chapters when LocationMatcher exists"""
         # Enable location matching
@@ -236,6 +249,7 @@ class TestLocationMethods:
         # Should delegate to location_matcher
         matcher.location_matcher.set_location_chapters.assert_called_once_with(chapters)
 
+    @pytest.mark.fast
     def test_set_location_chapters_without_matcher(self, mock_config, mock_cache):
         """Test setting location chapters when no LocationMatcher"""
         matcher = TieredMatcher(mock_config, mock_cache)
@@ -246,6 +260,7 @@ class TestLocationMethods:
         # Should handle gracefully (no error)
         assert True
 
+    @pytest.mark.fast
     def test_set_video_locations_with_matcher(self, mock_config, mock_cache):
         """Test setting video locations when LocationMatcher exists"""
         matcher = TieredMatcher(mock_config, mock_cache)
@@ -261,6 +276,7 @@ class TestLocationMethods:
 class TestUtilityMethods:
     """Test utility methods"""
 
+    @pytest.mark.fast
     def test_should_skip_llm_high_similarity(self, mock_config, mock_cache):
         """Test LLM skipping for high similarity"""
         mock_config.matching.high_confidence_threshold = 0.85
@@ -271,6 +287,7 @@ class TestUtilityMethods:
         assert matcher._should_skip_llm(0.85) == True
         assert matcher._should_skip_llm(0.80) == False
 
+    @pytest.mark.fast
     def test_get_cache_key_generation(self, mock_config, mock_cache, sample_vo_segment, sample_candidates):
         """Test cache key generation"""
         matcher = TieredMatcher(mock_config, mock_cache)
@@ -281,6 +298,7 @@ class TestUtilityMethods:
         assert isinstance(key, str)
         assert len(key) == 16
 
+    @pytest.mark.fast
     def test_get_cached_response_hit(self, mock_config, mock_cache, sample_vo_segment, sample_candidates):
         """Test cached LLM response retrieval"""
         mock_cache.get_llm_response.return_value = {
@@ -299,6 +317,7 @@ class TestUtilityMethods:
         assert result[1] == 0.85  # confidence
         assert result[2] == "Cached match"  # reasoning
 
+    @pytest.mark.fast
     def test_get_cached_response_miss(self, mock_config, mock_cache, sample_vo_segment, sample_candidates):
         """Test cache miss returns None"""
         mock_cache.get_llm_response.return_value = None
@@ -314,6 +333,7 @@ class TestUtilityMethods:
 class TestChapterMatching:
     """Test chapter-based matching configuration"""
 
+    @pytest.mark.fast
     def test_chapter_matching_enabled(self, mock_config, mock_cache):
         """Test chapter matching when enabled"""
         mock_config.matching.chapter_matching_enabled = True
@@ -324,6 +344,7 @@ class TestChapterMatching:
         assert matcher.chapter_matching_enabled == True
         assert matcher.topic_mismatch_penalty == 0.20
 
+    @pytest.mark.fast
     def test_chapter_matching_disabled(self, mock_config, mock_cache):
         """Test chapter matching when disabled (default)"""
         # Don't set chapter_matching_enabled (should use getattr default)
@@ -337,6 +358,7 @@ class TestChapterMatching:
 class TestVideoTopicsIntegration:
     """Test video_topics parameter handling"""
 
+    @pytest.mark.fast
     def test_video_topics_provided(self, mock_config, mock_cache):
         """Test TieredMatcher with video_topics"""
         video_topics = {
@@ -353,6 +375,7 @@ class TestVideoTopicsIntegration:
         assert len(matcher.video_topics) == 1
         assert "/video1.mp4" in matcher.video_topics
 
+    @pytest.mark.fast
     def test_video_topics_default_empty(self, mock_config, mock_cache):
         """Test TieredMatcher defaults to empty video_topics"""
         matcher = TieredMatcher(mock_config, mock_cache)

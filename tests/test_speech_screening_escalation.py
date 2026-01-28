@@ -98,6 +98,7 @@ class TestDownloadAudioClipEscalationArgs:
     """Test that download_audio_clip() uses escalation_manager.get_escalation_args()."""
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_tier1_impersonate_args_applied(self, mock_run):
         """AC1: Verify --impersonate args included when Tier 1 (default)."""
         config = _make_mock_config()
@@ -126,6 +127,7 @@ class TestDownloadAudioClipEscalationArgs:
             assert '--impersonate' in cmd, "Tier 1 should include --impersonate"
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_tier2_extractor_args_applied(self, mock_run):
         """AC1: Verify --extractor-args added when Tier 2."""
         config = _make_mock_config()
@@ -159,6 +161,7 @@ class TestDownloadAudioClipEscalationArgs:
             assert '--extractor-args' in cmd, "Tier 2 should include --extractor-args"
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_escalation_args_before_cookies(self, mock_run):
         """AC1: Verify escalation args appear before cookie args in command."""
         config = _make_mock_config()
@@ -199,6 +202,7 @@ class TestDownloadAudioClipNoEscalation:
     """Test that download_audio_clip() works without escalation_manager."""
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_no_impersonate_when_no_manager(self, mock_run):
         """AC2: No --impersonate when both escalation_manager and impersonation_manager are None."""
         config = _make_mock_config()
@@ -229,6 +233,7 @@ class TestDownloadAudioClipNoEscalation:
             assert '--extractor-args' not in cmd
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_impersonation_only_when_no_escalation_manager(self, mock_run):
         """AC2: Falls back to impersonation_manager when escalation_manager is None."""
         config = _make_mock_config()
@@ -260,6 +265,7 @@ class TestDownloadAudioClipNoEscalation:
             imp_mgr.get_impersonate_args.assert_called_once()
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_no_attribute_error_when_none(self, mock_run):
         """AC2: No AttributeError when escalation_manager is None on error path."""
         config = _make_mock_config()
@@ -294,6 +300,7 @@ class TestDownloadAudioClipNoEscalation:
 class TestScreenVideoRecordsFailure:
     """Test that screen_video_for_speech() records failure via escalation_manager."""
 
+    @pytest.mark.integration
     def test_records_failure_on_403_download(self):
         """AC3: record_failure() called when download returns 403 stderr."""
         config = _make_mock_config()
@@ -329,6 +336,7 @@ class TestScreenVideoRecordsFailure:
                 assert call_args[0][0] == "abc123"  # keyword/video_id
                 assert "403" in call_args[0][1]  # error_output
 
+    @pytest.mark.integration
     def test_no_failure_recorded_on_timeout(self):
         """AC3: record_failure() NOT called on timeout (not a 403)."""
         config = _make_mock_config()
@@ -360,6 +368,7 @@ class TestScreenVideoRecordsFailure:
                 # Timeout is not a 403 - no escalation failure recorded
                 esc_mgr.record_failure.assert_not_called()
 
+    @pytest.mark.integration
     def test_no_failure_recorded_on_success(self):
         """AC3: record_failure() NOT called on successful download."""
         config = _make_mock_config()
@@ -402,6 +411,7 @@ class TestScreenVideoRecordsFailure:
 class TestScreenVideoHandlesCookieRotation:
     """Test that screen_video_for_speech() handles EscalationResult.rotate_cookies."""
 
+    @pytest.mark.integration
     def test_cookie_rotation_triggered(self):
         """AC4: When rotate_cookies=True, cookie_rotator.rotate() is called before download."""
         config = _make_mock_config()
@@ -439,6 +449,7 @@ class TestScreenVideoHandlesCookieRotation:
 
                 cookie_rotator.rotate.assert_called_once()
 
+    @pytest.mark.integration
     def test_no_rotation_when_flag_false(self):
         """AC4: No cookie rotation when rotate_cookies=False."""
         config = _make_mock_config()
@@ -474,6 +485,7 @@ class TestScreenVideoHandlesCookieRotation:
 
                 cookie_rotator.rotate.assert_not_called()
 
+    @pytest.mark.integration
     def test_no_crash_when_no_cookie_rotator(self):
         """AC4: No crash when rotate_cookies=True but no cookie_rotator set."""
         config = _make_mock_config()
@@ -513,6 +525,7 @@ class TestScreenVideoHandlesCookieRotation:
 class TestScreenApprovedVideosSharedState:
     """Test that screen_approved_videos() shares escalation state across videos."""
 
+    @pytest.mark.integration
     def test_tier_progression_across_videos(self):
         """AC5: Tier advances from Tier 1 -> Tier 2 across video screening calls."""
         config = _make_mock_config()
@@ -558,6 +571,7 @@ class TestScreenApprovedVideosSharedState:
             f"Expected at least 2 recorded 403s, got {esc_mgr._total_403s}"
         )
 
+    @pytest.mark.integration
     def test_shared_manager_state_persists(self):
         """AC5: Escalation state persists across multiple screen_approved_videos() calls."""
         config = _make_mock_config()
@@ -596,6 +610,7 @@ class TestScreenApprovedVideosSharedState:
             f"Expected Tier 2+ after 2 consecutive 403s, got {state.current_tier.name}"
         )
 
+    @pytest.mark.fast
     def test_different_videos_independent_tiers(self):
         """AC5: Different video IDs maintain independent escalation tiers."""
         config = _make_mock_config()

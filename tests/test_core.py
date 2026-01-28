@@ -382,6 +382,7 @@ def create_test_srt(output_path: Path, duration: float = 60.0, segments: int = 1
 # COMPONENT TESTS
 # =============================================================================
 
+@pytest.mark.requires_api
 def test_api_keys_available():
     """Check that required API keys are available"""
     from dotenv import load_dotenv
@@ -406,6 +407,7 @@ def test_api_keys_available():
     assert has_llm, f"No LLM API key (need GEMINI or ANTHROPIC). Available: {available_str}"
 
 
+@pytest.mark.fast
 def test_config_loading():
     """Test config loading"""
     from src.config import load_config

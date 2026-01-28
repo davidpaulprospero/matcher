@@ -127,11 +127,13 @@ class MockEntityResult:
 class TestValidateEntityImages:
     """Test _validate_entity_images function."""
 
+    @pytest.mark.fast
     def test_validate_empty_dict(self):
         """Test with empty entity images dict."""
         result = _validate_entity_images({})
         assert result == {}
 
+    @pytest.mark.fast
     def test_validate_with_valid_images(self, tmp_path):
         """Test validation with valid image files."""
         # Create temporary image files
@@ -152,6 +154,7 @@ class TestValidateEntityImages:
         assert "Entity1" in result
         assert len(result["Entity1"].images) == 2
 
+    @pytest.mark.fast
     def test_validate_filters_missing_files(self, tmp_path):
         """Test that validation filters out missing image files."""
         # Create one valid file
@@ -175,6 +178,7 @@ class TestValidateEntityImages:
         assert len(result["Entity1"].images) == 1
         assert result["Entity1"].images[0].file == str(valid_img)
 
+    @pytest.mark.fast
     def test_validate_removes_entity_with_no_valid_images(self, tmp_path):
         """Test that entities with no valid images are removed."""
         missing_img = tmp_path / "missing.jpg"
@@ -191,6 +195,7 @@ class TestValidateEntityImages:
         assert "Entity1" not in result
         assert len(result) == 0
 
+    @pytest.mark.fast
     def test_validate_entity_without_images_attribute(self):
         """Test handling of entity results without images attribute."""
         @dataclass
@@ -206,6 +211,7 @@ class TestValidateEntityImages:
         # BadEntity should be filtered out
         assert "BadEntity" not in result
 
+    @pytest.mark.fast
     def test_validate_entity_with_empty_images_list(self):
         """Test handling of entity with empty images list."""
         entity_images = {
@@ -223,6 +229,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_creates_basic_timeline(self, mock_windows_path, mock_duration):
         """Test that create_timeline creates a valid OTIO timeline."""
         # Mock helpers
@@ -258,6 +265,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_creates_video_tracks(self, mock_windows_path, mock_duration):
         """Test that video tracks are created correctly."""
         mock_windows_path.side_effect = lambda x: x
@@ -291,6 +299,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_creates_audio_tracks(self, mock_windows_path, mock_duration):
         """Test that audio tracks are created correctly."""
         mock_windows_path.side_effect = lambda x: x
@@ -319,6 +328,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_timeline_with_custom_frame_rate(self, mock_windows_path, mock_duration):
         """Test timeline creation with custom frame rate."""
         mock_windows_path.side_effect = lambda x: x
@@ -344,6 +354,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_timeline_with_voiceover(self, mock_windows_path, mock_duration, tmp_path):
         """Test timeline creation with voiceover track."""
         mock_windows_path.side_effect = lambda x: x
@@ -377,6 +388,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_timeline_with_strategy_tracks(self, mock_windows_path, mock_duration):
         """Test timeline creation with strategy tracks."""
         mock_windows_path.side_effect = lambda x: x
@@ -412,6 +424,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_timeline_tracks_stack_name(self, mock_windows_path, mock_duration):
         """Test that tracks stack name is empty (DaVinci format)."""
         mock_windows_path.side_effect = lambda x: x
@@ -437,6 +450,7 @@ class TestCreateTimeline:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_timeline_with_empty_matches(self, mock_windows_path, mock_duration):
         """Test timeline creation with empty matches list."""
         mock_windows_path.side_effect = lambda x: x
@@ -463,6 +477,7 @@ class TestResolveVideoSegment:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_audio_first_mode_segment_resolution(self, mock_windows_path, mock_duration, tmp_path):
         """Test that audio-first mode correctly resolves video segments."""
         mock_windows_path.side_effect = lambda x: x
@@ -519,6 +534,7 @@ class TestResolveVideoSegment:
 class TestClipCountWarnings:
     """Test clip count warning functionality for DaVinci Resolve limits."""
 
+    @pytest.mark.fast
     def test_count_timeline_clips_counts_clips_only(self):
         """Test that _count_timeline_clips counts only Clips, not Gaps."""
         from src.otio.timeline import _count_timeline_clips
@@ -557,6 +573,7 @@ class TestClipCountWarnings:
         # Should count 2 clips, not the gap
         assert _count_timeline_clips(timeline) == 2
 
+    @pytest.mark.fast
     def test_count_timeline_clips_counts_across_tracks(self):
         """Test that _count_timeline_clips counts clips across all tracks."""
         from src.otio.timeline import _count_timeline_clips
@@ -580,6 +597,7 @@ class TestClipCountWarnings:
         # Should count 6 clips total (3 tracks * 2 clips)
         assert _count_timeline_clips(timeline) == 6
 
+    @pytest.mark.fast
     def test_count_timeline_clips_empty_timeline(self):
         """Test that _count_timeline_clips returns 0 for empty timeline."""
         from src.otio.timeline import _count_timeline_clips
@@ -587,6 +605,7 @@ class TestClipCountWarnings:
         timeline = otio.schema.Timeline(name="Empty")
         assert _count_timeline_clips(timeline) == 0
 
+    @pytest.mark.fast
     def test_log_clip_count_warnings_below_threshold(self, caplog):
         """Test that no warning is logged when clip count is below threshold."""
         from src.otio.timeline import _log_clip_count_warnings, CLIP_COUNT_WARNING_THRESHOLD
@@ -599,6 +618,7 @@ class TestClipCountWarnings:
         assert "approaching DaVinci limit" not in caplog.text
         assert "exceeding safe limit" not in caplog.text
 
+    @pytest.mark.fast
     def test_log_clip_count_warnings_at_warning_threshold(self, caplog):
         """Test that warning is logged when clip count reaches warning threshold."""
         import logging
@@ -612,6 +632,7 @@ class TestClipCountWarnings:
         assert len(caplog.records) >= 1
         assert caplog.records[-1].levelno == logging.WARNING
 
+    @pytest.mark.fast
     def test_log_clip_count_warnings_at_error_threshold(self, caplog):
         """Test that error is logged when clip count reaches error threshold."""
         import logging
@@ -626,6 +647,7 @@ class TestClipCountWarnings:
         assert len(caplog.records) >= 1
         assert caplog.records[-1].levelno == logging.ERROR
 
+    @pytest.mark.fast
     def test_log_clip_count_warnings_error_includes_lite_suggestion(self, caplog):
         """Test that error message includes LITE mode suggestion."""
         import logging
@@ -637,6 +659,7 @@ class TestClipCountWarnings:
         # Should mention LITE mode as solution
         assert "LITE mode" in caplog.text
 
+    @pytest.mark.fast
     def test_threshold_constants_are_correct(self):
         """Test that threshold constants have expected values."""
         from src.otio.timeline import CLIP_COUNT_WARNING_THRESHOLD, CLIP_COUNT_ERROR_THRESHOLD
@@ -650,6 +673,7 @@ class TestClipCountWarnings:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_create_timeline_calls_clip_count_check(self, mock_windows_path, mock_duration, caplog):
         """Test that create_timeline calls clip count check."""
         import logging
@@ -680,6 +704,7 @@ class TestClipCountWarnings:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_create_timeline_logs_warning_for_many_clips(self, mock_windows_path, mock_duration, caplog):
         """Test that create_timeline logs warning when clip count is high.
 
@@ -724,6 +749,7 @@ class TestGapModeExtend:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gap_mode_extend_parameter_accepted(self, mock_windows_path, mock_duration):
         """Test that gap_mode='extend' is accepted as a valid option."""
         mock_windows_path.side_effect = lambda x: x
@@ -759,6 +785,7 @@ class TestGapModeExtend:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gap_mode_extend_extends_previous_clip(self, mock_windows_path, mock_duration):
         """Test that extend mode extends the previous clip to fill gaps."""
         mock_windows_path.side_effect = lambda x: x
@@ -813,6 +840,7 @@ class TestGapModeExtend:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gap_mode_extend_limits_to_2x_original(self, mock_windows_path, mock_duration):
         """Test that extension is limited to 2x original clip duration."""
         mock_windows_path.side_effect = lambda x: x
@@ -866,6 +894,7 @@ class TestGapModeExtend:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gap_mode_extend_first_segment_gap_not_extended(self, mock_windows_path, mock_duration):
         """Test that leading gap (before first segment) is not extended (nothing to extend)."""
         mock_windows_path.side_effect = lambda x: x
@@ -904,6 +933,7 @@ class TestGapModeExtend:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gap_mode_extend_logs_extension(self, mock_windows_path, mock_duration, caplog):
         """Test that extension is logged at debug level."""
         import logging
@@ -939,6 +969,7 @@ class TestGapModeExtend:
         # Should log about extending the previous clip
         assert "Extended previous clip" in caplog.text or "Gap mode: extend" in caplog.text
 
+    @pytest.mark.fast
     def test_max_extension_factor_constant_is_2(self):
         """Test that MAX_CLIP_EXTENSION_FACTOR is set to 2.0."""
         from src.otio.timeline import MAX_CLIP_EXTENSION_FACTOR

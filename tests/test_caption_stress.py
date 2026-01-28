@@ -58,6 +58,7 @@ def make_caption_result(video_id: str, segment_count: int = 10) -> CaptionResult
 class TestCaptionStressSuite:
     """Stress tests for high-concurrency caption fetching (US-010 Sprint 7)."""
 
+    @pytest.mark.fast
     def test_100_videos_16_workers_no_deadlock(self):
         """Test: 100 videos with 16 workers completes without deadlock or memory leak.
 
@@ -129,6 +130,7 @@ class TestCaptionStressSuite:
         # Verify all videos were actually fetched (no silently dropped)
         assert len(fetch_order) == 100
 
+    @pytest.mark.fast
     def test_50_percent_error_rate_no_cascade_failure(self):
         """Test: 50% error rate doesn't cause cascade failure or worker starvation.
 
@@ -208,6 +210,7 @@ class TestCaptionStressSuite:
             if isinstance(result, dict):
                 assert 'video_id' in result or 'error' in result or 'unavailable' in result
 
+    @pytest.mark.fast
     def test_mixed_latency_fair_scheduling(self):
         """Test: mixed slow/fast videos (0.1s to 5s latency) maintains fair scheduling.
 
@@ -354,6 +357,7 @@ class TestCaptionStressSuite:
         assert thread_delta <= 2, \
             f"Threads leaked: {thread_delta} extra threads after cancellation"
 
+    @pytest.mark.fast
     def test_concurrent_metrics_updates_thread_safe(self):
         """Test metrics are correctly updated with high concurrency.
 
@@ -421,6 +425,7 @@ class TestCaptionStressSuite:
         for lang in languages:
             assert metrics.language_distribution.get(lang, 0) == 60  # 20 * 3
 
+    @pytest.mark.fast
     def test_progress_callback_thread_safety(self):
         """Test progress callback doesn't cause issues with concurrent invocations.
 

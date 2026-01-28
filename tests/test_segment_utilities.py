@@ -22,6 +22,7 @@ from src.utils import Chapter, SRTSegment, parse_srt_file, write_srt_file
 class TestChapter:
     """Test Chapter dataclass"""
 
+    @pytest.mark.fast
     def test_chapter_initialization(self):
         """Test basic initialization"""
         chapter = Chapter(
@@ -38,6 +39,7 @@ class TestChapter:
         assert chapter.title == "Introduction"
         assert chapter.topics == ["overview", "background"]
 
+    @pytest.mark.fast
     def test_chapter_minimal_initialization(self):
         """Test with minimal required fields"""
         chapter = Chapter(
@@ -52,6 +54,7 @@ class TestChapter:
         assert chapter.title == ""
         assert chapter.topics == []
 
+    @pytest.mark.fast
     def test_chapter_contains_segment(self):
         """Test contains_segment() method"""
         chapter = Chapter(
@@ -69,6 +72,7 @@ class TestChapter:
         assert chapter.contains_segment(9) is False
         assert chapter.contains_segment(21) is False
 
+    @pytest.mark.fast
     def test_chapter_contains_segment_single_segment(self):
         """Test contains_segment() with single-segment chapter"""
         chapter = Chapter(
@@ -81,6 +85,7 @@ class TestChapter:
         assert chapter.contains_segment(4) is False
         assert chapter.contains_segment(6) is False
 
+    @pytest.mark.fast
     def test_chapter_to_dict(self):
         """Test to_dict() method"""
         chapter = Chapter(
@@ -99,6 +104,7 @@ class TestChapter:
         assert result['title'] == "Chapter 1"
         assert result['topics'] == ["topic1", "topic2"]
 
+    @pytest.mark.fast
     def test_chapter_multiple_topics(self):
         """Test with many topics"""
         topics = [f"topic{i}" for i in range(10)]
@@ -117,6 +123,7 @@ class TestChapter:
 class TestSRTSegment:
     """Test SRTSegment dataclass"""
 
+    @pytest.mark.fast
     def test_srt_segment_basic_initialization(self):
         """Test basic initialization"""
         segment = SRTSegment(
@@ -137,6 +144,7 @@ class TestSRTSegment:
         assert segment.topics == []
         assert segment.is_broll is False
 
+    @pytest.mark.fast
     def test_srt_segment_with_all_fields(self):
         """Test with all fields populated"""
         segment = SRTSegment(
@@ -163,6 +171,7 @@ class TestSRTSegment:
         assert segment.topics == ["topic1", "topic2"]
         assert segment.is_broll is True
 
+    @pytest.mark.fast
     def test_srt_segment_to_dict(self):
         """Test to_dict() method"""
         segment = SRTSegment(
@@ -185,6 +194,7 @@ class TestSRTSegment:
         assert result['topics'] == []
         assert result['is_broll'] is False
 
+    @pytest.mark.fast
     def test_srt_segment_to_dict_with_all_fields(self):
         """Test to_dict() with all fields"""
         segment = SRTSegment(
@@ -213,6 +223,7 @@ class TestSRTSegment:
         assert result['topics'] == ["topic1"]
         assert result['is_broll'] is True
 
+    @pytest.mark.fast
     def test_srt_segment_duration_calculation(self):
         """Test duration can be calculated from times"""
         segment = SRTSegment(
@@ -225,6 +236,7 @@ class TestSRTSegment:
         duration = segment.end_time - segment.start_time
         assert duration == 5.5
 
+    @pytest.mark.fast
     def test_srt_segment_empty_text(self):
         """Test with empty text"""
         segment = SRTSegment(
@@ -240,6 +252,7 @@ class TestSRTSegment:
 class TestParseSrtFile:
     """Test parse_srt_file() function"""
 
+    @pytest.mark.fast
     def test_parse_srt_file_basic(self, tmp_path):
         """Test parsing basic SRT file"""
         srt_content = """1
@@ -267,6 +280,7 @@ Third segment
         assert segments[2].index == 3
         assert segments[2].text == "Third segment"
 
+    @pytest.mark.fast
     def test_parse_srt_file_timestamps(self, tmp_path):
         """Test timestamp parsing"""
         srt_content = """1
@@ -282,6 +296,7 @@ Test segment
         assert segments[0].start_time == 10.5
         assert segments[0].end_time == 15.75
 
+    @pytest.mark.fast
     def test_parse_srt_file_multiline_text(self, tmp_path):
         """Test parsing segment with multiline text"""
         srt_content = """1
@@ -300,11 +315,13 @@ Third line
         assert "Second line" in segments[0].text
         assert "Third line" in segments[0].text
 
+    @pytest.mark.fast
     def test_parse_srt_file_nonexistent(self):
         """Test with nonexistent file"""
         segments = parse_srt_file("/nonexistent/file.srt")
         assert segments == []
 
+    @pytest.mark.fast
     def test_parse_srt_file_empty(self, tmp_path):
         """Test with empty file"""
         srt_file = tmp_path / "empty.srt"
@@ -313,6 +330,7 @@ Third line
         segments = parse_srt_file(str(srt_file))
         assert segments == []
 
+    @pytest.mark.fast
     def test_parse_srt_file_malformed_skips_bad_entries(self, tmp_path):
         """Test that malformed entries are skipped"""
         srt_content = """1
@@ -340,6 +358,7 @@ Another valid segment
 class TestWriteSrtFile:
     """Test write_srt_file() function"""
 
+    @pytest.mark.fast
     def test_write_srt_file_basic(self, tmp_path):
         """Test writing basic SRT file"""
         segments = [
@@ -359,6 +378,7 @@ class TestWriteSrtFile:
         assert "Second" in content
         assert "-->" in content
 
+    @pytest.mark.fast
     def test_write_srt_file_timestamps(self, tmp_path):
         """Test timestamp formatting"""
         segments = [
@@ -372,6 +392,7 @@ class TestWriteSrtFile:
         assert "00:00:10,500" in content
         assert "00:00:15,750" in content
 
+    @pytest.mark.fast
     def test_write_srt_file_empty_list(self, tmp_path):
         """Test with empty segment list"""
         output_file = tmp_path / "empty.srt"
@@ -385,6 +406,7 @@ class TestWriteSrtFile:
 class TestSrtRoundtrip:
     """Test roundtrip parsing and writing"""
 
+    @pytest.mark.fast
     def test_srt_roundtrip(self, tmp_path):
         """Test parse → write → parse roundtrip"""
         # Create original file
@@ -413,6 +435,7 @@ class TestSrtRoundtrip:
 class TestSegmentEdgeCases:
     """Test edge cases for segment utilities"""
 
+    @pytest.mark.fast
     def test_chapter_zero_length(self):
         """Test chapter with same start and end"""
         chapter = Chapter(
@@ -424,6 +447,7 @@ class TestSegmentEdgeCases:
         assert chapter.contains_segment(10) is True
         assert chapter.contains_segment(9) is False
 
+    @pytest.mark.fast
     def test_chapter_large_range(self):
         """Test chapter with large segment range"""
         chapter = Chapter(
@@ -435,6 +459,7 @@ class TestSegmentEdgeCases:
         assert chapter.contains_segment(5000) is True
         assert chapter.contains_segment(10001) is False
 
+    @pytest.mark.fast
     def test_srt_segment_zero_duration(self):
         """Test segment with zero duration"""
         segment = SRTSegment(
@@ -446,6 +471,7 @@ class TestSegmentEdgeCases:
 
         assert segment.end_time - segment.start_time == 0.0
 
+    @pytest.mark.fast
     def test_srt_segment_very_long_text(self):
         """Test segment with very long text"""
         long_text = "A" * 10000
@@ -458,6 +484,7 @@ class TestSegmentEdgeCases:
 
         assert len(segment.text) == 10000
 
+    @pytest.mark.fast
     def test_parse_srt_file_unicode_content(self, tmp_path):
         """Test parsing SRT with Unicode characters"""
         srt_content = """1

@@ -45,6 +45,7 @@ class MockLLMRequest:
 class TestOllamaClientInit:
     """Test OllamaClient initialization"""
 
+    @pytest.mark.fast
     def test_init_default_values(self, tmp_path):
         """Test initialization with default values"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -55,6 +56,7 @@ class TestOllamaClientInit:
         assert client.host == "http://localhost:11434"
         assert client.provider_name == "ollama"
 
+    @pytest.mark.fast
     def test_init_custom_model(self, tmp_path):
         """Test initialization with custom model"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -66,6 +68,7 @@ class TestOllamaClientInit:
 
         assert client.model == "mistral"
 
+    @pytest.mark.fast
     def test_init_custom_host(self, tmp_path):
         """Test initialization with custom host"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -77,6 +80,7 @@ class TestOllamaClientInit:
 
         assert client.host == "http://192.168.1.100:11434"
 
+    @pytest.mark.fast
     def test_init_strips_trailing_slash(self, tmp_path):
         """Test that trailing slash is stripped from host"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -96,6 +100,7 @@ class TestOllamaClientInit:
 class TestOllamaAPICalls:
     """Test Ollama API calls"""
 
+    @pytest.mark.requires_network
     def test_call_api_success(self, tmp_path):
         """Test successful API call"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -116,6 +121,7 @@ class TestOllamaAPICalls:
             assert "llama3.2" in str(call_args)
             assert "Hello" in str(call_args)
 
+    @pytest.mark.requires_network
     def test_call_api_with_custom_temperature(self, tmp_path):
         """Test API call includes temperature when not default"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -134,6 +140,7 @@ class TestOllamaAPICalls:
             call_kwargs = mock_post.call_args[1]
             assert call_kwargs['json']['temperature'] == 0.5
 
+    @pytest.mark.requires_network
     def test_call_api_default_temperature_not_included(self, tmp_path):
         """Test API call doesn't include temperature when default 0.7"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -152,6 +159,7 @@ class TestOllamaAPICalls:
             call_kwargs = mock_post.call_args[1]
             assert 'temperature' not in call_kwargs['json']
 
+    @pytest.mark.requires_network
     def test_call_api_empty_response(self, tmp_path):
         """Test handling of empty response"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -176,6 +184,7 @@ class TestOllamaAPICalls:
 class TestOllamaErrorHandling:
     """Test Ollama error handling"""
 
+    @pytest.mark.fast
     def test_requests_import_error(self, tmp_path):
         """Test handling when requests package not installed"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -192,6 +201,7 @@ class TestOllamaErrorHandling:
 
                 assert "requests package not installed" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_timeout_error(self, tmp_path):
         """Test handling of timeout errors"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -207,6 +217,7 @@ class TestOllamaErrorHandling:
 
             assert "timed out" in str(exc_info.value).lower()
 
+    @pytest.mark.requires_network
     def test_connection_error(self, tmp_path):
         """Test handling of connection errors"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -223,6 +234,7 @@ class TestOllamaErrorHandling:
             assert "Failed to connect" in str(exc_info.value)
             assert "Is Ollama running?" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_http_404_model_not_found(self, tmp_path):
         """Test handling of 404 error (model not found)"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -245,6 +257,7 @@ class TestOllamaErrorHandling:
             assert "ollama pull" in str(exc_info.value)
             assert "nonexistent-model" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_http_other_error(self, tmp_path):
         """Test handling of other HTTP errors"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -265,6 +278,7 @@ class TestOllamaErrorHandling:
 
             assert "API error" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_http_error_without_response(self, tmp_path):
         """Test handling of HTTP error with response=None triggers AttributeError path"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -283,6 +297,7 @@ class TestOllamaErrorHandling:
                 request = MockLLMRequest(prompt="Test")
                 client._call_api(request)
 
+    @pytest.mark.requires_network
     def test_generic_exception(self, tmp_path):
         """Test handling of generic exceptions"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -305,6 +320,7 @@ class TestOllamaErrorHandling:
 class TestOllamaIntegration:
     """Test Ollama integration with base client"""
 
+    @pytest.mark.fast
     def test_provider_name_property(self, tmp_path):
         """Test provider_name property returns 'ollama'"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -313,6 +329,7 @@ class TestOllamaIntegration:
 
         assert client.provider_name == "ollama"
 
+    @pytest.mark.requires_network
     def test_timeout_passed_to_request(self, tmp_path):
         """Test that timeout is passed to requests.post"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -330,6 +347,7 @@ class TestOllamaIntegration:
             call_kwargs = mock_post.call_args[1]
             assert call_kwargs['timeout'] == 120
 
+    @pytest.mark.requires_network
     def test_correct_endpoint_used(self, tmp_path):
         """Test that correct API endpoint is used"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -358,6 +376,7 @@ class TestOllamaIntegration:
 class TestOllamaEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.requires_network
     def test_empty_prompt(self, tmp_path):
         """Test API call with empty prompt"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -376,6 +395,7 @@ class TestOllamaEdgeCases:
             call_kwargs = mock_post.call_args[1]
             assert call_kwargs['json']['prompt'] == ""
 
+    @pytest.mark.requires_network
     def test_long_prompt(self, tmp_path):
         """Test API call with very long prompt"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -396,6 +416,7 @@ class TestOllamaEdgeCases:
             call_kwargs = mock_post.call_args[1]
             assert len(call_kwargs['json']['prompt']) == 10000
 
+    @pytest.mark.requires_network
     def test_unicode_prompt(self, tmp_path):
         """Test API call with unicode characters"""
         from src.llm_client.providers.ollama import OllamaClient
@@ -413,6 +434,7 @@ class TestOllamaEdgeCases:
             call_kwargs = mock_post.call_args[1]
             assert "" in call_kwargs['json']['prompt']
 
+    @pytest.mark.requires_network
     def test_stream_always_false(self, tmp_path):
         """Test that stream is always set to False"""
         from src.llm_client.providers.ollama import OllamaClient

@@ -33,6 +33,7 @@ def _make_config(download_root=None, image_root=None):
 class TestValidateRootDirCreatesMissing:
     """Test that validate_root_directories() calls mkdir for missing absolute dirs."""
 
+    @pytest.mark.fast
     def test_creates_download_root_dir(self, tmp_path):
         """mkdir is called for download.root_dir when the path is absolute but doesn't exist."""
         missing = tmp_path / "videos"
@@ -42,6 +43,7 @@ class TestValidateRootDirCreatesMissing:
 
         assert missing.exists(), "download.root_dir should have been created"
 
+    @pytest.mark.fast
     def test_creates_image_search_root_dir(self, tmp_path):
         """mkdir is called for image_search.root_dir when the path is absolute but doesn't exist."""
         missing = tmp_path / "images"
@@ -51,6 +53,7 @@ class TestValidateRootDirCreatesMissing:
 
         assert missing.exists(), "image_search.root_dir should have been created"
 
+    @pytest.mark.fast
     def test_creates_both_root_dirs(self, tmp_path):
         """Both download and image root dirs are created when both missing."""
         vid = tmp_path / "v"
@@ -62,6 +65,7 @@ class TestValidateRootDirCreatesMissing:
         assert vid.exists()
         assert img.exists()
 
+    @pytest.mark.fast
     def test_existing_dir_no_error(self, tmp_path):
         """An already-existing root dir is accepted without error."""
         existing = tmp_path / "already"
@@ -71,6 +75,7 @@ class TestValidateRootDirCreatesMissing:
         # Should not raise
         validate_root_directories(config)
 
+    @pytest.mark.fast
     def test_creates_nested_dirs(self, tmp_path):
         """mkdir(parents=True) creates intermediate directories."""
         nested = tmp_path / "a" / "b" / "c"
@@ -88,6 +93,7 @@ class TestValidateRootDirCreatesMissing:
 class TestValidateRootDirRejectsRelative:
     """Test that relative paths cause SystemExit."""
 
+    @pytest.mark.fast
     def test_relative_download_root_exits(self):
         """SystemExit when download.root_dir is relative (e.g., './videos')."""
         config = _make_config(download_root="./videos")
@@ -95,6 +101,7 @@ class TestValidateRootDirRejectsRelative:
         with pytest.raises(SystemExit):
             validate_root_directories(config)
 
+    @pytest.mark.fast
     def test_relative_image_root_exits(self):
         """SystemExit when image_search.root_dir is relative."""
         config = _make_config(image_root="images")
@@ -102,6 +109,7 @@ class TestValidateRootDirRejectsRelative:
         with pytest.raises(SystemExit):
             validate_root_directories(config)
 
+    @pytest.mark.fast
     def test_relative_both_exits(self):
         """SystemExit when both root_dirs are relative."""
         config = _make_config(download_root="./v", image_root="./i")
@@ -109,6 +117,7 @@ class TestValidateRootDirRejectsRelative:
         with pytest.raises(SystemExit):
             validate_root_directories(config)
 
+    @pytest.mark.fast
     def test_error_message_mentions_path(self, capsys):
         """Error output includes the offending relative path."""
         config = _make_config(download_root="./videos")
@@ -127,6 +136,7 @@ class TestValidateRootDirRejectsRelative:
 class TestValidateRootDirHandlesNone:
     """Test no error when root_dir is None or empty string."""
 
+    @pytest.mark.fast
     def test_none_download_root(self):
         """No error when download.root_dir is None."""
         config = _make_config(download_root=None, image_root=None)
@@ -134,6 +144,7 @@ class TestValidateRootDirHandlesNone:
         # Should not raise
         validate_root_directories(config)
 
+    @pytest.mark.fast
     def test_empty_string_download_root(self):
         """No error when download.root_dir is empty string."""
         config = _make_config(download_root="", image_root="")
@@ -141,6 +152,7 @@ class TestValidateRootDirHandlesNone:
         # Should not raise
         validate_root_directories(config)
 
+    @pytest.mark.fast
     def test_none_image_root_with_valid_download(self, tmp_path):
         """None image_root doesn't interfere with valid download root."""
         vid = tmp_path / "v"
@@ -158,6 +170,7 @@ class TestValidateRootDirHandlesNone:
 class TestValidateRootDirReportsFailure:
     """Test error message includes path when mkdir raises PermissionError."""
 
+    @pytest.mark.fast
     def test_permission_error_includes_path(self, capsys):
         """Error message includes path when mkdir fails with PermissionError."""
         bad_path = "Z:/nonexistent/protected"
@@ -172,6 +185,7 @@ class TestValidateRootDirReportsFailure:
         captured = capsys.readouterr()
         assert bad_path in captured.out
 
+    @pytest.mark.fast
     def test_permission_error_image_root(self, capsys):
         """Error message includes path for image_search.root_dir failure."""
         bad_path = "Z:/protected/images"
@@ -186,6 +200,7 @@ class TestValidateRootDirReportsFailure:
         captured = capsys.readouterr()
         assert bad_path in captured.out
 
+    @pytest.mark.fast
     def test_oserror_reported(self, capsys):
         """Generic OSError is also reported with path."""
         bad_path = "X:/broken"
@@ -208,6 +223,7 @@ class TestValidateRootDirReportsFailure:
 class TestMakePathsProjectRelative:
     """Test that make_paths_project_relative() resolves relative paths to project_dir."""
 
+    @pytest.mark.fast
     def test_output_dir_resolved(self, tmp_path):
         """Relative output_dir becomes project-relative."""
         config = MagicMock()
@@ -221,6 +237,7 @@ class TestMakePathsProjectRelative:
         expected = str(tmp_path / "output")
         assert result.output.output_dir == expected
 
+    @pytest.mark.fast
     def test_download_dir_resolved(self, tmp_path):
         """Relative download_dir becomes project-relative."""
         config = MagicMock()
@@ -234,6 +251,7 @@ class TestMakePathsProjectRelative:
         expected = str(tmp_path / "videos")
         assert result.download.download_dir == expected
 
+    @pytest.mark.fast
     def test_cache_dir_resolved(self, tmp_path):
         """Relative cache_dir becomes project-relative."""
         config = MagicMock()
@@ -247,6 +265,7 @@ class TestMakePathsProjectRelative:
         expected = str(tmp_path / ".cache")
         assert result.transcription.cache_dir == expected
 
+    @pytest.mark.fast
     def test_absolute_paths_not_changed(self, tmp_path):
         """Absolute paths are NOT converted to project-relative."""
         abs_path = str(tmp_path / "absolute_output")
@@ -261,6 +280,7 @@ class TestMakePathsProjectRelative:
         # Absolute path should remain unchanged
         assert result.output.output_dir == abs_path
 
+    @pytest.mark.fast
     def test_returns_config_object(self, tmp_path):
         """make_paths_project_relative returns the config object."""
         config = MagicMock()

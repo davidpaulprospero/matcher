@@ -23,6 +23,7 @@ class TestGeminiResearchResultParsing:
     """AC1: Test research() returns correctly parsed ResearchResult objects."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_research_returns_research_result_object(self):
         """Research method returns a ResearchResult dataclass."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -49,6 +50,7 @@ class TestGeminiResearchResultParsing:
                 assert result.model == 'gemini-2.0-flash'
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_research_result_contains_sources_from_grounding(self):
         """Research result includes sources extracted from grounding metadata."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -87,6 +89,7 @@ class TestGeminiResearchResultParsing:
                 assert result.search_queries == ["query 1", "query 2"]
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_research_result_with_quick_depth(self):
         """Research with depth='quick' returns concise result."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -113,6 +116,7 @@ class TestGeminiResearchResultParsing:
                 assert "concise summary" in call_args.lower()
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_research_result_with_comprehensive_depth(self):
         """Research with depth='comprehensive' returns detailed result."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -138,6 +142,7 @@ class TestGeminiResearchResultParsing:
                 assert "comprehensively" in call_args.lower()
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_research_result_with_custom_system_prompt(self):
         """Research accepts custom system prompt."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -171,6 +176,7 @@ class TestGeminiQuotaHandling:
     """AC2: Test research() handles API quota exceeded (429) with exponential backoff."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_429_triggers_exponential_backoff(self):
         """429 error triggers exponential backoff retry."""
         from src.research.gemini_client import GeminiClient, INITIAL_BACKOFF, MAX_RETRIES
@@ -209,6 +215,7 @@ class TestGeminiQuotaHandling:
                 assert mock_sleep.call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_resource_exhausted_triggers_retry(self):
         """'resource_exhausted' error string triggers retry."""
         from src.research.gemini_client import GeminiClient
@@ -240,6 +247,7 @@ class TestGeminiQuotaHandling:
                 assert call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_max_retries_exceeded_raises_original_error(self):
         """After MAX_RETRIES, re-raises the original exception."""
         from src.research.gemini_client import GeminiClient, MAX_RETRIES
@@ -266,6 +274,7 @@ class TestGeminiQuotaHandling:
                 assert mock_sleep.call_count == MAX_RETRIES - 1
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_backoff_increases_exponentially(self):
         """Backoff time increases exponentially with jitter."""
         from src.research.gemini_client import GeminiClient, INITIAL_BACKOFF, MAX_BACKOFF
@@ -313,6 +322,7 @@ class TestGeminiNetworkTimeoutHandling:
     """AC3: Test research() handles network timeout with configurable retry."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_timeout_error_triggers_retry(self):
         """Timeout error triggers retry logic."""
         from src.research.gemini_client import GeminiClient
@@ -344,6 +354,7 @@ class TestGeminiNetworkTimeoutHandling:
                 assert call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_connection_error_triggers_retry(self):
         """Connection error triggers retry logic."""
         from src.research.gemini_client import GeminiClient
@@ -375,6 +386,7 @@ class TestGeminiNetworkTimeoutHandling:
                 assert call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_unavailable_error_triggers_retry(self):
         """503 Service Unavailable triggers retry."""
         from src.research.gemini_client import GeminiClient
@@ -406,6 +418,7 @@ class TestGeminiNetworkTimeoutHandling:
                 assert call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_overloaded_error_triggers_retry(self):
         """Overloaded error triggers retry."""
         from src.research.gemini_client import GeminiClient
@@ -445,6 +458,7 @@ class TestGeminiMalformedResponseHandling:
     """AC4: Test research() handles malformed/empty response without crash."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_empty_text_response_handled(self):
         """Empty text response returns empty string content."""
         from src.research.gemini_client import GeminiClient
@@ -467,6 +481,7 @@ class TestGeminiMalformedResponseHandling:
             assert result.topic == "test query"
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_none_candidates_handled(self):
         """None candidates in response handled gracefully."""
         from src.research.gemini_client import GeminiClient
@@ -490,6 +505,7 @@ class TestGeminiMalformedResponseHandling:
             assert result.search_queries == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_empty_candidates_list_handled(self):
         """Empty candidates list handled gracefully."""
         from src.research.gemini_client import GeminiClient
@@ -512,6 +528,7 @@ class TestGeminiMalformedResponseHandling:
             assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_missing_grounding_metadata_handled(self):
         """Missing grounding_metadata on candidate handled gracefully."""
         from src.research.gemini_client import GeminiClient
@@ -538,6 +555,7 @@ class TestGeminiMalformedResponseHandling:
             assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_response_without_text_attribute_uses_str(self):
         """Response without text attribute falls back to str()."""
         from src.research.gemini_client import GeminiClient
@@ -561,6 +579,7 @@ class TestGeminiMalformedResponseHandling:
             assert "Fallback string content" in result.content
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_none_web_search_queries_handled(self):
         """None web_search_queries in grounding handled gracefully."""
         from src.research.gemini_client import GeminiClient
@@ -599,6 +618,7 @@ class TestGeminiAPIKeyValidation:
     """AC5: Test GeminiClient validates API key format before making requests."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_missing_api_key_raises_value_error(self):
         """Missing API key raises ValueError."""
         from src.research.gemini_client import GeminiClient
@@ -615,6 +635,7 @@ class TestGeminiAPIKeyValidation:
             assert "GEMINI_API_KEY not set" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_empty_string_api_key_raises_value_error(self):
         """Empty string API key raises ValueError."""
         from src.research.gemini_client import GeminiClient
@@ -626,6 +647,7 @@ class TestGeminiAPIKeyValidation:
             assert "GEMINI_API_KEY not set" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_api_key_from_parameter_preferred(self):
         """API key from parameter is used over environment variable."""
         from src.research.gemini_client import GeminiClient
@@ -640,6 +662,7 @@ class TestGeminiAPIKeyValidation:
                 assert client.api_key == 'param-api-key'
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_api_key_from_environment_used_when_no_param(self):
         """API key from environment variable is used when no parameter."""
         from src.research.gemini_client import GeminiClient
@@ -655,6 +678,7 @@ class TestGeminiAPIKeyValidation:
                 assert client.api_key == env_key
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_error_message_suggests_env_or_parameter(self):
         """Error message suggests both env variable and parameter options."""
         from src.research.gemini_client import GeminiClient
@@ -681,6 +705,7 @@ class TestGeminiOtherMethods:
     """Additional tests for fact_check, compare, and api_docs methods."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_fact_check_returns_research_result(self):
         """fact_check method returns ResearchResult."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -703,6 +728,7 @@ class TestGeminiOtherMethods:
             assert result.topic == "Fact Check"
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_compare_returns_research_result(self):
         """compare method returns ResearchResult."""
         from src.research.gemini_client import GeminiClient, ResearchResult
@@ -726,6 +752,7 @@ class TestGeminiOtherMethods:
             assert "Item B" in result.topic
 
     @pytest.mark.unit
+    @pytest.mark.requires_api
     def test_api_docs_returns_research_result(self):
         """api_docs method returns ResearchResult."""
         from src.research.gemini_client import GeminiClient, ResearchResult

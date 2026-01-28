@@ -49,6 +49,7 @@ class TestCachedCaption:
         assert cached.fetch_timestamp == 1234567890.0
         assert cached.duration == 4.0
 
+    @pytest.mark.fast
     def test_cached_caption_to_dict(self):
         """Test serialization to dict"""
         cached = CachedCaption(
@@ -71,6 +72,7 @@ class TestCachedCaption:
         assert result['fetch_timestamp'] == 1000000.0
         assert result['duration'] == 1.0
 
+    @pytest.mark.fast
     def test_cached_caption_from_dict(self):
         """Test deserialization from dict"""
         data = {
@@ -93,6 +95,7 @@ class TestCachedCaption:
         assert cached.fetch_timestamp == 9999999.0
         assert cached.duration == 3.0
 
+    @pytest.mark.fast
     def test_cached_caption_to_caption_result(self):
         """Test conversion to CaptionResult"""
         cached = CachedCaption(
@@ -150,6 +153,7 @@ class TestCaptionCacheBasics:
         """Create a CaptionCache instance"""
         return CaptionCache(mock_config)
 
+    @pytest.mark.fast
     def test_cache_initialization(self, mock_config, temp_cache_dir):
         """Test cache initializes correctly"""
         cache = CaptionCache(mock_config)
@@ -158,6 +162,7 @@ class TestCaptionCacheBasics:
         assert cache.max_age_days == 30
         assert cache.cache_dir == temp_cache_dir
 
+    @pytest.mark.fast
     def test_cache_initialization_defaults(self, tmp_path):
         """Test cache with no config uses defaults"""
         # Patch expanduser to use temp directory
@@ -167,6 +172,7 @@ class TestCaptionCacheBasics:
             assert cache.enabled is True
             assert cache.max_age_days == 30
 
+    @pytest.mark.fast
     def test_cache_disabled(self, temp_cache_dir):
         """Test cache respects enabled=False"""
         config = Mock()
@@ -178,6 +184,7 @@ class TestCaptionCacheBasics:
 
         assert cache.enabled is False
 
+    @pytest.mark.fast
     def test_make_cache_key(self, cache):
         """Test cache key generation"""
         key = cache._make_cache_key("dQw4w9WgXcQ", "en")
@@ -228,6 +235,7 @@ class TestCaptionCacheOperations:
             format_source="vtt"
         )
 
+    @pytest.mark.fast
     def test_store_and_get(self, cache, sample_result):
         """Test storing and retrieving captions"""
         # Store
@@ -243,11 +251,13 @@ class TestCaptionCacheOperations:
         assert cached.is_auto_generated is False
         assert cached.format_source == "vtt"
 
+    @pytest.mark.fast
     def test_cache_miss(self, cache):
         """Test cache miss returns None"""
         cached = cache.get_caption("nonexistent1", "en")
         assert cached is None
 
+    @pytest.mark.fast
     def test_cache_miss_different_language(self, cache, sample_result):
         """Test cache miss for different language"""
         cache.store(sample_result)
@@ -256,6 +266,7 @@ class TestCaptionCacheOperations:
         cached = cache.get_caption("dQw4w9WgXcQ", "es")
         assert cached is None
 
+    @pytest.mark.fast
     def test_store_empty_result(self, cache):
         """Test storing empty result is rejected"""
         empty_result = CaptionResult(
@@ -272,6 +283,7 @@ class TestCaptionCacheOperations:
         cached = cache.get_caption("emptyvideoxx", "en")
         assert cached is None
 
+    @pytest.mark.fast
     def test_store_when_disabled(self, temp_cache_dir, sample_result):
         """Test store fails when cache is disabled"""
         config = Mock()
@@ -284,6 +296,7 @@ class TestCaptionCacheOperations:
 
         assert success is False
 
+    @pytest.mark.fast
     def test_get_when_disabled(self, temp_cache_dir, sample_result):
         """Test get returns None when cache is disabled"""
         # First store with enabled cache
@@ -306,6 +319,7 @@ class TestCaptionCacheOperations:
 
         assert cached is None
 
+    @pytest.mark.fast
     def test_multiple_languages(self, cache):
         """Test caching same video in multiple languages"""
         # English version
@@ -369,6 +383,7 @@ class TestCaptionCacheInvalidation:
         """Create a CaptionCache instance"""
         return CaptionCache(mock_config)
 
+    @pytest.mark.fast
     def test_invalidate_specific_language(self, cache):
         """Test invalidating a specific video+language"""
         # Store multiple entries
@@ -391,6 +406,7 @@ class TestCaptionCacheInvalidation:
         assert cache.get_caption("dQw4w9WgXcQ", "es") is not None
         assert cache.get_caption("dQw4w9WgXcQ", "fr") is not None
 
+    @pytest.mark.fast
     def test_invalidate_all_languages(self, cache):
         """Test invalidating all languages for a video"""
         # Store multiple entries
@@ -413,11 +429,13 @@ class TestCaptionCacheInvalidation:
         assert cache.get_caption("dQw4w9WgXcQ", "es") is None
         assert cache.get_caption("dQw4w9WgXcQ", "fr") is None
 
+    @pytest.mark.fast
     def test_invalidate_nonexistent(self, cache):
         """Test invalidating nonexistent entry returns 0"""
         count = cache.invalidate("nonexistent1", "en")
         assert count == 0
 
+    @pytest.mark.fast
     def test_invalidate_doesnt_affect_other_videos(self, cache):
         """Test invalidation doesn't affect other videos"""
         # Store entries for two videos
@@ -483,6 +501,7 @@ class TestCaptionCacheTTL:
         cached = cache.get_caption("dQw4w9WgXcQ", "en")
         assert cached is None
 
+    @pytest.mark.fast
     def test_no_expiration_with_zero_days(self, temp_cache_dir):
         """Test TTL=0 means no expiration"""
         config = Mock()
@@ -532,6 +551,7 @@ class TestCaptionCacheGetOrFetch:
         """Create a CaptionCache instance"""
         return CaptionCache(mock_config)
 
+    @pytest.mark.fast
     def test_get_or_fetch_cache_hit(self, cache):
         """Test get_or_fetch returns cached value when available"""
         # Pre-populate cache
@@ -558,6 +578,7 @@ class TestCaptionCacheGetOrFetch:
         assert result.video_id == "dQw4w9WgXcQ"
         assert result.segments[0].text == "Cached text"
 
+    @pytest.mark.fast
     def test_get_or_fetch_cache_miss(self, cache):
         """Test get_or_fetch fetches and caches on miss"""
         # Mock fetcher
@@ -591,6 +612,7 @@ class TestCaptionCacheGetOrFetch:
         assert cached is not None
         assert cached.segments[0]['text'] == "Fresh text"
 
+    @pytest.mark.fast
     def test_get_or_fetch_propagates_error(self, cache):
         """Test get_or_fetch propagates fetcher errors"""
         mock_fetcher = Mock(spec=CaptionFetcher)
@@ -627,6 +649,7 @@ class TestCaptionCacheStats:
         """Create a CaptionCache instance"""
         return CaptionCache(mock_config)
 
+    @pytest.mark.fast
     def test_stats_empty_cache(self, cache):
         """Test stats for empty cache"""
         stats = cache.get_stats()
@@ -638,6 +661,7 @@ class TestCaptionCacheStats:
         assert stats['enabled'] is True
         assert stats['max_age_days'] == 30
 
+    @pytest.mark.fast
     def test_stats_with_entries(self, cache):
         """Test stats with cached entries"""
         # Store some entries
@@ -666,6 +690,7 @@ class TestCaptionCacheStats:
         assert stats['auto_generated_entries'] == 1
         assert stats['manual_entries'] == 2
 
+    @pytest.mark.fast
     def test_stats_hit_miss_tracking(self, cache):
         """Test hit/miss statistics"""
         # Store an entry
@@ -703,6 +728,7 @@ class TestCaptionCachePersistence:
         cache_dir.mkdir()
         return cache_dir
 
+    @pytest.mark.fast
     def test_persistence_across_instances(self, temp_cache_dir):
         """Test cached data persists across cache instances"""
         config = Mock()
@@ -729,6 +755,7 @@ class TestCaptionCachePersistence:
         assert cached is not None
         assert cached.segments[0]['text'] == "Persistent text"
 
+    @pytest.mark.fast
     def test_index_file_created(self, temp_cache_dir):
         """Test index file is created"""
         config = Mock()
@@ -840,6 +867,7 @@ class TestCacheValidation:
         config.cache_validation_tolerance = 0.2
         return config
 
+    @pytest.mark.fast
     def test_validate_cache_entry_passes(self, mock_config_warn):
         """Test validation passes for consistent entry"""
         from src.caption_fetcher import CaptionCache, CachedCaption
@@ -866,6 +894,7 @@ class TestCacheValidation:
         assert result.language == "en"
         assert result.actual_segment_count == 18
 
+    @pytest.mark.fast
     def test_validate_cache_entry_fails_video_id_mismatch(self, mock_config_warn):
         """Test validation fails when video_id doesn't match"""
         from src.caption_fetcher import CaptionCache, CachedCaption
@@ -889,6 +918,7 @@ class TestCacheValidation:
         assert "wrongVideoId" in result.reason
         assert "dQw4w9WgXcQ" in result.reason
 
+    @pytest.mark.fast
     def test_validate_cache_entry_fails_language_mismatch(self, mock_config_warn):
         """Test validation fails when language doesn't match"""
         from src.caption_fetcher import CaptionCache, CachedCaption
@@ -912,6 +942,7 @@ class TestCacheValidation:
         assert "es" in result.reason
         assert "en" in result.reason
 
+    @pytest.mark.fast
     def test_validate_cache_entry_fails_segment_count_deviation(self, mock_config_warn):
         """Test validation fails when segment count deviates >20% from expected"""
         from src.caption_fetcher import CaptionCache, CachedCaption
@@ -939,6 +970,7 @@ class TestCacheValidation:
         assert result.actual_segment_count == 50
         assert result.segment_count_deviation == 0.5  # 50% deviation
 
+    @pytest.mark.fast
     def test_validate_cache_entry_passes_within_tolerance(self, mock_config_warn):
         """Test validation passes when deviation is within tolerance"""
         from src.caption_fetcher import CaptionCache, CachedCaption
@@ -964,6 +996,7 @@ class TestCacheValidation:
         assert result.actual_segment_count == 85
         assert result.expected_segment_count == 100
 
+    @pytest.mark.fast
     def test_validate_cache_entry_fails_zero_segments(self, mock_config_warn):
         """Test validation fails when cached caption has 0 segments"""
         from src.caption_fetcher import CaptionCache, CachedCaption
@@ -985,6 +1018,7 @@ class TestCacheValidation:
         assert result.is_valid is False
         assert "0 segments" in result.reason
 
+    @pytest.mark.fast
     def test_get_validated_caption_skip_mode(self, mock_config_skip, temp_cache_dir):
         """Test get_validated_caption skips validation in skip mode"""
         from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
@@ -1008,6 +1042,7 @@ class TestCacheValidation:
         assert cached is not None
         assert validation is None  # Skip mode returns no validation result
 
+    @pytest.mark.fast
     def test_get_validated_caption_warn_mode_deletes_on_failure(
         self, mock_config_warn, temp_cache_dir
     ):
@@ -1075,6 +1110,7 @@ class TestCacheValidation:
         # Verify the entry was deleted
         assert cache2.get_caption("badVid12345", "en") is None
 
+    @pytest.mark.fast
     def test_get_validated_caption_strict_mode_rejects_without_delete(
         self, mock_config_strict, temp_cache_dir
     ):
@@ -1112,6 +1148,7 @@ class TestCacheValidation:
         # In strict mode, entry should still exist (not deleted)
         assert cache.get_caption("dQw4w9WgXcQ", "en") is not None
 
+    @pytest.mark.fast
     def test_get_validated_caption_tracks_metrics(self, mock_config_warn, temp_cache_dir):
         """Test get_validated_caption records metrics"""
         from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment, CaptionMetrics
@@ -1181,6 +1218,7 @@ class TestCacheValidationResult:
         assert d['actual_segment_count'] == 50
         assert d['segment_count_deviation'] == 0.5
 
+    @pytest.mark.fast
     def test_from_dict(self):
         """Test deserialization"""
         from src.caption_fetcher import CacheValidationResult
@@ -1228,6 +1266,7 @@ class TestCaptionMetricsCacheValidation:
         assert stats['total'] == 1
         assert stats['pass_rate'] == 100.0
 
+    @pytest.mark.fast
     def test_record_cache_validation_failed(self):
         """Test recording failed validation"""
         from src.caption_fetcher import CaptionMetrics, CacheValidationResult
@@ -1248,6 +1287,7 @@ class TestCaptionMetricsCacheValidation:
         assert stats['total'] == 1
         assert stats['pass_rate'] == 0.0
 
+    @pytest.mark.fast
     def test_cache_validation_stats_multiple(self):
         """Test statistics with multiple validations"""
         from src.caption_fetcher import CaptionMetrics, CacheValidationResult
@@ -1271,6 +1311,7 @@ class TestCaptionMetricsCacheValidation:
         assert stats['total'] == 5
         assert stats['pass_rate'] == 60.0
 
+    @pytest.mark.fast
     def test_cache_validation_serialization(self):
         """Test to_dict/from_dict includes validation fields"""
         from src.caption_fetcher import CaptionMetrics
@@ -1290,6 +1331,7 @@ class TestCaptionMetricsCacheValidation:
         assert metrics2.cache_validation_rejected == 2
         assert metrics2.cache_validation_refetched == 5
 
+    @pytest.mark.fast
     def test_cache_validation_merge(self):
         """Test merge combines validation counts"""
         from src.caption_fetcher import CaptionMetrics
@@ -1308,6 +1350,7 @@ class TestCaptionMetricsCacheValidation:
         assert m1.cache_validation_rejected == 1
         assert m1.cache_validation_refetched == 2
 
+    @pytest.mark.fast
     def test_cache_validation_clear(self):
         """Test clear resets validation counts"""
         from src.caption_fetcher import CaptionMetrics
@@ -1339,6 +1382,7 @@ class TestAdaptiveFormatOrdering:
 
         assert order == ["json3", "vtt", "srt"]
 
+    @pytest.mark.fast
     def test_get_optimal_format_order_sorts_by_count(self):
         """Test format with 90% success rate tried before format with 50% success rate"""
         from src.caption_fetcher import CaptionMetrics
@@ -1354,6 +1398,7 @@ class TestAdaptiveFormatOrdering:
         assert order[1] == 'json3'
         assert order[2] == 'srt'
 
+    @pytest.mark.fast
     def test_get_optimal_format_order_includes_defaults(self):
         """Test that default formats are added if not in historical data"""
         from src.caption_fetcher import CaptionMetrics
@@ -1369,6 +1414,7 @@ class TestAdaptiveFormatOrdering:
         assert 'vtt' in order
         assert 'srt' in order
 
+    @pytest.mark.fast
     def test_get_optimal_format_order_custom_defaults(self):
         """Test custom default formats are preserved"""
         from src.caption_fetcher import CaptionMetrics
@@ -1382,6 +1428,7 @@ class TestAdaptiveFormatOrdering:
         assert 'srv3' in order
         assert 'srt' in order
 
+    @pytest.mark.fast
     def test_get_optimal_format_order_thread_safety(self):
         """Test get_optimal_format_order is thread-safe"""
         from src.caption_fetcher import CaptionMetrics
@@ -1441,6 +1488,7 @@ class TestCaptionCacheFormatStatistics:
         """Create a CaptionCache instance"""
         return CaptionCache(mock_config)
 
+    @pytest.mark.fast
     def test_save_format_statistics(self, cache):
         """Test saving format statistics to cache"""
         format_counts = {'json3': 95, 'vtt': 80, 'srt': 25}
@@ -1452,6 +1500,7 @@ class TestCaptionCacheFormatStatistics:
         assert cache.index['__format_statistics__']['format_success_counts'] == format_counts
         assert cache.index['__format_statistics__']['total_samples'] == 200
 
+    @pytest.mark.fast
     def test_load_format_statistics(self, cache):
         """Test loading format statistics from cache"""
         format_counts = {'json3': 95, 'vtt': 80, 'srt': 25}
@@ -1461,12 +1510,14 @@ class TestCaptionCacheFormatStatistics:
 
         assert loaded == format_counts
 
+    @pytest.mark.fast
     def test_load_format_statistics_empty(self, cache):
         """Test loading returns empty dict when no statistics saved"""
         loaded = cache.load_format_statistics()
 
         assert loaded == {}
 
+    @pytest.mark.fast
     def test_format_statistics_disabled_cache(self, temp_cache_dir):
         """Test format statistics methods when cache is disabled"""
         config = Mock()
@@ -1484,6 +1535,7 @@ class TestCaptionCacheFormatStatistics:
         load_result = cache.load_format_statistics()
         assert load_result == {}
 
+    @pytest.mark.fast
     def test_format_statistics_persistence(self, mock_config, temp_cache_dir):
         """Test format statistics persist across cache instances"""
         format_counts = {'vtt': 150, 'json3': 100}
@@ -1509,6 +1561,7 @@ class TestCaptionFetcherAdaptiveOrder:
 
         assert fetcher._adaptive_format_order is True
 
+    @pytest.mark.fast
     def test_fetcher_config_disables_adaptive(self):
         """Test config can disable adaptive ordering"""
         config = Mock()
@@ -1524,6 +1577,7 @@ class TestCaptionFetcherAdaptiveOrder:
 
         assert fetcher._adaptive_format_order is False
 
+    @pytest.mark.fast
     def test_apply_adaptive_format_order_from_metrics(self):
         """Test applying adaptive order from CaptionMetrics"""
         from src.caption_fetcher import CaptionMetrics
@@ -1538,6 +1592,7 @@ class TestCaptionFetcherAdaptiveOrder:
         assert fetcher._preferred_formats[0] == 'vtt'
         assert fetcher._using_adaptive_order is True
 
+    @pytest.mark.fast
     def test_apply_adaptive_format_order_from_cache(self, tmp_path):
         """Test applying adaptive order from CaptionCache"""
         config = Mock()
@@ -1556,6 +1611,7 @@ class TestCaptionFetcherAdaptiveOrder:
         assert order[0] == 'srt'
         assert fetcher._preferred_formats[0] == 'srt'
 
+    @pytest.mark.fast
     def test_apply_adaptive_format_order_no_data(self):
         """Test applying adaptive order with no historical data uses default"""
         fetcher = CaptionFetcher()
@@ -1566,6 +1622,7 @@ class TestCaptionFetcherAdaptiveOrder:
         assert order == original_formats
         assert fetcher._using_adaptive_order is False
 
+    @pytest.mark.fast
     def test_apply_adaptive_format_order_disabled(self):
         """Test adaptive ordering does nothing when disabled"""
         config = Mock()
@@ -1588,6 +1645,7 @@ class TestCaptionFetcherAdaptiveOrder:
         assert order == ['json3', 'vtt', 'srt']
         assert fetcher._using_adaptive_order is False
 
+    @pytest.mark.fast
     def test_apply_adaptive_format_order_metrics_priority_over_cache(self, tmp_path):
         """Test that metrics data takes priority over cache data"""
         from src.caption_fetcher import CaptionMetrics
@@ -1658,6 +1716,7 @@ class TestCacheStaleness:
         config.cache_validation_tolerance = 0.2
         return config
 
+    @pytest.mark.fast
     def test_is_stale_returns_false_for_fresh_entry(self, mock_config_warn):
         """Test is_stale returns False for entries younger than max_age_days"""
         from src.caption_fetcher import CaptionCache
@@ -1675,6 +1734,7 @@ class TestCacheStaleness:
 
         assert cache.is_stale(entry) is False
 
+    @pytest.mark.fast
     def test_is_stale_returns_true_for_old_entry(self, mock_config_warn):
         """Test is_stale returns True for entries older than max_age_days"""
         from src.caption_fetcher import CaptionCache
@@ -1692,6 +1752,7 @@ class TestCacheStaleness:
 
         assert cache.is_stale(entry) is True
 
+    @pytest.mark.fast
     def test_is_stale_with_custom_max_age(self, mock_config_warn):
         """Test is_stale respects override max_age_days parameter"""
         from src.caption_fetcher import CaptionCache
@@ -1713,6 +1774,7 @@ class TestCacheStaleness:
         # Stale with override of 3 days
         assert cache.is_stale(entry, max_age_days=3) is True
 
+    @pytest.mark.fast
     def test_is_stale_returns_false_when_no_expiration(self, temp_cache_dir):
         """Test is_stale returns False when max_age_days is 0 (no expiration)"""
         from src.caption_fetcher import CaptionCache
@@ -1737,6 +1799,7 @@ class TestCacheStaleness:
         # Should not be stale since max_age=0 means no expiration
         assert cache.is_stale(old_entry) is False
 
+    @pytest.mark.fast
     def test_get_entry_age_days(self, mock_config_warn):
         """Test get_entry_age_days returns correct age"""
         from src.caption_fetcher import CaptionCache
@@ -1756,6 +1819,7 @@ class TestCacheStaleness:
         # Allow small tolerance for test execution time
         assert 4.9 < age < 5.1
 
+    @pytest.mark.fast
     def test_get_caption_returns_none_for_stale_in_strict_mode(
         self, mock_config_strict, temp_cache_dir
     ):
@@ -1786,6 +1850,7 @@ class TestCacheStaleness:
         cached = cache.get_caption("dQw4w9WgXcQ", "en")
         assert cached is None
 
+    @pytest.mark.fast
     def test_get_caption_returns_data_for_stale_in_warn_mode(
         self, mock_config_warn, temp_cache_dir
     ):
@@ -1817,6 +1882,7 @@ class TestCacheStaleness:
         assert cached is not None
         assert cached.video_id == "dQw4w9WgXcQ"
 
+    @pytest.mark.fast
     def test_get_caption_skips_staleness_check_in_skip_mode(
         self, mock_config_skip, temp_cache_dir
     ):
@@ -1901,6 +1967,7 @@ class TestCleanupStaleEntries:
 
         return cache
 
+    @pytest.mark.fast
     def test_cleanup_removes_stale_entries(self, cache_with_entries):
         """Test cleanup_stale_entries removes entries older than max_age_days"""
         result = cache_with_entries.cleanup_stale_entries()
@@ -1918,6 +1985,7 @@ class TestCleanupStaleEntries:
         assert cache_with_entries.get_caption("vid00000000003", "en") is not None
         assert cache_with_entries.get_caption("vid00000000004", "en") is not None
 
+    @pytest.mark.fast
     def test_cleanup_dry_run_does_not_remove(self, cache_with_entries):
         """Test cleanup_stale_entries with dry_run=True doesn't remove entries"""
         result = cache_with_entries.cleanup_stale_entries(dry_run=True)
@@ -1934,6 +2002,7 @@ class TestCleanupStaleEntries:
             key = cache_with_entries._make_cache_key(f"vid{i:011d}", "en")
             assert key in cache_with_entries.index
 
+    @pytest.mark.fast
     def test_cleanup_with_custom_max_age(self, cache_with_entries):
         """Test cleanup_stale_entries respects custom max_age_days"""
         # With 3 day threshold, all 5 entries should be considered stale
@@ -1949,6 +2018,7 @@ class TestCleanupStaleEntries:
         # But we need fresh cache for this test
         # So let's verify with a different approach
 
+    @pytest.mark.fast
     def test_cleanup_returns_bytes_freed(self, cache_with_entries):
         """Test cleanup_stale_entries reports bytes freed"""
         result = cache_with_entries.cleanup_stale_entries()
@@ -1956,6 +2026,7 @@ class TestCleanupStaleEntries:
         # Should have freed some bytes (rough estimate)
         assert result['bytes_freed'] > 0
 
+    @pytest.mark.fast
     def test_cleanup_with_zero_max_age_does_nothing(self, mock_config, temp_cache_dir):
         """Test cleanup_stale_entries does nothing when max_age_days=0"""
         from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
@@ -1987,6 +2058,7 @@ class TestCleanupStaleEntries:
         assert cleanup_result['entries_removed'] == 0
         assert cache.get_caption("oldvideo1234", "en") is not None
 
+    @pytest.mark.fast
     def test_cleanup_skips_metadata_entries(self, cache_with_entries):
         """Test cleanup_stale_entries skips entries starting with __"""
         # Add a metadata entry
@@ -2013,6 +2085,7 @@ class TestCacheStalenessIntegration:
         cache_dir.mkdir()
         return cache_dir
 
+    @pytest.mark.fast
     def test_stale_entry_skipped_strict_refetched(self, temp_cache_dir):
         """Test that stale entries in strict mode trigger re-fetch"""
         from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment
@@ -2050,6 +2123,7 @@ class TestCacheStalenessIntegration:
         # Entry should still exist (not deleted, just skipped)
         assert key in cache.index
 
+    @pytest.mark.fast
     def test_batch_with_mixed_staleness(self, temp_cache_dir):
         """Test that batch with 40% network errors uses 60% fewer retries"""
         from src.caption_fetcher import CaptionCache, CaptionResult, CaptionSegment

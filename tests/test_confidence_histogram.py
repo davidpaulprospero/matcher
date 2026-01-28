@@ -12,16 +12,19 @@ from unittest.mock import patch, MagicMock
 class TestHistogramFunctionExists:
     """Test that the histogram function exists and is importable."""
 
+    @pytest.mark.fast
     def test_function_importable_from_metrics(self):
         """log_confidence_histogram should be importable from metrics module."""
         from src.matching.metrics import log_confidence_histogram
         assert callable(log_confidence_histogram)
 
+    @pytest.mark.fast
     def test_function_importable_from_matching_package(self):
         """log_confidence_histogram should be exported from matching package."""
         from src.matching import log_confidence_histogram
         assert callable(log_confidence_histogram)
 
+    @pytest.mark.fast
     def test_function_in_matching_all(self):
         """log_confidence_histogram should be in matching __all__."""
         from src import matching
@@ -31,6 +34,7 @@ class TestHistogramFunctionExists:
 class TestHistogramBuckets:
     """Test that histogram buckets are correct."""
 
+    @pytest.mark.fast
     def test_six_buckets_defined(self):
         """Should have exactly 6 buckets."""
         from src.matching.metrics import log_confidence_histogram
@@ -42,6 +46,7 @@ class TestHistogramBuckets:
         bucket_lines = [l for l in lines if '|' in l and '-' in l.split('|')[0]]
         assert len(bucket_lines) == 6
 
+    @pytest.mark.fast
     def test_bucket_ranges_correct(self):
         """Buckets should be: 0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0."""
         from src.matching.metrics import log_confidence_histogram
@@ -56,6 +61,7 @@ class TestHistogramBuckets:
 class TestBucketCounting:
     """Test that confidences are correctly bucketed."""
 
+    @pytest.mark.fast
     def test_low_confidence_bucket(self):
         """Values 0.0-0.5 should go in first bucket."""
         from src.matching.metrics import log_confidence_histogram
@@ -68,6 +74,7 @@ class TestBucketCounting:
         first_bucket_line = [l for l in lines if '0.0-0.5' in l][0]
         assert '5' in first_bucket_line or '5 ' in first_bucket_line
 
+    @pytest.mark.fast
     def test_medium_confidence_bucket(self):
         """Values 0.6-0.7 should go in third bucket."""
         from src.matching.metrics import log_confidence_histogram
@@ -79,6 +86,7 @@ class TestBucketCounting:
         bucket_line = [l for l in lines if '0.6-0.7' in l][0]
         assert '3' in bucket_line
 
+    @pytest.mark.fast
     def test_high_confidence_bucket(self):
         """Values 0.9-1.0 should go in last bucket."""
         from src.matching.metrics import log_confidence_histogram
@@ -90,6 +98,7 @@ class TestBucketCounting:
         last_bucket_line = [l for l in lines if '0.9-1.0' in l][0]
         assert '4' in last_bucket_line
 
+    @pytest.mark.fast
     def test_boundary_value_half(self):
         """Value 0.5 should go in 0.5-0.6 bucket (not 0.0-0.5)."""
         from src.matching.metrics import log_confidence_histogram
@@ -106,6 +115,7 @@ class TestBucketCounting:
         second_bucket = [l for l in lines if '0.5-0.6' in l][0]
         assert '1' in second_bucket
 
+    @pytest.mark.fast
     def test_boundary_value_one(self):
         """Value 1.0 should go in 0.9-1.0 bucket."""
         from src.matching.metrics import log_confidence_histogram
@@ -121,6 +131,7 @@ class TestBucketCounting:
 class TestHistogramFormatting:
     """Test histogram output formatting."""
 
+    @pytest.mark.fast
     def test_includes_bar_characters(self):
         """Histogram should include bar characters."""
         from src.matching.metrics import log_confidence_histogram
@@ -128,6 +139,7 @@ class TestHistogramFormatting:
         result = log_confidence_histogram([0.75, 0.75, 0.75])
         assert '█' in result
 
+    @pytest.mark.fast
     def test_includes_segment_counts(self):
         """Each bucket should show segment count."""
         from src.matching.metrics import log_confidence_histogram
@@ -140,6 +152,7 @@ class TestHistogramFormatting:
             bucket_line = [l for l in result.split('\n') if label in l][0]
             assert '1 ' in bucket_line or '   1' in bucket_line
 
+    @pytest.mark.fast
     def test_includes_percentages(self):
         """Histogram should show percentages."""
         from src.matching.metrics import log_confidence_histogram
@@ -149,6 +162,7 @@ class TestHistogramFormatting:
 
         assert '100.0%' in result or '100%' in result
 
+    @pytest.mark.fast
     def test_includes_total_segments(self):
         """Histogram should show total segment count."""
         from src.matching.metrics import log_confidence_histogram
@@ -158,6 +172,7 @@ class TestHistogramFormatting:
 
         assert 'Total segments: 5' in result
 
+    @pytest.mark.fast
     def test_includes_header_and_footer(self):
         """Histogram should have header and footer."""
         from src.matching.metrics import log_confidence_histogram
@@ -171,6 +186,7 @@ class TestHistogramFormatting:
 class TestHistogramLogging:
     """Test that histogram is logged at INFO level."""
 
+    @pytest.mark.fast
     def test_logs_at_info_level(self):
         """Histogram should be logged at INFO level."""
         from src.matching.metrics import log_confidence_histogram
@@ -181,6 +197,7 @@ class TestHistogramLogging:
             # Should have called info multiple times (header + buckets + footer)
             assert mock_logger.info.call_count >= 8  # At least header + 6 buckets + footer
 
+    @pytest.mark.fast
     def test_all_bucket_lines_logged(self):
         """All bucket lines should be logged."""
         from src.matching.metrics import log_confidence_histogram
@@ -197,6 +214,7 @@ class TestHistogramLogging:
 class TestHistogramEdgeCases:
     """Test edge cases for histogram."""
 
+    @pytest.mark.fast
     def test_empty_confidences(self):
         """Empty confidences list should not crash."""
         from src.matching.metrics import log_confidence_histogram
@@ -205,6 +223,7 @@ class TestHistogramEdgeCases:
 
         assert 'Total segments: 0' in result
 
+    @pytest.mark.fast
     def test_single_confidence(self):
         """Single confidence value should work."""
         from src.matching.metrics import log_confidence_histogram
@@ -213,6 +232,7 @@ class TestHistogramEdgeCases:
 
         assert 'Total segments: 1' in result
 
+    @pytest.mark.fast
     def test_many_confidences(self):
         """Large number of confidences should work."""
         from src.matching.metrics import log_confidence_histogram
@@ -222,6 +242,7 @@ class TestHistogramEdgeCases:
 
         assert 'Total segments: 101' in result
 
+    @pytest.mark.fast
     def test_all_same_confidence(self):
         """All same confidence values should work."""
         from src.matching.metrics import log_confidence_histogram
@@ -234,6 +255,7 @@ class TestHistogramEdgeCases:
         bucket_0708 = [l for l in lines if '0.7-0.8' in l][0]
         assert '50' in bucket_0708
 
+    @pytest.mark.fast
     def test_zero_confidence(self):
         """Zero confidence should go in first bucket."""
         from src.matching.metrics import log_confidence_histogram
@@ -249,6 +271,7 @@ class TestHistogramEdgeCases:
 class TestHistogramBarScaling:
     """Test that histogram bars scale correctly."""
 
+    @pytest.mark.fast
     def test_max_bucket_gets_full_bar(self):
         """The bucket with the most items should have the longest bar."""
         from src.matching.metrics import log_confidence_histogram
@@ -267,6 +290,7 @@ class TestHistogramBarScaling:
 
         assert bars_0708 > bars_0506
 
+    @pytest.mark.fast
     def test_empty_buckets_have_no_bar(self):
         """Empty buckets should have no bar characters."""
         from src.matching.metrics import log_confidence_histogram
@@ -282,6 +306,7 @@ class TestHistogramBarScaling:
         # Should have no █ characters
         assert first_bucket.count('█') == 0
 
+    @pytest.mark.fast
     def test_custom_bar_width(self):
         """Custom bar_width parameter should be respected."""
         from src.matching.metrics import log_confidence_histogram
@@ -296,6 +321,7 @@ class TestHistogramBarScaling:
 class TestHistogramReturnValue:
     """Test that histogram returns the string for testing."""
 
+    @pytest.mark.fast
     def test_returns_string(self):
         """Function should return the histogram string."""
         from src.matching.metrics import log_confidence_histogram
@@ -305,6 +331,7 @@ class TestHistogramReturnValue:
         assert isinstance(result, str)
         assert len(result) > 0
 
+    @pytest.mark.fast
     def test_return_matches_logged(self):
         """Returned string should match what was logged."""
         from src.matching.metrics import log_confidence_histogram
@@ -323,6 +350,7 @@ class TestHistogramReturnValue:
 class TestMatchStageIntegration:
     """Test that histogram is integrated into match stage."""
 
+    @pytest.mark.fast
     def test_histogram_import_in_match_stage(self):
         """log_confidence_histogram should be used in match stage."""
         # Read the match stage source to verify integration
@@ -332,6 +360,7 @@ class TestMatchStageIntegration:
         source = inspect.getsource(match)
         assert 'log_confidence_histogram' in source
 
+    @pytest.mark.fast
     def test_histogram_called_after_quality_summary(self):
         """Histogram should be called after quality summary."""
         import inspect
@@ -351,6 +380,7 @@ class TestMatchStageIntegration:
 class TestDistributionVerification:
     """Test that histogram correctly reflects confidence distribution."""
 
+    @pytest.mark.fast
     def test_uniform_distribution(self):
         """Uniform distribution should show similar counts across buckets."""
         from src.matching.metrics import log_confidence_histogram
@@ -369,6 +399,7 @@ class TestDistributionVerification:
             count_part = parts[-1].strip()
             assert '2' in count_part.split()[0]
 
+    @pytest.mark.fast
     def test_skewed_distribution(self):
         """Skewed distribution should show appropriate counts."""
         from src.matching.metrics import log_confidence_histogram

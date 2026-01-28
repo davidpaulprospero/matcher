@@ -58,6 +58,7 @@ class TestParametrizedAPIHealerErrors:
         ("Disk full", False),
         ("Path too long", False),
     ])
+    @pytest.mark.fast
     def test_can_handle_api_errors(self, mock_config, project_dir, error_msg, expected_can_handle):
         """Test APIHealer can_handle with various error messages."""
         healer = APIHealer(mock_config, project_dir)
@@ -89,6 +90,7 @@ class TestParametrizedCheckpointHealerErrors:
         ("File not found", False),
         ("timeout", False),
     ])
+    @pytest.mark.fast
     def test_can_handle_checkpoint_errors(self, mock_config, project_dir, error_msg, expected_can_handle):
         """Test CheckpointHealer can_handle with various error messages."""
         healer = CheckpointHealer(mock_config, project_dir)
@@ -124,6 +126,7 @@ class TestParametrizedDownloadHealerErrors:
         ("OTIO error", False),
         ("Path too long", False),
     ])
+    @pytest.mark.fast
     def test_can_handle_download_errors(self, mock_config, project_dir, error_msg, expected_can_handle):
         """Test DownloadHealer can_handle with various error messages."""
         healer = DownloadHealer(mock_config, project_dir)
@@ -155,6 +158,7 @@ class TestParametrizedDiskHealerErrors:
         ("checkpoint corrupt", False),
         ("timeout", False),
     ])
+    @pytest.mark.fast
     def test_can_handle_disk_errors(self, mock_config, project_dir, error_msg, expected_can_handle):
         """Test DiskHealer can_handle with various error messages."""
         healer = DiskHealer(mock_config, project_dir)
@@ -185,6 +189,7 @@ class TestParametrizedPathHealerErrors:
         ("checkpoint corrupt", False),
         ("disk full", False),
     ])
+    @pytest.mark.fast
     def test_can_handle_path_errors(self, mock_config, project_dir, error_msg, expected_can_handle):
         """Test PathHealer can_handle with various error messages."""
         healer = PathHealer(mock_config, project_dir)
@@ -208,6 +213,7 @@ class TestParametrizedHealingStrategies:
         ("interactive", HealingMode.INTERACTIVE, 3, 30),  # interactive has max_total_heals=30
         ("minimal", HealingMode.MINIMAL, 1, 5),
     ])
+    @pytest.mark.fast
     def test_strategy_factory_values(self, strategy_name, expected_mode, expected_max_attempts, expected_max_heals):
         """Test strategy factory methods return correct values."""
         factory_method = getattr(HealingStrategy, strategy_name)
@@ -223,6 +229,7 @@ class TestParametrizedHealingStrategies:
         ("interactive", True),
         ("minimal", False),
     ])
+    @pytest.mark.fast
     def test_strategy_rollback_setting(self, strategy_name, expected_rollback_enabled):
         """Test strategy rollback settings."""
         factory_method = getattr(HealingStrategy, strategy_name)
@@ -236,6 +243,7 @@ class TestParametrizedHealingStrategies:
         ("interactive", False),  # Interactive asks user
         ("minimal", False),      # Minimal also doesn't auto-fix
     ])
+    @pytest.mark.fast
     def test_strategy_auto_fix_preflight(self, strategy_name, expected_auto_fix_preflight):
         """Test strategy auto_fix_preflight settings."""
         factory_method = getattr(HealingStrategy, strategy_name)
@@ -249,6 +257,7 @@ class TestParametrizedHealingStrategies:
         ("interactive", 2.0),
         ("minimal", 0.5),  # minimal has 0.5 delay
     ])
+    @pytest.mark.fast
     def test_strategy_heal_delay(self, strategy_name, expected_heal_delay):
         """Test strategy heal delay settings."""
         factory_method = getattr(HealingStrategy, strategy_name)
@@ -261,6 +270,7 @@ class TestParametrizedOrchestratorWithStrategies:
     """Parametrized tests for orchestrator behavior with different strategies."""
 
     @pytest.mark.parametrize("strategy_name", ["aggressive", "conservative", "interactive", "minimal"])
+    @pytest.mark.fast
     def test_orchestrator_initializes_with_strategy(self, mock_config, project_dir, strategy_name):
         """Test orchestrator initializes correctly with each strategy."""
         factory_method = getattr(HealingStrategy, strategy_name)
@@ -277,6 +287,7 @@ class TestParametrizedOrchestratorWithStrategies:
         ("interactive", 3),    # Returns up to 3 applicable
         ("minimal", 1),        # Returns only first applicable
     ])
+    @pytest.mark.fast
     def test_select_healers_by_strategy(self, mock_config, project_dir, strategy_name, expected_max_healers):
         """Test healer selection varies by strategy."""
         factory_method = getattr(HealingStrategy, strategy_name)
@@ -304,6 +315,7 @@ class TestParametrizedRetryBoundaries:
     """Parametrized tests for retry count boundaries."""
 
     @pytest.mark.parametrize("max_attempts", [1, 2, 3, 5, 10])
+    @pytest.mark.fast
     def test_runner_respects_max_attempts(self, mock_config, project_dir, mock_stage, mock_state, max_attempts):
         """Test runner respects max_attempts_per_stage boundary."""
         strategy = HealingStrategy(max_attempts_per_stage=max_attempts)
@@ -324,6 +336,7 @@ class TestParametrizedRetryBoundaries:
         assert mock_stage.run.call_count == max_attempts
 
     @pytest.mark.parametrize("attempts_before_success", [1, 2, 3])
+    @pytest.mark.fast
     def test_runner_succeeds_on_nth_attempt(self, mock_config, project_dir, mock_stage, mock_state, attempts_before_success):
         """Test runner succeeds when stage passes on nth attempt."""
         strategy = HealingStrategy(max_attempts_per_stage=5)  # Allow enough attempts
@@ -349,6 +362,7 @@ class TestParametrizedTotalHealLimits:
     """Parametrized tests for total heal limits."""
 
     @pytest.mark.parametrize("max_total_heals", [5, 10, 20, 50])
+    @pytest.mark.fast
     def test_strategy_max_total_heals(self, max_total_heals):
         """Test max_total_heals configuration."""
         strategy = HealingStrategy(max_total_heals=max_total_heals)
@@ -361,6 +375,7 @@ class TestParametrizedTotalHealLimits:
         (5, "5"),
         (10, "10"),
     ])
+    @pytest.mark.fast
     def test_metrics_records_heals(self, total_heals, expected_summary_contains):
         """Test HealingMetrics correctly records heal counts."""
         metrics = HealingMetrics()
@@ -406,6 +421,7 @@ class TestParametrizedHealerSelection:
         ("opentimelineio exception", "OUTPUT", "otio-healer"),
         ("OTIO serialization failed", "OUTPUT", "otio-healer"),
     ])
+    @pytest.mark.fast
     def test_orchestrator_selects_correct_healer(self, mock_config, project_dir, error_msg, stage_name, expected_healer):
         """Test orchestrator selects correct healer for each error type."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
@@ -426,6 +442,7 @@ class TestParametrizedHealerPriority:
         ["api-healer", "checkpoint-healer", "disk-healer"],
         ["disk-healer", "path-healer", "otio-healer"],
     ])
+    @pytest.mark.fast
     def test_orchestrator_respects_healer_priority(self, mock_config, project_dir, priority_order):
         """Test orchestrator respects healer priority order."""
         strategy = HealingStrategy(healer_priority=priority_order)
@@ -449,6 +466,7 @@ class TestParametrizedMultiHealerScenarios:
         ({"download-healer"}, "download-healer"),
         ({"path-healer"}, "path-healer"),
     ])
+    @pytest.mark.fast
     def test_orchestrator_respects_skip_healers(self, mock_config, project_dir, skip_healers, expected_excluded):
         """Test orchestrator excludes healers in skip_healers set."""
         strategy = HealingStrategy(skip_healers=skip_healers)
@@ -476,6 +494,7 @@ class TestParametrizedExceptionTypes:
         # TypeError - not commonly handled
         (TypeError, "type error", APIHealer, False),
     ])
+    @pytest.mark.fast
     def test_healer_exception_type_handling(self, mock_config, project_dir, exception_class, error_msg, healer_class, expected_can_handle):
         """Test healer exception type matching."""
         healer = healer_class(mock_config, project_dir)
@@ -504,6 +523,7 @@ class TestParametrizedHealerResultVariations:
         (HealerAction.MODIFY_CONFIG, True),
         (HealerAction.RESTORE, True),
     ])
+    @pytest.mark.fast
     def test_healer_result_action_implies_retry(self, action, expected_retry):
         """Test which HealerActions imply retry should be attempted."""
         result = HealerResult.fixed("test", action=action)
@@ -524,6 +544,7 @@ class TestParametrizedMetricsRecording:
         ("disk-healer", "OUTPUT", False),
         ("otio-healer", "OUTPUT", True),
     ])
+    @pytest.mark.fast
     def test_metrics_records_heal_by_healer_and_stage(self, healer_name, stage_name, success):
         """Test HealingMetrics records heals by healer and stage."""
         metrics = HealingMetrics()
@@ -547,6 +568,7 @@ class TestParametrizedBackoffBehavior:
         (APIHealer, 5.0, 300.0),
         (DownloadHealer, 10.0, 600.0),
     ])
+    @pytest.mark.fast
     def test_healer_backoff_parameters(self, mock_config, project_dir, healer_class, initial_backoff, max_backoff):
         """Test healer backoff parameters."""
         healer = healer_class(mock_config, project_dir)
@@ -560,6 +582,7 @@ class TestParametrizedBackoffBehavior:
         (2, True),   # After second retry
         (5, True),   # After multiple retries
     ])
+    @pytest.mark.fast
     def test_backoff_increases_with_retries(self, mock_config, project_dir, retry_count, expected_backoff_increased):
         """Test backoff time increases with retries."""
         healer = APIHealer(mock_config, project_dir)
@@ -582,6 +605,7 @@ class TestParametrizedConfigModifications:
         (60, True),
         (120, True),
     ])
+    @pytest.mark.fast
     def test_api_healer_increases_timeout(self, mock_config, project_dir, initial_timeout, expected_increase):
         """Test APIHealer increases timeout on timeout errors."""
         healer = APIHealer(mock_config, project_dir)
@@ -600,6 +624,7 @@ class TestParametrizedConfigModifications:
         (60, True),
     ])
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_download_healer_increases_socket_timeout(self, mock_sleep, mock_config, project_dir,
                                                        initial_socket_timeout, expected_increase):
         """Test DownloadHealer increases socket timeout on network errors."""

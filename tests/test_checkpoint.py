@@ -1,3 +1,4 @@
+import pytest
 #!/usr/bin/env python3
 """
 Test script for Checkpoint and Saved Keywords features.
@@ -22,6 +23,7 @@ from src.checkpoint import (
 )
 
 
+@pytest.mark.integration
 def test_checkpoint_manager():
     """Test CheckpointManager functionality"""
     print("\n" + "=" * 60)
@@ -97,6 +99,7 @@ def test_checkpoint_manager():
     print("\n  ✅ CheckpointManager tests PASSED")
 
 
+@pytest.mark.integration
 def test_keyword_manager():
     """Test KeywordManager functionality"""
     print("\n" + "=" * 60)
@@ -180,6 +183,7 @@ def test_keyword_manager():
     print("\n  ✅ KeywordManager tests PASSED")
 
 
+@pytest.mark.fast
 def test_stage_order():
     """Test stage ordering logic"""
     print("\n" + "=" * 60)
@@ -199,6 +203,7 @@ def test_stage_order():
     print("\n  ✅ Stage order tests PASSED")
 
 
+@pytest.mark.integration
 def test_format_prompts():
     """Test prompt formatting functions"""
     print("\n" + "=" * 60)
@@ -233,6 +238,7 @@ def test_format_prompts():
     print("\n  ✅ Format prompt tests PASSED")
 
 
+@pytest.mark.integration
 def test_edge_cases():
     """Test edge cases and error handling"""
     print("\n" + "=" * 60)
@@ -282,6 +288,7 @@ def test_edge_cases():
     print("\n  ✅ Edge case tests PASSED")
 
 
+@pytest.mark.integration
 def test_json_structure():
     """Test that JSON files have correct structure"""
     print("\n" + "=" * 60)

@@ -83,6 +83,7 @@ class TestCheckObviousMatchFunction:
         from src.matching.tiered_matcher import TieredMatcher
         self.TieredMatcher = TieredMatcher
 
+    @pytest.mark.fast
     def test_function_exists(self):
         """check_obvious_match function should exist on TieredMatcher"""
         config = MockConfig()
@@ -90,6 +91,7 @@ class TestCheckObviousMatchFunction:
         assert hasattr(matcher, 'check_obvious_match')
         assert callable(matcher.check_obvious_match)
 
+    @pytest.mark.fast
     def test_returns_none_when_disabled(self):
         """Should return None when obvious_match_enabled is False"""
         config = MockConfig()
@@ -111,6 +113,7 @@ class TestCheckObviousMatchFunction:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_none_when_similarity_too_low(self):
         """Should return None when similarity is below threshold"""
         config = MockConfig()
@@ -135,6 +138,7 @@ class TestCheckObviousMatchFunction:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_none_when_too_few_keywords(self):
         """Should return None when fewer than 3 keywords match"""
         config = MockConfig()
@@ -157,6 +161,7 @@ class TestCheckObviousMatchFunction:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_none_when_no_matching_entity(self):
         """Should return None when no matching named entity"""
         config = MockConfig()
@@ -181,6 +186,7 @@ class TestCheckObviousMatchFunction:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_none_when_no_entities_in_voiceover(self):
         """Should return None when voiceover has no entities"""
         config = MockConfig()
@@ -205,6 +211,7 @@ class TestCheckObviousMatchFunction:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_returns_none_when_no_entities_in_video(self):
         """Should return None when video has no entities"""
         config = MockConfig()
@@ -237,6 +244,7 @@ class TestObviousMatchDetection:
         from src.matching.tiered_matcher import TieredMatcher
         self.TieredMatcher = TieredMatcher
 
+    @pytest.mark.fast
     def test_detects_obvious_match_with_all_conditions_met(self):
         """Should detect obvious match when all three conditions are met"""
         config = MockConfig()
@@ -265,6 +273,7 @@ class TestObviousMatchDetection:
         assert "obvious_match_early_termination" in reasoning
         assert len(entities) >= 1
 
+    @pytest.mark.fast
     def test_returns_boosted_confidence_minimum_0_92(self):
         """Should return at least 0.92 confidence for obvious matches"""
         config = MockConfig()
@@ -292,6 +301,7 @@ class TestObviousMatchDetection:
         confidence, _, _ = result
         assert confidence >= 0.92
 
+    @pytest.mark.fast
     def test_uses_higher_similarity_when_above_minimum(self):
         """Should use the similarity score if it's above minimum confidence"""
         config = MockConfig()
@@ -319,6 +329,7 @@ class TestObviousMatchDetection:
         confidence, _, _ = result
         assert confidence == 0.98
 
+    @pytest.mark.fast
     def test_reasoning_includes_match_details(self):
         """Should include similarity, keyword count, and entities in reasoning"""
         config = MockConfig()
@@ -347,6 +358,7 @@ class TestObviousMatchDetection:
         assert "keywords=" in reasoning
         assert "entities=" in reasoning
 
+    @pytest.mark.fast
     def test_matched_entities_returned(self):
         """Should return the list of matched entities"""
         config = MockConfig()
@@ -384,6 +396,7 @@ class TestObviousMatchConfigOptions:
         from src.matching.tiered_matcher import TieredMatcher
         self.TieredMatcher = TieredMatcher
 
+    @pytest.mark.fast
     def test_respects_custom_min_similarity(self):
         """Should use custom min_similarity from config"""
         config = MockConfig()
@@ -410,6 +423,7 @@ class TestObviousMatchConfigOptions:
 
         assert result is None  # Should not trigger with lower similarity
 
+    @pytest.mark.fast
     def test_respects_custom_min_keywords(self):
         """Should use custom min_keywords from config"""
         config = MockConfig()
@@ -436,6 +450,7 @@ class TestObviousMatchConfigOptions:
 
         assert result is None  # Should not trigger with fewer keywords
 
+    @pytest.mark.fast
     def test_respects_custom_min_confidence(self):
         """Should use custom min_confidence from config"""
         config = MockConfig()
@@ -472,6 +487,7 @@ class TestObviousMatchEntityMatching:
         from src.matching.tiered_matcher import TieredMatcher
         self.TieredMatcher = TieredMatcher
 
+    @pytest.mark.fast
     def test_case_insensitive_entity_matching(self):
         """Should match entities case-insensitively"""
         config = MockConfig()
@@ -496,6 +512,7 @@ class TestObviousMatchEntityMatching:
 
         assert result is not None
 
+    @pytest.mark.fast
     def test_handles_string_entities(self):
         """Should handle entities stored as plain strings"""
         config = MockConfig()
@@ -520,6 +537,7 @@ class TestObviousMatchEntityMatching:
 
         assert result is not None
 
+    @pytest.mark.fast
     def test_handles_dict_entities(self):
         """Should handle entities stored as dicts with 'text' key"""
         config = MockConfig()
@@ -558,6 +576,7 @@ class TestObviousMatchLogging:
         from src.matching.tiered_matcher import TieredMatcher
         self.TieredMatcher = TieredMatcher
 
+    @pytest.mark.fast
     def test_logs_info_when_obvious_match_detected(self):
         """Should log info message when obvious match is detected"""
         config = MockConfig()
@@ -608,6 +627,7 @@ class TestMatchSegmentIntegration:
         config.matching.face_preference = 'neutral'
         return config
 
+    @pytest.mark.fast
     def test_obvious_match_skips_llm_call(self):
         """Should skip LLM when obvious match is detected"""
         config = self._create_full_mock_config()
@@ -641,6 +661,7 @@ class TestMatchSegmentIntegration:
         assert result.primary_match.confidence >= 0.92
         assert "obvious_match" in result.primary_match.reasoning
 
+    @pytest.mark.fast
     def test_obvious_match_disabled_uses_normal_path(self):
         """Should use normal matching path when obvious match is disabled"""
         config = self._create_full_mock_config()
@@ -670,6 +691,7 @@ class TestMatchSegmentIntegration:
 class TestDefaultConfigValues:
     """Tests for default config values"""
 
+    @pytest.mark.fast
     def test_config_defaults_exist(self):
         """Config should have default values for obvious match settings"""
         from src.config.sections.matching import MatchingConfig
@@ -681,6 +703,7 @@ class TestDefaultConfigValues:
         assert hasattr(config, 'obvious_match_min_keywords')
         assert hasattr(config, 'obvious_match_min_confidence')
 
+    @pytest.mark.fast
     def test_config_default_values(self):
         """Config defaults should match acceptance criteria"""
         from src.config.sections.matching import MatchingConfig

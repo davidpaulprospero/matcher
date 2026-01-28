@@ -91,6 +91,7 @@ class TestParseTargetsOutput:
         assert "Firefox-133:Linux" in targets
         assert "Chrome-131:Android-14" in targets
 
+    @pytest.mark.fast
     def test_wide_column_output(self):
         targets = ImpersonationManager._parse_targets_output(SAMPLE_OUTPUT_WIDE_COLUMNS)
         assert len(targets) == 3
@@ -98,20 +99,24 @@ class TestParseTargetsOutput:
         assert "Tor-13.5:Linux" in targets
         assert "Safari-17.0:Macos-14" in targets
 
+    @pytest.mark.fast
     def test_minimal_output_no_info_line(self):
         targets = ImpersonationManager._parse_targets_output(SAMPLE_OUTPUT_MINIMAL)
         assert len(targets) == 2
         assert "Chrome-136:Macos-15" in targets
         assert "Edge-131:Windows-11" in targets
 
+    @pytest.mark.fast
     def test_empty_output_returns_empty_list(self):
         targets = ImpersonationManager._parse_targets_output(SAMPLE_OUTPUT_EMPTY)
         assert targets == []
 
+    @pytest.mark.fast
     def test_no_header_returns_empty_list(self):
         targets = ImpersonationManager._parse_targets_output(SAMPLE_OUTPUT_NO_HEADER)
         assert targets == []
 
+    @pytest.mark.fast
     def test_completely_empty_string(self):
         targets = ImpersonationManager._parse_targets_output("")
         assert targets == []
@@ -132,6 +137,7 @@ class TestRoundRobinRotation:
         returned = [mgr.get_next_target() for _ in range(len(targets))]
         assert returned == targets
 
+    @pytest.mark.fast
     def test_wraps_around_after_exhausting(self):
         targets = ["A:1", "B:2"]
         mgr = _make_manager_with_targets(targets)
@@ -145,11 +151,13 @@ class TestRoundRobinRotation:
         # Third cycle
         assert mgr.get_next_target() == "A:1"
 
+    @pytest.mark.fast
     def test_get_impersonate_args_returns_flag_pair(self):
         mgr = _make_manager_with_targets(["Chrome-136:Macos-15"])
         args = mgr.get_impersonate_args()
         assert args == ["--impersonate", "Chrome-136:Macos-15"]
 
+    @pytest.mark.fast
     def test_stats_track_rotation(self):
         targets = ["X:1", "Y:2"]
         mgr = _make_manager_with_targets(targets)
@@ -163,6 +171,7 @@ class TestRoundRobinRotation:
         assert mgr.stats.unique_targets_used["X:1"] == 3
         assert mgr.stats.unique_targets_used["Y:2"] == 2
 
+    @pytest.mark.fast
     def test_single_target_always_returns_same(self):
         mgr = _make_manager_with_targets(["Only:One"])
         for _ in range(10):
@@ -204,6 +213,7 @@ class TestThreadSafety:
         # All results are valid targets
         assert all(r in targets for r in results)
 
+    @pytest.mark.fast
     def test_concurrent_rotation_covers_all_targets(self):
         """Over enough iterations, every target should be returned."""
         targets = ["T1:A", "T2:B", "T3:C", "T4:D", "T5:E"]
@@ -228,6 +238,7 @@ class TestThreadSafety:
         returned_set = set(results)
         assert returned_set == set(targets)
 
+    @pytest.mark.fast
     def test_stats_match_total_calls_under_concurrency(self):
         mgr = _make_manager_with_targets(["A:1", "B:2", "C:3"])
         num_threads = 6
@@ -258,15 +269,18 @@ class TestEmptyAndInvalidTargets:
         mgr = _make_manager_with_targets([])
         assert mgr.get_next_target() is None
 
+    @pytest.mark.fast
     def test_empty_targets_returns_empty_args(self):
         mgr = _make_manager_with_targets([])
         assert mgr.get_impersonate_args() == []
 
+    @pytest.mark.fast
     def test_target_count_zero_when_empty(self):
         mgr = _make_manager_with_targets([])
         assert mgr.target_count == 0
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_detection_failure_returns_empty(self, mock_run):
         """When yt-dlp returns non-zero exit code, targets list is empty."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
@@ -275,6 +289,7 @@ class TestEmptyAndInvalidTargets:
         assert mgr.get_next_target() is None
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_detection_timeout_returns_empty(self, mock_run):
         """When yt-dlp times out, targets list is empty."""
         import subprocess as sp
@@ -283,6 +298,7 @@ class TestEmptyAndInvalidTargets:
         assert mgr.target_count == 0
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_yt_dlp_not_found_returns_empty(self, mock_run):
         """When yt-dlp is not on PATH."""
         mock_run.side_effect = FileNotFoundError("yt-dlp not found")
@@ -290,12 +306,14 @@ class TestEmptyAndInvalidTargets:
         assert mgr.target_count == 0
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_detect_at_startup_false_skips_detection(self, mock_run):
         """detect_at_startup=False should not call subprocess."""
         mgr = ImpersonationManager(detect_at_startup=False)
         mock_run.assert_not_called()
         assert mgr.target_count == 0
 
+    @pytest.mark.fast
     def test_get_status_with_no_targets(self):
         mgr = _make_manager_with_targets([])
         status = mgr.get_status()
@@ -314,6 +332,7 @@ class TestPreferredTargetsFiltering:
     targets are used in rotation."""
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_preferred_targets_filters_detected(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout=SAMPLE_OUTPUT_STANDARD
@@ -327,6 +346,7 @@ class TestPreferredTargetsFiltering:
         assert set(mgr.targets) == {"Chrome-136:Macos-15", "Edge-131:Windows-11"}
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_no_matching_preferred_uses_all(self, mock_run):
         """If no preferred targets match, fall back to using all detected."""
         mock_run.return_value = MagicMock(
@@ -340,6 +360,7 @@ class TestPreferredTargetsFiltering:
         assert mgr.target_count == 5
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_empty_preferred_uses_all(self, mock_run):
         """Empty preferred_targets list means use all detected."""
         mock_run.return_value = MagicMock(
@@ -352,6 +373,7 @@ class TestPreferredTargetsFiltering:
         assert mgr.target_count == 5
 
     @patch("src.downloader.impersonation.subprocess.run")
+    @pytest.mark.fast
     def test_preferred_targets_rotation_only_uses_filtered(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0, stdout=SAMPLE_OUTPUT_STANDARD
@@ -380,6 +402,7 @@ class TestImpersonationStats:
         assert stats.unique_count == 0
         assert stats.unique_targets_used == {}
 
+    @pytest.mark.fast
     def test_record_use_increments(self):
         stats = ImpersonationStats()
         stats.record_use("A:1")
@@ -390,6 +413,7 @@ class TestImpersonationStats:
         assert stats.unique_targets_used["A:1"] == 2
         assert stats.unique_targets_used["B:2"] == 1
 
+    @pytest.mark.fast
     def test_to_dict(self):
         stats = ImpersonationStats()
         stats.record_use("X:Y")

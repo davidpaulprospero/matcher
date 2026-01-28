@@ -75,6 +75,7 @@ class TestEmbeddingResultOutput:
     @patch('src.stages.transcribe.TranscribeStage._transcribe_videos')
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
+    @pytest.mark.fast
     def test_embedding_result_prints_vector_count(
         self, mock_handle_silent, mock_compute_emb, mock_transcribe,
         mock_config, mock_checkpoint, capsys
@@ -117,6 +118,7 @@ class TestFacePreferenceConditional:
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
     @patch('src.stages.transcribe.TranscribeStage._predetect_faces')
+    @pytest.mark.fast
     def test_predetect_faces_called_when_prefer_faces(
         self, mock_predetect, mock_handle_silent, mock_compute_emb,
         mock_transcribe, mock_config, mock_checkpoint
@@ -143,6 +145,7 @@ class TestFacePreferenceConditional:
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
     @patch('src.stages.transcribe.TranscribeStage._predetect_faces')
+    @pytest.mark.fast
     def test_predetect_faces_called_when_avoid_faces(
         self, mock_predetect, mock_handle_silent, mock_compute_emb,
         mock_transcribe, mock_config, mock_checkpoint
@@ -169,6 +172,7 @@ class TestFacePreferenceConditional:
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
     @patch('src.stages.transcribe.TranscribeStage._predetect_faces')
+    @pytest.mark.fast
     def test_predetect_faces_not_called_when_neutral(
         self, mock_predetect, mock_handle_silent, mock_compute_emb,
         mock_transcribe, mock_config, mock_checkpoint
@@ -203,6 +207,7 @@ class TestChapterMatchingConditional:
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
     @patch('src.stages.transcribe.TranscribeStage._extract_video_topics')
+    @pytest.mark.fast
     def test_extract_topics_called_when_chapter_matching_enabled(
         self, mock_extract_topics, mock_handle_silent, mock_compute_emb,
         mock_transcribe, mock_config, mock_checkpoint
@@ -229,6 +234,7 @@ class TestChapterMatchingConditional:
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
     @patch('src.stages.transcribe.TranscribeStage._extract_video_topics')
+    @pytest.mark.fast
     def test_extract_topics_not_called_when_chapter_matching_disabled(
         self, mock_extract_topics, mock_handle_silent, mock_compute_emb,
         mock_transcribe, mock_config, mock_checkpoint
@@ -259,6 +265,7 @@ class TestChapterMatchingConditional:
 class TestCanSkipMethod:
     """Tests for line 117: can_skip returns checkpoint result"""
 
+    @pytest.mark.fast
     def test_can_skip_returns_false_from_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when checkpoint says not to skip"""
         stage = TranscribeStage()
@@ -279,6 +286,7 @@ class TestSequentialTranscriptionPath:
     """Tests for line 216: sequential transcription when parallel disabled"""
 
     @patch('src.stages.transcribe.TranscribeStage._transcribe_sequential')
+    @pytest.mark.fast
     def test_sequential_path_when_parallel_disabled(
         self, mock_sequential, mock_config
     ):
@@ -302,6 +310,7 @@ class TestSequentialTranscriptionPath:
 class TestEmbeddingCacheHandling:
     """Tests for lines 332, 335-336: cache handling and import error paths"""
 
+    @pytest.mark.fast
     def test_compute_embeddings_returns_false_when_no_index_built(self, mock_config):
         """Test _compute_embeddings returns False when embedding_index is not built (line 332)"""
         stage = TranscribeStage()
@@ -319,6 +328,7 @@ class TestEmbeddingCacheHandling:
     @patch('src.embeddings.build_embedding_index')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_compute_embeddings_returns_false_when_embeddings_empty(
         self, mock_cache_class, mock_provider, mock_build_index,
         mock_compute, mock_config
@@ -346,6 +356,7 @@ class TestEmbeddingCacheHandling:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_compute_embeddings_import_error_returns_false(self, mock_config):
         """Test _compute_embeddings returns False on ImportError (lines 335-336)"""
         stage = TranscribeStage()
@@ -381,6 +392,7 @@ class TestFaceDetectionProgress:
     """Tests for lines 373, 401-402: face detection progress output"""
 
     @patch('src.face_detection.FaceDetector')
+    @pytest.mark.fast
     def test_face_detection_progress_output(self, mock_detector_class, mock_config, capsys):
         """Test face detection outputs progress (line 373)"""
         stage = TranscribeStage()
@@ -400,6 +412,7 @@ class TestFaceDetectionProgress:
         assert mock_detector.get_face_score.call_count == 11
 
     @patch('src.topic_extraction.TopicExtractor')
+    @pytest.mark.fast
     def test_extract_topics_with_dict_segments(self, mock_extractor_class, mock_config):
         """Test topic extraction handles dict segments (lines 401-402)"""
         stage = TranscribeStage()
@@ -424,6 +437,7 @@ class TestFaceDetectionProgress:
         mock_extractor_class.assert_called_once()
 
     @patch('src.topic_extraction.TopicExtractor')
+    @pytest.mark.fast
     def test_extract_topics_with_object_segments(self, mock_extractor_class, mock_config):
         """Test topic extraction handles object segments (lines 399-400)"""
         stage = TranscribeStage()
@@ -455,6 +469,7 @@ class TestYamlLoaderFallback:
 
     @patch('glob.glob')
     @patch('builtins.open', mock_open(read_data='cache:\n  cache_dir: .cache'))
+    @pytest.mark.fast
     def test_rebuild_metadata_with_csafeloader(self, mock_glob, mock_checkpoint, temp_project_dir):
         """Test rebuild uses CSafeLoader when available"""
         stage = TranscribeStage()
@@ -474,6 +489,7 @@ class TestYamlLoaderFallback:
         assert state.text_metadata == []
 
     @patch('glob.glob')
+    @pytest.mark.fast
     def test_rebuild_metadata_safeloader_fallback(self, mock_glob, mock_checkpoint, temp_project_dir):
         """Test rebuild falls back to SafeLoader when CSafeLoader unavailable (lines 459-460)"""
         stage = TranscribeStage()
@@ -516,6 +532,7 @@ class TestTranscriptLoadingErrors:
 
     @patch('glob.glob')
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_rebuild_metadata_handles_corrupt_transcript(
         self, mock_logger, mock_glob, mock_checkpoint, temp_project_dir
     ):
@@ -545,6 +562,7 @@ class TestTranscriptLoadingErrors:
         mock_logger.debug.assert_called()
 
     @patch('glob.glob')
+    @pytest.mark.fast
     def test_rebuild_metadata_with_valid_transcripts(
         self, mock_glob, mock_checkpoint, temp_project_dir
     ):
@@ -587,6 +605,7 @@ class TestRebuildMetadataErrors:
     """Tests for lines 512-515: overall exception handling in rebuild"""
 
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_rebuild_metadata_overall_exception(self, mock_logger, mock_checkpoint):
         """Test rebuild handles overall exception gracefully (lines 512-515)"""
         stage = TranscribeStage()
@@ -602,6 +621,7 @@ class TestRebuildMetadataErrors:
         mock_logger.warning.assert_called()
 
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_rebuild_metadata_config_file_not_found(
         self, mock_logger, mock_checkpoint, temp_project_dir
     ):
@@ -627,6 +647,7 @@ class TestLoadTranscriptsFromCache:
 
     @patch('src.transcription.TranscriptCache')
     @patch('src.stages.transcribe.logger')
+    @pytest.mark.fast
     def test_load_transcripts_from_cache_exception(
         self, mock_logger, mock_cache_class, mock_config, temp_project_dir
     ):
@@ -643,6 +664,7 @@ class TestLoadTranscriptsFromCache:
         mock_logger.warning.assert_called()
 
     @patch('src.transcription.TranscriptCache')
+    @pytest.mark.fast
     def test_load_transcripts_from_cache_success(
         self, mock_cache_class, mock_config, temp_project_dir
     ):
@@ -665,6 +687,7 @@ class TestLoadTranscriptsFromCache:
         assert len(result) == 1
 
     @patch('src.transcription.TranscriptCache')
+    @pytest.mark.fast
     def test_load_transcripts_from_cache_no_cached(
         self, mock_cache_class, mock_config, temp_project_dir
     ):
@@ -698,6 +721,7 @@ class TestEmbeddingComputationSegmentTypes:
     @patch('src.embeddings.build_embedding_index')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_compute_embeddings_with_object_segments(
         self, mock_cache_class, mock_provider, mock_build_index,
         mock_compute, mock_config
@@ -730,6 +754,7 @@ class TestEmbeddingComputationSegmentTypes:
     @patch('src.embeddings.build_embedding_index')
     @patch('src.embeddings.get_embedding_provider')
     @patch('src.utils.CacheManager')
+    @pytest.mark.fast
     def test_compute_embeddings_with_dict_segments(
         self, mock_cache_class, mock_provider, mock_build_index,
         mock_compute, mock_config
@@ -770,6 +795,7 @@ class TestFullStageRun:
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
     @patch('src.stages.transcribe.TranscribeStage._predetect_faces')
     @patch('src.stages.transcribe.TranscribeStage._extract_video_topics')
+    @pytest.mark.fast
     def test_full_run_with_all_features(
         self, mock_extract_topics, mock_predetect, mock_handle_silent,
         mock_compute_emb, mock_transcribe, mock_config, mock_checkpoint
@@ -799,6 +825,7 @@ class TestFullStageRun:
     @patch('src.stages.transcribe.TranscribeStage._transcribe_videos')
     @patch('src.stages.transcribe.TranscribeStage._compute_embeddings')
     @patch('src.stages.transcribe.TranscribeStage._handle_silent_videos')
+    @pytest.mark.fast
     def test_run_with_audio_first_mode(
         self, mock_handle_silent, mock_compute_emb, mock_transcribe,
         mock_config, mock_checkpoint
@@ -838,6 +865,7 @@ class TestSkipTranscriptionPath:
     """Tests for skip transcription configuration"""
 
     @patch('src.stages.transcribe.TranscribeStage._load_transcripts_from_cache')
+    @pytest.mark.fast
     def test_skip_transcription_enabled(
         self, mock_load_cache, mock_config, mock_checkpoint
     ):
@@ -867,6 +895,7 @@ class TestDeltaIndexingPath:
 
     @patch('src.transcription.transcribe_videos_parallel')
     @patch('src.transcription.DeltaAwareIndex')
+    @pytest.mark.fast
     def test_delta_indexing_filters_cached_videos(
         self, mock_delta_class, mock_transcribe, mock_config
     ):
@@ -894,6 +923,7 @@ class TestDeltaIndexingPath:
 
     @patch('src.transcription.transcribe_videos_parallel')
     @patch('src.transcription.DeltaAwareIndex')
+    @pytest.mark.fast
     def test_delta_indexing_all_cached(
         self, mock_delta_class, mock_transcribe, mock_config, capsys
     ):
@@ -927,6 +957,7 @@ class TestLLMDescriptionGeneration:
     """Tests for _generate_llm_descriptions and _generate_filename_descriptions"""
 
     @patch('src.stages.transcribe.TranscribeStage._generate_llm_descriptions')
+    @pytest.mark.fast
     def test_handle_silent_videos_calls_generate_descriptions(
         self, mock_generate, mock_config
     ):
@@ -952,6 +983,7 @@ class TestLLMDescriptionGeneration:
         assert Path("silent_video.mp4") in call_args[0]
 
     @patch('src.stages.transcribe.TranscribeStage._generate_llm_descriptions')
+    @pytest.mark.fast
     def test_handle_silent_videos_updates_transcripts(
         self, mock_generate, mock_config
     ):
@@ -974,6 +1006,7 @@ class TestLLMDescriptionGeneration:
         assert transcripts["silent_video.mp4"][0]['is_generated'] is True
         assert transcripts["silent_video.mp4"][0]['source'] == 'llm_description'
 
+    @pytest.mark.fast
     def test_handle_silent_videos_skips_when_disabled(self, mock_config):
         """Test that silent video handling is skipped when disabled"""
         stage = TranscribeStage()
@@ -988,6 +1021,7 @@ class TestLLMDescriptionGeneration:
         # No transcripts should be added
         assert len(transcripts) == 0
 
+    @pytest.mark.fast
     def test_handle_silent_videos_skips_when_no_silent_config(self, mock_config):
         """Test that silent video handling is skipped when config missing"""
         stage = TranscribeStage()
@@ -1001,6 +1035,7 @@ class TestLLMDescriptionGeneration:
         # No transcripts should be added
         assert len(transcripts) == 0
 
+    @pytest.mark.fast
     def test_handle_silent_videos_detects_sparse_transcripts(self, mock_config):
         """Test that videos with few words are detected as silent"""
         stage = TranscribeStage()
@@ -1025,6 +1060,7 @@ class TestLLMDescriptionGeneration:
             assert Path("sparse_video.mp4") in silent_list
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_generate_llm_descriptions_uses_vision_api(
         self, mock_processor_class, mock_config
     ):
@@ -1052,6 +1088,7 @@ class TestLLMDescriptionGeneration:
         mock_processor.describe_scene.assert_called_once()
 
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_generate_llm_descriptions_falls_back_when_vision_unavailable(
         self, mock_processor_class, mock_config
     ):
@@ -1077,6 +1114,7 @@ class TestLLMDescriptionGeneration:
         assert "ocean_waves_sunset.mp4" in descriptions
         assert "ocean waves sunset" in descriptions["ocean_waves_sunset.mp4"].lower()
 
+    @pytest.mark.fast
     def test_generate_filename_descriptions_simple_fallback(self, mock_config):
         """Test simple filename extraction when LLM unavailable"""
         stage = TranscribeStage()
@@ -1096,6 +1134,7 @@ class TestLLMDescriptionGeneration:
 
     @patch('os.getenv')
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_filename_descriptions_uses_llm(
         self, mock_create_client, mock_getenv, mock_config
     ):
@@ -1120,6 +1159,7 @@ class TestLLMDescriptionGeneration:
         assert "sunset_beach.mp4" in descriptions
         assert descriptions["sunset_beach.mp4"] == "A beautiful sunset over a sandy beach with gentle waves."
 
+    @pytest.mark.fast
     def test_generate_llm_descriptions_respects_vision_disabled(self, mock_config):
         """Test that Vision API is skipped when use_vision_api is False"""
         stage = TranscribeStage()
@@ -1140,6 +1180,7 @@ class TestLLMDescriptionGeneration:
             # Should still get filename fallback
             assert "test_video.mp4" in descriptions
 
+    @pytest.mark.fast
     def test_generate_llm_descriptions_handles_vision_error(self, mock_config):
         """Test graceful handling of Vision API errors"""
         stage = TranscribeStage()
@@ -1162,6 +1203,7 @@ class TestLLMDescriptionGeneration:
             # Should get filename fallback
             assert "test_video.mp4" in descriptions
 
+    @pytest.mark.fast
     def test_generate_llm_descriptions_no_fallback(self, mock_config):
         """Test when both Vision and LLM fallback are disabled"""
         stage = TranscribeStage()

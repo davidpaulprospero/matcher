@@ -1,3 +1,4 @@
+import pytest
 """
 Unit tests for unified cache package.
 
@@ -48,6 +49,7 @@ class TestBaseCache(unittest.TestCase):
         if Path(self.temp_dir).exists():
             shutil.rmtree(self.temp_dir)
 
+    @pytest.mark.fast
     def test_basic_get_set(self):
         """Test basic cache operations"""
         self.cache.set('key1', {'value': 'test'})
@@ -56,11 +58,13 @@ class TestBaseCache(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.data, {'value': 'test'})
 
+    @pytest.mark.fast
     def test_get_nonexistent(self):
         """Test getting non-existent key"""
         result = self.cache.get('nonexistent')
         self.assertIsNone(result)
 
+    @pytest.mark.slow
     def test_ttl_expiration(self):
         """Test TTL expiration"""
         self.cache.set('key1', 'value1')
@@ -74,6 +78,7 @@ class TestBaseCache(unittest.TestCase):
         # Should be expired
         self.assertIsNone(self.cache.get('key1'))
 
+    @pytest.mark.fast
     def test_persistence(self):
         """Test cache persistence across instances"""
         self.cache.set('key1', 'value1')
@@ -91,6 +96,7 @@ class TestBaseCache(unittest.TestCase):
         self.assertEqual(result1.data, 'value1')
         self.assertEqual(result2.data, 'value2')
 
+    @pytest.mark.fast
     def test_delete(self):
         """Test cache deletion"""
         self.cache.set('key1', 'value1')
@@ -100,6 +106,7 @@ class TestBaseCache(unittest.TestCase):
         # Deleting non-existent key
         self.assertFalse(self.cache.delete('nonexistent'))
 
+    @pytest.mark.fast
     def test_clear(self):
         """Test cache clearing"""
         self.cache.set('key1', 'value1')
@@ -111,12 +118,14 @@ class TestBaseCache(unittest.TestCase):
         self.assertIsNone(self.cache.get('key2'))
         self.assertEqual(len(self.cache.index), 0)
 
+    @pytest.mark.fast
     def test_exists(self):
         """Test key existence check"""
         self.cache.set('key1', 'value1')
         self.assertTrue(self.cache.exists('key1'))
         self.assertFalse(self.cache.exists('nonexistent'))
 
+    @pytest.mark.fast
     def test_get_all(self):
         """Test getting all entries"""
         self.cache.set('key1', 'value1')
@@ -130,6 +139,7 @@ class TestBaseCache(unittest.TestCase):
         self.assertIn('key2', all_entries)
         self.assertIn('key3', all_entries)
 
+    @pytest.mark.slow
     def test_cleanup_expired(self):
         """Test cleanup of expired entries"""
         self.cache.set('key1', 'value1')
@@ -149,6 +159,7 @@ class TestBaseCache(unittest.TestCase):
         self.assertIsNone(self.cache.get('key2'))
         self.assertIsNotNone(self.cache.get('key3'))
 
+    @pytest.mark.fast
     def test_stats(self):
         """Test cache statistics"""
         self.cache.set('key1', 'value1')
@@ -160,6 +171,7 @@ class TestBaseCache(unittest.TestCase):
         self.assertGreater(stats['cache_size_mb'], 0)
         self.assertEqual(stats['ttl_seconds'], 2)
 
+    @pytest.mark.fast
     def test_metadata(self):
         """Test entry metadata"""
         metadata = {'source': 'test', 'version': 1}
@@ -175,6 +187,7 @@ class TestBaseCache(unittest.TestCase):
 class TestCacheUtils(unittest.TestCase):
     """Test cache utility functions"""
 
+    @pytest.mark.fast
     def test_compute_hash(self):
         """Test hash computation"""
         hash1 = compute_hash("test")
@@ -185,17 +198,20 @@ class TestCacheUtils(unittest.TestCase):
         self.assertNotEqual(hash1, hash3)
         self.assertEqual(len(hash1), 16)
 
+    @pytest.mark.fast
     def test_compute_hash_custom_length(self):
         """Test hash with custom length"""
         hash1 = compute_hash("test", length=8)
         self.assertEqual(len(hash1), 8)
 
+    @pytest.mark.fast
     def test_compute_hash_bytes(self):
         """Test hash with bytes input"""
         hash1 = compute_hash(b"test")
         hash2 = compute_hash("test")
         self.assertEqual(hash1, hash2)
 
+    @pytest.mark.fast
     def test_normalize_path(self):
         """Test path normalization"""
         # Test with backslashes
@@ -211,6 +227,7 @@ class TestCacheUtils(unittest.TestCase):
         same_path_2 = normalize_path("./test.txt")
         self.assertEqual(same_path_1, same_path_2)
 
+    @pytest.mark.fast
     def test_batch_hash(self):
         """Test batch hashing"""
         items1 = ["item1", "item2", "item3"]
@@ -234,6 +251,7 @@ class TestLocationCache(unittest.TestCase):
         if Path(self.temp_dir).exists():
             shutil.rmtree(self.temp_dir)
 
+    @pytest.mark.fast
     def test_location_cache_structure(self):
         """Test LocationCache default structure"""
         from src.location_service import LocationCache
@@ -246,6 +264,7 @@ class TestLocationCache(unittest.TestCase):
         self.assertEqual(len(cache.index['locations']), 0)
         self.assertEqual(len(cache.index['disambiguations']), 0)
 
+    @pytest.mark.fast
     def test_location_cache_entry_count(self):
         """Test entry counting across sections"""
         from src.location_service import LocationCache

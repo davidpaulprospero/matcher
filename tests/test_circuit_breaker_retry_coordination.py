@@ -19,16 +19,19 @@ from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig,
 class TestBatchRetryConfigRespectCircuitBreaker:
     """Tests for respect_circuit_breaker config option."""
 
+    @pytest.mark.fast
     def test_default_is_true(self):
         """respect_circuit_breaker should default to True."""
         config = BatchRetryConfig()
         assert config.respect_circuit_breaker is True
 
+    @pytest.mark.fast
     def test_can_be_disabled(self):
         """respect_circuit_breaker can be set to False."""
         config = BatchRetryConfig(respect_circuit_breaker=False)
         assert config.respect_circuit_breaker is False
 
+    @pytest.mark.fast
     def test_included_in_config_section(self):
         """respect_circuit_breaker should be in config/sections/download.py."""
         from src.config.sections.download import BatchRetryConfig as ConfigBatchRetryConfig
@@ -40,6 +43,7 @@ class TestBatchRetryConfigRespectCircuitBreaker:
 class TestRetryQueueSetCircuitBreaker:
     """Tests for set_circuit_breaker() method."""
 
+    @pytest.mark.fast
     def test_set_circuit_breaker_links_instance(self):
         """set_circuit_breaker() should store circuit breaker reference."""
         queue = RetryQueue()
@@ -49,6 +53,7 @@ class TestRetryQueueSetCircuitBreaker:
 
         assert queue._circuit_breaker is cb
 
+    @pytest.mark.fast
     def test_set_circuit_breaker_logs_debug(self):
         """set_circuit_breaker() should log at debug level."""
         queue = RetryQueue()
@@ -58,6 +63,7 @@ class TestRetryQueueSetCircuitBreaker:
             queue.set_circuit_breaker(cb)
             mock_logger.debug.assert_called_once()
 
+    @pytest.mark.fast
     def test_without_circuit_breaker_is_none(self):
         """Without set_circuit_breaker(), _circuit_breaker should be None."""
         queue = RetryQueue()
@@ -67,11 +73,13 @@ class TestRetryQueueSetCircuitBreaker:
 class TestWaitForCircuitBreaker:
     """Tests for _wait_for_circuit_breaker() method."""
 
+    @pytest.mark.fast
     def test_returns_zero_when_no_circuit_breaker(self):
         """Should return 0 when no circuit breaker is linked."""
         queue = RetryQueue()
         assert queue._wait_for_circuit_breaker() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_respect_disabled(self):
         """Should return 0 when respect_circuit_breaker is False."""
         queue = RetryQueue(BatchRetryConfig(respect_circuit_breaker=False))
@@ -82,6 +90,7 @@ class TestWaitForCircuitBreaker:
 
         assert queue._wait_for_circuit_breaker() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_circuit_breaker_disabled(self):
         """Should return 0 when circuit breaker is disabled."""
         queue = RetryQueue()
@@ -90,6 +99,7 @@ class TestWaitForCircuitBreaker:
 
         assert queue._wait_for_circuit_breaker() == 0.0
 
+    @pytest.mark.fast
     def test_returns_zero_when_circuit_closed(self):
         """Should return 0 when circuit breaker is not tripped."""
         queue = RetryQueue()
@@ -99,6 +109,7 @@ class TestWaitForCircuitBreaker:
 
         assert queue._wait_for_circuit_breaker() == 0.0
 
+    @pytest.mark.fast
     def test_waits_when_circuit_open(self):
         """Should wait and return time when circuit breaker is tripped."""
         queue = RetryQueue()
@@ -115,6 +126,7 @@ class TestWaitForCircuitBreaker:
             called_time = mock_sleep.call_args[0][0]
             assert 0 < called_time <= 0.1
 
+    @pytest.mark.fast
     def test_tracks_circuit_breaker_wait_time(self):
         """Should accumulate total wait time in _circuit_breaker_wait_time."""
         queue = RetryQueue()
@@ -128,6 +140,7 @@ class TestWaitForCircuitBreaker:
 
         assert queue._circuit_breaker_wait_time > 0
 
+    @pytest.mark.fast
     def test_logs_when_waiting(self):
         """Should log at INFO level when waiting for circuit breaker."""
         queue = RetryQueue()
@@ -146,6 +159,7 @@ class TestWaitForCircuitBreaker:
 class TestStartRetryPassWithCircuitBreaker:
     """Tests for start_retry_pass() circuit breaker integration."""
 
+    @pytest.mark.fast
     def test_checks_circuit_breaker_before_delay(self):
         """start_retry_pass() should check circuit breaker via _wait_combined."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -161,6 +175,7 @@ class TestStartRetryPassWithCircuitBreaker:
             queue.start_retry_pass()
             mock_wait.assert_called_once()
 
+    @pytest.mark.fast
     def test_logs_circuit_breaker_wait_and_delay(self):
         """Should log with circuit breaker wait info when CB was active."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -181,6 +196,7 @@ class TestStartRetryPassWithCircuitBreaker:
             all_logs = ' '.join(c[0][0] for c in info_calls)
             assert 'circuit breaker' in all_logs.lower() or 'Batch retry pass' in all_logs
 
+    @pytest.mark.fast
     def test_logs_standard_message_when_no_cb_wait(self):
         """Should log standard message when circuit breaker wait is 0."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01))
@@ -200,6 +216,7 @@ class TestStartRetryPassWithCircuitBreaker:
 class TestRetryQueueStats:
     """Tests for get_stats() with circuit breaker fields."""
 
+    @pytest.mark.fast
     def test_stats_includes_respect_circuit_breaker(self):
         """get_stats() should include respect_circuit_breaker."""
         queue = RetryQueue(BatchRetryConfig(respect_circuit_breaker=True))
@@ -207,6 +224,7 @@ class TestRetryQueueStats:
         assert 'respect_circuit_breaker' in stats
         assert stats['respect_circuit_breaker'] is True
 
+    @pytest.mark.fast
     def test_stats_includes_circuit_breaker_wait_time(self):
         """get_stats() should include circuit_breaker_wait_time."""
         queue = RetryQueue()
@@ -215,6 +233,7 @@ class TestRetryQueueStats:
         assert 'circuit_breaker_wait_time' in stats
         assert stats['circuit_breaker_wait_time'] == 30.5
 
+    @pytest.mark.fast
     def test_stats_circuit_breaker_wait_time_rounded(self):
         """circuit_breaker_wait_time should be rounded to 1 decimal."""
         queue = RetryQueue()
@@ -226,6 +245,7 @@ class TestRetryQueueStats:
 class TestRetryQueueClear:
     """Tests for clear() with circuit breaker fields."""
 
+    @pytest.mark.fast
     def test_clear_resets_circuit_breaker_wait_time(self):
         """clear() should reset circuit_breaker_wait_time to 0."""
         queue = RetryQueue()
@@ -237,6 +257,7 @@ class TestRetryQueueClear:
 class TestRetryQueueCheckpoint:
     """Tests for checkpoint persistence with circuit breaker fields."""
 
+    @pytest.mark.fast
     def test_to_checkpoint_includes_circuit_breaker_wait_time(self):
         """to_checkpoint_dict() should include circuit_breaker_wait_time."""
         queue = RetryQueue()
@@ -245,6 +266,7 @@ class TestRetryQueueCheckpoint:
         assert 'circuit_breaker_wait_time' in data
         assert data['circuit_breaker_wait_time'] == 45.0
 
+    @pytest.mark.fast
     def test_from_checkpoint_restores_circuit_breaker_wait_time(self):
         """from_checkpoint_dict() should restore circuit_breaker_wait_time."""
         queue = RetryQueue()
@@ -252,6 +274,7 @@ class TestRetryQueueCheckpoint:
         queue.from_checkpoint_dict(data)
         assert queue._circuit_breaker_wait_time == 30.0
 
+    @pytest.mark.fast
     def test_from_checkpoint_defaults_circuit_breaker_wait_time(self):
         """from_checkpoint_dict() should default to 0 if missing."""
         queue = RetryQueue()
@@ -266,6 +289,7 @@ class TestRetryQueueCheckpoint:
         queue2.from_checkpoint_dict(data2)
         assert queue2._circuit_breaker_wait_time == 0.0
 
+    @pytest.mark.fast
     def test_checkpoint_roundtrip(self):
         """Should roundtrip circuit_breaker_wait_time through checkpoint."""
         queue = RetryQueue()
@@ -283,6 +307,7 @@ class TestRetryQueueCheckpoint:
 class TestVideoDownloaderIntegration:
     """Tests for VideoDownloader integration."""
 
+    @pytest.mark.fast
     def test_retry_queue_linked_to_circuit_breaker(self):
         """VideoDownloader should link retry_queue to circuit_breaker."""
         from src.downloader.core import VideoDownloader
@@ -333,6 +358,7 @@ class TestVideoDownloaderIntegration:
         # Verify circuit breaker is linked to retry queue
         assert downloader.retry_queue._circuit_breaker is downloader.circuit_breaker
 
+    @pytest.mark.fast
     def test_respect_circuit_breaker_config_read(self):
         """VideoDownloader should read respect_circuit_breaker from config."""
         from src.downloader.core import VideoDownloader
@@ -382,6 +408,7 @@ class TestVideoDownloaderIntegration:
 class TestIntegrationScenario:
     """Integration tests for realistic scenarios."""
 
+    @pytest.mark.fast
     def test_batch_retry_waits_for_tripped_circuit_breaker(self):
         """When circuit breaker is tripped, batch retry should wait before processing."""
         # Setup retry queue with circuit breaker
@@ -403,6 +430,7 @@ class TestIntegrationScenario:
             # Should have called sleep twice: once for CB wait, once for delay
             assert mock_sleep.call_count == 2
 
+    @pytest.mark.fast
     def test_batch_retry_does_not_wait_when_circuit_closed(self):
         """When circuit breaker is not tripped, batch retry should not wait for it."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01, respect_circuit_breaker=True))
@@ -420,6 +448,7 @@ class TestIntegrationScenario:
             # Should only call sleep once (for the delay)
             assert mock_sleep.call_count == 1
 
+    @pytest.mark.fast
     def test_batch_retry_does_not_wait_when_respect_disabled(self):
         """When respect_circuit_breaker is False, batch retry should not wait for CB."""
         queue = RetryQueue(BatchRetryConfig(delay_seconds=0.01, respect_circuit_breaker=False))
@@ -442,6 +471,7 @@ class TestIntegrationScenario:
 class TestConfigYamlIntegration:
     """Tests for config.yaml integration."""
 
+    @pytest.mark.fast
     def test_batch_retry_section_has_respect_circuit_breaker(self):
         """config.yaml batch_retry section should have respect_circuit_breaker."""
         import yaml
@@ -464,6 +494,7 @@ class TestConcurrentRetryCoordination:
     simultaneously.
     """
 
+    @pytest.mark.fast
     def test_concurrent_circuit_breaker_wait_serializes_correctly(self):
         """Multiple threads waiting on CB should all wait and then proceed."""
         import threading
@@ -504,6 +535,7 @@ class TestConcurrentRetryCoordination:
         # After all complete, CB should be closed (transitioned to half-open)
         assert cb.state.is_open is False
 
+    @pytest.mark.fast
     def test_concurrent_retry_queues_share_circuit_breaker(self):
         """Multiple retry queues sharing same CB coordinate correctly."""
         cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.05))
@@ -531,6 +563,7 @@ class TestConcurrentRetryCoordination:
         assert queue1._get_cb_remaining() == 0
         assert queue2._get_cb_remaining() == 0
 
+    @pytest.mark.fast
     def test_failure_recording_thread_safety(self):
         """Concurrent failure recording should not corrupt state."""
         import threading
@@ -553,6 +586,7 @@ class TestConcurrentRetryCoordination:
         # Should have exactly 100 failures recorded (no race condition corruption)
         assert cb.state.consecutive_failures == 100
 
+    @pytest.mark.fast
     def test_success_recording_thread_safety(self):
         """Concurrent success recording should properly reset failures."""
         import threading
@@ -578,6 +612,7 @@ class TestConcurrentRetryCoordination:
         # Failures should be reset to 0
         assert cb.state.consecutive_failures == 0
 
+    @pytest.mark.fast
     def test_circuit_breaker_state_machine_transitions(self):
         """Test CB state transitions: CLOSED -> OPEN -> HALF_OPEN -> CLOSED."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -606,6 +641,7 @@ class TestConcurrentRetryCoordination:
         assert cb.state.consecutive_failures == 0
         assert cb.state.is_open is False
 
+    @pytest.mark.fast
     def test_retry_queue_add_blocks_on_open_cb_via_process(self):
         """When CB is open, start_retry_pass() blocks before processing (not add())."""
         queue = RetryQueue(BatchRetryConfig(
@@ -627,6 +663,7 @@ class TestConcurrentRetryCoordination:
                 queue.start_retry_pass()
             mock_wait.assert_called_once()
 
+    @pytest.mark.fast
     def test_half_open_recovery_after_batch_retry_wait(self):
         """After batch retry waits for CB, CB should be in half-open state."""
         queue = RetryQueue(BatchRetryConfig(

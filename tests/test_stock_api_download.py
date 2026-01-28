@@ -66,6 +66,7 @@ class TestPexelsImageDownload:
             tags=["test", "image"]
         )
 
+    @pytest.mark.fast
     def test_download_image_success(self, mock_config, temp_output_dir, sample_image):
         """Test successful image download"""
         client = PexelsImageClient(
@@ -87,6 +88,7 @@ class TestPexelsImageDownload:
         assert Path(result).stat().st_size == 5000000
         assert len(client.downloaded_files) == 1
 
+    @pytest.mark.fast
     def test_download_image_skips_existing(self, mock_config, temp_output_dir, sample_image):
         """Test download skips existing files"""
         client = PexelsImageClient(
@@ -105,6 +107,7 @@ class TestPexelsImageDownload:
         # No HTTP request should be made
         assert len(client.downloaded_files) == 0
 
+    @pytest.mark.fast
     def test_download_image_too_small_precheck(self, mock_config, temp_output_dir, sample_image):
         """Test download skips images that are too small (HEAD request)"""
         client = PexelsImageClient(
@@ -123,6 +126,7 @@ class TestPexelsImageDownload:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_download_image_too_small_content_length(self, mock_config, temp_output_dir, sample_image):
         """Test download skips based on content-length header"""
         client = PexelsImageClient(
@@ -142,6 +146,7 @@ class TestPexelsImageDownload:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_download_image_too_small_actual_size(self, mock_config, temp_output_dir, sample_image):
         """Test download checks actual downloaded size"""
         client = PexelsImageClient(
@@ -162,6 +167,7 @@ class TestPexelsImageDownload:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_download_image_with_entity_metadata(self, mock_config, temp_output_dir, sample_image):
         """Test download saves entity metadata"""
         client = PexelsImageClient(
@@ -192,6 +198,7 @@ class TestPexelsImageDownload:
         assert metadata['entity_name'] == "Paris"
         assert metadata['entity_type'] == "Location"
 
+    @pytest.mark.fast
     def test_download_image_network_error(self, mock_config, temp_output_dir, sample_image):
         """Test download handles network errors"""
         client = PexelsImageClient(
@@ -206,6 +213,7 @@ class TestPexelsImageDownload:
         assert result is None
         assert sample_image.id in client.failed_downloads
 
+    @pytest.mark.fast
     def test_download_image_http_error(self, mock_config, temp_output_dir, sample_image):
         """Test download handles HTTP errors"""
         client = PexelsImageClient(
@@ -223,6 +231,7 @@ class TestPexelsImageDownload:
         assert result is None
         assert sample_image.id in client.failed_downloads
 
+    @pytest.mark.fast
     def test_download_image_creates_metadata_file(self, mock_config, temp_output_dir, sample_image):
         """Test download creates metadata JSON file"""
         client = PexelsImageClient(
@@ -272,6 +281,7 @@ class TestPixabayImageDownload:
             tags=["nature", "landscape"]
         )
 
+    @pytest.mark.fast
     def test_download_image_success(self, mock_config, temp_output_dir, sample_image):
         """Test successful Pixabay image download"""
         client = PixabayImageClient(
@@ -291,6 +301,7 @@ class TestPixabayImageDownload:
         assert Path(result).exists()
         assert len(client.downloaded_files) == 1
 
+    @pytest.mark.fast
     def test_download_tracks_failed_downloads(self, mock_config, temp_output_dir, sample_image):
         """Test Pixabay tracks failed downloads"""
         client = PixabayImageClient(
@@ -328,6 +339,7 @@ class TestUnsplashImageDownload:
             tags=["mountains", "snow"]
         )
 
+    @pytest.mark.fast
     def test_download_image_success(self, mock_config, temp_output_dir, sample_image):
         """Test successful Unsplash image download"""
         client = UnsplashImageClient(
@@ -346,6 +358,7 @@ class TestUnsplashImageDownload:
         assert result is not None
         assert Path(result).exists()
 
+    @pytest.mark.fast
     def test_download_short_filename_generation(self, mock_config, temp_output_dir, sample_image):
         """Test Unsplash generates short filenames from ID"""
         client = UnsplashImageClient(
@@ -375,6 +388,7 @@ class TestUnsplashImageDownload:
 class TestSearchAndDownload:
     """Test integrated search_and_download functionality"""
 
+    @pytest.mark.fast
     def test_pexels_search_and_download(self, mock_config, temp_output_dir):
         """Test Pexels search_and_download integration"""
         client = PexelsImageClient(
@@ -410,6 +424,7 @@ class TestSearchAndDownload:
         mock_search.assert_called_once()
         mock_download.assert_called_once()
 
+    @pytest.mark.fast
     def test_search_and_download_with_entity(self, mock_config, temp_output_dir):
         """Test search_and_download with entity metadata"""
         client = PexelsImageClient(
@@ -466,6 +481,7 @@ class TestPixabayAdditionalDownload:
             tags=["test"]
         )
 
+    @pytest.mark.fast
     def test_download_with_size_check(self, mock_config, temp_output_dir, sample_image):
         """Test download with size checking"""
         client = PixabayImageClient(
@@ -485,6 +501,7 @@ class TestPixabayAdditionalDownload:
 
         assert result is not None
 
+    @pytest.mark.fast
     def test_download_creates_metadata(self, mock_config, temp_output_dir, sample_image):
         """Test Pixabay creates metadata file"""
         client = PixabayImageClient(
@@ -507,6 +524,7 @@ class TestPixabayAdditionalDownload:
             metadata = json.load(f)
         assert metadata['source'] == 'pixabay'
 
+    @pytest.mark.fast
     def test_download_existing_file_too_small(self, mock_config, temp_output_dir, sample_image):
         """Test skips existing file that's too small"""
         client = PixabayImageClient(
@@ -543,6 +561,7 @@ class TestUnsplashAdditionalDownload:
             tags=["test"]
         )
 
+    @pytest.mark.fast
     def test_download_with_size_check(self, mock_config, temp_output_dir, sample_image):
         """Test Unsplash download with size checking"""
         client = UnsplashImageClient(
@@ -562,6 +581,7 @@ class TestUnsplashAdditionalDownload:
 
         assert result is not None
 
+    @pytest.mark.fast
     def test_download_creates_metadata(self, mock_config, temp_output_dir, sample_image):
         """Test Unsplash creates metadata file"""
         client = UnsplashImageClient(
@@ -584,6 +604,7 @@ class TestUnsplashAdditionalDownload:
             metadata = json.load(f)
         assert metadata['source'] == 'unsplash'
 
+    @pytest.mark.fast
     def test_download_existing_file_too_small(self, mock_config, temp_output_dir, sample_image):
         """Test skips existing file that's too small"""
         client = UnsplashImageClient(

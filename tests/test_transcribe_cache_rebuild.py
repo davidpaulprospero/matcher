@@ -22,6 +22,7 @@ from src.state import PipelineState
 class TestTranscriptCacheFieldNames:
     """Test that transcript cache rebuild handles different field names."""
 
+    @pytest.mark.fast
     def test_rebuild_handles_source_file_field(self, tmp_path):
         """Rebuild should work with 'source_file' field (current format)."""
         # Create mock project structure
@@ -76,6 +77,7 @@ cache:
         assert len(state.transcripts) >= 1
         assert len(state.text_metadata) >= 2
 
+    @pytest.mark.fast
     def test_rebuild_handles_video_path_field(self, tmp_path):
         """Rebuild should work with 'video_path' field (legacy format)."""
         # Create mock project structure
@@ -123,6 +125,7 @@ cache:
         assert len(state.transcripts) >= 1
         assert len(state.text_metadata) >= 1
 
+    @pytest.mark.fast
     def test_rebuild_prefers_source_file_over_video_path(self, tmp_path):
         """When both fields exist, source_file should be used."""
         # Create mock project structure
@@ -176,6 +179,7 @@ cache:
 class TestSceneDetectionVideoSources:
     """Test that scene detection finds videos from multiple sources."""
 
+    @pytest.mark.fast
     def test_get_video_files_from_transcripts(self, tmp_path):
         """_get_video_files should find videos from state.transcripts."""
         from src.stages.scene_detection import SceneDetectionStage
@@ -195,6 +199,7 @@ class TestSceneDetectionVideoSources:
         assert len(video_files) == 1
         assert video_files[0] == video_file
 
+    @pytest.mark.fast
     def test_get_video_files_from_remix_files(self, tmp_path):
         """_get_video_files should find videos from state.remix_files."""
         from src.stages.scene_detection import SceneDetectionStage
@@ -215,6 +220,7 @@ class TestSceneDetectionVideoSources:
         assert len(video_files) == 1
         assert video_files[0] == video_file
 
+    @pytest.mark.fast
     def test_validate_inputs_accepts_transcripts(self, tmp_path):
         """validate_inputs should pass if state.transcripts has data."""
         from src.stages.scene_detection import SceneDetectionStage
@@ -232,6 +238,7 @@ class TestSceneDetectionVideoSources:
 
         assert result is None  # None means validation passed
 
+    @pytest.mark.fast
     def test_validate_inputs_fails_when_all_empty(self):
         """validate_inputs should fail if all video sources are empty."""
         from src.stages.scene_detection import SceneDetectionStage

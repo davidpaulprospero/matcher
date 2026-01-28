@@ -19,6 +19,7 @@ from src.keyword_extractor.entity_extractor import (
 class TestParseEntityJson:
     """Test parse_entity_json() helper function"""
 
+    @pytest.mark.fast
     def test_parse_valid_json_dict(self):
         """Test parsing valid JSON dict"""
         json_text = '{"people": [{"name": "John Doe"}], "places": [{"name": "Paris"}]}'
@@ -26,24 +27,28 @@ class TestParseEntityJson:
         assert isinstance(entities, dict)
         assert "people" in entities or "places" in entities
 
+    @pytest.mark.fast
     def test_parse_json_with_extra_text(self):
         """Test parsing JSON with surrounding text"""
         json_text = 'Here are the entities:\n{"people": [{"name": "Alice"}]}\nThat\'s all.'
         entities = parse_entity_json(json_text)
         assert isinstance(entities, dict)
 
+    @pytest.mark.fast
     def test_parse_empty_dict(self):
         """Test parsing empty JSON dict"""
         json_text = '{}'
         entities = parse_entity_json(json_text)
         assert entities == {}
 
+    @pytest.mark.fast
     def test_parse_malformed_json(self):
         """Test parsing malformed JSON returns empty dict"""
         json_text = 'This is not JSON at all'
         entities = parse_entity_json(json_text)
         assert entities == {}
 
+    @pytest.mark.fast
     def test_parse_simple_dict(self):
         """Test parsing simple dict"""
         json_text = '{"name": "Alice", "type": "PERSON"}'
@@ -58,6 +63,7 @@ class TestParseEntityJson:
 class TestExtractEntities:
     """Test extract_entities() main function with mocked LLM"""
 
+    @pytest.mark.fast
     def test_extract_entities_basic(self):
         """Test basic entity extraction with mocked LLM"""
         # Mock LLM response with proper structure
@@ -82,6 +88,7 @@ class TestExtractEntities:
         assert isinstance(keywords, list)
         assert len(keywords) == 2
 
+    @pytest.mark.fast
     def test_extract_entities_empty_response(self):
         """Test entity extraction with empty LLM response"""
         mock_llm_call = Mock(return_value='{}')
@@ -94,6 +101,7 @@ class TestExtractEntities:
         assert keywords == []
         assert raw_entities == []
 
+    @pytest.mark.fast
     def test_extract_entities_malformed_response(self):
         """Test entity extraction with malformed LLM response"""
         mock_llm_call = Mock(return_value='This is not JSON')
@@ -107,6 +115,7 @@ class TestExtractEntities:
         assert keywords == []
         assert raw_entities == []
 
+    @pytest.mark.fast
     def test_extract_entities_multiple_types(self):
         """Test entity extraction with multiple entity types"""
         mock_llm_response = '''{
@@ -125,6 +134,7 @@ class TestExtractEntities:
         assert len(raw_entities) == 4
         assert len(keywords) == 4
 
+    @pytest.mark.fast
     def test_extract_entities_short_keywords_filtered(self):
         """Test entity extraction filters short keywords"""
         mock_llm_response = '''{
@@ -142,6 +152,7 @@ class TestExtractEntities:
         # But raw entity should still be recorded
         assert len(raw_entities) == 1
 
+    @pytest.mark.fast
     def test_extract_entities_logger_called(self):
         """Test entity extraction handles empty search_keyword"""
         mock_llm_response = '''{

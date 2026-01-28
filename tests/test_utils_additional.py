@@ -18,6 +18,7 @@ from src.utils import resolve_path, normalize_path, sanitize_path
 class TestResolvePath:
     """Test path resolution with base directory."""
 
+    @pytest.mark.fast
     def test_resolve_absolute_path(self):
         """Test resolving already absolute path."""
         abs_path = "/absolute/path/to/file.txt"
@@ -27,6 +28,7 @@ class TestResolvePath:
         # Should return normalized absolute path
         assert Path(resolved).is_absolute()
 
+    @pytest.mark.fast
     def test_resolve_relative_path_with_base(self, tmp_path):
         """Test resolving relative path with base directory."""
         base_dir = tmp_path
@@ -39,6 +41,7 @@ class TestResolvePath:
         # Normalize both paths for comparison (handle slash differences)
         assert Path(resolved).is_relative_to(base_dir)
 
+    @pytest.mark.fast
     def test_resolve_path_object(self, tmp_path):
         """Test resolving Path object."""
         path_obj = Path("test/file.txt")
@@ -48,6 +51,7 @@ class TestResolvePath:
         assert isinstance(resolved, str)
         assert Path(resolved).is_absolute()
 
+    @pytest.mark.fast
     def test_resolve_current_directory(self):
         """Test resolving with current directory."""
         rel_path = "file.txt"
@@ -61,6 +65,7 @@ class TestResolvePath:
 class TestNormalizePath:
     """Test path normalization."""
 
+    @pytest.mark.fast
     def test_normalize_forward_slashes(self):
         """Test normalizing path with forward slashes."""
         path = "C:/Users/test/file.txt"
@@ -70,6 +75,7 @@ class TestNormalizePath:
         assert normalized is not None
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_backslashes(self):
         """Test normalizing path with backslashes."""
         path = "C:\\Users\\test\\file.txt"
@@ -78,6 +84,7 @@ class TestNormalizePath:
 
         assert normalized is not None
 
+    @pytest.mark.fast
     def test_normalize_mixed_slashes(self):
         """Test normalizing path with mixed slashes."""
         path = "C:/Users\\test/file.txt"
@@ -86,6 +93,7 @@ class TestNormalizePath:
 
         assert normalized is not None
 
+    @pytest.mark.fast
     def test_normalize_empty_string(self):
         """Test normalizing empty string."""
         path = ""
@@ -94,6 +102,7 @@ class TestNormalizePath:
 
         assert normalized == ""
 
+    @pytest.mark.fast
     def test_normalize_preserves_content(self):
         """Test normalization preserves path content."""
         path = "D:/project/video.mp4"
@@ -107,6 +116,7 @@ class TestNormalizePath:
 class TestSanitizePath:
     """Test path sanitization."""
 
+    @pytest.mark.fast
     def test_sanitize_basic_path(self):
         """Test sanitizing basic path."""
         path = "C:/Videos/test.mp4"
@@ -116,6 +126,7 @@ class TestSanitizePath:
         assert isinstance(sanitized, str)
         assert ".mp4" in sanitized
 
+    @pytest.mark.fast
     def test_sanitize_path_with_spaces(self):
         """Test sanitizing path with spaces."""
         path = "C:/My Videos/test file.mp4"
@@ -125,6 +136,7 @@ class TestSanitizePath:
         # Should handle spaces (replace or keep)
         assert isinstance(sanitized, str)
 
+    @pytest.mark.fast
     def test_sanitize_path_object(self):
         """Test sanitizing Path object."""
         path_obj = Path("C:/Videos/test.mp4")
@@ -133,6 +145,7 @@ class TestSanitizePath:
 
         assert isinstance(sanitized, str)
 
+    @pytest.mark.fast
     def test_sanitize_unicode_path(self):
         """Test sanitizing path with unicode characters."""
         path = "C:/Videos/日本語.mp4"
@@ -141,6 +154,7 @@ class TestSanitizePath:
 
         assert isinstance(sanitized, str)
 
+    @pytest.mark.fast
     def test_sanitize_empty_path(self):
         """Test sanitizing empty path."""
         path = ""
@@ -153,6 +167,7 @@ class TestSanitizePath:
 class TestPathEdgeCases:
     """Test edge cases in path handling."""
 
+    @pytest.mark.fast
     def test_very_long_path(self):
         """Test handling very long paths."""
         # Create a path with many nested directories
@@ -163,6 +178,7 @@ class TestPathEdgeCases:
         assert isinstance(normalized, str)
         assert "file.txt" in normalized
 
+    @pytest.mark.fast
     def test_path_with_dots(self):
         """Test path with dots (., ..)."""
         path = "C:/project/../videos/./file.mp4"
@@ -171,6 +187,7 @@ class TestPathEdgeCases:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_network_path(self):
         """Test network/UNC path."""
         path = "//server/share/file.mp4"
@@ -179,6 +196,7 @@ class TestPathEdgeCases:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_path_with_special_chars(self):
         """Test path with special characters."""
         path = "C:/videos/file@#$%.mp4"
@@ -191,6 +209,7 @@ class TestPathEdgeCases:
 class TestPathConsistency:
     """Test path handling consistency."""
 
+    @pytest.mark.fast
     def test_normalize_idempotent(self):
         """Test normalizing twice gives same result."""
         path = "C:/Users\\test/file.txt"
@@ -201,6 +220,7 @@ class TestPathConsistency:
         # Normalizing twice should give same result
         assert norm1 == norm2
 
+    @pytest.mark.fast
     def test_sanitize_then_normalize(self):
         """Test sanitize followed by normalize."""
         path = "C:/My Videos/test file.mp4"
@@ -210,6 +230,7 @@ class TestPathConsistency:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_then_sanitize(self):
         """Test normalize followed by sanitize."""
         path = "C:\\Videos\\test.mp4"
@@ -223,6 +244,7 @@ class TestPathConsistency:
 class TestPathValidation:
     """Test path validation behavior."""
 
+    @pytest.mark.fast
     def test_none_path_handling(self):
         """Test handling None path."""
         # Should handle gracefully or raise TypeError
@@ -234,6 +256,7 @@ class TestPathValidation:
             # Expected behavior for None
             pass
 
+    @pytest.mark.fast
     def test_numeric_path_handling(self):
         """Test handling numeric input."""
         # Should handle gracefully or raise TypeError

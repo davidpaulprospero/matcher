@@ -79,6 +79,7 @@ class MockSRTSegment:
 class TestTieredMatcherInit:
     """Test TieredMatcher initialization."""
 
+    @pytest.mark.fast
     def test_init_with_no_api_keys(self):
         """Test initialization without any API keys."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -91,6 +92,7 @@ class TestTieredMatcherInit:
         assert matcher.primary_provider is None
         assert matcher.secondary_provider is None
 
+    @pytest.mark.fast
     def test_init_with_gemini_key(self):
         """Test initialization with Gemini API key."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -107,6 +109,7 @@ class TestTieredMatcherInit:
 class TestTieredMatcherFacePreference:
     """Test face preference handling."""
 
+    @pytest.mark.fast
     def test_face_preference_more_boosts_high_face_score(self):
         """Test that face_preference='more' boosts high face_score."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -140,6 +143,7 @@ class TestTieredMatcherFacePreference:
         # Note: The actual boost logic is complex, so we just verify the path is taken
         assert result is not None
 
+    @pytest.mark.fast
     def test_face_preference_none_boosts_low_face_score(self):
         """Test that face_preference='none' boosts low face_score."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -172,6 +176,7 @@ class TestTieredMatcherFacePreference:
 class TestTieredMatcherEmptyCandidates:
     """Test empty candidates handling."""
 
+    @pytest.mark.fast
     def test_no_candidates_returns_gap(self):
         """Test that no candidates returns gap match."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -188,6 +193,7 @@ class TestTieredMatcherEmptyCandidates:
         assert result.has_gap is True
         assert "No video candidates" in result.gap_reason or "No candidates" in result.gap_reason
 
+    @pytest.mark.fast
     def test_all_candidates_filtered_uses_fallback(self):
         """Test fallback when all candidates are filtered by reuse."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -219,6 +225,7 @@ class TestTieredMatcherEmptyCandidates:
 class TestTieredMatcherHighSimilarity:
     """Test high similarity skip LLM path."""
 
+    @pytest.mark.fast
     def test_high_similarity_skips_llm(self):
         """Test that high embedding similarity skips LLM."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -251,6 +258,7 @@ class TestTieredMatcherHighSimilarity:
 class TestTieredMatcherLLMFallback:
     """Test LLM exception fallback."""
 
+    @pytest.mark.fast
     def test_llm_exception_falls_back_to_embedding(self):
         """Test that LLM exception falls back to embedding similarity."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -290,6 +298,7 @@ class TestTieredMatcherLLMFallback:
 class TestTieredMatcherNoPrimaryProvider:
     """Test matching without primary LLM provider."""
 
+    @pytest.mark.fast
     def test_no_provider_uses_embedding_only(self):
         """Test that no provider uses embedding similarity only."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -324,6 +333,7 @@ class TestTieredMatcherNoPrimaryProvider:
 class TestTieredMatcherSecondaryMatches:
     """Test _get_secondary_matches three-pass approach."""
 
+    @pytest.mark.fast
     def test_secondary_matches_different_sources(self):
         """Test secondary matches prefer different video sources."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -360,6 +370,7 @@ class TestTieredMatcherSecondaryMatches:
 class TestTieredMatcherReviewWithLocalLLM:
     """Test review_with_local_llm method."""
 
+    @pytest.mark.fast
     def test_review_no_local_provider_returns_unchanged(self):
         """Test that no local provider returns matches unchanged."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -378,6 +389,7 @@ class TestTieredMatcherReviewWithLocalLLM:
 
         assert result == mock_matches
 
+    @pytest.mark.fast
     def test_review_no_low_confidence_returns_unchanged(self):
         """Test that no low confidence matches returns unchanged."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -405,6 +417,7 @@ class TestTieredMatcherReviewWithLocalLLM:
 class TestTieredMatcherAlternatives:
     """Test _get_alternatives method."""
 
+    @pytest.mark.fast
     def test_alternatives_prefer_different_sources(self):
         """Test that alternatives prefer different video sources."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -434,6 +447,7 @@ class TestTieredMatcherAlternatives:
 class TestTieredMatcherLocationFiltering:
     """Test location filtering."""
 
+    @pytest.mark.fast
     def test_location_matcher_set_chapters(self):
         """Test set_location_chapters method."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -459,6 +473,7 @@ class TestTieredMatcherLocationFiltering:
         if matcher.location_matcher:
             mock_matcher_instance.set_location_chapters.assert_called_once_with(mock_chapters)
 
+    @pytest.mark.fast
     def test_location_matcher_set_video_locations(self):
         """Test set_video_locations method."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -488,6 +503,7 @@ class TestTieredMatcherLocationFiltering:
 class TestTieredMatcherLocationInitExceptions:
     """Test location service initialization exceptions (lines 104-106)."""
 
+    @pytest.mark.fast
     def test_location_service_init_exception_disables_location_matching(self):
         """Test that exception during location service init disables location matching."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -510,6 +526,7 @@ class TestTieredMatcherLocationInitExceptions:
 class TestTieredMatcherDictLocationConfig:
     """Test location matching with dict-style config (line 95)."""
 
+    @pytest.mark.fast
     def test_location_config_as_dict(self):
         """Test location matching enabled from dict config."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -533,6 +550,7 @@ class TestTieredMatcherDictLocationConfig:
 class TestTieredMatcherSecondaryGeminiProvider:
     """Test secondary provider initialization with Gemini (lines 154-155)."""
 
+    @pytest.mark.fast
     def test_secondary_provider_gemini(self):
         """Test secondary provider is Gemini when configured."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -559,6 +577,7 @@ class TestTieredMatcherSecondaryGeminiProvider:
 class TestTieredMatcherLocalProviderConnectionFailure:
     """Test local provider connection failure (lines 164-166)."""
 
+    @pytest.mark.requires_network
     def test_local_provider_connection_refused(self):
         """Test local provider is None when Ollama connection fails."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -581,6 +600,7 @@ class TestTieredMatcherLocalProviderConnectionFailure:
 class TestTieredMatcherSceneNotFound:
     """Test scene lookup returns None when no match (line 225)."""
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_no_matching_scene(self):
         """Test _get_scene_for_segment returns None when segment time outside scenes."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -620,6 +640,7 @@ class TestTieredMatcherSceneNotFound:
 class TestTieredMatcherNoValidCandidatesAfterFiltering:
     """Test gap result when no valid candidates after all filtering (lines 344-352)."""
 
+    @pytest.mark.fast
     def test_no_valid_candidates_returns_gap_with_reason(self):
         """Test gap returned with correct reason when all candidates filtered by location."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -656,6 +677,7 @@ class TestTieredMatcherNoValidCandidatesAfterFiltering:
 class TestTieredMatcherBoostReasonsSkipLLM:
     """Test boost reasons in high similarity skip LLM path (lines 382, 384)."""
 
+    @pytest.mark.fast
     def test_skip_llm_includes_topic_and_broll_reasons(self):
         """Test that topic and broll boost reasons appear in skip LLM path."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -691,6 +713,7 @@ class TestTieredMatcherBoostReasonsSkipLLM:
 class TestTieredMatcherBoostReasonsCachedResponse:
     """Test boost reasons in cached response path (lines 444, 446, 448)."""
 
+    @pytest.mark.fast
     def test_cached_response_includes_all_boost_reasons(self):
         """Test that cached responses include topic, broll, and project boost reasons."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -737,6 +760,7 @@ class TestTieredMatcherBoostReasonsCachedResponse:
 class TestTieredMatcherAmbiguousWithSecondary:
     """Test ambiguous match uses secondary provider (lines 497-506)."""
 
+    @pytest.mark.fast
     def test_ambiguous_match_uses_secondary_provider(self):
         """Test secondary provider called when primary returns ambiguous result."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -787,6 +811,7 @@ class TestTieredMatcherAmbiguousWithSecondary:
 class TestTieredMatcherLLMPathBoosts:
     """Test boost reasons in LLM matching path (lines 557, 559)."""
 
+    @pytest.mark.fast
     def test_llm_path_includes_topic_and_broll_reasons(self):
         """Test LLM path includes topic and broll boost reasons."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -829,6 +854,7 @@ class TestTieredMatcherLLMPathBoosts:
 class TestTieredMatcherRunLoggerCalled:
     """Test run logger is called for match decision (line 578)."""
 
+    @pytest.mark.fast
     def test_run_logger_log_match_decision_called(self):
         """Test that run logger's log_match_decision is called."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -870,6 +896,7 @@ class TestTieredMatcherRunLoggerCalled:
 class TestTieredMatcherSecondaryMatchPasses:
     """Test secondary match three-pass logic (lines 710, 716, 733, 743-747, 758)."""
 
+    @pytest.mark.fast
     def test_secondary_matches_second_pass_same_source_ok(self):
         """Test second pass allows same source within V4-V6."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -910,6 +937,7 @@ class TestTieredMatcherSecondaryMatchPasses:
         # Second and third use "same source ok"
         assert "same source ok" in result[1].reasoning or "same source ok" in result[2].reasoning
 
+    @pytest.mark.fast
     def test_secondary_matches_third_pass_fallback(self):
         """Test third pass allows same video file but different segment."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -949,6 +977,7 @@ class TestTieredMatcherSecondaryMatchPasses:
 class TestTieredMatcherLocalLLMReviewImproves:
     """Test local LLM review improves match (lines 811-827)."""
 
+    @pytest.mark.fast
     def test_local_llm_improves_same_segment(self):
         """Test local LLM improves confidence for same segment selection."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -986,6 +1015,7 @@ class TestTieredMatcherLocalLLMReviewImproves:
         assert result[0].primary_match.confidence == 0.9
         assert "(local refined)" in result[0].primary_match.reasoning
 
+    @pytest.mark.fast
     def test_local_llm_selects_alternative(self):
         """Test local LLM selects alternative instead of primary."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1028,6 +1058,7 @@ class TestTieredMatcherLocalLLMReviewImproves:
         assert result[0].primary_match.video_segment == alt_seg
         assert "(local selected)" in result[0].primary_match.reasoning
 
+    @pytest.mark.fast
     def test_local_llm_exception_handled(self):
         """Test local LLM exception is caught and handled."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1073,6 +1104,7 @@ class TestTieredMatcherLocalLLMReviewImproves:
 class TestTieredMatcherCoverageGaps:
     """Test coverage gaps in TieredMatcher"""
 
+    @pytest.mark.fast
     def test_current_project_vs_global_cache_candidates_lines_295_301(self):
         """Test lines 295, 299-301: Separate current project from global cache candidates"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1108,6 +1140,7 @@ class TestTieredMatcherCoverageGaps:
             result = matcher.match_segment(vo_seg, candidates, {}, 0)
             assert result is not None
 
+    @pytest.mark.fast
     def test_global_cache_face_preference_neutral_line_316(self):
         """Test line 316: Global cache candidates with neutral face preference"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1139,6 +1172,7 @@ class TestTieredMatcherCoverageGaps:
         # Should pass through without boost (line 316)
         assert result is not None
 
+    @pytest.mark.fast
     def test_global_cache_no_face_score_line_318(self):
         """Test line 318: Global cache segment without face_score"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1172,6 +1206,7 @@ class TestTieredMatcherCoverageGaps:
         # Should handle missing face_score (line 318)
         assert result is not None
 
+    @pytest.mark.fast
     def test_secondary_matches_break_lines_710_734_758(self):
         """Test lines 710, 734, 758: Break when enough secondary matches found"""
         from src.matching.tiered_matcher import TieredMatcher

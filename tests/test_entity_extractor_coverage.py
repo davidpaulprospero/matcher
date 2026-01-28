@@ -16,6 +16,7 @@ from src.keyword_extractor.entity_extractor import extract_entities, parse_entit
 class TestExtractEntitiesOrganizations:
     """Test organization entity extraction (lines 85-90)."""
 
+    @pytest.mark.fast
     def test_organizations_with_valid_keywords(self):
         """Test extracting organizations with valid search keywords."""
         response = json.dumps({
@@ -46,6 +47,7 @@ class TestExtractEntitiesOrganizations:
         assert entities[0]['type'] == 'ORG'
         assert entities[0]['text'] == 'United Nations'
 
+    @pytest.mark.fast
     def test_organizations_with_short_keywords(self):
         """Test that short keywords (<=3 chars) are excluded."""
         response = json.dumps({
@@ -71,6 +73,7 @@ class TestExtractEntitiesOrganizations:
         assert len(entities) == 1
         assert entities[0]['text'] == 'FBI'
 
+    @pytest.mark.fast
     def test_organizations_without_keywords(self):
         """Test organizations with names but empty keywords (line 89-90)."""
         response = json.dumps({
@@ -100,6 +103,7 @@ class TestExtractEntitiesOrganizations:
 class TestExtractEntitiesExceptionHandling:
     """Test exception handling (lines 136-137)."""
 
+    @pytest.mark.fast
     def test_llm_call_raises_exception(self):
         """Test handling when LLM call raises exception."""
         mock_llm = MagicMock(side_effect=Exception("API error"))
@@ -112,6 +116,7 @@ class TestExtractEntitiesExceptionHandling:
             mock_logger.warning.assert_called_once()
             assert "Entity extraction failed" in str(mock_logger.warning.call_args)
 
+    @pytest.mark.fast
     def test_invalid_json_response(self):
         """Test handling when LLM returns invalid JSON."""
         mock_llm = MagicMock(return_value="not valid json at all")
@@ -122,6 +127,7 @@ class TestExtractEntitiesExceptionHandling:
             assert keywords == []
             assert entities == []
 
+    @pytest.mark.fast
     def test_malformed_json_structure(self):
         """Test handling when JSON has unexpected structure."""
         mock_llm = MagicMock(return_value='{"unexpected": "structure"}')
@@ -136,6 +142,7 @@ class TestExtractEntitiesExceptionHandling:
 class TestExtractEntitiesAllTypes:
     """Test all entity types for completeness."""
 
+    @pytest.mark.fast
     def test_people_entities(self):
         """Test extracting people entities."""
         response = json.dumps({
@@ -158,6 +165,7 @@ class TestExtractEntitiesAllTypes:
         assert "Einstein portrait scientist" in keywords
         assert entities[0]['type'] == 'PERSON'
 
+    @pytest.mark.fast
     def test_places_entities(self):
         """Test extracting place entities."""
         response = json.dumps({
@@ -180,6 +188,7 @@ class TestExtractEntitiesAllTypes:
         assert "Paris Eiffel Tower" in keywords
         assert entities[0]['type'] == 'GPE'
 
+    @pytest.mark.fast
     def test_dates_entities(self):
         """Test extracting date entities."""
         response = json.dumps({
@@ -202,6 +211,7 @@ class TestExtractEntitiesAllTypes:
         assert "1969 moon landing" in keywords
         assert entities[0]['type'] == 'DATE'
 
+    @pytest.mark.fast
     def test_events_entities(self):
         """Test extracting event entities."""
         response = json.dumps({
@@ -224,6 +234,7 @@ class TestExtractEntitiesAllTypes:
         assert "WWII battlefield footage" in keywords
         assert entities[0]['type'] == 'EVENT'
 
+    @pytest.mark.fast
     def test_mixed_entities(self):
         """Test extracting multiple entity types."""
         response = json.dumps({
@@ -244,6 +255,7 @@ class TestExtractEntitiesAllTypes:
 class TestExtractEntitiesDeduplication:
     """Test keyword deduplication."""
 
+    @pytest.mark.fast
     def test_duplicate_keywords_removed(self):
         """Test that duplicate keywords are deduplicated."""
         response = json.dumps({
@@ -269,6 +281,7 @@ class TestExtractEntitiesDeduplication:
 class TestParseEntityJson:
     """Test parse_entity_json function."""
 
+    @pytest.mark.fast
     def test_parse_valid_json(self):
         """Test parsing valid JSON response."""
         response = '{"people": [], "places": []}'
@@ -276,6 +289,7 @@ class TestParseEntityJson:
 
         assert result == {"people": [], "places": []}
 
+    @pytest.mark.fast
     def test_parse_json_with_surrounding_text(self):
         """Test parsing JSON with surrounding text."""
         response = 'Here is the response: {"data": "value"} end'
@@ -283,16 +297,19 @@ class TestParseEntityJson:
 
         assert result == {"data": "value"}
 
+    @pytest.mark.fast
     def test_parse_empty_response(self):
         """Test parsing empty response."""
         result = parse_entity_json("")
         assert result == {}
 
+    @pytest.mark.fast
     def test_parse_no_json(self):
         """Test parsing response with no JSON."""
         result = parse_entity_json("no json here")
         assert result == {}
 
+    @pytest.mark.fast
     def test_parse_whitespace_response(self):
         """Test parsing whitespace-only response."""
         result = parse_entity_json("   \n\t  ")

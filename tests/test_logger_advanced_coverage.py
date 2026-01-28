@@ -31,6 +31,7 @@ import pytest
 class TestRunLoggerFinalize:
     """Test finalize method edge cases."""
 
+    @pytest.mark.fast
     def test_total_matches_from_match_decisions(self, tmp_path):
         """Test that total_matches is set from match_decisions when 0."""
         from src.logger import RunLogger, MatchDecisionLog
@@ -67,6 +68,7 @@ class TestRunLoggerFinalize:
         # total_matches should be updated from match_decisions
         assert logger.run_log.total_matches == 2
 
+    @pytest.mark.fast
     def test_wall_clock_time_exception_fallback(self, tmp_path):
         """Test fallback to stage_timings sum when time parsing fails."""
         from src.logger import RunLogger
@@ -82,6 +84,7 @@ class TestRunLoggerFinalize:
 
         # Should not raise, uses fallback
 
+    @pytest.mark.fast
     def test_overhead_display_when_significant(self, tmp_path):
         """Test stage timings display with overhead calculation."""
         from src.logger import RunLogger
@@ -102,6 +105,7 @@ class TestRunLoggerFinalize:
         assert 'STAGE TIMINGS' in output.getvalue()
         assert '10.0s active' in output.getvalue()
 
+    @pytest.mark.fast
     def test_api_usage_display(self, tmp_path):
         """Test API usage section when total_api_calls > 0."""
         from src.logger import RunLogger
@@ -116,6 +120,7 @@ class TestRunLoggerFinalize:
 
         assert 'API' in output.getvalue()
 
+    @pytest.mark.fast
     def test_total_time_with_minutes(self, tmp_path):
         """Test total time display when >= 60 seconds."""
         from src.logger import RunLogger
@@ -137,6 +142,7 @@ class TestRunLoggerFinalize:
 class TestWriteMarkdownSummary:
     """Test _write_markdown_summary method."""
 
+    @pytest.mark.fast
     def test_warnings_overflow(self, tmp_path):
         """Test warnings list truncation when > 10."""
         from src.logger import RunLogger
@@ -151,6 +157,7 @@ class TestWriteMarkdownSummary:
         content = path.read_text()
         assert "... and 5 more" in content
 
+    @pytest.mark.fast
     def test_errors_overflow(self, tmp_path):
         """Test errors list truncation when > 10."""
         from src.logger import RunLogger
@@ -169,6 +176,7 @@ class TestWriteMarkdownSummary:
 class TestWriteVerboseMarkdown:
     """Test _write_verbose_markdown method."""
 
+    @pytest.mark.fast
     def test_fmt_time_formatting(self, tmp_path):
         """Test fmt_time helper function output."""
         from src.logger import RunLogger
@@ -183,6 +191,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'Pipeline Run' in content
 
+    @pytest.mark.fast
     def test_fmt_duration_minutes(self, tmp_path):
         """Test fmt_duration with >= 60 seconds."""
         from src.logger import RunLogger
@@ -197,6 +206,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert '2.0m' in content or 'MATCH' in content
 
+    @pytest.mark.fast
     def test_stages_iteration(self, tmp_path):
         """Test stages list iteration in verbose markdown."""
         from src.logger import RunLogger
@@ -218,6 +228,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'DOWNLOAD' in content or 'Pipeline' in content
 
+    @pytest.mark.fast
     def test_remix_stage_output(self, tmp_path):
         """Test REMIX stage section in verbose markdown."""
         from src.logger import RunLogger
@@ -236,6 +247,7 @@ class TestWriteVerboseMarkdown:
         assert 'REMIX' in content
         assert 'Scanned' in content or '50' in content
 
+    @pytest.mark.fast
     def test_video_process_logs_table(self, tmp_path):
         """Test video_process_logs table in verbose markdown."""
         from src.logger import RunLogger
@@ -258,6 +270,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'TRANSCRIBE' in content or 'abc123' in content
 
+    @pytest.mark.fast
     def test_video_process_logs_overflow(self, tmp_path):
         """Test video_process_logs truncation when > 100."""
         from src.logger import RunLogger
@@ -284,6 +297,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert '5 more videos' in content or 'more' in content.lower()
 
+    @pytest.mark.fast
     def test_embedding_batches_display(self, tmp_path):
         """Test embedding batches rate display."""
         from src.logger import RunLogger
@@ -302,6 +316,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'Batches' in content or '50' in content
 
+    @pytest.mark.fast
     def test_matching_config_output(self, tmp_path):
         """Test matching_config section in verbose markdown."""
         from src.logger import RunLogger
@@ -322,6 +337,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'Config' in content or 'Candidates' in content
 
+    @pytest.mark.fast
     def test_match_detail_logs_table(self, tmp_path):
         """Test match_detail_logs table in verbose markdown."""
         from src.logger import RunLogger
@@ -359,6 +375,7 @@ class TestWriteVerboseMarkdown:
         # Pipe should be escaped
         assert '\\|' in content or 'pipe' in content
 
+    @pytest.mark.fast
     def test_track_variety_logs_table(self, tmp_path):
         """Test track_variety_logs table in verbose markdown."""
         from src.logger import RunLogger
@@ -391,6 +408,7 @@ class TestWriteVerboseMarkdown:
 class TestNumpyImportHandling:
     """Test numpy import error handling."""
 
+    @pytest.mark.fast
     def test_numpy_not_available_encoder(self):
         """Test NumpyEncoder when numpy is not available."""
         # This tests the behavior when HAS_NUMPY is True but object is not numpy type
@@ -410,6 +428,7 @@ class TestNumpyImportHandling:
 class TestRunLoggerStageTimer:
     """Test stage_timer context manager edge cases."""
 
+    @pytest.mark.fast
     def test_stage_timer_records_timing(self, tmp_path):
         """Test stage_timer records timing properly."""
         from src.logger import RunLogger
@@ -427,6 +446,7 @@ class TestRunLoggerStageTimer:
 class TestRunLoggerLogApiCall:
     """Test log_api_call method."""
 
+    @pytest.mark.fast
     def test_log_api_call_accumulates(self, tmp_path):
         """Test that log_api_call accumulates calls and costs."""
         from src.logger import RunLogger
@@ -445,6 +465,7 @@ class TestRunLoggerLogApiCall:
 class TestRunLoggerLogMatchDecision:
     """Test log_match_decision method."""
 
+    @pytest.mark.fast
     def test_log_match_decision_records_decision(self, tmp_path):
         """Test that match decisions are recorded."""
         from src.logger import RunLogger

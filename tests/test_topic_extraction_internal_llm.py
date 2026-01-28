@@ -58,6 +58,7 @@ def mock_config():
 class TestExtractWithLLMInternal:
     """Test internal _extract_with_llm method with LLM client mocking"""
 
+    @pytest.mark.fast
     def test_extract_with_llm_successful_response(self, temp_cache, mock_config):
         """Test _extract_with_llm with successful LLM response"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -85,6 +86,7 @@ class TestExtractWithLLMInternal:
         assert "disaster" in result
         assert "emergency" in result
 
+    @pytest.mark.fast
     def test_extract_with_llm_truncates_long_transcript(self, temp_cache, mock_config):
         """Test that _extract_with_llm truncates transcripts over 3000 chars"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -111,6 +113,7 @@ class TestExtractWithLLMInternal:
             # Check that the prompt was called (transcript was truncated)
             assert mock_client.generate.called
 
+    @pytest.mark.fast
     def test_extract_with_llm_handles_json_parse_error(self, temp_cache, mock_config):
         """Test _extract_with_llm handles malformed JSON response"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -132,6 +135,7 @@ class TestExtractWithLLMInternal:
             # Should return empty list on parse error
             assert result == []
 
+    @pytest.mark.fast
     def test_extract_with_llm_handles_api_error(self, temp_cache, mock_config):
         """Test _extract_with_llm handles LLM API errors"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -149,6 +153,7 @@ class TestExtractWithLLMInternal:
             # Should return empty list on error
             assert result == []
 
+    @pytest.mark.fast
     def test_extract_with_llm_includes_context(self, temp_cache, mock_config):
         """Test that _extract_with_llm includes video title and keyword in prompt"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -183,6 +188,7 @@ class TestExtractWithLLMInternal:
 class TestDetectWithLLMInternal:
     """Test internal _detect_with_llm method for chapter detection"""
 
+    @pytest.mark.fast
     def test_detect_with_llm_successful_chapters(self, mock_config):
         """Test _detect_with_llm with successful chapter detection"""
         detector = ChapterDetector(mock_config)
@@ -223,6 +229,7 @@ class TestDetectWithLLMInternal:
         assert result[0]['title'] == "Introduction"
         assert result[1]['title'] == "Main Content"
 
+    @pytest.mark.fast
     def test_detect_with_llm_handles_empty_text(self, mock_config):
         """Test _detect_with_llm with empty indexed text"""
         detector = ChapterDetector(mock_config)
@@ -244,6 +251,7 @@ class TestDetectWithLLMInternal:
             # Should return empty list
             assert result == []
 
+    @pytest.mark.fast
     def test_detect_with_llm_handles_api_error(self, mock_config):
         """Test _detect_with_llm handles LLM errors gracefully"""
         detector = ChapterDetector(mock_config)
@@ -262,6 +270,7 @@ class TestDetectWithLLMInternal:
             # Should return empty list on error
             assert result == []
 
+    @pytest.mark.fast
     def test_detect_with_llm_includes_overall_topic(self, mock_config):
         """Test that _detect_with_llm includes overall_topic in prompt"""
         detector = ChapterDetector(mock_config)
@@ -295,6 +304,7 @@ class TestDetectWithLLMInternal:
 class TestDetectLocationChapters:
     """Test detect_location_chapters with location service integration"""
 
+    @pytest.mark.fast
     def test_detect_location_chapters_with_location_service(self, mock_config):
         """Test detect_location_chapters with mocked location service"""
         detector = ChapterDetector(mock_config)
@@ -351,6 +361,7 @@ class TestDetectLocationChapters:
         assert isinstance(result, list)
         assert len(result) > 0
 
+    @pytest.mark.fast
     def test_detect_location_chapters_no_location_service(self, mock_config):
         """Test detect_location_chapters without location service"""
         detector = ChapterDetector(mock_config)
@@ -367,6 +378,7 @@ class TestDetectLocationChapters:
         # Should return empty list without location service
         assert result == []
 
+    @pytest.mark.fast
     def test_detect_location_chapters_empty_segments(self, mock_config):
         """Test detect_location_chapters with empty segments"""
         detector = ChapterDetector(mock_config)
@@ -379,6 +391,7 @@ class TestDetectLocationChapters:
         # Should return empty list
         assert result == []
 
+    @pytest.mark.fast
     def test_detect_location_chapters_no_locations_found(self, mock_config):
         """Test detect_location_chapters when no locations are extracted"""
         detector = ChapterDetector(mock_config)
@@ -407,6 +420,7 @@ class TestDetectLocationChapters:
 class TestLLMMethodEdgeCases:
     """Test edge cases for internal LLM methods"""
 
+    @pytest.mark.fast
     def test_extract_with_llm_no_api_key(self, temp_cache):
         """Test _extract_with_llm when no API key is configured"""
         config = Mock(spec=Config)
@@ -428,6 +442,7 @@ class TestLLMMethodEdgeCases:
         # Should return empty list
         assert result == []
 
+    @pytest.mark.fast
     def test_detect_with_llm_very_long_segment_list(self, mock_config):
         """Test _detect_with_llm with many segments"""
         detector = ChapterDetector(mock_config)
@@ -452,6 +467,7 @@ class TestLLMMethodEdgeCases:
             assert isinstance(result, list)
             assert mock_client.generate.called
 
+    @pytest.mark.fast
     def test_location_chapters_with_llm_fallback(self, mock_config):
         """Test detect_location_chapters falls back gracefully when location service fails"""
         detector = ChapterDetector(mock_config)
@@ -490,6 +506,7 @@ class TestLLMMethodEdgeCases:
 class TestAdditionalCoverageMethods:
     """Test additional methods to reach 80%+ coverage"""
 
+    @pytest.mark.fast
     def test_parse_topics_response_json_array(self, temp_cache, mock_config):
         """Test _parse_topics_response with JSON array format (lines 292-297)"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -502,6 +519,7 @@ class TestAdditionalCoverageMethods:
         assert "travel" in result
         assert "beach" in result
 
+    @pytest.mark.fast
     def test_parse_topics_response_fallback_quoted_strings(self, temp_cache, mock_config):
         """Test _parse_topics_response fallback to quoted strings (lines 301-303)"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -516,6 +534,7 @@ class TestAdditionalCoverageMethods:
         assert "hiking" in result
         assert "nature" in result
 
+    @pytest.mark.fast
     def test_parse_topics_response_malformed(self, temp_cache, mock_config):
         """Test _parse_topics_response with malformed response"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -527,6 +546,7 @@ class TestAdditionalCoverageMethods:
         assert isinstance(result, list)
         assert len(result) == 0
 
+    @pytest.mark.fast
     def test_extract_batch_multiple_videos(self, temp_cache, mock_config):
         """Test extract_batch with multiple videos (lines 320-340)"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -561,6 +581,7 @@ class TestAdditionalCoverageMethods:
         assert "/video3.mp4" in result
         assert result["/video1.mp4"].topics == ["travel", "beach"]
 
+    @pytest.mark.fast
     def test_extract_batch_empty_transcripts(self, temp_cache, mock_config):
         """Test extract_batch with empty transcripts dict"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)

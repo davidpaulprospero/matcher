@@ -21,6 +21,7 @@ from src.keyword_extractor.utils import (
 class TestFindKeywordMatches:
     """Test find_keyword_matches() function"""
 
+    @pytest.mark.fast
     def test_find_keyword_matches_no_overlap(self):
         """Test with no keyword overlap"""
         vo_keywords = ["mountain", "snow", "ice"]
@@ -34,6 +35,7 @@ class TestFindKeywordMatches:
         assert is_keyword_match is False
         assert is_visual_match is False
 
+    @pytest.mark.fast
     def test_find_keyword_matches_text_overlap(self):
         """Test with text keyword overlap"""
         vo_keywords = ["mountain", "snow", "ice"]
@@ -48,6 +50,7 @@ class TestFindKeywordMatches:
         assert is_keyword_match is True
         assert is_visual_match is False
 
+    @pytest.mark.fast
     def test_find_keyword_matches_multiple_text_overlap(self):
         """Test with multiple text keyword overlaps"""
         vo_keywords = ["mountain", "snow", "ice"]
@@ -61,6 +64,7 @@ class TestFindKeywordMatches:
         assert boost == 0.10  # 2 matches * 0.05
         assert is_keyword_match is True
 
+    @pytest.mark.fast
     def test_find_keyword_matches_visual_overlap(self):
         """Test with visual keyword overlap"""
         vo_keywords = ["mountain", "snow"]
@@ -76,6 +80,7 @@ class TestFindKeywordMatches:
         assert is_keyword_match is False
         assert is_visual_match is True
 
+    @pytest.mark.fast
     def test_find_keyword_matches_both_overlap(self):
         """Test with both text and visual keyword overlap"""
         vo_keywords = ["mountain", "snow"]
@@ -92,6 +97,7 @@ class TestFindKeywordMatches:
         assert is_keyword_match is True
         assert is_visual_match is True
 
+    @pytest.mark.fast
     def test_find_keyword_matches_max_boost_cap(self):
         """Test boost score is capped at max_boost"""
         vo_keywords = ["kw1", "kw2", "kw3", "kw4", "kw5"]
@@ -106,6 +112,7 @@ class TestFindKeywordMatches:
         # 5 matches * 0.05 = 0.25, but capped at 0.2
         assert boost == 0.2
 
+    @pytest.mark.fast
     def test_find_keyword_matches_case_insensitive(self):
         """Test matching is case-insensitive"""
         vo_keywords = ["MOUNTAIN", "Snow"]
@@ -119,6 +126,7 @@ class TestFindKeywordMatches:
         assert boost == 0.10  # 2 matches
         assert is_keyword_match is True
 
+    @pytest.mark.fast
     def test_find_keyword_matches_empty_keywords(self):
         """Test with empty keyword lists"""
         boost, is_keyword_match, is_visual_match = find_keyword_matches(
@@ -129,6 +137,7 @@ class TestFindKeywordMatches:
         assert is_keyword_match is False
         assert is_visual_match is False
 
+    @pytest.mark.fast
     def test_find_keyword_matches_custom_boosts(self):
         """Test with custom boost values"""
         vo_keywords = ["mountain"]
@@ -146,6 +155,7 @@ class TestFindKeywordMatches:
 class TestExtractKeywordsFromSrt:
     """Test extract_keywords_from_srt() function"""
 
+    @pytest.mark.integration
     def test_extract_keywords_from_srt_basic(self):
         """Test basic SRT file keyword extraction"""
         # Create temporary SRT file
@@ -185,6 +195,7 @@ We scaled the highest peaks.
         finally:
             os.unlink(srt_path)
 
+    @pytest.mark.integration
     def test_extract_keywords_from_srt_with_max_keywords(self):
         """Test SRT extraction with custom max_keywords"""
         srt_content = """1
@@ -224,6 +235,7 @@ Sample text.
 class TestExtractKeywordPerSegmentFromSrt:
     """Test extract_keyword_per_segment_from_srt() function"""
 
+    @pytest.mark.integration
     def test_extract_keyword_per_segment_from_srt_basic(self):
         """Test per-segment SRT extraction"""
         srt_content = """1
@@ -260,6 +272,7 @@ Forest hiking is peaceful.
         finally:
             os.unlink(srt_path)
 
+    @pytest.mark.integration
     def test_extract_keyword_per_segment_from_srt_with_topic(self):
         """Test per-segment SRT extraction with explicit topic"""
         srt_content = """1
@@ -292,6 +305,7 @@ Sample text.
         finally:
             os.unlink(srt_path)
 
+    @pytest.mark.integration
     def test_extract_keyword_per_segment_from_srt_topic_detection(self):
         """Test per-segment SRT extraction with topic auto-detection"""
         srt_content = """1
@@ -336,6 +350,7 @@ More about Mountains.
 class TestUtilsEdgeCases:
     """Test edge cases for utils functions"""
 
+    @pytest.mark.integration
     def test_extract_keywords_from_empty_srt(self):
         """Test extracting keywords from empty SRT file"""
         srt_content = ""
@@ -364,6 +379,7 @@ class TestUtilsEdgeCases:
         finally:
             os.unlink(srt_path)
 
+    @pytest.mark.fast
     def test_find_keyword_matches_with_none_visual(self):
         """Test find_keyword_matches with None visual_keywords"""
         vo_keywords = ["mountain"]

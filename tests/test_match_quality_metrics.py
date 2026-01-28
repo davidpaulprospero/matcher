@@ -28,6 +28,7 @@ pytestmark = pytest.mark.unit
 class TestMatchQualityMetricsDataclass:
     """Tests for MatchQualityMetrics dataclass"""
 
+    @pytest.mark.fast
     def test_dataclass_has_all_fields(self):
         """MatchQualityMetrics should have all required fields"""
         metrics = MatchQualityMetrics()
@@ -40,6 +41,7 @@ class TestMatchQualityMetricsDataclass:
         assert hasattr(metrics, 'total_segments')
         assert hasattr(metrics, 'matched_segments')
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Default values should be zero"""
         metrics = MatchQualityMetrics()
@@ -52,6 +54,7 @@ class TestMatchQualityMetricsDataclass:
         assert metrics.total_segments == 0
         assert metrics.matched_segments == 0
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Should accept custom values"""
         metrics = MatchQualityMetrics(
@@ -77,12 +80,14 @@ class TestMatchQualityMetricsDataclass:
 class TestMatchQualityMetricsToDict:
     """Tests for MatchQualityMetrics.to_dict() method"""
 
+    @pytest.mark.fast
     def test_to_dict_returns_dict(self):
         """to_dict() should return a dictionary"""
         metrics = MatchQualityMetrics()
         result = metrics.to_dict()
         assert isinstance(result, dict)
 
+    @pytest.mark.fast
     def test_to_dict_contains_all_fields(self):
         """to_dict() should include all fields"""
         metrics = MatchQualityMetrics(
@@ -105,6 +110,7 @@ class TestMatchQualityMetricsToDict:
         assert result['total_segments'] == 20
         assert result['matched_segments'] == 18
 
+    @pytest.mark.fast
     def test_to_dict_json_serializable(self):
         """to_dict() result should be JSON serializable"""
         import json
@@ -127,6 +133,7 @@ class TestMatchQualityMetricsToDict:
 class TestMatchQualityMetricsFromDict:
     """Tests for MatchQualityMetrics.from_dict() classmethod"""
 
+    @pytest.mark.fast
     def test_from_dict_creates_instance(self):
         """from_dict() should create MatchQualityMetrics instance"""
         data = {
@@ -142,6 +149,7 @@ class TestMatchQualityMetricsFromDict:
         metrics = MatchQualityMetrics.from_dict(data)
         assert isinstance(metrics, MatchQualityMetrics)
 
+    @pytest.mark.fast
     def test_from_dict_restores_values(self):
         """from_dict() should restore all values"""
         data = {
@@ -164,6 +172,7 @@ class TestMatchQualityMetricsFromDict:
         assert metrics.total_segments == 20
         assert metrics.matched_segments == 18
 
+    @pytest.mark.fast
     def test_from_dict_handles_missing_keys(self):
         """from_dict() should handle missing keys with defaults"""
         data = {'avg_confidence': 0.5}
@@ -172,6 +181,7 @@ class TestMatchQualityMetricsFromDict:
         assert metrics.min_confidence == 0.0
         assert metrics.gap_count == 0
 
+    @pytest.mark.fast
     def test_roundtrip_serialization(self):
         """to_dict() -> from_dict() should preserve values"""
         original = MatchQualityMetrics(
@@ -198,6 +208,7 @@ class TestMatchQualityMetricsFromDict:
 class TestCalculateMatchQualityMetrics:
     """Tests for calculate_match_quality_metrics function"""
 
+    @pytest.mark.fast
     def test_empty_matches_returns_metrics(self):
         """Empty matches list should return metrics with zero values"""
         metrics = calculate_match_quality_metrics(matches=[], total_segments=10)
@@ -206,12 +217,14 @@ class TestCalculateMatchQualityMetrics:
         assert metrics.match_rate == 0.0
         assert metrics.avg_confidence == 0.0
 
+    @pytest.mark.fast
     def test_zero_total_segments(self):
         """Zero total segments should not cause division error"""
         metrics = calculate_match_quality_metrics(matches=[], total_segments=0)
         assert metrics.total_segments == 0
         assert metrics.match_rate == 0.0
 
+    @pytest.mark.fast
     def test_single_match_no_std(self):
         """Single match should have zero standard deviation"""
         match = MagicMock()
@@ -224,6 +237,7 @@ class TestCalculateMatchQualityMetrics:
         assert metrics.min_confidence == 0.8
         assert metrics.max_confidence == 0.8
 
+    @pytest.mark.fast
     def test_multiple_matches_calculates_avg(self):
         """Multiple matches should calculate correct average"""
         matches = []
@@ -238,6 +252,7 @@ class TestCalculateMatchQualityMetrics:
         assert metrics.matched_segments == 4
         assert metrics.match_rate == 1.0
 
+    @pytest.mark.fast
     def test_calculates_min_max(self):
         """Should correctly identify min and max confidence"""
         matches = []
@@ -251,6 +266,7 @@ class TestCalculateMatchQualityMetrics:
         assert metrics.min_confidence == 0.5
         assert metrics.max_confidence == 0.95
 
+    @pytest.mark.fast
     def test_calculates_std_deviation(self):
         """Should calculate correct standard deviation"""
         matches = []
@@ -265,6 +281,7 @@ class TestCalculateMatchQualityMetrics:
         expected_std = statistics.stdev(confidences)
         assert metrics.confidence_std == pytest.approx(expected_std)
 
+    @pytest.mark.fast
     def test_counts_gaps(self):
         """Should count gaps correctly"""
         matches = []
@@ -277,6 +294,7 @@ class TestCalculateMatchQualityMetrics:
         metrics = calculate_match_quality_metrics(matches=matches, total_segments=3)
         assert metrics.gap_count == 1
 
+    @pytest.mark.fast
     def test_match_rate_calculation(self):
         """Should calculate match rate correctly"""
         matches = []
@@ -293,6 +311,7 @@ class TestCalculateMatchQualityMetrics:
 class TestCalculateMatchQualityMetricsDirectMatch:
     """Tests for calculate_match_quality_metrics with direct Match objects"""
 
+    @pytest.mark.fast
     def test_handles_direct_match_objects(self):
         """Should handle Match objects without primary_match"""
         match = MagicMock(spec=['confidence', 'has_gap'])
@@ -305,6 +324,7 @@ class TestCalculateMatchQualityMetricsDirectMatch:
         assert metrics.avg_confidence == 0.85
         assert metrics.matched_segments == 1
 
+    @pytest.mark.fast
     def test_handles_mixed_match_types(self):
         """Should handle mix of MatchResult and Match objects"""
         # MatchResult style
@@ -326,6 +346,7 @@ class TestCalculateMatchQualityMetricsDirectMatch:
 class TestLogQualitySummary:
     """Tests for log_quality_summary function"""
 
+    @pytest.mark.fast
     def test_logs_at_info_level(self, caplog):
         """Should log at INFO level"""
         metrics = MatchQualityMetrics(
@@ -345,6 +366,7 @@ class TestLogQualitySummary:
         assert len(caplog.records) > 0
         assert all(r.levelno == logging.INFO for r in caplog.records)
 
+    @pytest.mark.fast
     def test_logs_summary_header(self, caplog):
         """Should log summary header"""
         metrics = MatchQualityMetrics()
@@ -354,6 +376,7 @@ class TestLogQualitySummary:
 
         assert any("Match Quality Summary" in r.message for r in caplog.records)
 
+    @pytest.mark.fast
     def test_logs_all_metrics(self, caplog):
         """Should log all metric values"""
         metrics = MatchQualityMetrics(
@@ -378,6 +401,7 @@ class TestLogQualitySummary:
         assert '0.6' in log_text or '0.600' in log_text   # min_confidence
         assert '0.95' in log_text or '0.950' in log_text  # max_confidence
 
+    @pytest.mark.fast
     def test_logs_match_rate_as_percentage(self, caplog):
         """Should log match rate as percentage"""
         metrics = MatchQualityMetrics(match_rate=0.9)
@@ -392,6 +416,7 @@ class TestLogQualitySummary:
 class TestMetricsDistribution:
     """Tests that metrics correctly reflect distribution of match confidences"""
 
+    @pytest.mark.fast
     def test_uniform_distribution(self):
         """Uniform distribution should have known std"""
         # Uniform distribution from 0.1 to 0.9 (9 values)
@@ -414,6 +439,7 @@ class TestMetricsDistribution:
         assert metrics.min_confidence == 0.1
         assert metrics.max_confidence == 0.9
 
+    @pytest.mark.fast
     def test_tight_distribution_low_std(self):
         """Tight distribution should have low standard deviation"""
         matches = []
@@ -429,6 +455,7 @@ class TestMetricsDistribution:
         # Very tight distribution should have small std
         assert metrics.confidence_std < 0.01
 
+    @pytest.mark.fast
     def test_bimodal_distribution(self):
         """Bimodal distribution should reflect in metrics"""
         matches = []
@@ -446,6 +473,7 @@ class TestMetricsDistribution:
         assert metrics.avg_confidence == pytest.approx(0.6)
         assert metrics.confidence_std > 0.2  # High variance
 
+    @pytest.mark.fast
     def test_all_same_confidence(self):
         """All same confidence should have zero std"""
         matches = []
@@ -466,6 +494,7 @@ class TestMetricsDistribution:
 class TestMatchStageIntegration:
     """Tests for MatchStage integration with quality metrics"""
 
+    @pytest.mark.fast
     def test_metrics_module_importable(self):
         """Metrics module should be importable from matching package"""
         from src.matching import (
@@ -477,6 +506,7 @@ class TestMatchStageIntegration:
         assert calculate_match_quality_metrics is not None
         assert log_quality_summary is not None
 
+    @pytest.mark.fast
     def test_metrics_in_match_stage_checkpoint(self):
         """MatchStage should include quality_metrics in checkpoint data"""
         # This is a design verification - the actual integration

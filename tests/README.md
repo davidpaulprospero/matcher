@@ -36,13 +36,23 @@ The following pytest markers are defined in `pytest.ini`:
 | `requires_network` | Tests making HTTP requests | When online |
 | `flaky` | Intermittent failures (timing, network, race conditions) | Auto-retried 2x |
 
-### Marker Statistics (Sprint 23)
+### Marker Statistics (Sprint 26)
 
 | Marker | Test Count | Approx. Runtime |
 |--------|------------|-----------------|
-| `fast` | ~2,680 | ~45 seconds |
-| `integration` | ~72 | Varies (network-dependent) |
-| Unmarked | ~8,800 | - |
+| `fast` | 11,149 | ~45 seconds |
+| `integration` | 384 | Varies |
+| `requires_network` | 144 | Network-dependent |
+| `requires_api` | 86 | API-dependent |
+| `slow` | 14 | >5 seconds each |
+| `stress` | 6 | Minutes |
+| `simulation` | 10 | Variable |
+| `flaky` | 29 | Auto-retried |
+| Unmarked | ~292 | - |
+
+**Total tests collected: 12,114**
+
+*Statistics updated in Sprint 26 after bulk marker assignment (10,957 markers applied).*
 
 **CI Optimization:**
 - Use `pytest -m fast` for quick feedback loop during development

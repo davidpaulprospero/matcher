@@ -85,6 +85,7 @@ def reset_face_detector():
 class TestSilenceThresholdBoundariesUS010:
     """AC1: Test silence detection at exact volume threshold boundaries."""
 
+    @pytest.mark.fast
     def test_silence_detection_at_exact_threshold(self, mock_librosa):
         """Test frame exactly at threshold (-40 dB) is NOT classified as silence."""
         analyzer = AudioAnalyzer()
@@ -103,6 +104,7 @@ class TestSilenceThresholdBoundariesUS010:
         # Exactly at threshold: NOT silence (threshold is <, not <=)
         assert len(regions) == 0
 
+    @pytest.mark.fast
     def test_silence_detection_just_below_threshold(self, mock_librosa):
         """Test frame just below threshold (-40.01 dB) IS classified as silence."""
         analyzer = AudioAnalyzer()
@@ -122,6 +124,7 @@ class TestSilenceThresholdBoundariesUS010:
         assert len(regions) == 1
         assert regions[0].duration >= analyzer.min_silence_duration
 
+    @pytest.mark.fast
     def test_silence_detection_just_above_threshold(self, mock_librosa):
         """Test frame just above threshold (-39.99 dB) is NOT classified as silence."""
         analyzer = AudioAnalyzer()
@@ -139,6 +142,7 @@ class TestSilenceThresholdBoundariesUS010:
         # Just above threshold: NOT silence
         assert len(regions) == 0
 
+    @pytest.mark.fast
     def test_silence_threshold_transition_boundary(self, mock_librosa):
         """Test transition from silence to non-silence at exact boundary."""
         analyzer = AudioAnalyzer()
@@ -160,6 +164,7 @@ class TestSilenceThresholdBoundariesUS010:
         assert regions[0].start_time == 0.0
         assert regions[0].end_time == 0.5
 
+    @pytest.mark.fast
     def test_silence_threshold_configurable(self, mock_librosa):
         """Test that silence threshold is configurable and respected."""
         analyzer = AudioAnalyzer()
@@ -191,6 +196,7 @@ class TestSilenceThresholdBoundariesUS010:
 class TestVADShortAudioUS010:
     """AC2: Test VAD handles very short audio clips (<1 second) gracefully."""
 
+    @pytest.mark.fast
     def test_speech_detection_sub_second_audio(self, mock_librosa):
         """Test speech detection on audio shorter than 1 second."""
         analyzer = AudioAnalyzer()
@@ -214,6 +220,7 @@ class TestVADShortAudioUS010:
         assert isinstance(regions, list)
         assert 0.0 <= ratio <= 1.0
 
+    @pytest.mark.fast
     def test_speech_detection_very_short_audio_100ms(self, mock_librosa):
         """Test speech detection on very short audio (100ms)."""
         analyzer = AudioAnalyzer()
@@ -237,6 +244,7 @@ class TestVADShortAudioUS010:
         assert isinstance(regions, list)
         assert 0.0 <= ratio <= 1.0
 
+    @pytest.mark.fast
     def test_silence_detection_sub_second_audio(self, mock_librosa):
         """Test silence detection on audio shorter than 1 second."""
         analyzer = AudioAnalyzer()
@@ -258,6 +266,7 @@ class TestVADShortAudioUS010:
         assert len(regions) == 1
         assert regions[0].duration >= 0.3
 
+    @pytest.mark.fast
     def test_zero_length_audio_handled(self, mock_librosa):
         """Test zero-length audio is handled gracefully."""
         analyzer = AudioAnalyzer()
@@ -277,6 +286,7 @@ class TestVADShortAudioUS010:
         regions = analyzer._detect_silence(empty_audio, 22050)
         assert isinstance(regions, list)
 
+    @pytest.mark.fast
     def test_speech_ratio_zero_duration_audio(self, mock_librosa):
         """Test speech ratio calculation with zero duration returns 0.
 
@@ -317,30 +327,36 @@ class TestVADShortAudioUS010:
 class TestFaceScore03ThresholdUS010:
     """AC3: Test face_score exactly at 0.3 threshold correctly classifies as B-roll."""
 
+    @pytest.mark.fast
     def test_is_broll_at_exact_threshold(self):
         """Test face_score exactly at 0.3 is NOT B-roll (threshold is <, not <=)."""
         # Exact threshold: NOT B-roll
         assert is_broll_scene(0.3, threshold=0.3) is False
 
+    @pytest.mark.fast
     def test_is_broll_just_below_threshold(self):
         """Test face_score just below 0.3 IS B-roll."""
         assert is_broll_scene(0.299, threshold=0.3) is True
         assert is_broll_scene(0.29999, threshold=0.3) is True
 
+    @pytest.mark.fast
     def test_is_broll_just_above_threshold(self):
         """Test face_score just above 0.3 is NOT B-roll."""
         assert is_broll_scene(0.301, threshold=0.3) is False
         assert is_broll_scene(0.30001, threshold=0.3) is False
 
+    @pytest.mark.fast
     def test_is_broll_zero_face_score(self):
         """Test face_score of 0.0 is definitely B-roll."""
         assert is_broll_scene(0.0, threshold=0.3) is True
 
+    @pytest.mark.fast
     def test_is_broll_one_face_score(self):
         """Test face_score of 1.0 is definitely NOT B-roll."""
         assert is_broll_scene(1.0, threshold=0.3) is False
 
     @patch('src.face_detection.FaceDetector.get_instance')
+    @pytest.mark.fast
     def test_apply_face_preference_threshold_boundary(self, mock_get_instance):
         """Test apply_face_preference uses 0.3 threshold for face statistics."""
         mock_detector = Mock()
@@ -367,6 +383,7 @@ class TestFaceScore03ThresholdUS010:
         # Segment with 0.31 is counted as with faces
         assert len(result) == 3
 
+    @pytest.mark.fast
     def test_apply_broll_preference_at_threshold(self):
         """Test apply_broll_preference at exact 0.3 threshold."""
         seg = Mock()
@@ -403,6 +420,7 @@ class TestMultipleFacesConfidenceUS010:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_mediapipe_multiple_faces_counted(self, mock_cvtColor, mock_cv2):
         """Test that frames with multiple faces are counted correctly."""
         mock_cap = MagicMock()
@@ -440,6 +458,7 @@ class TestMultipleFacesConfidenceUS010:
     @patch('cv2.VideoCapture')
     @patch('cv2.CascadeClassifier')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_opencv_multiple_faces_detected(self, mock_cvtColor, mock_cascade_class, mock_cv2):
         """Test OpenCV detects multiple faces per frame."""
         mock_cap = MagicMock()
@@ -469,6 +488,7 @@ class TestMultipleFacesConfidenceUS010:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_mediapipe_mixed_face_counts_per_frame(self, mock_cvtColor, mock_cv2):
         """Test scoring when frames have varying numbers of faces."""
         mock_cap = MagicMock()
@@ -504,6 +524,7 @@ class TestMultipleFacesConfidenceUS010:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_face_detection_preserves_highest_confidence_frames(self, mock_cvtColor, mock_cv2):
         """Test that frames with higher confidence faces contribute to scoring."""
         mock_cap = MagicMock()
@@ -540,6 +561,7 @@ class TestMultipleFacesConfidenceUS010:
 class TestSpeechVsMusicDetectionUS010:
     """AC5: Test audio analysis distinguishes speech from music-only content."""
 
+    @pytest.mark.fast
     def test_speech_like_features_detected_as_speech(self, mock_librosa):
         """Test audio with speech-like features is classified as speech."""
         analyzer = AudioAnalyzer()
@@ -565,6 +587,7 @@ class TestSpeechVsMusicDetectionUS010:
         # Should detect high speech ratio
         assert ratio > 0.5
 
+    @pytest.mark.fast
     def test_music_like_features_not_detected_as_speech(self, mock_librosa):
         """Test audio with music-like features (high spectral flatness) is not speech."""
         analyzer = AudioAnalyzer()
@@ -589,6 +612,7 @@ class TestSpeechVsMusicDetectionUS010:
         # Should detect low/no speech (high flatness fails speech heuristic)
         assert ratio < 0.3
 
+    @pytest.mark.fast
     def test_noise_like_features_not_detected_as_speech(self, mock_librosa):
         """Test audio with noise-like features is not classified as speech."""
         analyzer = AudioAnalyzer()
@@ -613,6 +637,7 @@ class TestSpeechVsMusicDetectionUS010:
         # High spectral centroid (>4000) and high flatness (>0.3) should fail speech
         assert ratio < 0.3
 
+    @pytest.mark.fast
     def test_low_energy_content_not_speech(self, mock_librosa):
         """Test that low-energy audio is not classified as speech.
 
@@ -645,6 +670,7 @@ class TestSpeechVsMusicDetectionUS010:
         # Even if all other features pass, low energy means not speech
         assert ratio <= 0.5
 
+    @pytest.mark.fast
     def test_mixed_speech_and_music_partial_detection(self, mock_librosa):
         """Test audio with mixed speech and music has partial speech detection."""
         analyzer = AudioAnalyzer()
@@ -670,6 +696,7 @@ class TestSpeechVsMusicDetectionUS010:
         assert isinstance(regions, list)
         assert 0.3 < ratio < 0.9  # Partial speech
 
+    @pytest.mark.fast
     def test_speech_vs_silence_distinction(self, mock_librosa):
         """Test that speech detection distinguishes speech from silence."""
         analyzer = AudioAnalyzer()
@@ -704,6 +731,7 @@ class TestSpeechVsMusicDetectionUS010:
 class TestAdditionalThresholdEdgeCasesUS010:
     """Additional edge cases for threshold boundaries."""
 
+    @pytest.mark.fast
     def test_silence_min_duration_boundary(self, mock_librosa):
         """Test silence duration at exactly minimum threshold."""
         analyzer = AudioAnalyzer()
@@ -723,6 +751,7 @@ class TestAdditionalThresholdEdgeCasesUS010:
         assert len(regions) == 1
         assert regions[0].duration >= 0.5
 
+    @pytest.mark.fast
     def test_face_detection_caching_preserves_threshold_values(self, temp_dir):
         """Test that cached face scores preserve exact threshold values."""
         FaceDetector._mediapipe_available = True
@@ -738,6 +767,7 @@ class TestAdditionalThresholdEdgeCasesUS010:
         assert score == 0.3
         assert is_broll_scene(score) is False  # 0.3 is NOT B-roll
 
+    @pytest.mark.fast
     def test_speech_threshold_configurable(self, mock_librosa):
         """Test that speech_threshold is configurable."""
         analyzer = AudioAnalyzer()

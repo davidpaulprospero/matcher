@@ -97,18 +97,21 @@ def create_downloader(tmp_path, rate_limit_config=None, **overrides):
 class TestRateLimitConfigAccess:
     """Test that rate limit config is correctly accessed."""
 
+    @pytest.mark.fast
     def test_uses_config_initial_backoff(self, tmp_path):
         """Test that initial_backoff_seconds is read from config."""
         rate_config = MockRateLimitConfig(initial_backoff_seconds=10.0)
         downloader = create_downloader(tmp_path, rate_config)
         assert downloader.download_config.rate_limit.initial_backoff_seconds == 10.0
 
+    @pytest.mark.fast
     def test_uses_config_max_backoff(self, tmp_path):
         """Test that max_backoff_before_rotate is read from config."""
         rate_config = MockRateLimitConfig(max_backoff_before_rotate=120.0)
         downloader = create_downloader(tmp_path, rate_config)
         assert downloader.download_config.rate_limit.max_backoff_before_rotate == 120.0
 
+    @pytest.mark.fast
     def test_uses_config_backoff_multiplier(self, tmp_path):
         """Test that backoff_multiplier is read from config."""
         rate_config = MockRateLimitConfig(backoff_multiplier=3.0)
@@ -119,11 +122,13 @@ class TestRateLimitConfigAccess:
 class TestBackoffInitialization:
     """Test that backoff state is properly initialized."""
 
+    @pytest.mark.fast
     def test_backoff_count_starts_at_zero(self, tmp_path):
         """Test that backoff count is initialized to zero."""
         downloader = create_downloader(tmp_path)
         assert downloader._rate_limit_backoff_count == 0
 
+    @pytest.mark.fast
     def test_total_delay_starts_at_zero(self, tmp_path):
         """Test that total delay is initialized to zero."""
         downloader = create_downloader(tmp_path)
@@ -133,6 +138,7 @@ class TestBackoffInitialization:
 class TestProgressiveBackoff:
     """Test the progressive backoff behavior."""
 
+    @pytest.mark.fast
     def test_first_backoff_uses_initial_delay(self, tmp_path):
         """Test that first rate limit uses initial_backoff_seconds."""
         rate_config = MockRateLimitConfig(initial_backoff_seconds=5.0)
@@ -145,6 +151,7 @@ class TestProgressiveBackoff:
             mock_sleep.assert_called_once()
             assert abs(mock_sleep.call_args[0][0] - 5.0) < 0.01
 
+    @pytest.mark.fast
     def test_backoff_is_exponential(self, tmp_path):
         """Test that backoff delay doubles each attempt."""
         rate_config = MockRateLimitConfig(
@@ -167,6 +174,7 @@ class TestProgressiveBackoff:
             downloader.handle_rate_limit_error("429")
             assert abs(mock_sleep.call_args[0][0] - 8.0) < 0.01
 
+    @pytest.mark.fast
     def test_backoff_count_increments(self, tmp_path):
         """Test that backoff count increments with each call."""
         rate_config = MockRateLimitConfig(max_backoff_before_rotate=100.0)
@@ -181,6 +189,7 @@ class TestProgressiveBackoff:
             downloader.handle_rate_limit_error("429")
             assert downloader._rate_limit_backoff_count == 2
 
+    @pytest.mark.fast
     def test_total_delay_accumulates(self, tmp_path):
         """Test that total delay accumulates across calls."""
         rate_config = MockRateLimitConfig(
@@ -207,6 +216,7 @@ class TestProgressiveBackoff:
 class TestBackoffEscalation:
     """Test that backoff escalates to cookie rotation after max delay."""
 
+    @pytest.mark.fast
     def test_escalates_after_max_backoff(self, tmp_path):
         """Test that cookie rotation is triggered after max backoff."""
         rate_config = MockRateLimitConfig(
@@ -235,6 +245,7 @@ class TestBackoffEscalation:
             assert result is True
             assert downloader.cookie_rotator.rotate.call_count == 1
 
+    @pytest.mark.fast
     def test_delay_capped_at_remaining(self, tmp_path):
         """Test that delay is capped so total doesn't exceed max."""
         rate_config = MockRateLimitConfig(
@@ -257,6 +268,7 @@ class TestBackoffEscalation:
 class TestBackoffReset:
     """Test that backoff state resets correctly."""
 
+    @pytest.mark.fast
     def test_reset_clears_count(self, tmp_path):
         """Test that reset clears backoff count."""
         downloader = create_downloader(tmp_path)
@@ -264,6 +276,7 @@ class TestBackoffReset:
         downloader._reset_rate_limit_backoff()
         assert downloader._rate_limit_backoff_count == 0
 
+    @pytest.mark.fast
     def test_reset_clears_total_delay(self, tmp_path):
         """Test that reset clears total delay."""
         downloader = create_downloader(tmp_path)
@@ -271,6 +284,7 @@ class TestBackoffReset:
         downloader._reset_rate_limit_backoff()
         assert downloader._rate_limit_total_delay == 0.0
 
+    @pytest.mark.fast
     def test_backoff_resets_before_rotation(self, tmp_path):
         """Test that backoff is reset before cookie rotation."""
         rate_config = MockRateLimitConfig(
@@ -296,6 +310,7 @@ class TestBackoffReset:
 class TestBackoffLogging:
     """Test that backoff progress is logged."""
 
+    @pytest.mark.fast
     def test_backoff_logged_with_progress(self, tmp_path, caplog):
         """Test that backoff logs include attempt number and total delay."""
         import logging
@@ -313,6 +328,7 @@ class TestBackoffLogging:
                 assert "backoff" in log_text
                 assert "waiting" in log_text
 
+    @pytest.mark.fast
     def test_escalation_logged(self, tmp_path, caplog):
         """Test that escalation to cookie rotation is logged."""
         import logging
@@ -339,6 +355,7 @@ class TestBackoffLogging:
 class TestBackoffWithCookieRotation:
     """Test backoff interaction with cookie rotation."""
 
+    @pytest.mark.fast
     def test_backoff_before_rotation_no_rotator(self, tmp_path):
         """Test backoff works when cookie rotator is not enabled."""
         rate_config = MockRateLimitConfig(
@@ -354,6 +371,7 @@ class TestBackoffWithCookieRotation:
             assert result is True
             mock_sleep.assert_called_once()
 
+    @pytest.mark.fast
     def test_rotation_only_after_backoff_exhausted(self, tmp_path):
         """Test that rotation is only called after backoff is exhausted."""
         rate_config = MockRateLimitConfig(
@@ -383,6 +401,7 @@ class TestBackoffWithCookieRotation:
 class TestBackoffWithVPN:
     """Test backoff interaction with VPN switching."""
 
+    @pytest.mark.fast
     def test_vpn_only_after_cookies_exhausted(self, tmp_path):
         """Test that VPN switch is only after cookies exhausted."""
         rate_config = MockRateLimitConfig(
@@ -412,6 +431,7 @@ class TestBackoffWithVPN:
 class TestNoRateLimitConfig:
     """Test fallback behavior when rate_limit config is missing."""
 
+    @pytest.mark.fast
     def test_uses_defaults_when_config_missing(self, tmp_path):
         """Test that default values are used when rate_limit config is None."""
         config = create_mock_config(tmp_path)

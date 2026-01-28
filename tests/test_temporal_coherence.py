@@ -69,11 +69,13 @@ def mock_segment_factory():
 class TestComputeTemporalCoherenceFunction:
     """Test that compute_temporal_coherence function exists with correct signature."""
 
+    @pytest.mark.fast
     def test_function_exists(self):
         """compute_temporal_coherence function should exist in scoring module."""
         from src.matching.scoring import compute_temporal_coherence
         assert callable(compute_temporal_coherence)
 
+    @pytest.mark.fast
     def test_function_returns_tuple(self, mock_config, mock_segment_factory):
         """Function should return tuple of (confidence, reason)."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -81,6 +83,7 @@ class TestComputeTemporalCoherenceFunction:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
+    @pytest.mark.fast
     def test_function_returns_float_and_string(self, mock_config, mock_segment_factory):
         """Function should return (float, str)."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -88,12 +91,14 @@ class TestComputeTemporalCoherenceFunction:
         assert isinstance(confidence, float)
         assert isinstance(reason, str)
 
+    @pytest.mark.fast
     def test_accepts_none_for_previous_match(self, mock_config, mock_segment_factory):
         """Function should handle None for previous_match (first segment)."""
         segment = mock_segment_factory(source_file="video1.mp4")
         confidence, reason = compute_temporal_coherence(0.8, segment, None, None, mock_config)
         assert confidence == 0.8  # No adjustment when no adjacent matches
 
+    @pytest.mark.fast
     def test_accepts_none_for_next_match(self, mock_config, mock_segment_factory):
         """Function should handle None for next_match (last segment)."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -109,24 +114,28 @@ class TestComputeTemporalCoherenceFunction:
 class TestTemporalCoherenceConfig:
     """Test temporal_coherence_enabled config option."""
 
+    @pytest.mark.fast
     def test_config_enabled_by_default(self):
         """temporal_coherence_enabled should default to True."""
         from src.config.sections.matching import MatchingConfig
         mc = MatchingConfig()
         assert mc.temporal_coherence_enabled is True
 
+    @pytest.mark.fast
     def test_config_same_source_boost_default(self):
         """temporal_coherence_same_source_boost should default to 0.05."""
         from src.config.sections.matching import MatchingConfig
         mc = MatchingConfig()
         assert mc.temporal_coherence_same_source_boost == 0.05
 
+    @pytest.mark.fast
     def test_config_context_switch_penalty_default(self):
         """temporal_coherence_context_switch_penalty should default to 0.05."""
         from src.config.sections.matching import MatchingConfig
         mc = MatchingConfig()
         assert mc.temporal_coherence_context_switch_penalty == 0.05
 
+    @pytest.mark.fast
     def test_disabled_config_returns_original_confidence(self, mock_config_disabled, mock_segment_factory):
         """When disabled, function should return original confidence unchanged."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -145,6 +154,7 @@ class TestTemporalCoherenceConfig:
 class TestSameSourceBoost:
     """Test +0.05 boost for clips from same source video as adjacent."""
 
+    @pytest.mark.fast
     def test_same_source_as_previous_applies_boost(self, mock_config, mock_segment_factory):
         """Clip from same source as previous should get +0.05 boost."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -155,6 +165,7 @@ class TestSameSourceBoost:
         assert confidence == pytest.approx(0.85, abs=0.001)
         assert "same source as prev" in reason
 
+    @pytest.mark.fast
     def test_same_source_as_next_applies_boost(self, mock_config, mock_segment_factory):
         """Clip from same source as next should get +0.05 boost."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -165,6 +176,7 @@ class TestSameSourceBoost:
         assert confidence == pytest.approx(0.85, abs=0.001)
         assert "same source as next" in reason
 
+    @pytest.mark.fast
     def test_same_source_both_directions_double_boost(self, mock_config, mock_segment_factory):
         """Same source on both sides should apply boost twice (+0.10 total)."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -177,6 +189,7 @@ class TestSameSourceBoost:
         assert "same source as prev" in reason
         assert "same source as next" in reason
 
+    @pytest.mark.fast
     def test_boost_capped_at_1_0(self, mock_config, mock_segment_factory):
         """Confidence should never exceed 1.0."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -188,6 +201,7 @@ class TestSameSourceBoost:
 
         assert confidence == 1.0
 
+    @pytest.mark.fast
     def test_different_source_no_boost(self, mock_config, mock_segment_factory):
         """Different sources should not get same-source boost."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -206,6 +220,7 @@ class TestSameSourceBoost:
 class TestContextSwitchPenalty:
     """Test -0.05 penalty for jarring context switches."""
 
+    @pytest.mark.fast
     def test_jarring_switch_applies_penalty(self, mock_config, mock_segment_factory):
         """Jarring context switch should apply -0.05 penalty."""
         segment = mock_segment_factory(
@@ -222,6 +237,7 @@ class TestContextSwitchPenalty:
         assert confidence == pytest.approx(0.75, abs=0.001)
         assert "context switch" in reason
 
+    @pytest.mark.fast
     def test_no_penalty_when_topics_overlap(self, mock_config, mock_segment_factory):
         """No penalty when topics have some overlap."""
         segment = mock_segment_factory(
@@ -237,6 +253,7 @@ class TestContextSwitchPenalty:
 
         assert "context switch" not in reason
 
+    @pytest.mark.fast
     def test_no_penalty_when_no_topics(self, mock_config, mock_segment_factory):
         """No penalty when segments have no topics."""
         segment = mock_segment_factory(source_file="video1.mp4")  # No topics
@@ -247,6 +264,7 @@ class TestContextSwitchPenalty:
         # No penalty should be applied when there's no topic info
         assert "context switch" not in reason
 
+    @pytest.mark.fast
     def test_penalty_not_below_zero(self, mock_config, mock_segment_factory):
         """Confidence should never go below 0.0."""
         segment = mock_segment_factory(
@@ -267,6 +285,7 @@ class TestContextSwitchPenalty:
 
         assert confidence == 0.0
 
+    @pytest.mark.fast
     def test_keywords_used_for_overlap_check(self, mock_config, mock_segment_factory):
         """Keywords should be used in addition to topics for overlap check."""
         segment = mock_segment_factory(
@@ -291,6 +310,7 @@ class TestContextSwitchPenalty:
 class TestIsJarringContextSwitch:
     """Test _is_jarring_context_switch helper function."""
 
+    @pytest.mark.fast
     def test_no_overlap_is_jarring(self, mock_segment_factory):
         """No topic/keyword overlap should be jarring."""
         current = mock_segment_factory(topics=["cooking", "food"])
@@ -300,6 +320,7 @@ class TestIsJarringContextSwitch:
 
         assert result is True
 
+    @pytest.mark.fast
     def test_overlap_is_not_jarring(self, mock_segment_factory):
         """Topic/keyword overlap should NOT be jarring."""
         current = mock_segment_factory(topics=["cooking", "food"])
@@ -309,6 +330,7 @@ class TestIsJarringContextSwitch:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_empty_topics_not_jarring(self, mock_segment_factory):
         """Empty topics should not be considered jarring."""
         current = mock_segment_factory(topics=[])
@@ -318,6 +340,7 @@ class TestIsJarringContextSwitch:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_empty_adjacent_topics_not_jarring(self, mock_segment_factory):
         """Empty adjacent topics should not be considered jarring (AC4)."""
         current = mock_segment_factory(topics=["cooking", "food"])
@@ -327,6 +350,7 @@ class TestIsJarringContextSwitch:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_case_insensitive_comparison(self, mock_segment_factory):
         """Topic comparison should be case-insensitive."""
         current = mock_segment_factory(topics=["Cooking", "FOOD"])
@@ -336,6 +360,7 @@ class TestIsJarringContextSwitch:
 
         assert result is False  # "FOOD" and "food" should match
 
+    @pytest.mark.fast
     def test_keywords_and_topics_combined(self, mock_segment_factory):
         """Both topics and keywords should be considered."""
         current = mock_segment_factory(
@@ -359,6 +384,7 @@ class TestIsJarringContextSwitch:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
+    @pytest.mark.fast
     def test_no_source_file_no_change(self, mock_config):
         """Segment without source_file should return original confidence."""
         segment = MagicMock(spec=['text', 'start_time', 'end_time'])
@@ -370,6 +396,7 @@ class TestEdgeCases:
         assert confidence == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_first_segment_no_previous(self, mock_config, mock_segment_factory):
         """First segment (no previous) should work without error."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -379,6 +406,7 @@ class TestEdgeCases:
 
         assert confidence == pytest.approx(0.85, abs=0.001)
 
+    @pytest.mark.fast
     def test_last_segment_no_next(self, mock_config, mock_segment_factory):
         """Last segment (no next) should work without error."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -388,6 +416,7 @@ class TestEdgeCases:
 
         assert confidence == pytest.approx(0.85, abs=0.001)
 
+    @pytest.mark.fast
     def test_isolated_segment_no_change(self, mock_config, mock_segment_factory):
         """Isolated segment (no prev, no next) should return original."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -397,6 +426,7 @@ class TestEdgeCases:
         assert confidence == 0.8
         assert reason == ""
 
+    @pytest.mark.fast
     def test_custom_boost_value(self, mock_segment_factory):
         """Custom boost values should be respected."""
         config = MagicMock()
@@ -412,6 +442,7 @@ class TestEdgeCases:
 
         assert confidence == pytest.approx(0.90, abs=0.001)  # +0.10 boost
 
+    @pytest.mark.fast
     def test_getattr_fallback_for_missing_config(self, mock_segment_factory):
         """Function should handle missing config attributes gracefully."""
         config = MagicMock()
@@ -434,6 +465,7 @@ class TestEdgeCases:
 class TestMixedBoostAndPenalty:
     """Test scenarios with both boost and penalty."""
 
+    @pytest.mark.fast
     def test_boost_from_prev_penalty_from_next(self, mock_config, mock_segment_factory):
         """Same source prev, jarring next should net to 0 adjustment."""
         segment = mock_segment_factory(
@@ -453,6 +485,7 @@ class TestMixedBoostAndPenalty:
         # +0.05 from same source, -0.05 from jarring = 0.80
         assert confidence == pytest.approx(0.80, abs=0.001)
 
+    @pytest.mark.fast
     def test_penalty_from_prev_boost_from_next(self, mock_config, mock_segment_factory):
         """Jarring prev, same source next should net to 0 adjustment."""
         segment = mock_segment_factory(
@@ -480,6 +513,7 @@ class TestMixedBoostAndPenalty:
 class TestReasonStringFormat:
     """Test the format of reason strings."""
 
+    @pytest.mark.fast
     def test_reason_includes_temporal_coherence_prefix(self, mock_config, mock_segment_factory):
         """Reason should start with 'temporal coherence:'."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -489,6 +523,7 @@ class TestReasonStringFormat:
 
         assert reason.startswith("temporal coherence:")
 
+    @pytest.mark.fast
     def test_reason_includes_adjustment_value(self, mock_config, mock_segment_factory):
         """Reason should include the adjustment value."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -498,6 +533,7 @@ class TestReasonStringFormat:
 
         assert "+0.05" in reason or "0.05" in reason
 
+    @pytest.mark.fast
     def test_multiple_adjustments_semicolon_separated(self, mock_config, mock_segment_factory):
         """Multiple adjustments should be semicolon-separated."""
         segment = mock_segment_factory(source_file="video1.mp4")
@@ -516,6 +552,7 @@ class TestReasonStringFormat:
 class TestRealConfigIntegration:
     """Test with real MatchingConfig dataclass."""
 
+    @pytest.mark.fast
     def test_with_real_matching_config(self, mock_segment_factory):
         """Function should work with real MatchingConfig."""
         from src.config.sections.matching import MatchingConfig
@@ -530,6 +567,7 @@ class TestRealConfigIntegration:
 
         assert confidence == pytest.approx(0.85, abs=0.001)
 
+    @pytest.mark.fast
     def test_config_values_used_correctly(self, mock_segment_factory):
         """Config values should be used in calculations."""
         from src.config.sections.matching import MatchingConfig
@@ -556,6 +594,7 @@ class TestRealConfigIntegration:
 class TestLogging:
     """Test debug logging behavior."""
 
+    @pytest.mark.fast
     def test_logs_adjustment_at_debug_level(self, mock_config, mock_segment_factory, caplog):
         """Should log adjustment at DEBUG level."""
         import logging

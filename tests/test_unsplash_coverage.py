@@ -28,6 +28,7 @@ from unittest.mock import patch, MagicMock, Mock, PropertyMock
 class TestUnsplashSearchNoApiKey:
     """Test search behavior without API key."""
 
+    @pytest.mark.fast
     def test_search_no_api_key_returns_empty(self, tmp_path):
         """Test that search returns empty list when no API key."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -48,6 +49,7 @@ class TestUnsplashSearchNoApiKey:
 class TestUnsplashSearchResults:
     """Test search result processing."""
 
+    @pytest.mark.fast
     def test_search_skips_photos_without_download_url(self, tmp_path):
         """Test that photos without download URL are skipped."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -93,6 +95,7 @@ class TestUnsplashSearchResults:
 class TestUnsplashDownloadImage:
     """Test image download scenarios."""
 
+    @pytest.mark.fast
     def test_existing_file_returns_path(self, tmp_path):
         """Test that existing file with adequate size returns path."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -125,6 +128,7 @@ class TestUnsplashDownloadImage:
         result = client.download_image(image, check_size=True)
         assert result == str(existing_file)
 
+    @pytest.mark.fast
     def test_existing_file_too_small_returns_none(self, tmp_path):
         """Test that existing file below min_size returns None."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -157,6 +161,7 @@ class TestUnsplashDownloadImage:
         result = client.download_image(image, check_size=True)
         assert result is None
 
+    @pytest.mark.fast
     def test_head_precheck_fails_continues_download(self, tmp_path):
         """Test that download continues even if HEAD request fails."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -195,6 +200,7 @@ class TestUnsplashDownloadImage:
         # Should still succeed despite HEAD failure
         assert result is not None
 
+    @pytest.mark.fast
     def test_content_length_precheck_too_small(self, tmp_path):
         """Test that image is rejected if HEAD content-length is too small."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -230,6 +236,7 @@ class TestUnsplashDownloadImage:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_downloaded_file_too_small_deleted(self, tmp_path):
         """Test that downloaded file below min_size is deleted."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -274,6 +281,7 @@ class TestUnsplashDownloadImage:
         temp_file = tmp_path / "oosmall.tmp"
         assert not temp_file.exists()
 
+    @pytest.mark.fast
     def test_entity_metadata_saved(self, tmp_path):
         """Test that entity metadata is saved to .entity.json."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -325,6 +333,7 @@ class TestUnsplashDownloadImage:
         assert metadata['entity_name'] == 'Test Entity'
         assert metadata['entity_type'] == 'GPE'
 
+    @pytest.mark.fast
     def test_regular_metadata_saved_when_no_entity(self, tmp_path):
         """Test that regular metadata is saved to .meta.json when no entity."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -371,6 +380,7 @@ class TestUnsplashDownloadImage:
         entity_file = Path(result).with_suffix('.entity.json')
         assert not entity_file.exists()
 
+    @pytest.mark.fast
     def test_download_exception_adds_to_failed(self, tmp_path):
         """Test that download exception adds to failed_downloads list."""
         from src.media_sources.images.unsplash import UnsplashImageClient
@@ -408,6 +418,7 @@ class TestUnsplashDownloadImage:
 class TestUnsplashSearchAndDownload:
     """Test search_and_download method."""
 
+    @pytest.mark.fast
     def test_search_and_download_limits_results(self, tmp_path):
         """Test that search_and_download respects max_images limit."""
         from src.media_sources.images.unsplash import UnsplashImageClient

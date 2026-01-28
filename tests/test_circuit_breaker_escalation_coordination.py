@@ -91,17 +91,20 @@ def linked_pair(circuit_breaker, escalation_manager):
 class TestPauseExtension:
     """When >50% of active keywords are at Tier 3, circuit breaker doubles pause."""
 
+    @pytest.mark.fast
     def test_no_extension_without_escalation_manager(self, circuit_breaker):
         """Without linked escalation manager, pause is base value."""
         effective = circuit_breaker._get_effective_pause_seconds()
         assert effective == 60.0
 
+    @pytest.mark.fast
     def test_no_extension_when_no_keywords(self, linked_pair):
         """When no keywords tracked, pause is base value."""
         cb, _ = linked_pair
         effective = cb._get_effective_pause_seconds()
         assert effective == 60.0
 
+    @pytest.mark.fast
     def test_no_extension_when_few_at_tier3(self, linked_pair):
         """When <=50% keywords at Tier 3, pause is base value."""
         cb, em = linked_pair
@@ -128,6 +131,7 @@ class TestPauseExtension:
         effective = cb._get_effective_pause_seconds()
         assert effective == 60.0  # Only 1/4 at Tier 3 (25%)
 
+    @pytest.mark.fast
     def test_extension_when_majority_at_tier3(self, linked_pair):
         """When >50% keywords at Tier 3, pause is doubled."""
         cb, em = linked_pair
@@ -153,6 +157,7 @@ class TestPauseExtension:
         effective = cb._get_effective_pause_seconds()
         assert effective == 120.0  # 3/4 = 75% at Tier 3, doubled
 
+    @pytest.mark.fast
     def test_extension_logged_at_info(self, linked_pair, caplog):
         """Extension should be logged at INFO level."""
         cb, em = linked_pair
@@ -187,6 +192,7 @@ class TestPauseExtension:
 class TestTier3Shortcut:
     """When circuit breaker is open, escalation returns Tier 3 immediately."""
 
+    @pytest.mark.fast
     def test_tier3_shortcut_when_circuit_open(self, linked_pair):
         """get_escalation_args returns Tier 3 when circuit breaker is open."""
         cb, em = linked_pair
@@ -201,6 +207,7 @@ class TestTier3Shortcut:
         assert result.tier == EscalationTier.FULL_BYPASS
         assert result.rotate_cookies is True
 
+    @pytest.mark.fast
     def test_no_shortcut_when_circuit_closed(self, linked_pair):
         """get_escalation_args returns normal tier when circuit breaker is closed."""
         cb, em = linked_pair
@@ -212,6 +219,7 @@ class TestTier3Shortcut:
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
         assert result.rotate_cookies is False
 
+    @pytest.mark.fast
     def test_shortcut_logged_at_info(self, linked_pair, caplog):
         """Tier 3 shortcut should be logged at INFO."""
         cb, em = linked_pair
@@ -225,11 +233,13 @@ class TestTier3Shortcut:
         assert any("Circuit breaker open" in r.message for r in caplog.records)
         assert any("shortcutting" in r.message for r in caplog.records)
 
+    @pytest.mark.fast
     def test_no_shortcut_without_circuit_breaker(self, escalation_manager):
         """Without linked circuit breaker, normal behavior."""
         result = escalation_manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_shortcut_preserves_actual_keyword_tier(self, linked_pair):
         """Shortcut changes returned tier but doesn't modify stored state."""
         cb, em = linked_pair
@@ -257,6 +267,7 @@ class TestTier3Shortcut:
 class TestExtendedReset:
     """At Tier 3, circuit breaker needs 3 consecutive successes to close."""
 
+    @pytest.mark.fast
     def test_single_success_closes_without_tier3(self, circuit_breaker):
         """Without escalation manager, single success resets failures."""
         circuit_breaker.record_failure()
@@ -266,6 +277,7 @@ class TestExtendedReset:
         circuit_breaker.record_success()
         assert circuit_breaker.state.consecutive_failures == 0
 
+    @pytest.mark.fast
     def test_single_success_not_enough_at_tier3(self, linked_pair):
         """With Tier 3 escalation, single success doesn't reset failures."""
         cb, em = linked_pair
@@ -296,6 +308,7 @@ class TestExtendedReset:
         cb.record_success()
         assert cb.state.consecutive_failures == 2  # Not reset yet
 
+    @pytest.mark.fast
     def test_three_successes_close_at_tier3(self, linked_pair):
         """With Tier 3, 3 consecutive successes reset failures."""
         cb, em = linked_pair
@@ -324,6 +337,7 @@ class TestExtendedReset:
         cb.record_success()
         assert cb.state.consecutive_failures == 0  # Reset after 3
 
+    @pytest.mark.fast
     def test_failure_resets_success_streak(self, linked_pair):
         """A failure between successes resets the streak counter."""
         cb, em = linked_pair
@@ -366,26 +380,31 @@ class TestExtendedReset:
 class TestEscalationQueryMethods:
     """New query methods on EscalationManager for circuit breaker consultation."""
 
+    @pytest.mark.fast
     def test_active_keyword_count_empty(self, escalation_manager):
         """No keywords tracked initially."""
         assert escalation_manager.get_active_keyword_count() == 0
 
+    @pytest.mark.fast
     def test_active_keyword_count_tracks_gets(self, escalation_manager):
         """get_escalation_args creates keyword state."""
         escalation_manager.get_escalation_args("kw1")
         escalation_manager.get_escalation_args("kw2")
         assert escalation_manager.get_active_keyword_count() == 2
 
+    @pytest.mark.fast
     def test_active_keyword_count_tracks_failures(self, escalation_manager):
         """record_failure creates keyword state."""
         escalation_manager.record_failure("kw_a", "HTTP Error 403")
         assert escalation_manager.get_active_keyword_count() == 1
 
+    @pytest.mark.fast
     def test_keywords_at_tier_initially_empty(self, escalation_manager):
         """No keywords at any tier initially."""
         result = escalation_manager.get_keywords_at_tier(EscalationTier.IMPERSONATE_ONLY)
         assert result == []
 
+    @pytest.mark.fast
     def test_keywords_at_tier_1(self, escalation_manager):
         """New keywords start at Tier 1."""
         escalation_manager.get_escalation_args("kw1")
@@ -397,6 +416,7 @@ class TestEscalationQueryMethods:
         tier3 = escalation_manager.get_keywords_at_tier(EscalationTier.FULL_BYPASS)
         assert tier3 == []
 
+    @pytest.mark.fast
     def test_keywords_at_tier_3_after_escalation(self, escalation_manager):
         """Keywords at Tier 3 after full escalation."""
         base_time = time.time()
@@ -414,6 +434,7 @@ class TestEscalationQueryMethods:
         tier3 = escalation_manager.get_keywords_at_tier(EscalationTier.FULL_BYPASS)
         assert "kw" in tier3
 
+    @pytest.mark.fast
     def test_reset_clears_keyword_counts(self, escalation_manager):
         """reset_all() clears keyword tracking."""
         escalation_manager.get_escalation_args("kw1")
@@ -432,6 +453,7 @@ class TestEscalationQueryMethods:
 class TestCoordinationLogging:
     """Verify INFO-level logging for coordination events."""
 
+    @pytest.mark.fast
     def test_extension_log_includes_percentage(self, linked_pair, caplog):
         """Extension log mentions the percentage of keywords at Tier 3."""
         cb, em = linked_pair
@@ -457,6 +479,7 @@ class TestCoordinationLogging:
         assert len(extension_logs) >= 1
         assert "Tier 3" in extension_logs[0].message
 
+    @pytest.mark.fast
     def test_shortcut_log_includes_keyword(self, linked_pair, caplog):
         """Shortcut log mentions the affected keyword."""
         cb, em = linked_pair
@@ -480,6 +503,7 @@ class TestCoordinationLogging:
 class TestBidirectionalLink:
     """Verify both directions of the link work independently and safely."""
 
+    @pytest.mark.fast
     def test_circuit_breaker_works_without_escalation_manager(self):
         """CircuitBreaker functions normally without linked escalation manager."""
         cb = CircuitBreaker(CircuitBreakerConfig(
@@ -494,16 +518,19 @@ class TestBidirectionalLink:
         cb.record_success()
         assert cb.state.consecutive_failures == 0  # Single success resets
 
+    @pytest.mark.fast
     def test_escalation_manager_works_without_circuit_breaker(self, escalation_manager):
         """EscalationManager functions normally without linked circuit breaker."""
         result = escalation_manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
 
+    @pytest.mark.fast
     def test_set_escalation_manager_method(self, circuit_breaker, escalation_manager):
         """set_escalation_manager() stores the reference."""
         circuit_breaker.set_escalation_manager(escalation_manager)
         assert circuit_breaker._escalation_manager is escalation_manager
 
+    @pytest.mark.fast
     def test_set_circuit_breaker_method(self, escalation_manager, circuit_breaker):
         """set_circuit_breaker() stores the reference."""
         escalation_manager.set_circuit_breaker(circuit_breaker)

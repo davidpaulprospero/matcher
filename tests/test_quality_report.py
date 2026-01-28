@@ -39,6 +39,7 @@ def create_mock_config(quality_report_enabled: bool = True):
 class TestQualityReportEnabledConfig:
     """Tests for quality_report_enabled config option"""
 
+    @pytest.mark.fast
     def test_config_option_exists(self):
         """OutputConfig should have quality_report_enabled field"""
         from src.config.sections.output import OutputConfig
@@ -46,6 +47,7 @@ class TestQualityReportEnabledConfig:
         config = OutputConfig()
         assert hasattr(config, 'quality_report_enabled')
 
+    @pytest.mark.fast
     def test_config_default_true(self):
         """quality_report_enabled should default to True"""
         from src.config.sections.output import OutputConfig
@@ -53,6 +55,7 @@ class TestQualityReportEnabledConfig:
         config = OutputConfig()
         assert config.quality_report_enabled is True
 
+    @pytest.mark.fast
     def test_config_can_be_disabled(self):
         """quality_report_enabled can be set to False"""
         from src.config.sections.output import OutputConfig
@@ -64,6 +67,7 @@ class TestQualityReportEnabledConfig:
 class TestOTIOQualityMetadata:
     """Tests for quality summary in OTIO metadata"""
 
+    @pytest.mark.fast
     def test_create_timeline_accepts_quality_metrics(self):
         """create_timeline should accept quality_metrics parameter"""
         from src.otio.timeline import create_timeline
@@ -73,6 +77,7 @@ class TestOTIOQualityMetadata:
         params = list(sig.parameters.keys())
         assert 'quality_metrics' in params
 
+    @pytest.mark.fast
     def test_quality_metrics_added_to_metadata(self):
         """Timeline metadata should include quality_summary when metrics provided"""
         from src.otio.timeline import create_timeline
@@ -106,6 +111,7 @@ class TestOTIOQualityMetadata:
         assert 'quality_summary' in timeline.metadata
         assert timeline.metadata['quality_summary'] == quality_metrics
 
+    @pytest.mark.fast
     def test_quality_metadata_not_added_when_none(self):
         """Timeline metadata should not include quality_summary when metrics is None"""
         from src.otio.timeline import create_timeline
@@ -132,6 +138,7 @@ class TestOTIOQualityMetadata:
 class TestCalculateQualityMetrics:
     """Tests for OutputStage._calculate_quality_metrics"""
 
+    @pytest.mark.fast
     def test_calculate_returns_metrics_object(self):
         """_calculate_quality_metrics should return MatchQualityMetrics"""
         from src.stages.output import OutputStage
@@ -145,6 +152,7 @@ class TestCalculateQualityMetrics:
         assert hasattr(metrics, 'avg_confidence')
         assert hasattr(metrics, 'matched_segments')
 
+    @pytest.mark.fast
     def test_calculate_empty_matches(self):
         """Should handle empty matches list"""
         from src.stages.output import OutputStage
@@ -155,6 +163,7 @@ class TestCalculateQualityMetrics:
         assert metrics is not None
         assert metrics.total_segments == 0
 
+    @pytest.mark.fast
     def test_calculate_avg_confidence(self):
         """Should correctly calculate average confidence"""
         from src.stages.output import OutputStage
@@ -171,6 +180,7 @@ class TestCalculateQualityMetrics:
         # Average of 0.8, 0.6, 0.7 = 0.7
         assert abs(metrics.avg_confidence - 0.7) < 0.01
 
+    @pytest.mark.fast
     def test_calculate_min_max_confidence(self):
         """Should correctly calculate min and max confidence"""
         from src.stages.output import OutputStage
@@ -187,6 +197,7 @@ class TestCalculateQualityMetrics:
         assert metrics.min_confidence == 0.5
         assert metrics.max_confidence == 0.9
 
+    @pytest.mark.fast
     def test_calculate_source_variety(self):
         """Should calculate source variety (unique sources / total matches)"""
         from src.stages.output import OutputStage
@@ -206,6 +217,7 @@ class TestCalculateQualityMetrics:
         assert abs(metrics._source_variety - 0.75) < 0.01
         assert metrics._unique_sources == 3
 
+    @pytest.mark.fast
     def test_calculate_matched_segments(self):
         """Should correctly count matched segments"""
         from src.stages.output import OutputStage
@@ -226,6 +238,7 @@ class TestCalculateQualityMetrics:
 class TestGenerateQualityReport:
     """Tests for OutputStage._generate_quality_report"""
 
+    @pytest.mark.fast
     def test_generates_json_file(self):
         """Should generate quality_report.json file"""
         from src.stages.output import OutputStage
@@ -256,6 +269,7 @@ class TestGenerateQualityReport:
             assert report_path.exists()
             assert report_path.name == "quality_report.json"
 
+    @pytest.mark.fast
     def test_report_contains_all_fields(self):
         """Quality report should contain all expected fields"""
         from src.stages.output import OutputStage
@@ -296,6 +310,7 @@ class TestGenerateQualityReport:
             assert 'max_confidence' in report
             assert 'match_rate' in report
 
+    @pytest.mark.fast
     def test_report_values_correct(self):
         """Quality report values should be correct"""
         from src.stages.output import OutputStage
@@ -333,6 +348,7 @@ class TestGenerateQualityReport:
             assert report['source_variety'] == 0.8
             assert report['unique_sources'] == 8
 
+    @pytest.mark.fast
     def test_report_handles_none_metrics(self):
         """Should handle None metrics gracefully"""
         from src.stages.output import OutputStage
@@ -356,6 +372,7 @@ class TestGenerateQualityReport:
             assert report['avg_confidence'] == 0.0
             assert report['gaps_count'] == 0
 
+    @pytest.mark.fast
     def test_report_valid_json(self):
         """Generated report should be valid JSON"""
         from src.stages.output import OutputStage
@@ -382,6 +399,7 @@ class TestGenerateQualityReport:
 class TestQualityReportIntegration:
     """Integration tests for quality report in OUTPUT stage"""
 
+    @pytest.mark.fast
     def test_quality_report_in_outputs(self):
         """Quality report path should be in outputs dict"""
         from src.stages.output import OutputStage
@@ -407,6 +425,7 @@ class TestQualityReportIntegration:
 class TestQualityReportEdgeCases:
     """Edge case tests for quality report generation"""
 
+    @pytest.mark.fast
     def test_single_match(self):
         """Should handle single match"""
         from src.stages.output import OutputStage
@@ -420,6 +439,7 @@ class TestQualityReportEdgeCases:
         assert metrics.min_confidence == 0.9
         assert metrics.max_confidence == 0.9
 
+    @pytest.mark.fast
     def test_all_same_confidence(self):
         """Should handle all matches with same confidence"""
         from src.stages.output import OutputStage
@@ -434,6 +454,7 @@ class TestQualityReportEdgeCases:
         assert metrics.max_confidence == 0.8
         assert metrics.confidence_std == 0.0
 
+    @pytest.mark.fast
     def test_all_same_source(self):
         """Should handle all matches from same source"""
         from src.stages.output import OutputStage
@@ -447,6 +468,7 @@ class TestQualityReportEdgeCases:
         assert metrics._source_variety == 0.2
         assert metrics._unique_sources == 1
 
+    @pytest.mark.fast
     def test_confidence_rounding(self):
         """Confidence values should be rounded appropriately in report"""
         from src.stages.output import OutputStage
@@ -480,6 +502,7 @@ class TestQualityReportEdgeCases:
 class TestQualityReportDisabled:
     """Tests for when quality report is disabled"""
 
+    @pytest.mark.fast
     def test_config_disabled_skips_report(self):
         """When quality_report_enabled=False, no report should be generated"""
         from src.config.sections.output import OutputConfig
@@ -494,6 +517,7 @@ class TestQualityReportDisabled:
 class TestQualityReportRealWorldScenarios:
     """Real-world scenario tests"""
 
+    @pytest.mark.fast
     def test_mixed_confidence_levels(self):
         """Should handle realistic mixed confidence levels"""
         from src.stages.output import OutputStage
@@ -517,6 +541,7 @@ class TestQualityReportRealWorldScenarios:
         assert metrics._unique_sources == 6
         assert 0.5 < metrics._source_variety < 0.7  # 6/10 = 0.6
 
+    @pytest.mark.fast
     def test_high_quality_matches(self):
         """Should correctly identify high quality match sets"""
         from src.stages.output import OutputStage
@@ -533,6 +558,7 @@ class TestQualityReportRealWorldScenarios:
         assert metrics.min_confidence > 0.85
         assert metrics._source_variety == 1.0  # All unique sources
 
+    @pytest.mark.fast
     def test_low_quality_matches(self):
         """Should correctly identify low quality match sets"""
         from src.stages.output import OutputStage

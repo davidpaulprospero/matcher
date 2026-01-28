@@ -14,6 +14,7 @@ from src.keyword_extractor.models import KeywordResult, PrioritizedKeyword
 class TestPrioritizedKeyword:
     """Test PrioritizedKeyword dataclass"""
 
+    @pytest.mark.fast
     def test_create_prioritized_keyword(self):
         """Test creating PrioritizedKeyword with all fields"""
         pk = PrioritizedKeyword(
@@ -27,6 +28,7 @@ class TestPrioritizedKeyword:
         assert pk.source == "entity"
         assert pk.mention_count == 5
 
+    @pytest.mark.fast
     def test_prioritized_keyword_defaults(self):
         """Test PrioritizedKeyword with default mention_count"""
         pk = PrioritizedKeyword(
@@ -36,6 +38,7 @@ class TestPrioritizedKeyword:
         )
         assert pk.mention_count == 1  # Default
 
+    @pytest.mark.fast
     def test_prioritized_keyword_sources(self):
         """Test different source types"""
         sources = ["entity", "topic", "general", "list_item"]
@@ -51,6 +54,7 @@ class TestPrioritizedKeyword:
 class TestKeywordResult:
     """Test KeywordResult dataclass"""
 
+    @pytest.mark.fast
     def test_create_minimal_result(self):
         """Test creating KeywordResult with minimal fields"""
         result = KeywordResult(
@@ -65,6 +69,7 @@ class TestKeywordResult:
         assert result.topic == ""  # Default
         assert result.prioritized_keywords == []  # Default
 
+    @pytest.mark.fast
     def test_create_full_result(self):
         """Test creating KeywordResult with all fields"""
         entities = [{"name": "John Doe", "type": "PERSON"}]
@@ -84,6 +89,7 @@ class TestKeywordResult:
         assert result.topic == "Documentary"
         assert len(result.prioritized_keywords) == 2
 
+    @pytest.mark.fast
     def test_get_sorted_keywords_with_prioritized(self):
         """Test get_sorted_keywords() sorts by priority"""
         prioritized = [
@@ -100,6 +106,7 @@ class TestKeywordResult:
         sorted_kw = result.get_sorted_keywords()
         assert sorted_kw == ["high", "medium", "low"]
 
+    @pytest.mark.fast
     def test_get_sorted_keywords_without_prioritized(self):
         """Test get_sorted_keywords() returns original order without prioritized"""
         result = KeywordResult(
@@ -110,6 +117,7 @@ class TestKeywordResult:
         sorted_kw = result.get_sorted_keywords()
         assert sorted_kw == ["first", "second", "third"]
 
+    @pytest.mark.fast
     def test_get_sorted_keywords_empty(self):
         """Test get_sorted_keywords() with empty keywords"""
         result = KeywordResult(
@@ -120,6 +128,7 @@ class TestKeywordResult:
         sorted_kw = result.get_sorted_keywords()
         assert sorted_kw == []
 
+    @pytest.mark.fast
     def test_extraction_methods(self):
         """Test different extraction method values"""
         methods = ["llm", "llm_entity_aware", "tfidf", "none"]

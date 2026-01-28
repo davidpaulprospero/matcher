@@ -41,6 +41,7 @@ class TestSaveLoadRoundTrip:
         "OUTPUT": {"otio_path": "/output/timeline.otio", "edl_path": "/output/timeline.edl"},
     }
 
+    @pytest.mark.fast
     def test_round_trip_all_14_stages(self, tmp_path):
         """Save data for all 14 stages sequentially, load, verify each stage dict matches."""
         manager = CheckpointManager(tmp_path, config_hash="test_hash")
@@ -65,6 +66,7 @@ class TestSaveLoadRoundTrip:
                 actual = getattr(loaded, stage_key)
                 assert actual == expected, f"Stage {stage} data mismatch: {actual} != {expected}"
 
+    @pytest.mark.fast
     def test_round_trip_preserves_metadata(self, tmp_path):
         """Verify config_hash, voiceover_path, and timestamps survive round-trip."""
         manager = CheckpointManager(tmp_path, config_hash="cfg_abc123")
@@ -83,6 +85,7 @@ class TestSaveLoadRoundTrip:
         assert loaded.created_at != ""
         assert loaded.updated_at != ""
 
+    @pytest.mark.fast
     def test_round_trip_single_stage(self, tmp_path):
         """Verify round-trip works for a single stage save."""
         manager = CheckpointManager(tmp_path)
@@ -95,6 +98,7 @@ class TestSaveLoadRoundTrip:
         assert loaded.last_completed_stage == "MATCH"
         assert loaded.match == {"match_count": 25, "avg_confidence": 0.92}
 
+    @pytest.mark.fast
     def test_round_trip_nested_stage_data(self, tmp_path):
         """Verify deeply nested stage data survives round-trip."""
         nested_data = {
@@ -113,6 +117,7 @@ class TestSaveLoadRoundTrip:
         assert loaded.analyze == nested_data
         assert loaded.analyze["results"][0]["metadata"]["channel"] == "NatGeo"
 
+    @pytest.mark.fast
     def test_round_trip_empty_stage_data(self, tmp_path):
         """Verify saving with None/empty stage_data preserves empty dict."""
         manager = CheckpointManager(tmp_path)
@@ -126,6 +131,7 @@ class TestSaveLoadRoundTrip:
         # Empty dict is the default for unset stage data
         assert loaded.download == {}
 
+    @pytest.mark.fast
     def test_round_trip_overwrite_stage_data(self, tmp_path):
         """Verify saving same stage twice overwrites with latest data."""
         manager = CheckpointManager(tmp_path)
@@ -141,6 +147,7 @@ class TestSaveLoadRoundTrip:
 class TestGetStageData:
     """AC2: get_stage_data() returns empty dict for stages not yet completed."""
 
+    @pytest.mark.fast
     def test_returns_empty_dict_before_any_stage_runs(self, tmp_path):
         """Verify no KeyError when accessing stage data before any stage runs."""
         manager = CheckpointManager(tmp_path)
@@ -148,6 +155,7 @@ class TestGetStageData:
         result = manager.get_stage_data("ANALYZE")
         assert result == {}
 
+    @pytest.mark.fast
     def test_returns_empty_dict_for_uncompleted_stage(self, tmp_path):
         """Verify empty dict for stage that hasn't been saved yet."""
         manager = CheckpointManager(tmp_path)
@@ -157,6 +165,7 @@ class TestGetStageData:
         result = manager.get_stage_data("DOWNLOAD")
         assert result == {}
 
+    @pytest.mark.fast
     def test_returns_data_for_completed_stage(self, tmp_path):
         """Verify correct data returned for a saved stage."""
         manager = CheckpointManager(tmp_path)
@@ -166,6 +175,7 @@ class TestGetStageData:
         result = manager.get_stage_data("ANALYZE")
         assert result == expected
 
+    @pytest.mark.fast
     def test_returns_empty_dict_for_unknown_stage(self, tmp_path):
         """Verify empty dict for a stage name not in STAGE_ORDER."""
         manager = CheckpointManager(tmp_path)
@@ -175,6 +185,7 @@ class TestGetStageData:
         result = manager.get_stage_data("NONEXISTENT_STAGE")
         assert result == {}
 
+    @pytest.mark.fast
     def test_returns_empty_dict_for_future_stages(self, tmp_path):
         """Verify all stages after last_completed return empty dicts."""
         manager = CheckpointManager(tmp_path)
@@ -185,6 +196,7 @@ class TestGetStageData:
             result = manager.get_stage_data(stage)
             assert result == {}, f"Expected empty dict for {stage}, got {result}"
 
+    @pytest.mark.fast
     def test_all_14_stages_return_empty_when_no_data(self, tmp_path):
         """Verify every stage in STAGE_ORDER returns empty dict on fresh manager."""
         manager = CheckpointManager(tmp_path)
@@ -196,6 +208,7 @@ class TestGetStageData:
 class TestShouldSkipStage:
     """AC3: should_skip_stage() correctly skips completed stages during resume."""
 
+    @pytest.mark.fast
     def test_skips_stages_before_last_completed(self, tmp_path):
         """Verify returns False for stages before last_completed_stage, True for stages after."""
         manager = CheckpointManager(tmp_path)
@@ -214,6 +227,7 @@ class TestShouldSkipStage:
             assert manager.should_skip_stage(stage) is False, \
                 f"Expected should_skip_stage('{stage}') to be False (not yet completed)"
 
+    @pytest.mark.fast
     def test_no_checkpoint_skips_nothing(self, tmp_path):
         """Verify all stages run when no checkpoint exists."""
         manager = CheckpointManager(tmp_path)
@@ -223,6 +237,7 @@ class TestShouldSkipStage:
             assert manager.should_skip_stage(stage) is False, \
                 f"Expected should_skip_stage('{stage}') to be False (no checkpoint)"
 
+    @pytest.mark.fast
     def test_first_stage_completed(self, tmp_path):
         """Verify only first stage skipped when it's the only completed one."""
         manager = CheckpointManager(tmp_path)
@@ -233,6 +248,7 @@ class TestShouldSkipStage:
         for stage in STAGE_ORDER[1:]:
             assert manager.should_skip_stage(stage) is False
 
+    @pytest.mark.fast
     def test_last_stage_completed(self, tmp_path):
         """Verify all stages skipped when last stage (OUTPUT) is completed."""
         manager = CheckpointManager(tmp_path)
@@ -242,6 +258,7 @@ class TestShouldSkipStage:
             assert manager.should_skip_stage(stage) is True, \
                 f"Expected should_skip_stage('{stage}') to be True (pipeline complete)"
 
+    @pytest.mark.fast
     def test_mid_pipeline_resume(self, tmp_path):
         """Verify correct split for mid-pipeline resume from TRANSCRIBE."""
         manager = CheckpointManager(tmp_path)
@@ -258,6 +275,7 @@ class TestShouldSkipStage:
         assert "TRANSCRIBE" in skipped
         assert "SCENE_DETECTION" in to_run  # Next stage after TRANSCRIBE
 
+    @pytest.mark.fast
     def test_unknown_stage_returns_false(self, tmp_path):
         """Verify unknown stage name returns False (don't skip unknown stages)."""
         manager = CheckpointManager(tmp_path)
@@ -269,6 +287,7 @@ class TestShouldSkipStage:
 class TestConfigHashMismatch:
     """AC4: config_hash mismatch detection via validate()."""
 
+    @pytest.mark.fast
     def test_validate_warns_on_config_hash_mismatch(self, tmp_path):
         """Verify validate() warns when checkpoint config_hash differs from current."""
         # Save checkpoint with one config hash
@@ -285,6 +304,7 @@ class TestConfigHashMismatch:
         assert len(result['warnings']) >= 1
         assert any("changed" in w.lower() or "config" in w.lower() for w in result['warnings'])
 
+    @pytest.mark.fast
     def test_validate_no_warning_when_config_hash_matches(self, tmp_path):
         """Verify no warning when config hash matches between save and load."""
         manager = CheckpointManager(tmp_path, config_hash="same_hash")
@@ -299,6 +319,7 @@ class TestConfigHashMismatch:
                            if "config" in w.lower() or "changed" in w.lower()]
         assert len(config_warnings) == 0
 
+    @pytest.mark.fast
     def test_validate_no_warning_when_no_original_hash(self, tmp_path):
         """Verify no warning when checkpoint has no config_hash (old checkpoint)."""
         # Save with no config hash (empty string)
@@ -315,6 +336,7 @@ class TestConfigHashMismatch:
                            if "config" in w.lower()]
         assert len(config_warnings) == 0
 
+    @pytest.mark.fast
     def test_validate_no_warning_when_no_current_hash(self, tmp_path):
         """Verify no warning when current manager has no config_hash."""
         manager = CheckpointManager(tmp_path, config_hash="saved_hash")
@@ -330,6 +352,7 @@ class TestConfigHashMismatch:
                            if "config" in w.lower()]
         assert len(config_warnings) == 0
 
+    @pytest.mark.fast
     def test_validate_resume_from_correct_after_hash_mismatch(self, tmp_path):
         """Verify resume_from is still correct even with config hash mismatch."""
         manager = CheckpointManager(tmp_path, config_hash="hash_v1")
@@ -349,6 +372,7 @@ class TestConfigHashMismatch:
 class TestVoiceoverHashComparison:
     """AC5: voiceover_hash comparison detects when voiceover file changed."""
 
+    @pytest.mark.fast
     def test_validate_warns_on_voiceover_hash_mismatch(self, tmp_path):
         """Verify checkpoint detects when voiceover file changed between runs."""
         # Create original voiceover file
@@ -372,6 +396,7 @@ class TestVoiceoverHashComparison:
         assert any("voiceover" in w.lower() for w in result['warnings']), \
             f"Expected voiceover change warning, got warnings: {result['warnings']}"
 
+    @pytest.mark.fast
     def test_validate_no_warning_when_voiceover_unchanged(self, tmp_path):
         """Verify no warning when voiceover file hasn't changed."""
         vo_file = tmp_path / "script.srt"
@@ -391,6 +416,7 @@ class TestVoiceoverHashComparison:
         vo_warnings = [w for w in result['warnings'] if "voiceover" in w.lower()]
         assert len(vo_warnings) == 0
 
+    @pytest.mark.fast
     def test_validate_no_warning_when_no_voiceover_path(self, tmp_path):
         """Verify no warning when no voiceover_path is provided to validate."""
         manager = CheckpointManager(tmp_path)
@@ -407,6 +433,7 @@ class TestVoiceoverHashComparison:
         vo_warnings = [w for w in result['warnings'] if "voiceover" in w.lower()]
         assert len(vo_warnings) == 0
 
+    @pytest.mark.fast
     def test_validate_no_warning_when_checkpoint_has_no_hash(self, tmp_path):
         """Verify no warning when checkpoint has empty voiceover_hash."""
         vo_file = tmp_path / "script.srt"
@@ -424,6 +451,7 @@ class TestVoiceoverHashComparison:
         vo_warnings = [w for w in result['warnings'] if "voiceover" in w.lower()]
         assert len(vo_warnings) == 0
 
+    @pytest.mark.fast
     def test_voiceover_hash_stored_correctly(self, tmp_path):
         """Verify set_voiceover() computes and stores hash correctly."""
         vo_file = tmp_path / "script.srt"
@@ -440,6 +468,7 @@ class TestVoiceoverHashComparison:
         assert manager.data.voiceover_hash == expected_hash
         assert manager.data.voiceover_path == str(vo_file)
 
+    @pytest.mark.fast
     def test_voiceover_hash_missing_file_returns_empty(self, tmp_path):
         """Verify set_voiceover() handles missing file gracefully."""
         manager = CheckpointManager(tmp_path)

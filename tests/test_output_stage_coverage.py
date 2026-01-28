@@ -88,6 +88,7 @@ class TestEntityDataDebugPrinting:
     """Test entity data debug print statements"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_entity_images_display_single_entity(self, mock_create, mock_config,
                                                   mock_checkpoint, mock_matches, tmp_path, capsys):
         """Test entity images display with single entity"""
@@ -112,6 +113,7 @@ class TestEntityDataDebugPrinting:
         assert "2 images" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_entity_images_display_more_than_three_entities(self, mock_create, mock_config,
                                                               mock_checkpoint, mock_matches,
                                                               tmp_path, capsys):
@@ -139,6 +141,7 @@ class TestEntityDataDebugPrinting:
         assert "... and 2 more entities" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_entity_videos_display_single_entity(self, mock_create, mock_config,
                                                    mock_checkpoint, mock_matches,
                                                    tmp_path, capsys):
@@ -164,6 +167,7 @@ class TestEntityDataDebugPrinting:
         assert "2 videos" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_entity_videos_display_more_than_three_entities(self, mock_create, mock_config,
                                                               mock_checkpoint, mock_matches,
                                                               tmp_path, capsys):
@@ -190,6 +194,7 @@ class TestEntityDataDebugPrinting:
         assert "... and 1 more entities" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_no_entity_images_warning(self, mock_create, mock_config, mock_checkpoint,
                                        mock_matches, tmp_path, capsys):
         """Test warning when no entity images available"""
@@ -210,6 +215,7 @@ class TestEntityDataDebugPrinting:
         assert "No entity images available" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_no_entity_videos_warning(self, mock_create, mock_config, mock_checkpoint,
                                        mock_matches, tmp_path, capsys):
         """Test warning when no entity videos (stock videos) available"""
@@ -230,6 +236,7 @@ class TestEntityDataDebugPrinting:
         assert "No stock videos available" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_entity_images_exactly_three_no_more_message(self, mock_create, mock_config,
                                                           mock_checkpoint, mock_matches,
                                                           tmp_path, capsys):
@@ -264,6 +271,7 @@ class TestOTIOTrackCategorization:
 
     @patch('src.otio.create_timeline')
     @patch('src.otio_builder.save_timeline_split')
+    @pytest.mark.fast
     def test_otio_split_with_all_track_types(self, mock_save_split, mock_create,
                                               mock_config, mock_checkpoint,
                                               mock_matches, tmp_path, capsys):
@@ -298,6 +306,7 @@ class TestOTIOTrackCategorization:
 
     @patch('src.otio.create_timeline')
     @patch('src.otio_builder.save_timeline_split')
+    @pytest.mark.fast
     def test_otio_split_with_audio_tracks(self, mock_save_split, mock_create,
                                            mock_config, mock_checkpoint,
                                            mock_matches, tmp_path, capsys):
@@ -324,6 +333,7 @@ class TestOTIOTrackCategorization:
 
     @patch('src.otio.create_timeline')
     @patch('src.otio_builder.save_timeline')
+    @pytest.mark.fast
     def test_otio_single_file_output(self, mock_save, mock_create, mock_config,
                                       mock_checkpoint, mock_matches, tmp_path, capsys):
         """Test single OTIO file generation (not split)"""
@@ -345,6 +355,7 @@ class TestOTIOTrackCategorization:
 
     @patch('src.otio.create_timeline')
     @patch('src.otio_builder.save_timeline_split')
+    @pytest.mark.fast
     def test_otio_split_empty_categories(self, mock_save_split, mock_create,
                                           mock_config, mock_checkpoint,
                                           mock_matches, tmp_path, capsys):
@@ -378,6 +389,7 @@ class TestOTIOTrackCategorization:
 class TestReportGenerationMatchStructures:
     """Test report generation with different Match/MatchResult structures"""
 
+    @pytest.mark.fast
     def test_generate_report_with_match_result(self, mock_config, mock_checkpoint, tmp_path):
         """Test report generation with MatchResult objects containing primary_match"""
         stage = OutputStage()
@@ -424,6 +436,7 @@ class TestReportGenerationMatchStructures:
         assert "92.0%" in report_content
         assert "Strong semantic match" in report_content
 
+    @pytest.mark.fast
     def test_generate_report_with_direct_match_object(self, mock_config, mock_checkpoint, tmp_path):
         """Test report generation with direct Match-like objects (no primary_match)"""
         stage = OutputStage()
@@ -457,6 +470,7 @@ class TestReportGenerationMatchStructures:
         assert "78.0%" in report_content
         assert "video1.mp4" in report_content
 
+    @pytest.mark.fast
     def test_generate_report_with_none_match_result(self, mock_config, mock_checkpoint, tmp_path):
         """Test report generation skips None match results"""
         stage = OutputStage()
@@ -499,6 +513,7 @@ class TestReportGenerationMatchStructures:
         assert "Segment 1" in report_content
         # But indices continue (Segment 2, Segment 3 skipped due to continue)
 
+    @pytest.mark.fast
     def test_generate_report_match_without_text(self, mock_config, mock_checkpoint, tmp_path):
         """Test report handles matches without text attribute"""
         stage = OutputStage()
@@ -531,6 +546,7 @@ class TestReportGenerationMatchStructures:
         report_content = report_files[0].read_text(encoding='utf-8')
         assert "75.0%" in report_content
 
+    @pytest.mark.fast
     def test_generate_report_match_with_empty_reasoning(self, mock_config, mock_checkpoint, tmp_path):
         """Test report handles matches with empty reasoning"""
         stage = OutputStage()
@@ -576,6 +592,7 @@ class TestReportGenerationMatchStructures:
 class TestImportErrorHandling:
     """Test OTIO import error handling"""
 
+    @pytest.mark.fast
     def test_otio_import_error(self, mock_config, mock_checkpoint, mock_matches, tmp_path):
         """Test handling when OTIO modules fail to import"""
         stage = OutputStage()
@@ -603,6 +620,7 @@ class TestImportErrorHandling:
         assert result.success is False
         assert "import" in result.error.lower() or "otio" in result.error.lower()
 
+    @pytest.mark.fast
     def test_real_import_error_handling(self, mock_config, mock_checkpoint, mock_matches, tmp_path):
         """Test real import error handling in run method"""
         stage = OutputStage()
@@ -637,6 +655,7 @@ class TestImportErrorHandling:
 class TestRestoreOTIODataTypes:
     """Test restore method with different OTIO data formats"""
 
+    @pytest.mark.fast
     def test_restore_otio_as_list(self, mock_checkpoint):
         """Test restore with OTIO as list of paths"""
         stage = OutputStage()
@@ -654,6 +673,7 @@ class TestRestoreOTIODataTypes:
         assert len(state.otio_files) == 3
         assert all(isinstance(p, Path) for p in state.otio_files)
 
+    @pytest.mark.fast
     def test_restore_otio_as_string(self, mock_checkpoint):
         """Test restore with OTIO as single string path"""
         stage = OutputStage()
@@ -671,6 +691,7 @@ class TestRestoreOTIODataTypes:
         assert len(state.otio_files) == 1
         assert state.otio_files[0] == Path('single_timeline.otio')
 
+    @pytest.mark.fast
     def test_restore_otio_as_none(self, mock_checkpoint):
         """Test restore with OTIO as None"""
         stage = OutputStage()
@@ -687,6 +708,7 @@ class TestRestoreOTIODataTypes:
         assert result is True
         assert len(state.otio_files) == 0
 
+    @pytest.mark.fast
     def test_restore_otio_missing_key(self, mock_checkpoint):
         """Test restore when OTIO key is missing"""
         stage = OutputStage()
@@ -705,6 +727,7 @@ class TestRestoreOTIODataTypes:
         assert result is True
         assert len(state.otio_files) == 0
 
+    @pytest.mark.fast
     def test_restore_empty_outputs(self, mock_checkpoint):
         """Test restore with empty outputs dict"""
         stage = OutputStage()
@@ -729,6 +752,7 @@ class TestEDLGenerationHelper:
     """Test _generate_edl helper method"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_generate_edl_with_extracted_entities(self, mock_create, mock_config,
                                                     mock_checkpoint, mock_matches, tmp_path, capsys):
         """Test EDL generation passes extracted_entities"""
@@ -751,6 +775,7 @@ class TestEDLGenerationHelper:
         assert call_kwargs['entities'] == ['Beach', 'Mountain', 'Forest']
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_generate_edl_with_none_entities(self, mock_create, mock_config,
                                                mock_checkpoint, mock_matches, tmp_path):
         """Test EDL generation with None extracted_entities"""
@@ -772,6 +797,7 @@ class TestEDLGenerationHelper:
         assert call_kwargs['entities'] == []
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_generate_edl_frame_rate_from_config(self, mock_create, mock_config,
                                                    mock_checkpoint, mock_matches, tmp_path):
         """Test EDL generation uses frame_rate from config"""
@@ -801,6 +827,7 @@ class TestXMLGenerationHelper:
     """Test _generate_xml helper method"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_generate_xml_with_entity_data(self, mock_create, mock_config,
                                             mock_checkpoint, mock_matches, tmp_path, capsys):
         """Test XML generation with entity images and videos"""
@@ -828,6 +855,7 @@ class TestXMLGenerationHelper:
         assert "XML (fallback)" in captured.out
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_generate_xml_custom_parts(self, mock_create, mock_config,
                                         mock_checkpoint, mock_matches, tmp_path):
         """Test XML generation with custom number of parts"""
@@ -851,6 +879,7 @@ class TestXMLGenerationHelper:
         call_kwargs = mock_gen_xml.call_args[1]
         assert call_kwargs['num_parts'] == 4
 
+    @pytest.mark.fast
     def test_generate_xml_disabled(self, mock_config, mock_checkpoint, mock_matches, tmp_path):
         """Test XML generation when disabled"""
         stage = OutputStage()
@@ -877,6 +906,7 @@ class TestXMLGenerationHelper:
 class TestOutputFileCollection:
     """Test _collect_output_paths helper method"""
 
+    @pytest.mark.fast
     def test_collect_paths_mixed_types(self):
         """Test collecting paths with mixed list and string values"""
         stage = OutputStage()
@@ -900,6 +930,7 @@ class TestOutputFileCollection:
         assert 'match_report.md' in paths
         assert 'segment_map.json' in paths
 
+    @pytest.mark.fast
     def test_collect_paths_only_lists(self):
         """Test collecting paths with only list values"""
         stage = OutputStage()
@@ -913,6 +944,7 @@ class TestOutputFileCollection:
 
         assert len(paths) == 5
 
+    @pytest.mark.fast
     def test_collect_paths_only_strings(self):
         """Test collecting paths with only string values"""
         stage = OutputStage()
@@ -926,6 +958,7 @@ class TestOutputFileCollection:
 
         assert len(paths) == 2
 
+    @pytest.mark.fast
     def test_collect_paths_ignores_non_path_types(self):
         """Test that non-string/list values are ignored"""
         stage = OutputStage()
@@ -951,6 +984,7 @@ class TestStateOutputFileTracking:
     """Test that state.output_files is properly populated"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_output_files_populated(self, mock_create, mock_config, mock_checkpoint,
                                      mock_matches, tmp_path):
         """Test that state.output_files contains all generated paths"""
@@ -978,6 +1012,7 @@ class TestStateOutputFileTracking:
         assert all(isinstance(p, Path) for p in state.output_files)
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_otio_files_list_populated(self, mock_create, mock_config, mock_checkpoint,
                                         mock_matches, tmp_path):
         """Test that state.otio_files is properly populated"""
@@ -1011,6 +1046,7 @@ class TestConfigAttributeDefaults:
     """Test getattr fallbacks for missing config attributes"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_missing_frame_rate_uses_default(self, mock_create, mock_checkpoint,
                                                mock_matches, tmp_path):
         """Test that missing frame_rate uses default value"""
@@ -1040,6 +1076,7 @@ class TestConfigAttributeDefaults:
         assert call_kwargs['frame_rate'] == 30.0
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_missing_split_otio_uses_default(self, mock_create, mock_checkpoint,
                                                mock_matches, tmp_path):
         """Test that missing split_otio uses default value"""
@@ -1074,6 +1111,7 @@ class TestTimestampAndDirectoryCreation:
     """Test timestamped directory creation"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_timestamped_directory_created(self, mock_create, mock_config, mock_checkpoint,
                                             mock_matches, tmp_path):
         """Test that timestamped output directory is created"""
@@ -1097,6 +1135,7 @@ class TestTimestampAndDirectoryCreation:
         assert '_' in timestamp
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_checkpoint_data_includes_output_dir(self, mock_create, mock_config,
                                                    mock_checkpoint, mock_matches, tmp_path):
         """Test checkpoint data includes output directory"""
@@ -1124,6 +1163,7 @@ class TestVoiceoverPathHandling:
     """Test voiceover path is properly passed"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_voiceover_path_passed_to_timeline(self, mock_create, mock_config,
                                                  mock_checkpoint, mock_matches, tmp_path):
         """Test voiceover_path is passed to create_timeline"""
@@ -1144,6 +1184,7 @@ class TestVoiceoverPathHandling:
         assert call_kwargs['voiceover_path'] == "/path/to/voiceover.srt"
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_none_voiceover_path(self, mock_create, mock_config, mock_checkpoint,
                                    mock_matches, tmp_path):
         """Test None voiceover_path is handled"""
@@ -1172,6 +1213,7 @@ class TestOTIOGenerationDisabled:
     """Test behavior when OTIO generation is disabled"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_otio_disabled_no_segment_map(self, mock_create, mock_config, mock_checkpoint,
                                            mock_matches, tmp_path):
         """Test that segment map is not generated when OTIO is disabled"""
@@ -1198,6 +1240,7 @@ class TestRunMethodErrorHandling:
     """Test error handling in run method"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_exception_in_xml_generation(self, mock_create, mock_config, mock_checkpoint,
                                           mock_matches, tmp_path):
         """Test exception handling when XML generation fails"""
@@ -1218,6 +1261,7 @@ class TestRunMethodErrorHandling:
         assert "error" in result.error.lower() or "xml" in result.error.lower()
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_exception_in_report_generation(self, mock_create, mock_config, mock_checkpoint,
                                              mock_matches, tmp_path):
         """Test exception handling when report generation fails"""
@@ -1244,6 +1288,7 @@ class TestSegmentMapGeneration:
     """Test segment map generation"""
 
     @patch('src.otio.create_timeline')
+    @pytest.mark.fast
     def test_segment_map_uses_timeline_start_tc(self, mock_create, mock_config,
                                                   mock_checkpoint, mock_matches, tmp_path):
         """Test segment map generation uses timeline_start_tc from config"""

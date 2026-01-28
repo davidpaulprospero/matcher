@@ -111,6 +111,7 @@ def audio_pipeline(mock_config):
 class TestSearchExceptionHandling:
     """Test search function exception handling (lines 117-119)"""
 
+    @pytest.mark.fast
     def test_search_raises_generic_exception(self, audio_pipeline, temp_dir):
         """Test handling of generic exception during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -122,6 +123,7 @@ class TestSearchExceptionHandling:
         assert result == []
         audio_pipeline._search_video_metadata.assert_called_once()
 
+    @pytest.mark.fast
     def test_search_raises_timeout_error(self, audio_pipeline, temp_dir):
         """Test handling of timeout error during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -132,6 +134,7 @@ class TestSearchExceptionHandling:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_search_raises_value_error(self, audio_pipeline, temp_dir):
         """Test handling of ValueError during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -142,6 +145,7 @@ class TestSearchExceptionHandling:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_search_raises_runtime_error(self, audio_pipeline, temp_dir):
         """Test handling of RuntimeError during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -160,6 +164,7 @@ class TestSearchExceptionHandling:
 class TestPartFileCleanup:
     """Test cleanup of stale .part files (lines 149-153)"""
 
+    @pytest.mark.integration
     def test_cleans_up_part_files(self, audio_pipeline, temp_dir):
         """Test that .part files are cleaned up before download"""
         # Setup: Create audio directory with stale .part files
@@ -188,6 +193,7 @@ class TestPartFileCleanup:
         assert not part_file2.exists(), "part file 2 should be cleaned up"
         assert not part_file3.exists(), "part file 3 should be cleaned up"
 
+    @pytest.mark.integration
     def test_cleans_part_files_with_exception(self, audio_pipeline, temp_dir):
         """Test that cleanup continues even if one file deletion fails"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -217,6 +223,7 @@ class TestPartFileCleanup:
 class TestExistingFileDetection:
     """Test detection and skipping of existing audio files (lines 168-181)"""
 
+    @pytest.mark.integration
     def test_skips_existing_mp3_file(self, audio_pipeline, temp_dir):
         """Test that existing .mp3 files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -242,6 +249,7 @@ class TestExistingFileDetection:
         assert result[0].video_id == 'vid1'
         assert 'vid1.mp3' in result[0].file
 
+    @pytest.mark.integration
     def test_skips_existing_m4a_file(self, audio_pipeline, temp_dir):
         """Test that existing .m4a files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -262,6 +270,7 @@ class TestExistingFileDetection:
         assert len(result) == 1
         assert 'vid1.m4a' in result[0].file
 
+    @pytest.mark.integration
     def test_skips_existing_opus_file(self, audio_pipeline, temp_dir):
         """Test that existing .opus files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -282,6 +291,7 @@ class TestExistingFileDetection:
         assert len(result) == 1
         assert 'vid1.opus' in result[0].file
 
+    @pytest.mark.integration
     def test_skips_existing_webm_file(self, audio_pipeline, temp_dir):
         """Test that existing .webm files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -301,6 +311,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_skips_existing_mp4_file(self, audio_pipeline, temp_dir):
         """Test that existing .mp4 audio files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -320,6 +331,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_skips_existing_wav_file(self, audio_pipeline, temp_dir):
         """Test that existing .wav files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -339,6 +351,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_skips_existing_ogg_file(self, audio_pipeline, temp_dir):
         """Test that existing .ogg files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -358,6 +371,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_existing_file_uses_correct_metadata(self, audio_pipeline, temp_dir):
         """Test that existing files get correct metadata in AudioDownload"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -394,6 +408,7 @@ class TestExistingFileDetection:
 class TestTimeoutFromObjectAttribute:
     """Test getting timeout from object attribute (line 211)"""
 
+    @pytest.mark.integration
     def test_timeout_from_object_attribute(self, audio_pipeline, temp_dir):
         """Test that timeout is correctly retrieved from object attribute"""
         # Create a mock object with tier attributes instead of dict
@@ -427,6 +442,7 @@ class TestTimeoutFromObjectAttribute:
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs['timeout'] == 45
 
+    @pytest.mark.integration
     def test_timeout_fallback_to_default(self, audio_pipeline, temp_dir):
         """Test that timeout falls back to default when attribute missing"""
         # Create object without the tier attribute
@@ -464,6 +480,7 @@ class TestTimeoutFromObjectAttribute:
 class TestDownloadFailureHandling:
     """Test audio download failure handling (lines 239-249)"""
 
+    @pytest.mark.integration
     def test_download_failure_calls_cleanup(self, audio_pipeline, temp_dir):
         """Test that failed download triggers cleanup of partial files"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -482,6 +499,7 @@ class TestDownloadFailureHandling:
             # Verify cleanup was called
             audio_pipeline._cleanup_partial_files.assert_called()
 
+    @pytest.mark.integration
     def test_download_failure_long_stderr(self, audio_pipeline, temp_dir):
         """Test that long stderr is truncated in warning"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -503,6 +521,7 @@ class TestDownloadFailureHandling:
             # Should complete without error
             assert result == []
 
+    @pytest.mark.integration
     def test_download_timeout_calls_cleanup(self, audio_pipeline, temp_dir):
         """Test that download timeout triggers cleanup"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -521,6 +540,7 @@ class TestDownloadFailureHandling:
             # Verify cleanup was called with correct args
             audio_pipeline._cleanup_partial_files.assert_called_with(audio_dir, 'vid1')
 
+    @pytest.mark.integration
     def test_download_generic_exception_calls_cleanup(self, audio_pipeline, temp_dir):
         """Test that generic exception triggers cleanup"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -540,6 +560,7 @@ class TestDownloadFailureHandling:
             audio_pipeline._cleanup_partial_files.assert_called()
             assert result == []
 
+    @pytest.mark.integration
     def test_download_no_file_created(self, audio_pipeline, temp_dir):
         """Test handling when yt-dlp succeeds but no file is created"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -567,6 +588,7 @@ class TestDownloadFailureHandling:
 class TestEmptySegmentsHandling:
     """Test handling of empty segments in video download (line 296)"""
 
+    @pytest.mark.integration
     def test_skip_video_with_empty_segments(self, audio_pipeline, temp_dir):
         """Test that videos with empty segment lists are skipped"""
         # This tests the 'if not segments: continue' branch
@@ -614,6 +636,7 @@ class TestEmptySegmentsHandling:
 class TestSegmentDownloadTimeout:
     """Test video segment download timeout handling (lines 382-383)"""
 
+    @pytest.mark.integration
     def test_segment_download_timeout(self, audio_pipeline, temp_dir, capsys):
         """Test that segment download timeout is handled correctly"""
         merged_segments = [
@@ -637,6 +660,7 @@ class TestSegmentDownloadTimeout:
                 captured = capsys.readouterr()
                 assert 'Timeout' in captured.out
 
+    @pytest.mark.integration
     def test_segment_download_timeout_triggers_fallback(self, audio_pipeline, temp_dir):
         """Test that timeout triggers fallback to full video download"""
         merged_segments = [
@@ -664,6 +688,7 @@ class TestSegmentDownloadTimeout:
 
                 assert fallback_called[0], "Fallback should be called on timeout"
 
+    @pytest.mark.integration
     def test_segment_download_generic_error(self, audio_pipeline, temp_dir, capsys):
         """Test that generic errors during segment download are handled"""
         merged_segments = [
@@ -695,6 +720,7 @@ class TestSegmentDownloadTimeout:
 class TestFullVideoFallbackCoverage:
     """Additional tests for full video fallback edge cases"""
 
+    @pytest.mark.integration
     def test_fallback_generic_exception(self, audio_pipeline, temp_dir):
         """Test fallback handles generic exceptions"""
         video_dir = temp_dir / "video_dir"
@@ -724,6 +750,7 @@ class TestFullVideoFallbackCoverage:
 
             assert result == []
 
+    @pytest.mark.integration
     def test_fallback_collects_all_original_matches(self, audio_pipeline, temp_dir):
         """Test that fallback collects matches from all segments"""
         video_dir = temp_dir / "video_dir"
@@ -793,6 +820,7 @@ class TestFullVideoFallbackCoverage:
 class TestFfmpegLocationConfig:
     """Test FFmpeg location configuration in download commands"""
 
+    @pytest.mark.integration
     def test_audio_download_with_ffmpeg_location(self, audio_pipeline, temp_dir):
         """Test that ffmpeg location is added to audio download command"""
         audio_pipeline.download_config.ffmpeg_location = '/custom/ffmpeg'
@@ -820,6 +848,7 @@ class TestFfmpegLocationConfig:
             assert '--ffmpeg-location' in call_args
             assert '/custom/ffmpeg' in call_args
 
+    @pytest.mark.integration
     def test_segment_download_with_ffmpeg_location(self, audio_pipeline, temp_dir):
         """Test that ffmpeg location is added to segment download command"""
         audio_pipeline.download_config.ffmpeg_location = '/custom/ffmpeg'
@@ -853,6 +882,7 @@ class TestFfmpegLocationConfig:
 class TestMultipleVideosProcessing:
     """Test processing of multiple videos with segments"""
 
+    @pytest.mark.integration
     def test_download_segments_multiple_videos(self, audio_pipeline, temp_dir):
         """Test downloading segments from multiple videos"""
         merged_segments = [
@@ -895,6 +925,7 @@ class TestMultipleVideosProcessing:
                 # Should call subprocess twice (once per video)
                 assert call_count[0] == 2
 
+    @pytest.mark.integration
     def test_download_segments_uses_correct_section_args(self, audio_pipeline, temp_dir):
         """Test that correct --download-sections args are generated"""
         merged_segments = [
@@ -930,6 +961,7 @@ class TestMultipleVideosProcessing:
 class TestLLMTitleFilter:
     """Test LLM title filter integration"""
 
+    @pytest.mark.integration
     def test_llm_filter_enabled_calls_filter(self, audio_pipeline, temp_dir):
         """Test that LLM filter is called when enabled"""
         # Enable LLM filter
@@ -954,6 +986,7 @@ class TestLLMTitleFilter:
             # Verify filter was called with topic
             audio_pipeline._filter_titles_with_llm.assert_called_once()
 
+    @pytest.mark.integration
     def test_llm_filter_disabled_skips_filter(self, audio_pipeline, temp_dir):
         """Test that LLM filter is skipped when disabled"""
         llm_filter = Mock()
@@ -980,6 +1013,7 @@ class TestLLMTitleFilter:
 class TestTierDownloadCountTracking:
     """Test tier download count tracking and limits"""
 
+    @pytest.mark.integration
     def test_tier_count_increments_on_success(self, audio_pipeline, temp_dir):
         """Test that tier count is incremented on successful downloads"""
         assert audio_pipeline.tier_download_counts.get('short', 0) == 0
@@ -1010,6 +1044,7 @@ class TestTierDownloadCountTracking:
             # Should have incremented count
             assert audio_pipeline.tier_download_counts.get('short', 0) == len(result)
 
+    @pytest.mark.fast
     def test_max_total_limit_stops_downloads(self, audio_pipeline, temp_dir):
         """Test that max_total limit prevents downloads"""
         # Set up limit and current count

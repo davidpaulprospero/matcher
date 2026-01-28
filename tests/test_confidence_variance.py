@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 class TestMatchResultConfidenceVariance:
     """Tests for MatchResult.confidence_variance field"""
 
+    @pytest.mark.fast
     def test_confidence_variance_field_exists(self):
         """MatchResult should have confidence_variance field"""
         match = Match(
@@ -35,6 +36,7 @@ class TestMatchResultConfidenceVariance:
         result = MatchResult(primary_match=match)
         assert hasattr(result, 'confidence_variance')
 
+    @pytest.mark.fast
     def test_confidence_variance_default_value(self):
         """confidence_variance should default to 0.0"""
         match = Match(
@@ -47,6 +49,7 @@ class TestMatchResultConfidenceVariance:
         result = MatchResult(primary_match=match)
         assert result.confidence_variance == 0.0
 
+    @pytest.mark.fast
     def test_confidence_variance_can_be_set(self):
         """confidence_variance should be settable"""
         match = Match(
@@ -59,6 +62,7 @@ class TestMatchResultConfidenceVariance:
         result = MatchResult(primary_match=match, confidence_variance=0.15)
         assert result.confidence_variance == 0.15
 
+    @pytest.mark.fast
     def test_confidence_variance_type_is_float(self):
         """confidence_variance should be a float"""
         match = Match(
@@ -98,6 +102,7 @@ class TestTieredMatcherVarianceCalculation:
         config.output.num_alternatives = 2
         return config
 
+    @pytest.mark.fast
     def test_calculate_variance_with_5_candidates(self, mock_config):
         """Variance should be calculated from top-5 candidate scores"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -120,6 +125,7 @@ class TestTieredMatcherVarianceCalculation:
         expected = statistics.stdev([0.90, 0.85, 0.80, 0.75, 0.70])
         assert abs(variance - expected) < 0.0001
 
+    @pytest.mark.fast
     def test_calculate_variance_with_2_candidates(self, mock_config):
         """Variance should work with exactly 2 candidates"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -135,6 +141,7 @@ class TestTieredMatcherVarianceCalculation:
         expected = statistics.stdev([0.90, 0.70])
         assert abs(variance - expected) < 0.0001
 
+    @pytest.mark.fast
     def test_calculate_variance_with_1_candidate_returns_zero(self, mock_config):
         """Variance should return 0.0 with only 1 candidate"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -146,6 +153,7 @@ class TestTieredMatcherVarianceCalculation:
         variance = matcher._calculate_confidence_variance(candidates)
         assert variance == 0.0
 
+    @pytest.mark.fast
     def test_calculate_variance_with_empty_candidates_returns_zero(self, mock_config):
         """Variance should return 0.0 with empty candidates list"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -155,6 +163,7 @@ class TestTieredMatcherVarianceCalculation:
         variance = matcher._calculate_confidence_variance([])
         assert variance == 0.0
 
+    @pytest.mark.fast
     def test_calculate_variance_identical_scores_returns_zero(self, mock_config):
         """Variance should return 0.0 when all scores are identical"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -174,6 +183,7 @@ class TestTieredMatcherVarianceCalculation:
 class TestHighVarianceIndicatesUncertainty:
     """Tests for interpreting high variance as uncertain match"""
 
+    @pytest.mark.fast
     def test_high_variance_threshold(self):
         """Variance > 0.1 should indicate uncertain match"""
         # Calculate variance of scores where top candidates are close
@@ -190,6 +200,7 @@ class TestHighVarianceIndicatesUncertainty:
         # Spread scores should have HIGH variance (more uncertain)
         assert spread_variance > 0.1, f"Spread scores variance {spread_variance} should be > 0.1"
 
+    @pytest.mark.fast
     def test_variance_interpretation_examples(self):
         """Document example variance values for reference"""
         # Example 1: Very uncertain (multiple similar candidates)
@@ -202,6 +213,7 @@ class TestHighVarianceIndicatesUncertainty:
         clear_variance = statistics.stdev(clear_winner)
         assert clear_variance > 0.15  # High variance = clear winner stands out
 
+    @pytest.mark.fast
     def test_zero_variance_means_identical_options(self):
         """Zero variance means all candidates have identical scores"""
         identical = [0.75, 0.75, 0.75, 0.75, 0.75]
@@ -212,6 +224,7 @@ class TestHighVarianceIndicatesUncertainty:
 class TestCheckpointSerialization:
     """Tests for confidence_variance in checkpoint JSON output"""
 
+    @pytest.mark.fast
     def test_checkpoint_includes_variance(self):
         """Serialized match data should include confidence_variance"""
         from src.utils import MatchResult, Match, SRTSegment
@@ -233,6 +246,7 @@ class TestCheckpointSerialization:
         # Verify variance is accessible
         assert result.confidence_variance == 0.12
 
+    @pytest.mark.fast
     def test_match_stage_serializes_variance(self):
         """MatchStage should serialize confidence_variance to checkpoint"""
         # This tests that the serialization code handles confidence_variance
@@ -250,6 +264,7 @@ class TestCheckpointSerialization:
         conf_variance = getattr(match_result, 'confidence_variance', 0.0)
         assert conf_variance == 0.12
 
+    @pytest.mark.fast
     def test_variance_default_when_missing(self):
         """confidence_variance should default to 0.0 if not present"""
         match_result = MagicMock(spec=['primary_match'])  # No confidence_variance
@@ -285,6 +300,7 @@ class TestVarianceCalculationEdgeCases:
         config.output.num_alternatives = 2
         return config
 
+    @pytest.mark.fast
     def test_variance_with_3_candidates(self, mock_config):
         """Variance should work with 3 candidates"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -301,6 +317,7 @@ class TestVarianceCalculationEdgeCases:
         expected = statistics.stdev([0.90, 0.80, 0.70])
         assert abs(variance - expected) < 0.0001
 
+    @pytest.mark.fast
     def test_variance_with_10_candidates_uses_top_5(self, mock_config):
         """Variance should only use top 5 candidates even if more available"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -324,6 +341,7 @@ class TestVarianceCalculationEdgeCases:
         expected = statistics.stdev([0.95, 0.90, 0.85, 0.80, 0.75])
         assert abs(variance - expected) < 0.0001
 
+    @pytest.mark.fast
     def test_variance_with_custom_top_n(self, mock_config):
         """Variance should respect custom top_n parameter"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -343,6 +361,7 @@ class TestVarianceCalculationEdgeCases:
         expected = statistics.stdev([0.90, 0.80, 0.70])
         assert abs(variance - expected) < 0.0001
 
+    @pytest.mark.fast
     def test_variance_with_negative_scores(self, mock_config):
         """Variance should handle negative scores (edge case)"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -363,6 +382,7 @@ class TestVarianceCalculationEdgeCases:
 class TestMatchResultWithVariance:
     """Integration tests for MatchResult with confidence_variance"""
 
+    @pytest.mark.fast
     def test_match_result_all_fields(self):
         """MatchResult should support all fields including variance"""
         vo_seg = SRTSegment(index=0, start_time=0, end_time=1, text="voiceover")
@@ -398,6 +418,7 @@ class TestMatchResultWithVariance:
         assert result.confidence_variance == 0.08
         assert result.has_gap is False
 
+    @pytest.mark.fast
     def test_match_result_high_variance_gap_detection(self):
         """High variance match with gap should preserve both fields"""
         vo_seg = SRTSegment(index=0, start_time=0, end_time=1, text="voiceover")

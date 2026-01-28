@@ -17,6 +17,7 @@ from src.downloader.rate_limit_metrics import RateLimitMetricsAggregator
 class TestAggregateMethod:
     """Test aggregate() collects from all subsystems."""
 
+    @pytest.mark.fast
     def test_aggregate_empty_subsystems(self):
         """aggregate() returns empty dicts when no subsystems provided."""
         agg = RateLimitMetricsAggregator()
@@ -28,6 +29,7 @@ class TestAggregateMethod:
         assert result['circuit_breaker'] == {}
         assert result['trigger_categories'] == {}
 
+    @pytest.mark.fast
     def test_aggregate_with_escalation_manager(self):
         """aggregate() includes escalation metrics when manager provided."""
         mock_esc = MagicMock()
@@ -51,6 +53,7 @@ class TestAggregateMethod:
         assert result['escalation']['total_403s'] == 10
         assert result['escalation']['average_tier'] == 1.5
 
+    @pytest.mark.fast
     def test_aggregate_with_cookie_rotator(self):
         """aggregate() includes cookie status when rotator provided."""
         mock_cookie = MagicMock()
@@ -67,6 +70,7 @@ class TestAggregateMethod:
         assert result['cookies']['enabled'] is True
         assert result['cookies']['rotation_count'] == 3
 
+    @pytest.mark.fast
     def test_aggregate_with_rate_limit_budget(self):
         """aggregate() includes budget data when budget provided."""
         mock_budget = MagicMock()
@@ -84,6 +88,7 @@ class TestAggregateMethod:
         assert result['budget']['rotations_used'] == 3
         assert result['budget']['max_rotations'] == 10
 
+    @pytest.mark.fast
     def test_aggregate_with_circuit_breaker(self):
         """aggregate() includes circuit breaker stats when provided."""
         mock_cb = MagicMock()
@@ -100,6 +105,7 @@ class TestAggregateMethod:
         assert result['circuit_breaker']['total_trips'] == 2
         assert result['circuit_breaker']['is_open'] is False
 
+    @pytest.mark.fast
     def test_aggregate_all_subsystems(self):
         """aggregate() collects from all 4 subsystems simultaneously."""
         mock_esc = MagicMock()
@@ -127,6 +133,7 @@ class TestAggregateMethod:
         assert result['budget']['rotations_used'] == 1
         assert result['circuit_breaker']['total_trips'] == 1
 
+    @pytest.mark.fast
     def test_aggregate_handles_subsystem_error(self):
         """aggregate() returns empty dict when subsystem raises exception."""
         mock_esc = MagicMock()
@@ -141,6 +148,7 @@ class TestAggregateMethod:
 class TestTriggerCategories:
     """Test trigger_categories using classify_trigger()."""
 
+    @pytest.mark.fast
     def test_record_trigger_403(self):
         """record_trigger() categorizes 403 errors."""
         agg = RateLimitMetricsAggregator()
@@ -150,6 +158,7 @@ class TestTriggerCategories:
         assert '403' in result['trigger_categories']
         assert result['trigger_categories']['403'] == 1
 
+    @pytest.mark.fast
     def test_record_trigger_429(self):
         """record_trigger() categorizes 429 rate-limit errors."""
         agg = RateLimitMetricsAggregator()
@@ -159,6 +168,7 @@ class TestTriggerCategories:
         assert '429' in result['trigger_categories']
         assert result['trigger_categories']['429'] == 1
 
+    @pytest.mark.fast
     def test_record_trigger_bot_detection(self):
         """record_trigger() categorizes bot detection."""
         agg = RateLimitMetricsAggregator()
@@ -167,6 +177,7 @@ class TestTriggerCategories:
 
         assert 'bot_detection' in result['trigger_categories']
 
+    @pytest.mark.fast
     def test_record_trigger_ip_blocked(self):
         """record_trigger() categorizes IP blocking."""
         agg = RateLimitMetricsAggregator()
@@ -175,6 +186,7 @@ class TestTriggerCategories:
 
         assert 'ip_blocked' in result['trigger_categories']
 
+    @pytest.mark.fast
     def test_record_trigger_age_gate(self):
         """record_trigger() categorizes age-gate triggers."""
         agg = RateLimitMetricsAggregator()
@@ -183,6 +195,7 @@ class TestTriggerCategories:
 
         assert 'age_gate' in result['trigger_categories']
 
+    @pytest.mark.fast
     def test_record_trigger_multiple_categories(self):
         """record_trigger() accumulates across multiple categories."""
         agg = RateLimitMetricsAggregator()
@@ -198,6 +211,7 @@ class TestTriggerCategories:
         assert cats.get('429', 0) == 1
         assert cats.get('ip_blocked', 0) == 1
 
+    @pytest.mark.fast
     def test_record_trigger_no_match_ignored(self):
         """record_trigger() ignores unrecognized errors."""
         agg = RateLimitMetricsAggregator()
@@ -211,11 +225,13 @@ class TestTriggerCategories:
 class TestHealthStatus:
     """Test get_health_status() with threshold logic."""
 
+    @pytest.mark.fast
     def test_healthy_no_subsystems(self):
         """get_health_status() returns 'healthy' with no subsystems."""
         agg = RateLimitMetricsAggregator()
         assert agg.get_health_status() == 'healthy'
 
+    @pytest.mark.fast
     def test_healthy_low_escalation(self):
         """get_health_status() returns 'healthy' when most keywords at Tier 1."""
         mock_esc = MagicMock()
@@ -229,6 +245,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(escalation_manager=mock_esc)
         assert agg.get_health_status() == 'healthy'
 
+    @pytest.mark.fast
     def test_degraded_moderate_escalation(self):
         """get_health_status() returns 'degraded' with significant escalation."""
         mock_esc = MagicMock()
@@ -244,6 +261,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(escalation_manager=mock_esc)
         assert agg.get_health_status() == 'degraded'
 
+    @pytest.mark.fast
     def test_critical_high_escalation(self):
         """get_health_status() returns 'critical' when >50% at max tier."""
         mock_esc = MagicMock()
@@ -258,6 +276,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(escalation_manager=mock_esc)
         assert agg.get_health_status() == 'critical'
 
+    @pytest.mark.fast
     def test_critical_budget_exhausted(self):
         """get_health_status() returns 'critical' when budget nearly exhausted."""
         mock_budget = MagicMock()
@@ -271,6 +290,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(rate_limit_budget=mock_budget)
         assert agg.get_health_status() == 'critical'
 
+    @pytest.mark.fast
     def test_degraded_budget_half_consumed(self):
         """get_health_status() returns 'degraded' when budget half consumed."""
         mock_budget = MagicMock()
@@ -284,6 +304,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(rate_limit_budget=mock_budget)
         assert agg.get_health_status() == 'degraded'
 
+    @pytest.mark.fast
     def test_critical_circuit_breaker_open(self):
         """get_health_status() returns 'critical' when circuit breaker is open."""
         mock_cb = MagicMock()
@@ -295,6 +316,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(circuit_breaker=mock_cb)
         assert agg.get_health_status() == 'critical'
 
+    @pytest.mark.fast
     def test_degraded_circuit_breaker_frequent_trips(self):
         """get_health_status() returns 'degraded' with many circuit trips."""
         mock_cb = MagicMock()
@@ -306,6 +328,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(circuit_breaker=mock_cb)
         assert agg.get_health_status() == 'degraded'
 
+    @pytest.mark.fast
     def test_combined_signals_take_worst(self):
         """get_health_status() uses worst signal across all subsystems."""
         # Escalation: healthy (all Tier 1)
@@ -327,6 +350,7 @@ class TestHealthStatus:
         )
         assert agg.get_health_status() == 'critical'
 
+    @pytest.mark.fast
     def test_healthy_no_tier2_and_budget_above_50_pct(self):
         """AC1: 'healthy' when no keywords at Tier 2+ AND budget > 50% remaining."""
         mock_esc = MagicMock()
@@ -350,6 +374,7 @@ class TestHealthStatus:
         )
         assert agg.get_health_status() == 'healthy'
 
+    @pytest.mark.fast
     def test_degraded_budget_between_50_and_90_pct_consumed(self):
         """AC2: 'degraded' when budget between 50-90% consumed (20-50% remaining)."""
         mock_budget = MagicMock()
@@ -363,6 +388,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(rate_limit_budget=mock_budget)
         assert agg.get_health_status() == 'degraded'
 
+    @pytest.mark.fast
     def test_degraded_over_30_pct_keywords_at_tier2_plus(self):
         """AC2: 'degraded' when >30% keywords at Tier 2+ (avg_tier >= 1.8)."""
         mock_esc = MagicMock()
@@ -377,6 +403,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(escalation_manager=mock_esc)
         assert agg.get_health_status() == 'degraded'
 
+    @pytest.mark.fast
     def test_critical_budget_under_20_pct_remaining(self):
         """AC3: 'critical' when budget < 20% remaining (>80% consumed)."""
         mock_budget = MagicMock()
@@ -390,6 +417,7 @@ class TestHealthStatus:
         agg = RateLimitMetricsAggregator(rate_limit_budget=mock_budget)
         assert agg.get_health_status() == 'critical'
 
+    @pytest.mark.fast
     def test_health_transitions_healthy_to_degraded_to_critical(self):
         """AC5: Health transitions as failures accumulate."""
         mock_esc = MagicMock()
@@ -453,6 +481,7 @@ class TestHealthStatus:
         }
         assert agg.get_health_status() == 'critical'
 
+    @pytest.mark.fast
     def test_health_safe_with_failing_subsystem(self):
         """get_health_status() doesn't crash when subsystem raises."""
         mock_esc = MagicMock()
@@ -466,6 +495,7 @@ class TestHealthStatus:
 class TestPipelineIntegration:
     """Test aggregator integration with orchestrator print_report()."""
 
+    @pytest.mark.fast
     def test_print_report_with_aggregator(self, capsys):
         """print_report() uses aggregator when set."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -499,6 +529,7 @@ class TestPipelineIntegration:
         assert 'UNIFIED RATE-LIMIT STATUS: HEALTHY' in captured.out
         assert 'Total 403/bot errors: 8' in captured.out
 
+    @pytest.mark.fast
     def test_print_report_shows_health_critical(self, capsys):
         """print_report() shows CRITICAL status appropriately."""
         from src.agents.orchestrator import HealingOrchestrator
@@ -533,6 +564,7 @@ class TestPipelineIntegration:
         captured = capsys.readouterr()
         assert 'UNIFIED RATE-LIMIT STATUS: CRITICAL' in captured.out
 
+    @pytest.mark.fast
     def test_reset_clears_aggregated_metrics(self):
         """reset() clears the aggregated metrics."""
         from src.agents.orchestrator import HealingOrchestrator

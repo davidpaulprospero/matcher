@@ -23,16 +23,19 @@ from src.config.sections.download import RateLimitConfig
 class TestRateLimitConfig:
     """Tests for RateLimitConfig dataclass."""
 
+    @pytest.mark.fast
     def test_default_resume_cooldown_minutes(self):
         """Default resume_cooldown_minutes should be 15."""
         config = RateLimitConfig()
         assert config.resume_cooldown_minutes == 15.0
 
+    @pytest.mark.fast
     def test_custom_resume_cooldown_minutes(self):
         """Custom resume_cooldown_minutes should be respected."""
         config = RateLimitConfig(resume_cooldown_minutes=30.0)
         assert config.resume_cooldown_minutes == 30.0
 
+    @pytest.mark.fast
     def test_all_config_values(self):
         """Verify all config values can be set."""
         config = RateLimitConfig(
@@ -54,6 +57,7 @@ class TestRateLimitConfig:
 class TestDownloadCheckpointRateLimitFields:
     """Tests for rate limit tracking fields in DownloadCheckpoint."""
 
+    @pytest.mark.fast
     def test_default_rate_limit_fields(self):
         """New checkpoint should have None/0 rate limit fields."""
         checkpoint = DownloadCheckpoint(
@@ -67,6 +71,7 @@ class TestDownloadCheckpointRateLimitFields:
         assert checkpoint.last_rate_limit_timestamp is None
         assert checkpoint.rate_limit_event_count == 0
 
+    @pytest.mark.fast
     def test_rate_limit_fields_in_to_dict(self):
         """Rate limit fields should be included in to_dict output."""
         timestamp = datetime.now().isoformat()
@@ -84,6 +89,7 @@ class TestDownloadCheckpointRateLimitFields:
         assert data['last_rate_limit_timestamp'] == timestamp
         assert data['rate_limit_event_count'] == 5
 
+    @pytest.mark.fast
     def test_from_dict_with_rate_limit_fields(self):
         """from_dict should restore rate limit fields."""
         timestamp = datetime.now().isoformat()
@@ -101,6 +107,7 @@ class TestDownloadCheckpointRateLimitFields:
         assert checkpoint.last_rate_limit_timestamp == timestamp
         assert checkpoint.rate_limit_event_count == 3
 
+    @pytest.mark.fast
     def test_from_dict_without_rate_limit_fields_backward_compat(self):
         """from_dict should handle old checkpoints without rate limit fields."""
         data = {
@@ -146,6 +153,7 @@ class TestCooldownCheck:
 
             return downloader
 
+    @pytest.mark.fast
     def test_no_previous_rate_limit(self, mock_downloader):
         """No cooldown if checkpoint has no rate limit timestamp."""
         checkpoint = DownloadCheckpoint(
@@ -162,6 +170,7 @@ class TestCooldownCheck:
         result = mock_downloader._check_rate_limit_cooldown(checkpoint)
         assert result is False
 
+    @pytest.mark.fast
     def test_within_cooldown_period(self, mock_downloader):
         """Should return True if rate limit was within cooldown period."""
         # Rate limit 5 minutes ago, cooldown is 15 minutes
@@ -180,6 +189,7 @@ class TestCooldownCheck:
         result = mock_downloader._check_rate_limit_cooldown(checkpoint)
         assert result is True
 
+    @pytest.mark.fast
     def test_outside_cooldown_period(self, mock_downloader):
         """Should return False if rate limit was outside cooldown period."""
         # Rate limit 20 minutes ago, cooldown is 15 minutes
@@ -198,6 +208,7 @@ class TestCooldownCheck:
         result = mock_downloader._check_rate_limit_cooldown(checkpoint)
         assert result is False
 
+    @pytest.mark.fast
     def test_invalid_timestamp_ignored(self, mock_downloader):
         """Invalid timestamp should be ignored, return False."""
         checkpoint = DownloadCheckpoint(
@@ -214,6 +225,7 @@ class TestCooldownCheck:
         result = mock_downloader._check_rate_limit_cooldown(checkpoint)
         assert result is False
 
+    @pytest.mark.fast
     def test_custom_cooldown_period(self, mock_downloader):
         """Custom cooldown period should be respected."""
         # Set custom cooldown to 5 minutes
@@ -281,6 +293,7 @@ class TestRateLimitEventRecording:
 
             return downloader
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_sets_timestamp(self, mock_downloader_with_checkpoint):
         """_record_rate_limit_event should set timestamp on checkpoint."""
         downloader = mock_downloader_with_checkpoint
@@ -292,6 +305,7 @@ class TestRateLimitEventRecording:
         # Verify it's a valid ISO timestamp
         datetime.fromisoformat(downloader.checkpoint.last_rate_limit_timestamp)
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_updates_count(self, mock_downloader_with_checkpoint):
         """_record_rate_limit_event should update event count on checkpoint."""
         downloader = mock_downloader_with_checkpoint
@@ -301,6 +315,7 @@ class TestRateLimitEventRecording:
 
         assert downloader.checkpoint.rate_limit_event_count == 5
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_saves_checkpoint(self, mock_downloader_with_checkpoint):
         """_record_rate_limit_event should call _save_checkpoint."""
         downloader = mock_downloader_with_checkpoint
@@ -310,6 +325,7 @@ class TestRateLimitEventRecording:
 
         downloader._save_checkpoint.assert_called_once()
 
+    @pytest.mark.fast
     def test_record_rate_limit_event_no_checkpoint(self):
         """_record_rate_limit_event should handle missing checkpoint gracefully."""
         with patch('src.downloader.core.VideoDownloader.__init__', return_value=None):
@@ -392,6 +408,7 @@ class TestRecoveryModeBehavior:
             return downloader
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_recovery_mode_doubles_initial_backoff(self, mock_sleep, mock_downloader_for_backoff):
         """Recovery mode should double initial backoff."""
         downloader = mock_downloader_for_backoff
@@ -406,6 +423,7 @@ class TestRecoveryModeBehavior:
         assert actual_delay == 10.0  # 5.0 * 2 = 10.0
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_normal_mode_uses_standard_backoff(self, mock_sleep, mock_downloader_for_backoff):
         """Normal mode (not recovery) should use standard backoff."""
         downloader = mock_downloader_for_backoff
@@ -420,6 +438,7 @@ class TestRecoveryModeBehavior:
         assert actual_delay == 5.0
 
     @patch('time.sleep')
+    @pytest.mark.fast
     def test_recovery_mode_halves_max_backoff(self, mock_sleep, mock_downloader_for_backoff):
         """Recovery mode should halve max_backoff_before_rotate."""
         downloader = mock_downloader_for_backoff
@@ -467,6 +486,7 @@ class TestCooldownLogging:
 
             return downloader
 
+    @pytest.mark.fast
     def test_logs_within_cooldown(self, mock_downloader, caplog):
         """Should log warning when within cooldown period."""
         import logging
@@ -490,6 +510,7 @@ class TestCooldownLogging:
         assert "Rate limit cooldown" in caplog.text
         assert "recovery mode" in caplog.text.lower()
 
+    @pytest.mark.fast
     def test_logs_cooldown_cleared(self, mock_downloader, caplog):
         """Should log when cooldown period has passed."""
         import logging
@@ -520,6 +541,7 @@ class TestCooldownLogging:
 class TestCheckpointRoundtrip:
     """Tests for checkpoint save/restore with rate limit data."""
 
+    @pytest.mark.fast
     def test_full_checkpoint_roundtrip(self):
         """Checkpoint should preserve all rate limit data through save/restore."""
         timestamp = datetime.now().isoformat()
@@ -560,6 +582,7 @@ class TestCheckpointRoundtrip:
 class TestCooldownIntegration:
     """Integration tests for cooldown tracking flow."""
 
+    @pytest.mark.fast
     def test_rate_limit_increments_event_count(self):
         """handle_rate_limit_error should increment event count."""
         with patch('src.downloader.core.VideoDownloader.__init__', return_value=None):

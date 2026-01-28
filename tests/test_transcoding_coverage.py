@@ -53,6 +53,7 @@ class MockConfig:
 class TestNeedsTranscoding:
     """Test needs_transcoding edge cases."""
 
+    @pytest.mark.fast
     def test_compatible_codec_not_in_combination_list(self, tmp_path):
         """Test h264/hevc codec in unusual container (line 132)."""
         # Create a mock video file
@@ -70,6 +71,7 @@ class TestNeedsTranscoding:
             assert needs == False
             assert "Compatible codec (h264)" in reason
 
+    @pytest.mark.fast
     def test_hevc_codec_not_in_combination(self, tmp_path):
         """Test hevc codec in unusual container (line 132)."""
         video_file = tmp_path / "test.ts"
@@ -84,6 +86,7 @@ class TestNeedsTranscoding:
             assert needs == False
             assert "Compatible codec (hevc)" in reason
 
+    @pytest.mark.fast
     def test_avc_codec_not_in_combination(self, tmp_path):
         """Test avc codec in unusual container."""
         video_file = tmp_path / "test.mts"
@@ -98,6 +101,7 @@ class TestNeedsTranscoding:
             assert needs == False
             assert "Compatible codec" in reason
 
+    @pytest.mark.fast
     def test_h265_codec_compatible(self, tmp_path):
         """Test h265 codec in unusual container."""
         video_file = tmp_path / "test.ts"
@@ -112,6 +116,7 @@ class TestNeedsTranscoding:
             assert needs == False
             assert "Compatible codec" in reason
 
+    @pytest.mark.fast
     def test_unknown_codec_needs_transcode(self, tmp_path):
         """Test unknown codec combination requires transcoding."""
         video_file = tmp_path / "test.weird"
@@ -130,6 +135,7 @@ class TestNeedsTranscoding:
 class TestFFmpegTranscodeCmd:
     """Test FFmpeg transcode command building."""
 
+    @pytest.mark.fast
     def test_h265_with_mac_acceleration(self, tmp_path):
         """Test h265 codec with mac hw_accel (line 309-310)."""
         input_file = tmp_path / "input.mp4"
@@ -153,6 +159,7 @@ class TestFFmpegTranscodeCmd:
         assert "-q:v" in cmd
         assert "65" in cmd
 
+    @pytest.mark.fast
     def test_h265_with_cpu_encoding(self, tmp_path):
         """Test h265 codec with CPU encoding (lines 311-312)."""
         input_file = tmp_path / "input.mp4"
@@ -175,6 +182,7 @@ class TestFFmpegTranscodeCmd:
         assert "libx265" in cmd
         assert "-crf" in cmd
 
+    @pytest.mark.fast
     def test_h264_with_nvidia_encoding(self, tmp_path):
         """Test h264 codec with NVIDIA hw_accel."""
         input_file = tmp_path / "input.mp4"
@@ -197,6 +205,7 @@ class TestFFmpegTranscodeCmd:
         assert "-hwaccel" in cmd
         assert "cuda" in cmd
 
+    @pytest.mark.fast
     def test_h264_with_amd_encoding(self, tmp_path):
         """Test h264 codec with AMD hw_accel."""
         input_file = tmp_path / "input.mp4"
@@ -217,6 +226,7 @@ class TestFFmpegTranscodeCmd:
         assert "h264_amf" in cmd
         assert "-quality" in cmd
 
+    @pytest.mark.fast
     def test_h264_with_intel_encoding(self, tmp_path):
         """Test h264 codec with Intel QSV hw_accel."""
         input_file = tmp_path / "input.mp4"
@@ -237,6 +247,7 @@ class TestFFmpegTranscodeCmd:
         assert "h264_qsv" in cmd
         assert "-global_quality" in cmd
 
+    @pytest.mark.fast
     def test_h264_with_mac_videotoolbox(self, tmp_path):
         """Test h264 codec with Mac VideoToolbox."""
         input_file = tmp_path / "input.mp4"
@@ -256,6 +267,7 @@ class TestFFmpegTranscodeCmd:
 
         assert "h264_videotoolbox" in cmd
 
+    @pytest.mark.fast
     def test_h264_with_cpu_fallback(self, tmp_path):
         """Test h264 codec with CPU encoding."""
         input_file = tmp_path / "input.mp4"
@@ -279,6 +291,7 @@ class TestFFmpegTranscodeCmd:
         assert "-preset" in cmd
         assert "medium" in cmd
 
+    @pytest.mark.fast
     def test_prores_codec(self, tmp_path):
         """Test ProRes codec output (changes extension to .mov)."""
         input_file = tmp_path / "input.mp4"
@@ -302,6 +315,7 @@ class TestFFmpegTranscodeCmd:
         assert "3" in cmd  # hq profile
         assert output_path.endswith('.mov')
 
+    @pytest.mark.fast
     def test_dnxhd_codec(self, tmp_path):
         """Test DNxHD codec output (changes extension to .mxf)."""
         input_file = tmp_path / "input.mp4"
@@ -327,6 +341,7 @@ class TestFFmpegTranscodeCmd:
 class TestHardwareAccelDetection:
     """Test hardware acceleration detection."""
 
+    @pytest.mark.integration
     def test_detect_nvidia(self):
         """Test NVIDIA detection."""
         config = MockConfig()
@@ -340,6 +355,7 @@ class TestHardwareAccelDetection:
             manager = TranscodingManager(config)
             assert manager.hw_accel == "nvidia"
 
+    @pytest.mark.integration
     def test_detect_amd(self):
         """Test AMD detection."""
         config = MockConfig()
@@ -353,6 +369,7 @@ class TestHardwareAccelDetection:
             manager = TranscodingManager(config)
             assert manager.hw_accel == "amd"
 
+    @pytest.mark.integration
     def test_detect_intel(self):
         """Test Intel QSV detection."""
         config = MockConfig()
@@ -366,6 +383,7 @@ class TestHardwareAccelDetection:
             manager = TranscodingManager(config)
             assert manager.hw_accel == "intel"
 
+    @pytest.mark.integration
     def test_detect_mac(self):
         """Test Mac VideoToolbox detection."""
         config = MockConfig()
@@ -379,6 +397,7 @@ class TestHardwareAccelDetection:
             manager = TranscodingManager(config)
             assert manager.hw_accel == "mac"
 
+    @pytest.mark.integration
     def test_detect_none(self):
         """Test fallback to none when no GPU detected."""
         config = MockConfig()
@@ -392,6 +411,7 @@ class TestHardwareAccelDetection:
             manager = TranscodingManager(config)
             assert manager.hw_accel == "none"
 
+    @pytest.mark.integration
     def test_detect_exception_fallback(self):
         """Test fallback to none on subprocess exception."""
         config = MockConfig()
@@ -401,6 +421,7 @@ class TestHardwareAccelDetection:
             manager = TranscodingManager(config)
             assert manager.hw_accel == "none"
 
+    @pytest.mark.integration
     def test_manual_override(self):
         """Test manual hw_accel setting bypasses detection."""
         config = MockConfig()
@@ -416,6 +437,7 @@ class TestHardwareAccelDetection:
 class TestBuildFormatString:
     """Test format string building."""
 
+    @pytest.mark.integration
     def test_best_quality_davinci_mode(self):
         """Test best quality with DaVinci mode."""
         config = MockConfig()
@@ -429,6 +451,7 @@ class TestBuildFormatString:
         format_str = manager.build_format_string()
         assert "avc1" in format_str
 
+    @pytest.mark.integration
     def test_best_quality_no_davinci(self):
         """Test best quality without DaVinci mode."""
         config = MockConfig()
@@ -442,6 +465,7 @@ class TestBuildFormatString:
         format_str = manager.build_format_string()
         assert "bestvideo+bestaudio" in format_str
 
+    @pytest.mark.integration
     def test_audio_only(self):
         """Test audio-only format."""
         config = MockConfig()
@@ -454,6 +478,7 @@ class TestBuildFormatString:
         format_str = manager.build_format_string()
         assert format_str == "bestaudio"
 
+    @pytest.mark.integration
     def test_specific_quality_davinci(self):
         """Test specific quality (720p) with DaVinci mode."""
         config = MockConfig()
@@ -472,6 +497,7 @@ class TestBuildFormatString:
 class TestBuildFilterString:
     """Test filter string building."""
 
+    @pytest.mark.integration
     def test_filter_with_min_views(self, tmp_path):
         """Test filter includes min views check."""
         config = MockConfig()
@@ -488,6 +514,7 @@ class TestBuildFilterString:
         filter_str = manager.build_filter_string('short', duration_tiers)
         assert "view_count>1000" in filter_str
 
+    @pytest.mark.integration
     def test_filter_with_title_blacklist(self, tmp_path):
         """Test filter includes title blacklist."""
         config = MockConfig()
@@ -505,6 +532,7 @@ class TestBuildFilterString:
         assert "title!*='highlights'" in filter_str
         assert "title!*='full game'" in filter_str
 
+    @pytest.mark.integration
     def test_filter_escapes_quotes(self, tmp_path):
         """Test filter escapes single quotes in blacklist."""
         config = MockConfig()
@@ -522,6 +550,7 @@ class TestBuildFilterString:
         # Quote should be escaped
         assert "\\'s" in filter_str
 
+    @pytest.mark.integration
     def test_filter_includes_is_live_check(self, tmp_path):
         """Test filter always excludes live streams."""
         config = MockConfig()
@@ -541,6 +570,7 @@ class TestBuildFilterString:
 class TestGetVideoCodec:
     """Test video codec detection."""
 
+    @pytest.mark.integration
     def test_get_video_codec_success(self, tmp_path):
         """Test successful codec detection."""
         video_file = tmp_path / "test.mp4"
@@ -563,6 +593,7 @@ class TestGetVideoCodec:
             assert codec == "h264"
             assert container == "mp4"
 
+    @pytest.mark.integration
     def test_get_video_codec_failure(self, tmp_path):
         """Test codec detection failure."""
         video_file = tmp_path / "test.mp4"

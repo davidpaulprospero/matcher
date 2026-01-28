@@ -113,6 +113,7 @@ class TestSearchIncludesEscalationArgs:
     get_escalation_args(keyword) in the yt-dlp --dump-json search command."""
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_tier1_impersonate_args_included(self, mock_run):
         """At Tier 1, --impersonate args appear in yt-dlp command."""
         esc_mgr = _make_escalation_manager()
@@ -128,6 +129,7 @@ class TestSearchIncludesEscalationArgs:
         assert "--dump-json" in cmd
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_tier2_extractor_args_included(self, mock_run):
         """At Tier 2, --extractor-args appear alongside --impersonate."""
         esc_mgr = _make_escalation_manager()
@@ -146,6 +148,7 @@ class TestSearchIncludesEscalationArgs:
         assert "--extractor-args" in cmd, "Tier 2 should include --extractor-args"
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_escalation_args_before_cookies(self, mock_run):
         """Escalation args appear before cookie args in command (correct ordering)."""
         esc_mgr = _make_escalation_manager()
@@ -172,6 +175,7 @@ class TestSearchHandles403WithEscalation:
     on escalation_manager, so that subsequent searches use escalated args."""
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_403_stderr_detected_as_escalation_trigger(self, mock_run):
         """Verify that is_escalation_trigger() detects 403 in search stderr."""
         mock_run.return_value = _mock_subprocess_403()
@@ -180,6 +184,7 @@ class TestSearchHandles403WithEscalation:
         assert result is True
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_caller_can_record_failure_on_403_search(self, mock_run):
         """After search returns 403 stderr, caller records failure on
         escalation_manager which escalates for next call."""
@@ -209,6 +214,7 @@ class TestSearchHandles403WithEscalation:
             "After 2 failures, search should use Tier 2 (--extractor-args)"
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_403_does_not_crash_search_return(self, mock_run):
         """403 search still returns a valid SearchResult (empty videos)."""
         esc_mgr = _make_escalation_manager()
@@ -231,6 +237,7 @@ class TestTimeoutDoesNotTriggerEscalation:
     search-specific, not rate-limit related)."""
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_timeout_does_not_escalate(self, mock_run):
         """TimeoutExpired in search doesn't call record_failure on escalation."""
         esc_mgr = _make_escalation_manager()
@@ -250,6 +257,7 @@ class TestTimeoutDoesNotTriggerEscalation:
         assert "--extractor-args" not in esc_result.args
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_timeout_returns_timed_out_search_result(self, mock_run):
         """Timeout returns SearchResult with timed_out=True for caller to handle."""
         esc_mgr = _make_escalation_manager()
@@ -264,6 +272,7 @@ class TestTimeoutDoesNotTriggerEscalation:
         assert "timeout" in result.error.lower()
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_timeout_preserves_tier_for_next_search(self, mock_run):
         """After timeout, next search still uses same tier (no escalation)."""
         esc_mgr = _make_escalation_manager()
@@ -293,6 +302,7 @@ class TestJsonParseErrorPreservesEscalation:
     tracking — verify escalation state unchanged after parse failures."""
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_malformed_json_output_no_escalation_crash(self, mock_run):
         """Malformed JSON in stdout doesn't affect escalation state."""
         esc_mgr = _make_escalation_manager()
@@ -313,6 +323,7 @@ class TestJsonParseErrorPreservesEscalation:
         assert esc_result.tier == EscalationTier.IMPERSONATE_ONLY
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_mixed_valid_invalid_json_preserves_escalation(self, mock_run):
         """Mix of valid and invalid JSON lines — valid ones parsed, escalation intact."""
         esc_mgr = _make_escalation_manager()
@@ -336,6 +347,7 @@ class TestJsonParseErrorPreservesEscalation:
         assert esc_result.tier == EscalationTier.IMPERSONATE_ONLY
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_empty_json_output_escalation_unchanged(self, mock_run):
         """Empty yt-dlp stdout — escalation state unchanged."""
         esc_mgr = _make_escalation_manager()
@@ -350,6 +362,7 @@ class TestJsonParseErrorPreservesEscalation:
         assert esc_result.tier == EscalationTier.IMPERSONATE_ONLY
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_generic_exception_no_escalation_change(self, mock_run):
         """Generic exception in subprocess — escalation state intact."""
         esc_mgr = _make_escalation_manager()
@@ -376,6 +389,7 @@ class TestEscalationManagerNone:
     without AttributeError."""
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_search_works_without_escalation_manager(self, mock_run):
         """search_video_metadata works with no escalation manager."""
         tf = _make_title_filter(escalation_manager=None, impersonation_manager=None)
@@ -389,6 +403,7 @@ class TestEscalationManagerNone:
         assert result.videos[0]["id"] == "abc"
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_no_impersonate_args_when_both_none(self, mock_run):
         """No --impersonate or --extractor-args when both managers are None."""
         tf = _make_title_filter(escalation_manager=None, impersonation_manager=None)
@@ -402,6 +417,7 @@ class TestEscalationManagerNone:
         assert "--extractor-args" not in cmd
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_impersonation_fallback_when_escalation_none(self, mock_run):
         """When escalation_manager=None but impersonation_manager exists,
         impersonation args are still added."""
@@ -421,6 +437,7 @@ class TestEscalationManagerNone:
         assert "--extractor-args" not in cmd
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_no_attribute_error_on_403_without_manager(self, mock_run):
         """403 search with no escalation_manager doesn't raise AttributeError."""
         tf = _make_title_filter(escalation_manager=None, impersonation_manager=None)
@@ -432,6 +449,7 @@ class TestEscalationManagerNone:
         assert len(result.videos) == 0
 
     @patch("subprocess.run")
+    @pytest.mark.fast
     def test_no_attribute_error_on_timeout_without_manager(self, mock_run):
         """Timeout with no escalation_manager doesn't raise AttributeError."""
         tf = _make_title_filter(escalation_manager=None, impersonation_manager=None)

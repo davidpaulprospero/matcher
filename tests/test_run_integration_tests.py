@@ -31,6 +31,7 @@ from scripts.run_integration_tests import (
 class TestIsolatedTestEnvironment:
     """Tests for IsolatedTestEnvironment class."""
 
+    @pytest.mark.fast
     def test_setup_creates_temp_directory(self):
         """Test that setup creates temp directory with subdirectories."""
         env = IsolatedTestEnvironment()
@@ -45,6 +46,7 @@ class TestIsolatedTestEnvironment:
         finally:
             env.cleanup()
 
+    @pytest.mark.fast
     def test_setup_sets_environment_variables(self):
         """Test that setup sets isolation environment variables."""
         env = IsolatedTestEnvironment()
@@ -59,6 +61,7 @@ class TestIsolatedTestEnvironment:
         finally:
             env.cleanup()
 
+    @pytest.mark.fast
     def test_cleanup_removes_temp_directory(self):
         """Test that cleanup removes temp directory when keep_artifacts=False."""
         env = IsolatedTestEnvironment(keep_artifacts=False)
@@ -69,6 +72,7 @@ class TestIsolatedTestEnvironment:
 
         assert not Path(temp_dir_path).exists()
 
+    @pytest.mark.integration
     def test_cleanup_preserves_temp_when_keep_artifacts(self):
         """Test that cleanup preserves temp directory when keep_artifacts=True."""
         env = IsolatedTestEnvironment(keep_artifacts=True)
@@ -84,6 +88,7 @@ class TestIsolatedTestEnvironment:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
 
+    @pytest.mark.fast
     def test_cleanup_restores_environment(self):
         """Test that cleanup restores original environment variables."""
         # Set a marker variable
@@ -96,6 +101,7 @@ class TestIsolatedTestEnvironment:
         # Should be restored (None or original value)
         assert os.environ.get("INTEGRATION_TEST_TEMP_DIR") == original_value
 
+    @pytest.mark.fast
     def test_context_manager_protocol(self):
         """Test that IsolatedTestEnvironment works as context manager."""
         with IsolatedTestEnvironment() as temp_dir:
@@ -106,6 +112,7 @@ class TestIsolatedTestEnvironment:
         # After exiting, should be cleaned up
         assert not Path(temp_dir_path).exists()
 
+    @pytest.mark.fast
     def test_custom_base_dir(self, tmp_path):
         """Test that custom base_dir is used for temp directory."""
         env = IsolatedTestEnvironment(base_dir=tmp_path)
@@ -121,6 +128,7 @@ class TestIsolatedTestEnvironment:
 class TestIntegrationTestRunner:
     """Tests for IntegrationTestRunner class."""
 
+    @pytest.mark.fast
     def test_default_configuration(self):
         """Test default configuration values."""
         runner = IntegrationTestRunner()
@@ -132,6 +140,7 @@ class TestIntegrationTestRunner:
         assert runner.markers == INTEGRATION_MARKERS
         assert runner.keep_artifacts is False
 
+    @pytest.mark.fast
     def test_custom_configuration(self):
         """Test custom configuration values."""
         runner = IntegrationTestRunner(
@@ -150,6 +159,7 @@ class TestIntegrationTestRunner:
         assert runner.markers == ["integration"]
         assert runner.keep_artifacts is True
 
+    @pytest.mark.integration
     def test_discover_tests_returns_list(self):
         """Test that discover_tests returns a list."""
         runner = IntegrationTestRunner()
@@ -168,6 +178,7 @@ class TestIntegrationTestRunner:
             assert "tests/test_example.py::test_one" in tests
             assert "tests/test_example.py::test_two" in tests
 
+    @pytest.mark.integration
     def test_discover_tests_handles_timeout(self):
         """Test that discover_tests handles timeout gracefully."""
         runner = IntegrationTestRunner()
@@ -180,6 +191,7 @@ class TestIntegrationTestRunner:
 
             assert tests == []
 
+    @pytest.mark.integration
     def test_discover_tests_filters_summary_lines(self):
         """Test that discover_tests filters out pytest summary lines."""
         runner = IntegrationTestRunner()
@@ -201,6 +213,7 @@ tests/test_two.py::test_b
             assert "====" not in str(tests)
             assert "<Module" not in str(tests)
 
+    @pytest.mark.integration
     def test_run_single_test_success(self, tmp_path):
         """Test running a single test that passes."""
         runner = IntegrationTestRunner(timeout=10)
@@ -218,6 +231,7 @@ tests/test_two.py::test_b
             assert result.duration >= 0  # Can be very fast when mocked
             assert result.name == "tests/test_example.py::test_pass"
 
+    @pytest.mark.integration
     def test_run_single_test_failure(self, tmp_path):
         """Test running a single test that fails."""
         runner = IntegrationTestRunner(timeout=10)
@@ -233,6 +247,7 @@ tests/test_two.py::test_b
 
             assert result.status == "failed"
 
+    @pytest.mark.integration
     def test_run_single_test_timeout(self, tmp_path):
         """Test running a single test that times out."""
         runner = IntegrationTestRunner(timeout=1)
@@ -248,6 +263,7 @@ tests/test_two.py::test_b
             assert result.status == "timeout"
             assert "timed out" in result.error.lower()
 
+    @pytest.mark.integration
     def test_run_single_test_skipped(self, tmp_path):
         """Test running a single test that is skipped."""
         runner = IntegrationTestRunner(timeout=10)
@@ -267,6 +283,7 @@ tests/test_two.py::test_b
 class TestIntegrationTestResult:
     """Tests for IntegrationTestResult dataclass."""
 
+    @pytest.mark.fast
     def test_create_passed_result(self):
         """Test creating a passed test result."""
         result = IntegrationTestResult(
@@ -282,6 +299,7 @@ class TestIntegrationTestResult:
         assert result.output == "test output"
         assert result.error == ""
 
+    @pytest.mark.fast
     def test_create_failed_result(self):
         """Test creating a failed test result."""
         result = IntegrationTestResult(
@@ -298,6 +316,7 @@ class TestIntegrationTestResult:
 class TestRunSummary:
     """Tests for RunSummary dataclass."""
 
+    @pytest.mark.fast
     def test_create_empty_summary(self):
         """Test creating an empty summary."""
         summary = RunSummary()
@@ -307,6 +326,7 @@ class TestRunSummary:
         assert summary.failed == 0
         assert summary.results == []
 
+    @pytest.mark.fast
     def test_create_populated_summary(self):
         """Test creating a populated summary."""
         results = [
@@ -332,6 +352,7 @@ class TestRunSummary:
 class TestParallelExecution:
     """Tests for parallel execution support."""
 
+    @pytest.mark.fast
     def test_parallel_disabled_runs_sequential(self, tmp_path):
         """Test that parallel=1 runs tests sequentially."""
         runner = IntegrationTestRunner(parallel=1)
@@ -346,6 +367,7 @@ class TestParallelExecution:
             assert mock_run.call_count == 2
             assert len(results) == 2
 
+    @pytest.mark.integration
     def test_parallel_fallback_on_xdist_missing(self, tmp_path):
         """Test fallback to sequential when pytest-xdist is missing."""
         runner = IntegrationTestRunner(parallel=4)

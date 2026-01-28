@@ -1298,6 +1298,7 @@ def output_dir(request):
 class TestOutputValidation:
     """Pytest test class for output validation."""
 
+    @pytest.mark.fast
     def test_output_structure(self, validator, output_dir):
         """Output passes structural validation."""
         if not output_dir:
@@ -1305,6 +1306,7 @@ class TestOutputValidation:
         result = validator.validate(output_dir)
         assert result.success, result.summary()
 
+    @pytest.mark.fast
     def test_required_files_exist(self, output_dir):
         """Required files exist in output."""
         if not output_dir:
@@ -1313,6 +1315,7 @@ class TestOutputValidation:
             assert (output_dir / filename).exists(), f"Missing: {filename}"
 
     @pytest.mark.skipif(not HAS_OTIO, reason="opentimelineio not installed")
+    @pytest.mark.fast
     def test_otio_parses(self, output_dir):
         """OTIO files parse without errors."""
         if not output_dir:
@@ -1323,6 +1326,7 @@ class TestOutputValidation:
             assert timeline is not None
             assert timeline.duration().to_seconds() > 0
 
+    @pytest.mark.fast
     def test_xml_wellformed(self, output_dir):
         """XML files are well-formed."""
         if not output_dir:
@@ -1330,6 +1334,7 @@ class TestOutputValidation:
         for xml_file in output_dir.glob("*.xml"):
             ET.parse(xml_file)  # Raises on parse error
 
+    @pytest.mark.fast
     def test_json_valid(self, output_dir):
         """JSON files are valid."""
         if not output_dir:

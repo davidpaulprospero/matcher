@@ -23,6 +23,7 @@ class TestPerplexityResearchResultParsing:
     """AC1: Test research() returns correctly parsed ResearchResult objects."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_returns_research_result_object(self):
         """Research method returns a ResearchResult dataclass."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -46,6 +47,7 @@ class TestPerplexityResearchResultParsing:
                 assert result.model == "sonar-pro"  # Default for comprehensive
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_result_contains_sources_from_citations(self):
         """Research result includes sources from citations in response."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -69,6 +71,7 @@ class TestPerplexityResearchResultParsing:
                 assert "https://example.com/source2" in result.sources
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_result_with_quick_depth(self):
         """Research with depth='quick' uses sonar model."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -94,6 +97,7 @@ class TestPerplexityResearchResultParsing:
                 assert payload['model'] == 'sonar'
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_result_with_comprehensive_depth(self):
         """Research with depth='comprehensive' uses sonar-pro model."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -118,6 +122,7 @@ class TestPerplexityResearchResultParsing:
                 assert payload['model'] == 'sonar-pro'
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_research_result_with_custom_system_prompt(self):
         """Research accepts custom system prompt."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -151,6 +156,7 @@ class TestPerplexityRateLimitHandling:
     """AC2: Test research() handles rate limiting (429) with exponential backoff."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_429_triggers_exponential_backoff(self):
         """429 error triggers exponential backoff retry."""
         from src.research.perplexity_client import PerplexityClient, INITIAL_BACKOFF, MAX_RETRIES
@@ -183,6 +189,7 @@ class TestPerplexityRateLimitHandling:
                     assert mock_sleep.call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_500_error_triggers_retry(self):
         """500 server error triggers retry."""
         from src.research.perplexity_client import PerplexityClient
@@ -209,6 +216,7 @@ class TestPerplexityRateLimitHandling:
                     assert mock_post.call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_max_retries_exceeded_raises_exception(self):
         """After MAX_RETRIES, re-raises the exception."""
         from src.research.perplexity_client import PerplexityClient, MAX_RETRIES
@@ -230,6 +238,7 @@ class TestPerplexityRateLimitHandling:
                     assert mock_post.call_count == MAX_RETRIES
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_backoff_includes_jitter(self):
         """Backoff time includes random jitter component."""
         from src.research.perplexity_client import PerplexityClient, INITIAL_BACKOFF
@@ -274,6 +283,7 @@ class TestPerplexityConnectionErrorHandling:
     """AC3: Test research() handles connection/timeout errors with retry."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_timeout_error_triggers_retry(self):
         """Timeout error triggers retry logic."""
         from src.research.perplexity_client import PerplexityClient
@@ -300,6 +310,7 @@ class TestPerplexityConnectionErrorHandling:
                     assert mock_post.call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_connection_error_triggers_retry(self):
         """Connection error triggers retry logic."""
         from src.research.perplexity_client import PerplexityClient
@@ -326,6 +337,7 @@ class TestPerplexityConnectionErrorHandling:
                     assert mock_post.call_count == 2
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_502_bad_gateway_triggers_retry(self):
         """502 Bad Gateway triggers retry."""
         from src.research.perplexity_client import PerplexityClient
@@ -351,6 +363,7 @@ class TestPerplexityConnectionErrorHandling:
                     assert result.content == "Success"
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_503_service_unavailable_triggers_retry(self):
         """503 Service Unavailable triggers retry."""
         from src.research.perplexity_client import PerplexityClient
@@ -376,6 +389,7 @@ class TestPerplexityConnectionErrorHandling:
                     assert result.content == "Success"
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_504_gateway_timeout_triggers_retry(self):
         """504 Gateway Timeout triggers retry."""
         from src.research.perplexity_client import PerplexityClient
@@ -409,6 +423,7 @@ class TestPerplexityInvalidAPIKeyHandling:
     """AC4: Test research() handles invalid API key with clear error message."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_401_unauthorized_raises_http_error(self):
         """401 Unauthorized (invalid API key) raises exception with clear message."""
         from src.research.perplexity_client import PerplexityClient
@@ -432,6 +447,7 @@ class TestPerplexityInvalidAPIKeyHandling:
                 assert "401" in str(exc_info.value) or "Invalid API key" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_403_forbidden_raises_http_error(self):
         """403 Forbidden raises exception immediately (no retry)."""
         from src.research.perplexity_client import PerplexityClient
@@ -454,6 +470,7 @@ class TestPerplexityInvalidAPIKeyHandling:
                 assert mock_post.call_count == 1
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_http_error_includes_response_details(self):
         """HTTP error includes response body details in exception message."""
         from src.research.perplexity_client import PerplexityClient
@@ -500,6 +517,7 @@ class TestPerplexityAPIKeyValidation:
             assert "PERPLEXITY_API_KEY not set" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_empty_string_api_key_raises_value_error(self):
         """Empty string API key raises ValueError."""
         from src.research.perplexity_client import PerplexityClient
@@ -511,6 +529,7 @@ class TestPerplexityAPIKeyValidation:
             assert "PERPLEXITY_API_KEY not set" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_api_key_from_parameter_preferred(self):
         """API key from parameter is used over environment variable."""
         from src.research.perplexity_client import PerplexityClient
@@ -520,6 +539,7 @@ class TestPerplexityAPIKeyValidation:
             assert client.api_key == 'param-api-key'
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_api_key_from_environment_used_when_no_param(self):
         """API key from environment variable is used when no parameter."""
         from src.research.perplexity_client import PerplexityClient
@@ -530,6 +550,7 @@ class TestPerplexityAPIKeyValidation:
             assert client.api_key == env_key
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_error_message_suggests_env_or_parameter(self):
         """Error message suggests both env variable and parameter options."""
         from src.research.perplexity_client import PerplexityClient
@@ -556,6 +577,7 @@ class TestPerplexityOtherMethods:
     """Additional tests for fact_check, compare, and api_docs methods."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_fact_check_returns_research_result(self):
         """fact_check method returns ResearchResult."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -577,6 +599,7 @@ class TestPerplexityOtherMethods:
                 assert result.topic == "Fact Check"
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_compare_returns_research_result(self):
         """compare method returns ResearchResult."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -599,6 +622,7 @@ class TestPerplexityOtherMethods:
                 assert "Item B" in result.topic
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_api_docs_returns_research_result(self):
         """api_docs method returns ResearchResult."""
         from src.research.perplexity_client import PerplexityClient, ResearchResult
@@ -628,6 +652,7 @@ class TestPerplexityEdgeCases:
     """Edge case and robustness tests."""
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_empty_citations_handled(self):
         """Empty citations list handled correctly."""
         from src.research.perplexity_client import PerplexityClient
@@ -648,6 +673,7 @@ class TestPerplexityEdgeCases:
                 assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_missing_citations_field_handled(self):
         """Missing citations field in response handled gracefully."""
         from src.research.perplexity_client import PerplexityClient
@@ -668,6 +694,7 @@ class TestPerplexityEdgeCases:
                 assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.requires_network
     def test_non_list_citations_handled(self):
         """Non-list citations value handled gracefully."""
         from src.research.perplexity_client import PerplexityClient
@@ -689,6 +716,7 @@ class TestPerplexityEdgeCases:
                 assert result.sources == []
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_default_model_selection(self):
         """Default model can be specified at client initialization."""
         from src.research.perplexity_client import PerplexityClient
@@ -704,6 +732,7 @@ class TestPerplexityEdgeCases:
             assert client3.default_model == 'sonar-reasoning'
 
     @pytest.mark.unit
+    @pytest.mark.fast
     def test_custom_model_passthrough(self):
         """Custom model name passed through if not in MODELS dict."""
         from src.research.perplexity_client import PerplexityClient

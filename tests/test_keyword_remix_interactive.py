@@ -57,6 +57,7 @@ def sample_keywords():
 class TestRemixDownloadedVideosInteractive:
     """Test interactive curation prompts and auto-accept modes"""
 
+    @pytest.mark.fast
     def test_auto_accept_filtered(self, temp_dir, sample_keywords):
         """Test auto_accept_filter='filtered' mode (lines 650-656)"""
         config = RemixConfig(
@@ -84,6 +85,7 @@ class TestRemixDownloadedVideosInteractive:
         # Filtered videos should be returned, not all videos
         assert len(selected) < result.total_files or result.total_files == result.included_files
 
+    @pytest.mark.fast
     def test_auto_accept_all(self, temp_dir, sample_keywords):
         """Test auto_accept_filter='all' mode (lines 657-662)"""
         config = RemixConfig(
@@ -112,6 +114,7 @@ class TestRemixDownloadedVideosInteractive:
         # Should bypass filtering
         assert len(selected) >= result.included_files
 
+    @pytest.mark.fast
     def test_interactive_prompt_yes(self, temp_dir, sample_keywords, monkeypatch):
         """Test interactive prompt with 'Y' response (lines 664-678)"""
         config = RemixConfig(
@@ -140,6 +143,7 @@ class TestRemixDownloadedVideosInteractive:
         assert result is not None
         assert len(selected) == result.included_files
 
+    @pytest.mark.fast
     def test_interactive_prompt_all(self, temp_dir, sample_keywords, monkeypatch):
         """Test interactive prompt with 'A' response (lines 672-675)"""
         config = RemixConfig(
@@ -170,6 +174,7 @@ class TestRemixDownloadedVideosInteractive:
         assert result is not None
         assert len(selected) == result.total_files
 
+    @pytest.mark.fast
     def test_interactive_prompt_cancel(self, temp_dir, sample_keywords, monkeypatch):
         """Test interactive prompt with 'N' response (lines 676-678)"""
         config = RemixConfig(
@@ -198,6 +203,7 @@ class TestRemixDownloadedVideosInteractive:
         assert result is not None
         assert len(selected) == 0
 
+    @pytest.mark.fast
     def test_show_progress_output(self, temp_dir, sample_keywords, capsys):
         """Test show_progress output (lines 625-645)"""
         config = RemixConfig(
@@ -234,6 +240,7 @@ class TestRemixDownloadedVideosInteractive:
 class TestRemixAudioFilesInteractive:
     """Test interactive curation for audio file remixing"""
 
+    @pytest.mark.fast
     def test_auto_accept_filtered_audio(self, temp_dir, sample_keywords):
         """Test auto_accept_filter='filtered' for audio (lines 746-751)"""
         config = RemixConfig(
@@ -263,6 +270,7 @@ class TestRemixAudioFilesInteractive:
         assert result is not None
         assert len(selected) == result.included_files
 
+    @pytest.mark.fast
     def test_auto_accept_all_audio(self, temp_dir, sample_keywords):
         """Test auto_accept_filter='all' for audio (lines 752-756)"""
         config = RemixConfig(
@@ -293,6 +301,7 @@ class TestRemixAudioFilesInteractive:
         assert result is not None
         assert len(selected) == result.total_files
 
+    @pytest.mark.fast
     def test_interactive_prompt_yes_audio(self, temp_dir, sample_keywords, monkeypatch):
         """Test interactive prompt 'Y' for audio (lines 758-771)"""
         config = RemixConfig(
@@ -321,6 +330,7 @@ class TestRemixAudioFilesInteractive:
         assert result is not None
         assert len(selected) == result.included_files
 
+    @pytest.mark.fast
     def test_interactive_prompt_all_audio(self, temp_dir, sample_keywords, monkeypatch):
         """Test interactive prompt 'A' for audio (lines 765-768)"""
         config = RemixConfig(
@@ -353,6 +363,7 @@ class TestRemixAudioFilesInteractive:
         assert result is not None
         assert len(selected) == result.total_files
 
+    @pytest.mark.fast
     def test_interactive_prompt_cancel_audio(self, temp_dir, sample_keywords, monkeypatch):
         """Test interactive prompt 'N' for audio (lines 769-771)"""
         config = RemixConfig(
@@ -382,6 +393,7 @@ class TestRemixAudioFilesInteractive:
         assert result is not None
         assert len(selected) == 0
 
+    @pytest.mark.fast
     def test_show_progress_audio(self, temp_dir, sample_keywords, capsys):
         """Test show_progress output for audio (lines 721-742)"""
         config = RemixConfig(
@@ -418,6 +430,7 @@ class TestRemixAudioFilesInteractive:
 class TestKeywordRemixerLLM:
     """Test LLM-based keyword remixing methods"""
 
+    @pytest.mark.fast
     def test_remix_keywords_batch_basic(self):
         """Test remix_keywords_batch orchestration (lines 1112-1157)"""
         remixer = KeywordRemixer(
@@ -446,6 +459,7 @@ class TestKeywordRemixerLLM:
         assert len(result.results) == 2
         assert result.processing_time_seconds >= 0
 
+    @pytest.mark.fast
     def test_remix_keywords_batch_with_gemini_batch(self):
         """Test batch processing path with Gemini (lines 1119-1126)"""
         remixer = KeywordRemixer(
@@ -475,6 +489,7 @@ class TestKeywordRemixerLLM:
         remixer._batch_remix_gemini.assert_called_once_with(keywords, 1)
         assert result.total_original == 2
 
+    @pytest.mark.fast
     def test_remix_keywords_batch_fallback_individual(self):
         """Test fallback to individual processing (lines 1127-1134)"""
         remixer = KeywordRemixer(
@@ -513,6 +528,7 @@ class TestKeywordRemixerLLM:
         remixer.remix_keyword.assert_called_once_with("beach", 1)
         assert result.total_original == 2
 
+    @pytest.mark.fast
     def test_batch_remix_gemini_success(self):
         """Test _batch_remix_gemini with successful response (lines 1161-1208)"""
         remixer = KeywordRemixer(
@@ -544,6 +560,7 @@ class TestKeywordRemixerLLM:
             assert results[1].original_keyword == "beach"
             assert remixer.stats['api_calls'] == 1
 
+    @pytest.mark.fast
     def test_batch_remix_gemini_no_api_key(self):
         """Test _batch_remix_gemini without API key (lines 1161-1162)"""
         remixer = KeywordRemixer(
@@ -558,6 +575,7 @@ class TestKeywordRemixerLLM:
         # Should return empty list
         assert results == []
 
+    @pytest.mark.fast
     def test_batch_remix_gemini_error_handling(self):
         """Test _batch_remix_gemini error handling"""
         remixer = KeywordRemixer(
@@ -588,6 +606,7 @@ class TestKeywordRemixerLLM:
 class TestEdgeCases:
     """Test edge cases and error scenarios"""
 
+    @pytest.mark.fast
     def test_remix_with_disabled_config(self, temp_dir):
         """Test remix_downloaded_videos with disabled config (lines 708-709 in remix_audio_files)"""
         config = RemixConfig(enabled=False)
@@ -604,6 +623,7 @@ class TestEdgeCases:
         assert result is None
         assert len(selected) >= 1
 
+    @pytest.mark.fast
     def test_remix_audio_files_empty_list(self):
         """Test remix_audio_files with empty list (lines 711-713)"""
         config = RemixConfig(enabled=True)
@@ -618,6 +638,7 @@ class TestEdgeCases:
         assert selected == []
         assert result is None
 
+    @pytest.mark.fast
     def test_interactive_non_interactive_fallthrough(self, temp_dir, sample_keywords):
         """Test when interactive=False, should skip prompts"""
         config = RemixConfig(

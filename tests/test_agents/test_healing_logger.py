@@ -34,6 +34,7 @@ from src.agents.healing_logger import HealingLogger, HealingLogEntry
 class TestHealingLoggerInit:
     """Tests for HealingLogger.__init__() - US-001."""
 
+    @pytest.mark.integration
     def test_init_creates_log_directory_if_not_exists(self):
         """Test HealingLogger.__init__() creates log directory if not exists."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -47,6 +48,7 @@ class TestHealingLoggerInit:
             assert log_dir.exists()
             assert log_dir.is_dir()
 
+    @pytest.mark.integration
     def test_init_creates_log_and_json_files_with_correct_naming_pattern(self):
         """Test HealingLogger.__init__() creates both .log and .json files with correct naming pattern.
 
@@ -108,6 +110,7 @@ class TestHealingLoggerInit:
             timestamp_pattern = r"^\d{8}_\d{6}$"
             assert re.match(timestamp_pattern, log_timestamp)
 
+    @pytest.mark.integration
     def test_init_generates_unique_8_char_session_id(self):
         """Test HealingLogger.__init__() generates unique 8-char session_id."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,6 +133,7 @@ class TestHealingLoggerInit:
             for session_id in session_ids:
                 assert re.match(r"^[a-f0-9]{8}$", session_id), f"Session ID {session_id} should be hex characters"
 
+    @pytest.mark.integration
     def test_init_calls_cleanup_orphaned_temp_files_on_startup(self):
         """Test HealingLogger.__init__() calls _cleanup_orphaned_temp_files() on startup."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -159,6 +163,7 @@ class TestHealingLoggerInit:
             assert not orphaned_file1.exists(), "Old orphaned temp file should be cleaned up"
             assert not orphaned_file2.exists(), "Old orphaned temp file should be cleaned up"
 
+    @pytest.mark.integration
     def test_init_does_not_cleanup_recent_temp_files(self):
         """Test _cleanup_orphaned_temp_files() preserves temp files younger than 60 seconds."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -176,6 +181,7 @@ class TestHealingLoggerInit:
             # Recent temp file should be preserved
             assert recent_temp.exists(), "Recent temp file should not be cleaned up"
 
+    @pytest.mark.integration
     def test_init_handles_permission_error_on_directory_creation(self):
         """Test HealingLogger.__init__() handles permission errors gracefully when directory creation fails."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -188,6 +194,7 @@ class TestHealingLoggerInit:
                 with pytest.raises(PermissionError):
                     HealingLogger(log_dir, json_log=True)
 
+    @pytest.mark.integration
     def test_init_handles_permission_error_on_json_file_write(self):
         """Test HealingLogger handles permission error when writing initial JSON file."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,6 +209,7 @@ class TestHealingLoggerInit:
                 with pytest.raises(PermissionError):
                     HealingLogger(log_dir, json_log=True)
 
+    @pytest.mark.integration
     def test_init_with_json_log_disabled(self):
         """Test HealingLogger.__init__() with json_log=False doesn't create JSON file initially."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,6 +224,7 @@ class TestHealingLoggerInit:
             assert logger.json_file is not None
             assert not logger.json_file.exists(), "JSON file should not be created when json_log=False"
 
+    @pytest.mark.integration
     def test_init_console_format_options(self):
         """Test HealingLogger accepts all three console_format options."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -228,6 +237,7 @@ class TestHealingLoggerInit:
 class TestHealingLoggerCleanup:
     """Tests for _cleanup_orphaned_temp_files() method."""
 
+    @pytest.mark.integration
     def test_cleanup_only_targets_healing_temp_files(self):
         """Test cleanup only removes .healing_*.json.tmp files, not other files."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -255,6 +265,7 @@ class TestHealingLoggerCleanup:
             assert other_temp.exists(), "Non-healing temp file should be preserved"
             assert regular_file.exists(), "Regular file should be preserved"
 
+    @pytest.mark.integration
     def test_cleanup_handles_file_access_errors_gracefully(self):
         """Test cleanup continues if individual file deletion fails."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -293,6 +304,7 @@ class TestHealingLoggerCleanup:
 class TestHealingLoggerFilesystemCheck:
     """Tests for _check_filesystem_atomicity() method."""
 
+    @pytest.mark.integration
     def test_network_share_warning_for_unc_path(self):
         """Test warning is logged for UNC path (Windows network share)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -311,6 +323,7 @@ class TestHealingLoggerFilesystemCheck:
                                    if 'network share' in str(call).lower()]
                     assert len(warning_calls) > 0, "Should warn about network share"
 
+    @pytest.mark.integration
     def test_local_path_no_warning(self):
         """Test no warning for local filesystem path."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -328,6 +341,7 @@ class TestHealingLoggerFilesystemCheck:
 class TestHealingLogEntry:
     """Tests for HealingLogEntry dataclass."""
 
+    @pytest.mark.fast
     def test_to_dict_converts_timestamp_to_iso(self):
         """Test to_dict() converts datetime to ISO format string."""
         timestamp = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
@@ -345,6 +359,7 @@ class TestHealingLogEntry:
         d = entry.to_dict()
         assert d['timestamp'] == "2024-01-15T10:30:45+00:00"
 
+    @pytest.mark.fast
     def test_to_dict_preserves_all_fields(self):
         """Test to_dict() includes all entry fields."""
         entry = HealingLogEntry(
@@ -383,6 +398,7 @@ class TestHealingLogEntry:
 class TestAtomicJsonWrite:
     """Tests for HealingLogger._atomic_json_write() - US-002."""
 
+    @pytest.mark.integration
     def test_atomic_json_write_creates_temp_file_in_same_directory(self):
         """Test _atomic_json_write() creates temp file in same directory as target."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -415,6 +431,7 @@ class TestAtomicJsonWrite:
             assert len(created_temp_dirs) > 0
             assert created_temp_dirs[-1] == log_dir
 
+    @pytest.mark.integration
     def test_atomic_json_write_uses_os_replace_for_atomic_rename(self):
         """Test _atomic_json_write() uses os.replace for atomic rename."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -444,6 +461,7 @@ class TestAtomicJsonWrite:
                 # Second arg is target json file path
                 assert call_args[1] == logger.json_file
 
+    @pytest.mark.integration
     def test_atomic_json_write_cleans_up_temp_file_on_write_failure(self):
         """Test _atomic_json_write() cleans up temp file on write failure."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -470,6 +488,7 @@ class TestAtomicJsonWrite:
             temp_files = list(log_dir.glob(".healing_*.json.tmp"))
             assert len(temp_files) == 0, "Temp file should be cleaned up on failure"
 
+    @pytest.mark.integration
     def test_atomic_json_write_cleans_up_temp_on_replace_failure(self):
         """Test temp file cleanup when os.replace fails."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -496,6 +515,7 @@ class TestAtomicJsonWrite:
             temp_files = list(log_dir.glob(".healing_*.json.tmp"))
             assert len(temp_files) == 0, "Temp file should be cleaned up on replace failure"
 
+    @pytest.mark.integration
     def test_atomic_json_write_preserves_existing_entries(self):
         """Test atomic write appends to existing entries without losing data."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -527,6 +547,7 @@ class TestAtomicJsonWrite:
 class TestWriteThreadSafety:
     """Tests for HealingLogger._write() thread safety - US-002."""
 
+    @pytest.mark.integration
     def test_write_is_thread_safe_under_concurrent_calls(self):
         """Test _write() is thread-safe under concurrent log_* method calls."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -573,6 +594,7 @@ class TestWriteThreadSafety:
             assert len(logger.entries) == expected_count, \
                 f"Expected {expected_count} entries, got {len(logger.entries)}"
 
+    @pytest.mark.integration
     def test_write_lock_prevents_race_conditions(self):
         """Test that _write() lock prevents entry list corruption.
 
@@ -625,6 +647,7 @@ class TestWriteThreadSafety:
                 assert entry.error_message.startswith("T")
                 assert "_E" in entry.error_message
 
+    @pytest.mark.integration
     def test_concurrent_log_methods_do_not_corrupt_json(self):
         """Test concurrent log_* method calls don't corrupt JSON file."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -687,6 +710,7 @@ class TestWriteThreadSafety:
 class TestEntriesTruncation:
     """Tests for entries list truncation at MAX_ENTRIES - US-002."""
 
+    @pytest.mark.integration
     def test_entries_truncates_at_max_entries_keeping_recent_half(self):
         """Test entries list truncates at MAX_ENTRIES (10000) keeping recent half.
 
@@ -740,6 +764,7 @@ class TestEntriesTruncation:
             finally:
                 HealingLogger.MAX_ENTRIES = original_max
 
+    @pytest.mark.integration
     def test_truncation_keeps_most_recent_entries(self):
         """Test that truncation keeps the most recent (highest index) entries."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -778,6 +803,7 @@ class TestEntriesTruncation:
             finally:
                 HealingLogger.MAX_ENTRIES = original_max
 
+    @pytest.mark.integration
     def test_truncation_logs_warning(self):
         """Test that truncation logs a warning message."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -811,6 +837,7 @@ class TestEntriesTruncation:
             finally:
                 HealingLogger.MAX_ENTRIES = original_max
 
+    @pytest.mark.integration
     def test_no_truncation_below_max_entries(self):
         """Test that no truncation occurs when entries < MAX_ENTRIES."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -852,6 +879,7 @@ class TestEntriesTruncation:
 class TestLogClassification:
     """Tests for HealingLogger.log_classification() - US-003."""
 
+    @pytest.mark.integration
     def test_log_classification_creates_entry_with_correct_component_and_action(self):
         """Test log_classification() creates entry with correct component='watcher' and action='classify'."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -882,6 +910,7 @@ class TestLogClassification:
             assert entry.result == "success"
             assert entry.duration_ms == 15.5
 
+    @pytest.mark.integration
     def test_log_classification_captures_classification_details(self):
         """Test log_classification() stores classification details correctly."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -909,6 +938,7 @@ class TestLogClassification:
             assert details["needs_llm_healer"] == True
             assert "HTTP 429" in details["reasoning"]
 
+    @pytest.mark.integration
     def test_log_classification_truncates_long_reasoning(self):
         """Test log_classification() truncates reasoning to 100 characters."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -933,6 +963,7 @@ class TestLogClassification:
 class TestLogHealerAttempt:
     """Tests for HealingLogger.log_healer_attempt() - US-003."""
 
+    @pytest.mark.integration
     def test_log_healer_attempt_captures_healer_name_and_result(self):
         """Test log_healer_attempt() captures healer_name, result, and stack_trace in details."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -974,6 +1005,7 @@ class TestLogHealerAttempt:
             assert entry.details["modified_config"] == True
             assert entry.details["healer_details"]["backoff_seconds"] == 30
 
+    @pytest.mark.integration
     def test_log_healer_attempt_records_failed_result(self):
         """Test log_healer_attempt() correctly records failed result."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -995,6 +1027,7 @@ class TestLogHealerAttempt:
             assert entry.result == "failed"
             assert entry.details["action"] == "ABORT"
 
+    @pytest.mark.integration
     def test_log_healer_attempt_handles_action_without_value_attr(self):
         """Test log_healer_attempt() handles action that's a string not enum."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1018,6 +1051,7 @@ class TestLogHealerAttempt:
 class TestLogFallback:
     """Tests for HealingLogger.log_fallback() - US-003."""
 
+    @pytest.mark.integration
     def test_log_fallback_records_component_transition(self):
         """Test log_fallback() records from_component and to_component transition correctly."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1048,6 +1082,7 @@ class TestLogFallback:
             assert entry.details["to"] == "PatternMatcher"
             assert entry.details["reason"] == "LLM API unavailable"
 
+    @pytest.mark.integration
     def test_log_fallback_multiple_transitions(self):
         """Test log_fallback() can record multiple fallback transitions."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1073,6 +1108,7 @@ class TestLogFallback:
 class TestLogEscalation:
     """Tests for HealingLogger.log_escalation() - US-003."""
 
+    @pytest.mark.integration
     def test_log_escalation_distinguishes_to_user(self):
         """Test log_escalation() correctly handles to_user=True escalation."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1102,6 +1138,7 @@ class TestLogEscalation:
             assert entry.details["to_llm_healer"] == False
             assert entry.details["reason"] == "All automated fixes exhausted"
 
+    @pytest.mark.integration
     def test_log_escalation_distinguishes_to_llm_healer(self):
         """Test log_escalation() correctly handles to_user=False (to LLM healer) escalation."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1123,6 +1160,7 @@ class TestLogEscalation:
             assert entry.details["to_llm_healer"] == True
             assert entry.details["reason"] == "Pattern matchers insufficient"
 
+    @pytest.mark.integration
     def test_log_escalation_default_is_to_llm_healer(self):
         """Test log_escalation() defaults to LLM healer (to_user=False)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1141,6 +1179,7 @@ class TestLogEscalation:
 class TestLogSelfHeal:
     """Tests for HealingLogger.log_self_heal() - US-003."""
 
+    @pytest.mark.integration
     def test_log_self_heal_captures_attempt_progression(self):
         """Test log_self_heal() captures attempt count and max_attempts progression."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1177,6 +1216,7 @@ class TestLogSelfHeal:
             for entry in logger.entries:
                 assert entry.details["max_attempts"] == 3
 
+    @pytest.mark.integration
     def test_log_self_heal_records_action_as_error_message(self):
         """Test log_self_heal() stores action description in error_message field."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1195,6 +1235,7 @@ class TestLogSelfHeal:
             assert entry.error_message == "Applying exponential backoff"
             assert entry.component == "AnthropicHealer"
 
+    @pytest.mark.integration
     def test_log_self_heal_different_healers(self):
         """Test log_self_heal() correctly identifies different healer types."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1218,6 +1259,7 @@ class TestLogSelfHeal:
 class TestGenerateReportCounts:
     """Tests for HealingLogger.generate_report() result counts - US-004."""
 
+    @pytest.mark.integration
     def test_generate_report_returns_correct_success_failed_counts(self):
         """Test generate_report() returns correct success/failed counts from entries."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1261,6 +1303,7 @@ class TestGenerateReportCounts:
             assert f"Failed heals: {failed_entries}" in report
             assert f"Total entries: {success_entries + failed_entries}" in report
 
+    @pytest.mark.integration
     def test_generate_report_counts_watcher_classifications(self):
         """Test generate_report() counts watcher classifications correctly."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1297,6 +1340,7 @@ class TestGenerateReportCounts:
             report = healing_logger.generate_report()
             assert "Watcher classifications: 4" in report
 
+    @pytest.mark.integration
     def test_generate_report_counts_llm_healer_invocations(self):
         """Test generate_report() counts LLM healer invocations correctly."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1337,6 +1381,7 @@ class TestGenerateReportCounts:
 class TestGenerateReportGrouping:
     """Tests for HealingLogger.generate_report() grouping by stage - US-004."""
 
+    @pytest.mark.integration
     def test_generate_report_groups_entries_by_stage(self):
         """Test generate_report() groups entries by stage and counts healer activity."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1385,6 +1430,7 @@ class TestGenerateReportGrouping:
             assert "TRANSCRIBE: 2/4 healed" in report
             assert "MATCH: 4/4 healed" in report
 
+    @pytest.mark.integration
     def test_generate_report_excludes_self_heal_and_preflight_from_stages(self):
         """Test generate_report() excludes SELF_HEAL and PREFLIGHT from stage listing."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1438,6 +1484,7 @@ class TestGenerateReportGrouping:
             assert "SELF_HEAL:" not in report
             assert "PREFLIGHT:" not in report
 
+    @pytest.mark.integration
     def test_generate_report_only_shows_stages_with_healer_activity(self):
         """Test generate_report() only lists stages that have healer activity."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1481,6 +1528,7 @@ class TestGenerateReportGrouping:
 class TestGenerateReportEmptyEntries:
     """Tests for HealingLogger.generate_report() empty entries case - US-004."""
 
+    @pytest.mark.integration
     def test_generate_report_returns_no_activity_when_entries_empty(self):
         """Test generate_report() returns 'No healing activity recorded' when entries empty."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1491,6 +1539,7 @@ class TestGenerateReportEmptyEntries:
             report = healing_logger.generate_report()
             assert report == "No healing activity recorded."
 
+    @pytest.mark.integration
     def test_generate_report_includes_session_id(self):
         """Test generate_report() includes session ID in report."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1517,6 +1566,7 @@ class TestGenerateReportEmptyEntries:
 class TestFinalize:
     """Tests for HealingLogger.finalize() - US-004."""
 
+    @pytest.mark.integration
     def test_finalize_writes_final_json_with_session_summary(self):
         """Test finalize() writes final JSON with session summary."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1550,6 +1600,7 @@ class TestFinalize:
             assert "entries" in content
             assert len(content["entries"]) == 3
 
+    @pytest.mark.integration
     def test_finalize_json_contains_all_entry_data(self):
         """Test finalize() JSON contains complete entry data."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1586,6 +1637,7 @@ class TestFinalize:
             assert entry_data["stack_trace"] == "Test stack trace"
             assert entry_data["details"] == {"key": "value"}
 
+    @pytest.mark.integration
     def test_finalize_with_empty_entries_writes_empty_entries_array(self):
         """Test finalize() writes empty entries array when no entries."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1601,6 +1653,7 @@ class TestFinalize:
             assert content["total_entries"] == 0
             assert content["entries"] == []
 
+    @pytest.mark.integration
     def test_finalize_calls_generate_report(self):
         """Test finalize() calls generate_report() for logging."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1629,6 +1682,7 @@ class TestFinalize:
 class TestPrintBox:
     """Tests for HealingLogger.print_box() - US-004."""
 
+    @pytest.mark.integration
     def test_print_box_handles_minimal_format(self, capsys):
         """Test print_box() handles minimal console_format option."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1649,6 +1703,7 @@ class TestPrintBox:
             assert "└" not in captured.out
             assert "===" not in captured.out
 
+    @pytest.mark.integration
     def test_print_box_handles_simple_format(self, capsys):
         """Test print_box() handles simple console_format option."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1668,6 +1723,7 @@ class TestPrintBox:
             assert "┌" not in captured.out
             assert "└" not in captured.out
 
+    @pytest.mark.integration
     def test_print_box_handles_box_format(self, capsys):
         """Test print_box() handles box console_format option (default)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1688,6 +1744,7 @@ class TestPrintBox:
             assert "Line 1" in captured.out
             assert "Line 2" in captured.out
 
+    @pytest.mark.integration
     def test_print_box_truncates_long_lines(self, capsys):
         """Test print_box() truncates lines longer than width."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1705,6 +1762,7 @@ class TestPrintBox:
             # Original long line should not appear in full
             assert "A" * 100 not in captured.out
 
+    @pytest.mark.integration
     def test_print_box_custom_width(self, capsys):
         """Test print_box() respects custom width parameter."""
         with tempfile.TemporaryDirectory() as tmp:
