@@ -134,8 +134,8 @@
             "id": "US-010",
             "title": "Add benchmark revival and fixture adoption tests",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "AC1-3: Archived 3 broken benchmark files to tests/benchmarks_archived/ with updated README (reference non-existent APIs like TFIDFKeywordExtractor, EmbeddingMatcher). AC4: Verified 15 test files use factory fixtures (exceeds min of 10). AC5: Added scripts/verify_fixture_adoption.py - tracks 12 fixtures, reports per-fixture/per-file usage, exits 0/1 based on minimum adoption. Commit: 540d519.",
             "acceptanceCriteria": [
                 "Fix or archive tests/benchmarks_broken/test_keyword_extraction_performance.py",
                 "Fix or archive tests/benchmarks_broken/test_matching_performance.py",
