@@ -6552,3 +6552,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC3/AC5: test_returns_keywords_in_report_not_state documents this separation of concerns
 - AC4: test_max_retries_prevents_broadening — verifies broadener not called when retry_count >= max_retries
 - Test results: 6 passed in 0.34s
+
+## Iteration US-005 (Sprint 19) - Add stage checkpoint serialization edge case tests
+- Created tests/test_checkpoint_edge_cases.py (12 tests)
+- AC1: test_save_handles_numpy_arrays_via_default_str — numpy->string (NOT list conversion)
+- AC2: test_save_handles_datetime_via_default_str — datetime->ISO string
+- AC3: Note - load() doesn't restore numpy arrays from lists (feature not implemented)
+- AC4: test_circular_reference_causes_error — documents that circular refs NOT handled
+- AC5: test_missing_stage_data_returns_empty_dict — verifies empty dict for missing fields
+- Bonus: Added Path, unicode, nested structure tests
+- Test results: 12 passed in 0.43s
