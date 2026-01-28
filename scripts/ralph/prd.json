@@ -134,8 +134,8 @@
             "id": "US-010",
             "title": "Add SavedKeywords preset management tests",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Pre-implemented: All 5 acceptance criteria already covered by existing tests in test_checkpoint_unit.py (TestSavedKeywordsDataclass, 5 tests) and test_checkpoint_coverage.py (TestSavedKeywordsDataClass + TestKeywordManager, 21 tests). Tests verify: from_dict ignores unknown keys, to_dict round-trip, save_keywords writes file, get_preset returns None for missing, list_presets sorted newest first. All 26 tests pass.",
             "acceptanceCriteria": [
                 "Test SavedKeywords.from_dict() ignores unknown keys — verify extra keys in dict don't cause TypeError, only known dataclass fields are set",
                 "Test SavedKeywords.to_dict() round-trip preserves all fields — save with name, keywords list, topic_context, entities, verify from_dict(to_dict()) equals original",
