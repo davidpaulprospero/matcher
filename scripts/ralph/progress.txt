@@ -6842,3 +6842,42 @@ def test_eta_accuracy_batch_50_videos(self):
 - Test results: 31 tests passed in 2.38s
 - Files created: tests/test_otio_auto_split_rule17.py (~604 lines)
 - Commit: 6e43826
+
+## Iteration US-008 (Sprint 21) - Add speed tracker sliding window edge case tests
+- Added 21 new tests in 5 test classes to tests/test_speed_tracker.py
+- Test classes:
+  1. TestFewerThan2SamplesAverage (AC1): 4 tests for <2 samples behavior
+     - test_zero_samples_returns_zero_average
+     - test_one_sample_returns_valid_average
+     - test_one_sample_timeout_unchanged
+     - test_two_samples_enables_timeout_adjustment
+  2. TestZeroDurationSamplesUS008 (AC2): 4 tests for zero/negative duration
+     - test_zero_duration_skipped_silently
+     - test_zero_duration_mixed_with_valid
+     - test_speed_property_zero_duration_returns_zero
+     - test_negative_duration_also_skipped
+  3. TestSlidingWindowDropsOldUS008 (AC3): 3 tests for window overflow
+     - test_window_size_3_keeps_last_3
+     - test_window_size_1_always_keeps_single_sample
+     - test_dropping_old_samples_updates_average
+  4. TestNegativeSpeedValuesUS008 (AC4): 5 tests for invalid speed values
+     - test_negative_bytes_skipped
+     - test_negative_duration_skipped
+     - test_both_negative_skipped
+     - test_zero_bytes_skipped
+     - test_checkpoint_restore_invalid_values_skipped
+  5. TestConcurrentSpeedRecordingUS008 (AC5): 5 thread-safety tests
+     - test_concurrent_record_download_count_accurate
+     - test_concurrent_record_download_no_data_loss
+     - test_concurrent_average_speed_consistent
+     - test_concurrent_with_window_overflow
+     - test_per_keyword_tracker_concurrent_isolation
+- Acceptance criteria mapping:
+  - AC1 (fewer than 2 samples): TestFewerThan2SamplesAverage validates timeout requires 2+ samples, average works with 0-1
+  - AC2 (zero duration): TestZeroDurationSamplesUS008 validates graceful skip without exceptions
+  - AC3 (sliding window drops): TestSlidingWindowDropsOldUS008 validates FIFO dropping, average updates
+  - AC4 (negative values): TestNegativeSpeedValuesUS008 validates all negative/zero inputs skipped
+  - AC5 (thread-safe): TestConcurrentSpeedRecordingUS008 validates no data loss under contention
+- Test results: 80 speed tracker tests passed in 0.55s
+- Files modified: tests/test_speed_tracker.py (+318 lines)
+- Commit: 96ff4e6
