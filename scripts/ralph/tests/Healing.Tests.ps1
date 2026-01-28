@@ -856,3 +856,66 @@ Describe 'Healing metrics recording' {
         Should -Invoke Record-Metric -Times 1 -ParameterFilter { $Mode -eq "Healing" -and $StoryId -like "HEALING-*" }
     }
 }
+
+Describe 'Get-HealingSummary' {
+    It 'summarizes healing activity from log' {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_summary.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+
+        @{ timestamp = "2026-01-28T10:00:00"; event = "healing_started"; data = @{ failedTier = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ timestamp = "2026-01-28T10:01:00"; event = "healing_resolved"; data = @{ attempts = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ timestamp = "2026-01-28T10:05:00"; event = "healing_started"; data = @{ failedTier = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ timestamp = "2026-01-28T10:06:00"; event = "healing_resolved"; data = @{ attempts = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+
+        $summary = Get-HealingSummary
+        $summary.TotalHealingSessions | Should -Be 2
+        $summary.TotalResolved | Should -Be 2
+        $summary.TotalFailed | Should -Be 0
+        $summary.TotalAttempts | Should -Be 3
+    }
+
+    It 'returns empty summary when no log exists' {
+        $script:HealingLogFile = Join-Path $TestDrive "nonexistent_summary.jsonl"
+
+        $summary = Get-HealingSummary
+        $summary.TotalHealingSessions | Should -Be 0
+    }
+
+    It 'counts tier breakdown correctly' {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_tiers.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+
+        @{ event = "healing_started"; data = @{ failedTier = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_started"; data = @{ failedTier = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_started"; data = @{ failedTier = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_started"; data = @{ failedTier = 3 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+
+        $summary = Get-HealingSummary
+        $summary.TierBreakdown[1] | Should -Be 1
+        $summary.TierBreakdown[2] | Should -Be 2
+        $summary.TierBreakdown[3] | Should -Be 1
+    }
+
+    It 'counts failed sessions' {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_failed.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+
+        @{ event = "healing_started"; data = @{ failedTier = 3 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_failed"; data = @{ attempts = 3 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+
+        $summary = Get-HealingSummary
+        $summary.TotalFailed | Should -Be 1
+        $summary.TotalResolved | Should -Be 0
+        $summary.TotalAttempts | Should -Be 3
+    }
+}
