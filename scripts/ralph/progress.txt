@@ -6778,3 +6778,21 @@ def test_eta_accuracy_batch_50_videos(self):
   - AC5 (half-open recovery): test_half_open_recovery_after_batch_retry_wait + test_transitions_to_half_open
 - Test results: 191 CB+retry coordination tests passed in 2.31s
 - Files modified: tests/test_circuit_breaker_retry_coordination.py (+198 lines)
+
+## Iteration US-003 (Sprint 21) - Add caption-first video ID resolution tests for Rule 26
+- Created tests/test_caption_first_video_id_resolution.py with 29 tests
+- Test classes:
+  1. TestVideoIdToSegmentPathResolution (AC1): video ID to segment path resolution
+  2. TestGlobalCacheSegmentGaps (AC2): global cache entries don't have segments
+  3. TestOtioPathValidation (AC3): OTIO paths are valid file:/// URLs
+  4. TestExtractVideoIdHandling (AC4): extract_video_id handles IDs and URLs
+  5. TestSegmentCoverageAnalysis (AC5): segment coverage analysis
+  6. TestCaptionFirstIntegration: end-to-end integration tests
+- Acceptance criteria mapping:
+  - AC1: test_video_id_in_match_resolves_to_segment_file, test_segment_filename_format_encodes_video_id_and_time, test_match_with_video_id_finds_segment_path
+  - AC2: test_global_cache_video_not_in_project_candidates, test_segment_collection_skips_missing_audio_download
+  - AC3: test_is_missing_file_handles_video_id, test_valid_file_path_has_extension, test_file_url_format_is_valid
+  - AC4: test_extract_from_11_char_id, test_extract_from_segment_filename, test_extract_from_full_path
+  - AC5: test_identify_missing_segments, test_global_cache_videos_in_missing_list, test_coverage_percentage_calculation
+- Test results: 29 tests passed in 0.51s
+- Files created: tests/test_caption_first_video_id_resolution.py (~520 lines)
