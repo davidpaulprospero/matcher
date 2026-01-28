@@ -469,3 +469,158 @@ function Resume-SprintFromHealing {
         Remove-Item $statePath -Force
     }
 }
+
+function Build-HealingPrompt {
+    <#
+    .SYNOPSIS
+        Build a prompt for Claude to fix detected codebase errors.
+        Includes tier-specific diagnostics and previous attempt context.
+    #>
+    param(
+        [Parameter(Mandatory)]$HealingState,
+        [int]$Attempt = 1,
+        [string]$PreviousOutput = ""
+    )
+
+    $tierNames = @{ 1 = "Syntax/File Integrity"; 2 = "Import/Collection"; 3 = "Test Execution" }
+    $tierName = $tierNames[[int]$HealingState.failedTier]
+
+    $prompt = @"
+# HEALING MODE - Fix Codebase Errors (Tier $($HealingState.failedTier): $tierName)
+
+You are in HEALING MODE. The codebase has errors that must be fixed before the sprint can continue.
+
+## Priority
+Fix ALL errors below. Do NOT add new features. Do NOT refactor. ONLY fix what is broken.
+
+## Tier $($HealingState.failedTier) Diagnostics
+$($HealingState.rawDiagnostics)
+
+## Context
+- Sprint focus area: $($HealingState.focusArea)
+- Story in progress: $($HealingState.storyId)
+- Failed health check tier: $($HealingState.failedTier) ($tierName)
+- This is healing attempt $Attempt
+
+## Instructions
+1. Read the failing files to understand what's expected
+2. Identify the root cause of each error
+3. Make the MINIMAL fix needed -- do not refactor or improve
+4. Run ``pytest tests/ --tb=short -q`` to verify ALL tests pass
+5. Commit with message: ``fix(healing): <what you fixed>``
+
+IMPORTANT: After fixing, run the full test suite. ALL tests must pass.
+"@
+
+    if ($Attempt -gt 1 -and $PreviousOutput) {
+        $truncated = $PreviousOutput.Substring(0, [Math]::Min(1000, $PreviousOutput.Length))
+        $prompt += @"
+
+## Previous Attempt Output (attempt $($Attempt - 1))
+The previous fix attempt did NOT resolve all errors. Here is what was tried:
+``````
+$truncated
+``````
+
+Try a DIFFERENT approach this time.
+"@
+    }
+
+    return $prompt
+}
+
+function Invoke-HealingSession {
+    <#
+    .SYNOPSIS
+        Run a Claude healing session to fix detected codebase errors.
+        Reads healing_state.json for context, invokes Claude with tier-specific
+        diagnostics, validates via re-running tiered health check, retries up to MaxAttempts.
+    .PARAMETER MaxAttempts
+        Maximum number of healing attempts (default: 3)
+    .RETURNS
+        Hashtable: Success (bool), AttemptsUsed (int), FixSummary (string)
+    #>
+    param(
+        [int]$MaxAttempts = 3
+    )
+
+    $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
+                 else { Join-Path $script:RalphDir "healing_state.json" }
+
+    $healingState = $null
+    if (Test-Path $statePath) {
+        $healingState = Get-Content $statePath -Raw | ConvertFrom-Json
+    }
+
+    if (-not $healingState) {
+        return @{ Success = $false; AttemptsUsed = 0; FixSummary = "No healing state found" }
+    }
+
+    $claudePath = Get-ClaudePath
+    $attempt = 0
+    $lastOutput = ""
+
+    while ($attempt -lt $MaxAttempts) {
+        $attempt++
+        $attemptStart = Get-Date
+        Write-Host ""
+        Write-Host "  Healing attempt $attempt/$MaxAttempts (Tier $($healingState.failedTier) failure)" -ForegroundColor Cyan
+
+        $prompt = Build-HealingPrompt -HealingState $healingState -Attempt $attempt -PreviousOutput $lastOutput
+
+        Log-HealingEvent -Event "healing_attempt" -Data @{
+            attempt     = $attempt
+            maxAttempts = $MaxAttempts
+            failedTier  = [int]$healingState.failedTier
+            prompt      = ($prompt.Substring(0, [Math]::Min(500, $prompt.Length)) + "...")
+        }
+
+        $claudeArgs = @("--print", "--dangerously-skip-permissions")
+        $outFile = Join-Path $script:RalphDir "healing_out_$attempt.log"
+        $errFile = Join-Path $script:RalphDir "healing_err_$attempt.log"
+
+        $subResult = Invoke-ClaudeSubprocess `
+            -ClaudePath $claudePath `
+            -ClaudeArgs $claudeArgs `
+            -Prompt $prompt `
+            -OutFile $outFile `
+            -ErrFile $errFile
+
+        $lastOutput = $subResult.Output
+
+        if ($subResult.TimedOut) {
+            Write-Host "  Healing attempt $attempt timed out" -ForegroundColor Yellow
+            continue
+        }
+
+        if ($subResult.ExitCode -ne 0) {
+            Write-Host "  Healing attempt $attempt failed (exit $($subResult.ExitCode))" -ForegroundColor Yellow
+            continue
+        }
+
+        # Validate fix by re-running tiered health check (force full run to be thorough)
+        Write-Host "  Validating fix..." -ForegroundColor Cyan
+        $recheck = Invoke-TieredHealthCheck -ForceFullRun
+
+        if (-not $recheck.HasErrors) {
+            Write-Host "  Codebase is clean!" -ForegroundColor Green
+            return @{
+                Success      = $true
+                AttemptsUsed = $attempt
+                FixSummary   = "Fixed after $attempt attempt(s). Tier $($healingState.failedTier) errors resolved."
+            }
+        }
+
+        Write-Host "  Still has errors (Tier $($recheck.FailedTier))" -ForegroundColor Yellow
+
+        # Update diagnostics for next attempt
+        $healingState.rawDiagnostics = $recheck.RawDiagnostics
+        $healingState.failedTier = $recheck.FailedTier
+    }
+
+    return @{
+        Success      = $false
+        AttemptsUsed = $attempt
+        FixSummary   = "Failed to fix after $MaxAttempts attempts"
+    }
+}
