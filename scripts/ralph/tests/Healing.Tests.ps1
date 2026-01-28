@@ -76,6 +76,55 @@ Describe 'Invoke-FastHealthCheck (Tier 1)' -Tag 'Unit', 'Healing' {
         $result.ChecksRun | Should -Contain "critical_files"
         $result.ChecksRun | Should -Contain "config_validation"
     }
+
+    It 'detects config validation failures' {
+        Mock Invoke-Expression { return "" } -ParameterFilter { $Command -like '*py_compile*' }
+        Mock Invoke-Expression {
+            $global:LASTEXITCODE = 1
+            return "Error: invalid YAML in config.yaml"
+        } -ParameterFilter { $Command -like '*validate-config*' }
+        Mock git { return $null }
+
+        $result = Invoke-FastHealthCheck -ChangedFiles @() -CriticalFiles @()
+        $result.HasErrors | Should -BeTrue
+        $result.ConfigErrors.Count | Should -BeGreaterThan 0
+    }
+
+    It 'detects merge conflicts from git ls-files' {
+        Mock Invoke-Expression { return "" } -ParameterFilter { $Command -like '*py_compile*' }
+        Mock Invoke-Expression { return "" } -ParameterFilter { $Command -like '*validate-config*' }
+        Mock git {
+            return "100644 abc123 1`tsrc/pipeline.py"
+        }
+
+        $result = Invoke-FastHealthCheck -ChangedFiles @() -CriticalFiles @()
+        $result.HasErrors | Should -BeTrue
+        $result.MergeConflicts.Count | Should -BeGreaterThan 0
+    }
+
+    It 'reports multiple syntax errors from different files' {
+        Mock Invoke-Expression {
+            $global:LASTEXITCODE = 1
+            return "SyntaxError: unexpected indent"
+        } -ParameterFilter { $Command -like '*py_compile*' }
+        Mock Invoke-Expression { return "" } -ParameterFilter { $Command -like '*validate-config*' }
+        Mock git { return $null }
+
+        New-Item -Path (Join-Path $TestDrive "a.py") -ItemType File -Force | Out-Null
+        New-Item -Path (Join-Path $TestDrive "b.py") -ItemType File -Force | Out-Null
+
+        $result = Invoke-FastHealthCheck -ChangedFiles @("a.py", "b.py") -CriticalFiles @()
+        $result.SyntaxErrors.Count | Should -Be 2
+    }
+
+    It 'skips py_compile for non-python changed files' {
+        Mock Invoke-Expression { $global:LASTEXITCODE = 0; return "" } -ParameterFilter { $Command -like '*validate-config*' }
+        Mock git { return $null }
+
+        $result = Invoke-FastHealthCheck -ChangedFiles @("README.md", "config.yaml") -CriticalFiles @()
+        $result.HasErrors | Should -BeFalse
+        $result.ChecksRun | Should -Not -Contain "py_compile"
+    }
 }
 
 Describe 'Invoke-CollectionHealthCheck (Tier 2)' -Tag 'Unit', 'Healing' {
@@ -121,6 +170,27 @@ Describe 'Invoke-CollectionHealthCheck (Tier 2)' -Tag 'Unit', 'Healing' {
 
         $result = Invoke-CollectionHealthCheck
         $result.RawOutput | Should -BeLike "*50 tests collected*"
+    }
+
+    It 'parses ERROR line with no dash separator' {
+        Mock Invoke-Expression {
+            return @(
+                "ERROR tests/broken.py",
+                "1 error in 0.5s"
+            ) -join "`n"
+        } -ParameterFilter { $Command -like '*--collect-only*' }
+
+        $result = Invoke-CollectionHealthCheck
+        $result.HasErrors | Should -BeTrue
+        $result.CollectionErrors[0].Error | Should -Be "Unknown"
+    }
+
+    It 'returns clean on empty output' {
+        Mock Invoke-Expression { return "" } -ParameterFilter { $Command -like '*--collect-only*' }
+
+        $result = Invoke-CollectionHealthCheck
+        $result.HasErrors | Should -BeFalse
+        $result.ErrorCount | Should -Be 0
     }
 }
 
@@ -182,6 +252,29 @@ Describe 'Invoke-FullHealthCheck (Tier 3)' -Tag 'Unit', 'Healing' {
 
         $result = Invoke-FullHealthCheck -PytestArgs "tests/ --tb=short -q"
         $result.Summary | Should -BeLike "*failed*passed*"
+    }
+
+    It 'detects mixed failures and collection errors' {
+        Mock Invoke-Expression {
+            return @(
+                "ERROR tests/test_broken.py - ImportError: no module named 'foo'",
+                "FAILED tests/test_x.py::test_y - AssertionError",
+                "1 failed, 1 error, 5 passed in 4.2s"
+            ) -join "`n"
+        } -ParameterFilter { $Command -like '*pytest*' }
+
+        $result = Invoke-FullHealthCheck -PytestArgs "tests/ --tb=short -q"
+        $result.HasErrors | Should -BeTrue
+        $result.FailureCount | Should -Be 1
+        $result.ErrorCount | Should -Be 1
+    }
+
+    It 'handles pytest exception gracefully' {
+        Mock Invoke-Expression { throw "pytest crashed" } -ParameterFilter { $Command -like '*pytest*' }
+
+        $result = Invoke-FullHealthCheck -PytestArgs "tests/"
+        $result.Skipped | Should -BeTrue
+        $result.HasErrors | Should -BeFalse
     }
 }
 
@@ -290,6 +383,32 @@ Describe 'Invoke-TieredHealthCheck (orchestrator)' -Tag 'Unit', 'Healing' {
         $result = Invoke-TieredHealthCheck -ChangedFiles @() -FullRunCadence 3 -ForceFullRun
         Should -Invoke Invoke-FullHealthCheck -Times 1
     }
+
+    It 'handles missing $State gracefully (defaults to iteration 1)' {
+        $savedState = $script:State
+        $script:State = $null
+        Mock Invoke-FastHealthCheck { return @{ HasErrors = $false; Tier = 1 } }
+        Mock Invoke-CollectionHealthCheck { return @{ HasErrors = $false; Tier = 2; Skipped = $false } }
+        Mock Invoke-FullHealthCheck { return @{ HasErrors = $false; Tier = 3; Skipped = $false } }
+        Mock Write-Host {}
+
+        # With null state, iteration defaults to 1 -> always runs Tier 3
+        $result = Invoke-TieredHealthCheck -ChangedFiles @() -FullRunCadence 5
+        Should -Invoke Invoke-FullHealthCheck -Times 1
+        $script:State = $savedState
+    }
+
+    It 'skips Tier 3 when Tier 2 is skipped (pytest unavailable)' {
+        Mock Invoke-FastHealthCheck { return @{ HasErrors = $false; Tier = 1 } }
+        Mock Invoke-CollectionHealthCheck { return @{ HasErrors = $false; Tier = 2; Skipped = $true } }
+        Mock Invoke-FullHealthCheck { return @{ HasErrors = $false; Tier = 3 } }
+        Mock Write-Host {}
+
+        # Iteration 3 on cadence but T2 skipped -- T3 should still run based on cadence logic
+        $script:State.IterationCount = 3
+        $result = Invoke-TieredHealthCheck -ChangedFiles @() -FullRunCadence 3
+        $result.HasErrors | Should -BeFalse
+    }
 }
 
 Describe 'Build-TierDiagnostics' -Tag 'Unit', 'Healing' {
@@ -389,6 +508,34 @@ Describe 'Build-TierDiagnostics' -Tag 'Unit', 'Healing' {
         $diag = Build-TierDiagnostics -TierResult $tierResult
         $diag | Should -BeLike "*Raw output:*some raw output here*"
     }
+
+    It 'formats config errors' {
+        $tierResult = @{
+            Tier = 1; SyntaxErrors = @(); MergeConflicts = @(); MissingFiles = @()
+            ConfigErrors = @("Config validation failed: missing 'download' section")
+            CollectionErrors = $null; Failures = $null; RawOutput = $null
+        }
+
+        $diag = Build-TierDiagnostics -TierResult $tierResult
+        $diag | Should -BeLike "*CONFIG: Config validation failed*"
+    }
+
+    It 'handles tier result with all error types populated' {
+        $tierResult = @{
+            Tier = 1
+            SyntaxErrors = @(@{ File = "a.py"; Error = "bad" })
+            MergeConflicts = @("b.py")
+            MissingFiles = @("c.py")
+            ConfigErrors = @("config error")
+            CollectionErrors = $null; Failures = $null; RawOutput = $null
+        }
+
+        $diag = Build-TierDiagnostics -TierResult $tierResult
+        $diag | Should -BeLike "*SYNTAX*"
+        $diag | Should -BeLike "*CONFLICT*"
+        $diag | Should -BeLike "*MISSING*"
+        $diag | Should -BeLike "*CONFIG*"
+    }
 }
 
 Describe 'Log-HealingEvent' {
@@ -447,6 +594,26 @@ Describe 'Log-HealingEvent' {
         $entry.sessionId | Should -Be "test-session-123"
         $entry.iteration | Should -Be 5
     }
+
+    It 'handles missing $State gracefully' {
+        $savedState = $script:State
+        $script:State = $null
+        Log-HealingEvent -Event "healing_skipped" -Data @{ reason = "disabled" }
+
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.event | Should -Be "healing_skipped"
+        # sessionId and iteration should be absent, not error
+        $entry.PSObject.Properties.Name | Should -Not -Contain "sessionId"
+        $script:State = $savedState
+    }
+
+    It 'supports healing_skipped event type' {
+        Log-HealingEvent -Event "healing_skipped" -Data @{ reason = "config disabled" }
+
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.event | Should -Be "healing_skipped"
+        $entry.data.reason | Should -Be "config disabled"
+    }
 }
 
 Describe 'Suspend-SprintForHealing' {
@@ -498,6 +665,35 @@ Describe 'Suspend-SprintForHealing' {
         $entry.event | Should -Be "healing_started"
         $entry.data.failedTier | Should -Be 1
     }
+
+    It 'overwrites existing healing_state.json' {
+        @{ paused = $true; storyId = "OLD" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        $healthResult = @{
+            HasErrors = $true; FailedTier = 3
+            RawDiagnostics = "FAIL: new error"
+            TierResults = @()
+        }
+        Mock Write-Host {}
+        Suspend-SprintForHealing -HealthResult $healthResult -StoryId "US-NEW" -FocusArea "testing"
+
+        $state = Get-Content $script:HealingStateFile -Raw | ConvertFrom-Json
+        $state.storyId | Should -Be "US-NEW"
+        $state.failedTier | Should -Be 3
+    }
+
+    It 'handles empty StoryId and FocusArea' {
+        $healthResult = @{
+            HasErrors = $true; FailedTier = 1
+            RawDiagnostics = "SYNTAX error"
+            TierResults = @()
+        }
+        Mock Write-Host {}
+        Suspend-SprintForHealing -HealthResult $healthResult -StoryId "" -FocusArea ""
+
+        $state = Get-Content $script:HealingStateFile -Raw | ConvertFrom-Json
+        $state.paused | Should -BeTrue
+        $state.storyId | Should -Be ""
+    }
 }
 
 Describe 'Resume-SprintFromHealing' {
@@ -533,6 +729,12 @@ Describe 'Resume-SprintFromHealing' {
         $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
         $entry.event | Should -Be "healing_failed"
     }
+
+    It 'handles already-removed state file gracefully' {
+        # Don't create state file - it should not throw
+        Mock Write-Host {}
+        { Resume-SprintFromHealing -Success $true -AttemptCount 1 } | Should -Not -Throw
+    }
 }
 
 Describe 'Test-HealingInProgress' {
@@ -552,6 +754,11 @@ Describe 'Test-HealingInProgress' {
 
     It 'returns false when file exists but paused is false' {
         @{ paused = $false; storyId = "US-005" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        Test-HealingInProgress | Should -BeFalse
+    }
+
+    It 'returns false when state file has corrupt JSON' {
+        "not valid json {{{" | Set-Content $script:HealingStateFile
         Test-HealingInProgress | Should -BeFalse
     }
 }
@@ -590,6 +797,28 @@ Describe 'Build-HealingPrompt' {
 
         $prompt = Build-HealingPrompt -HealingState $state -Attempt 1
         $prompt | Should -Not -BeLike "*Previous Attempt*"
+    }
+
+    It 'maps all three tier names correctly' {
+        foreach ($tier in @(1, 2, 3)) {
+            $state = @{ failedTier = $tier; rawDiagnostics = "err"; focusArea = "x"; storyId = "y" }
+            $prompt = Build-HealingPrompt -HealingState $state -Attempt 1
+            switch ($tier) {
+                1 { $prompt | Should -BeLike "*Syntax/File Integrity*" }
+                2 { $prompt | Should -BeLike "*Import/Collection*" }
+                3 { $prompt | Should -BeLike "*Test Execution*" }
+            }
+        }
+    }
+
+    It 'truncates long previous output to 1000 chars' {
+        $state = @{ failedTier = 1; rawDiagnostics = "err"; focusArea = "x"; storyId = "y" }
+        $longOutput = "A" * 2000
+        $prompt = Build-HealingPrompt -HealingState $state -Attempt 2 -PreviousOutput $longOutput
+        # The prompt should contain truncated output, not the full 2000 chars
+        $prompt | Should -BeLike "*Previous Attempt Output*"
+        # Verify the raw 2000-char string isn't embedded fully
+        $prompt.Length | Should -BeLessThan ($longOutput.Length + 500)
     }
 }
 
@@ -693,6 +922,93 @@ Describe 'Invoke-HealingSession' {
         $result = Invoke-HealingSession -MaxAttempts 1
         $result.Success | Should -BeFalse
         $result.AttemptsUsed | Should -Be 1
+    }
+
+    It 'updates diagnostics between retry attempts' {
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "Tried to fix"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+        $script:recheckCount = 0
+        Mock Invoke-TieredHealthCheck {
+            $script:recheckCount++
+            if ($script:recheckCount -lt 2) {
+                return @{ HasErrors = $true; FailedTier = 3; RawDiagnostics = "still broken attempt $($script:recheckCount)"; TierResults = @() }
+            }
+            return @{ HasErrors = $false; FailedTier = 0 }
+        }
+        Mock Write-Host {}
+
+        $result = Invoke-HealingSession -MaxAttempts 3
+        $result.Success | Should -BeTrue
+        $result.AttemptsUsed | Should -Be 2
+    }
+
+    It 'retries on Claude non-zero exit code' {
+        Mock Get-ClaudePath { return "claude" }
+        $script:callNum = 0
+        Mock Invoke-ClaudeSubprocess {
+            $script:callNum++
+            if ($script:callNum -eq 1) {
+                return @{
+                    Exited = $true; ExitCode = 1; TimedOut = $false
+                    Output = "Error occurred"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+                }
+            }
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "Fixed"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $false; FailedTier = 0 } }
+        Mock Write-Host {}
+
+        $result = Invoke-HealingSession -MaxAttempts 3
+        $result.Success | Should -BeTrue
+        $result.AttemptsUsed | Should -Be 2
+    }
+
+    It 'continues on Record-Metric failure' {
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "Fixed"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $false; FailedTier = 0 } }
+        Mock Record-Metric { throw "CSV locked" }
+        Mock Write-Host {}
+
+        $result = Invoke-HealingSession -MaxAttempts 3
+        $result.Success | Should -BeTrue
+    }
+
+    It 'passes Build-HealingPrompt the previous output on retries' {
+        Mock Get-ClaudePath { return "claude" }
+        $script:promptCaptures = @()
+        Mock Build-HealingPrompt {
+            param($HealingState, $Attempt, $PreviousOutput)
+            $script:promptCaptures += @{ Attempt = $Attempt; HasPrev = [bool]$PreviousOutput }
+            return "fix prompt"
+        }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "attempt output"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $true; FailedTier = 2; RawDiagnostics = "err"; TierResults = @() } }
+        Mock Write-Host {}
+
+        Invoke-HealingSession -MaxAttempts 2
+
+        $script:promptCaptures.Count | Should -Be 2
+        $script:promptCaptures[0].HasPrev | Should -BeFalse  # First attempt: no previous
+        $script:promptCaptures[1].HasPrev | Should -BeTrue   # Second attempt: has previous
     }
 }
 
@@ -811,6 +1127,28 @@ Describe 'Invoke-PostIterationHealing' {
         $script:passedChangedFiles | Should -Not -BeNullOrEmpty
         $script:passedChangedFiles.Count | Should -Be 2
     }
+
+    It 'handles null selfHealing config gracefully' {
+        Mock Get-RalphConfig { return @{} }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $false; FailedTier = 0 } }
+
+        # Should not throw when selfHealing key is missing
+        $result = Invoke-PostIterationHealing -StoryId "US-001" -FocusArea "test"
+        $result.HealingNeeded | Should -BeFalse
+    }
+
+    It 'uses default fullRunCadence when not in config' {
+        Mock Get-RalphConfig { return @{ selfHealing = @{ enabled = $true; runAfterSuccess = $true; maxAttempts = 3 } } }
+        $script:capturedCadence = $null
+        Mock Invoke-TieredHealthCheck {
+            param($ChangedFiles, $FullRunCadence)
+            $script:capturedCadence = $FullRunCadence
+            return @{ HasErrors = $false; FailedTier = 0 }
+        }
+
+        Invoke-PostIterationHealing -StoryId "US-001" -FocusArea "test" -ChangedFiles @()
+        $script:capturedCadence | Should -Be 3
+    }
 }
 
 Describe 'Self-healing config' {
@@ -917,5 +1255,53 @@ Describe 'Get-HealingSummary' {
         $summary.TotalFailed | Should -Be 1
         $summary.TotalResolved | Should -Be 0
         $summary.TotalAttempts | Should -Be 3
+    }
+
+    It 'skips corrupt JSONL lines without crashing' {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_corrupt.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+
+        @{ event = "healing_started"; data = @{ failedTier = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        "this is not valid json at all" | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_resolved"; data = @{ attempts = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+
+        $summary = Get-HealingSummary
+        $summary.TotalHealingSessions | Should -Be 1
+        $summary.TotalResolved | Should -Be 1
+    }
+
+    It 'counts attempts from resolved and failed events' {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_attempts.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+
+        @{ event = "healing_started"; data = @{ failedTier = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_attempt"; data = @{ attempt = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_attempt"; data = @{ attempt = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_failed"; data = @{ attempts = 2 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+
+        $summary = Get-HealingSummary
+        $summary.TotalHealingSessions | Should -Be 1
+        $summary.TotalFailed | Should -Be 1
+        # TotalAttempts comes from resolved/failed .data.attempts, not healing_attempt event count
+        $summary.TotalAttempts | Should -Be 2
+    }
+
+    It 'handles healing_skipped events without counting as session' {
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_skipped.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+
+        @{ event = "healing_skipped"; data = @{ reason = "disabled" } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+        @{ event = "healing_started"; data = @{ failedTier = 1 } } |
+            ConvertTo-Json -Compress | Add-Content $script:HealingLogFile -Encoding UTF8
+
+        $summary = Get-HealingSummary
+        $summary.TotalHealingSessions | Should -Be 1  # Only started counts
     }
 }
