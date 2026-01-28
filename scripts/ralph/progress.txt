@@ -7416,3 +7416,30 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: requirements-dev.txt, pytest.ini, tests/README.md
 - Test results: 8 tests passed in 0.28s
 - Commit: c9da8e1
+
+## Iteration US-006 (Sprint 24) - Expand parameterized tests for config validation edge cases
+- Added 76 parametrized test cases to tests/test_config_section_validation.py
+- Added 19 @pytest.mark.parametrize decorators across 10 new test classes
+
+**New Test Classes:**
+1. TestMatchingConfigProviderParametrized: primary_provider (4 values), secondary_provider (3 values), invalid detection (5 values)
+2. TestLLMConfigProviderParametrized: env key loading (2 values), valid providers (3 values), default models (3 values)
+3. TestEmbeddingProviderParametrized: valid providers (4 values), invalid providers (4 values)
+4. TestHealingStrategyParametrized: 4 valid strategies (aggressive, conservative, interactive, minimal)
+5. TestBoundaryValuesParametrized: confidence thresholds (6 cases), embedding_candidates (8 cases), scene threshold (5 cases), temperature (5 cases), min_scene_len (5 cases)
+6. TestLocationMatchingLevelParametrized: 4 valid levels (city, state, country, continent), 4 invalid levels
+7. TestChapterDetectionStrategyParametrized: 2 strategies (topic, location)
+8. TestSceneDetectionPresetParametrized: 3 presets (fast, balanced, accurate)
+9. TestVisionProviderParametrized: 2 providers (gemini, openai)
+
+**Acceptance Criteria Verification:**
+- AC1: Added @pytest.mark.parametrize for enum values throughout
+- AC2: Covered MatchingConfig.primary_provider (gemini, anthropic, local, embedding_only) and secondary_provider
+- AC3: Covered LLMConfig.provider (google, anthropic, ollama) with env key and model tests
+- AC4: Added boundary tests for min_confidence/high_confidence_threshold, embedding_candidates constraint, threshold ranges
+- AC5: Added 76 new parametrized test cases (far exceeds minimum of 10)
+- AC6: All 132 tests pass in 0.73s with pytest -v
+
+- Files modified: tests/test_config_section_validation.py (+270 lines)
+- Test results: 132 passed in 0.73s
+

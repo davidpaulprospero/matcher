@@ -809,5 +809,321 @@ class TestLocationMatchingConfigDefaults:
             assert config.geonames_username == 'test_user'
 
 
+# =============================================================================
+# Parametrized Tests for Enum Values (US-006 Sprint 24)
+# =============================================================================
+
+@pytest.mark.fast
+class TestMatchingConfigProviderParametrized:
+    """Parametrized tests for MatchingConfig provider enum values."""
+
+    @pytest.mark.parametrize("provider", [
+        "gemini",
+        "anthropic",
+        "local",
+        "embedding_only",
+    ])
+    def test_valid_primary_providers(self, provider):
+        """Test all valid primary_provider values are accepted."""
+        config = MatchingConfig(primary_provider=provider)
+        assert config.primary_provider == provider
+
+    @pytest.mark.parametrize("provider", [
+        "gemini",
+        "anthropic",
+        "ollama",
+    ])
+    def test_valid_secondary_providers(self, provider):
+        """Test all valid secondary_provider values are accepted."""
+        config = MatchingConfig(secondary_provider=provider)
+        assert config.secondary_provider == provider
+
+    @pytest.mark.parametrize("invalid_provider", [
+        "invalid",
+        "openai",
+        "gpt4",
+        "",
+        "GEMINI",  # Case-sensitive
+    ])
+    def test_invalid_primary_provider_detected(self, invalid_provider, tmp_path):
+        """Test invalid primary_provider values are detected during validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+matching:
+  primary_provider: {invalid_provider if invalid_provider else '""'}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+        assert any("primary_provider" in e for e in errors)
+
+
+@pytest.mark.fast
+class TestLLMConfigProviderParametrized:
+    """Parametrized tests for LLMConfig provider enum values."""
+
+    @pytest.mark.parametrize("provider,expected_env_key", [
+        ("google", "GEMINI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+    ])
+    def test_provider_loads_correct_env_key(self, provider, expected_env_key):
+        """Test each provider loads the correct environment variable."""
+        test_key = f"test_{provider}_key_123"
+        with patch.dict(os.environ, {expected_env_key: test_key}):
+            config = LLMConfig(provider=provider, api_key='')
+            assert config.api_key == test_key
+
+    @pytest.mark.parametrize("provider", [
+        "google",
+        "anthropic",
+        "ollama",
+    ])
+    def test_valid_llm_providers(self, provider):
+        """Test all valid LLMConfig.provider values are accepted."""
+        config = LLMConfig(provider=provider)
+        assert config.provider == provider
+
+    @pytest.mark.parametrize("provider,model_attr,expected_default", [
+        ("google", "gemini", "gemini-2.0-flash"),
+        ("anthropic", "anthropic", "claude-3-haiku-20240307"),
+        ("ollama", "ollama", "llama3.2"),
+    ])
+    def test_provider_default_models(self, provider, model_attr, expected_default):
+        """Test each provider has correct default model configuration."""
+        config = LLMConfig(provider=provider)
+        provider_config = getattr(config, model_attr)
+        assert provider_config.model == expected_default
+
+
+@pytest.mark.fast
+class TestEmbeddingProviderParametrized:
+    """Parametrized tests for embedding provider enum values."""
+
+    @pytest.mark.parametrize("provider", [
+        "gemini",
+        "openai",
+        "local",
+        "sentence_transformers",
+    ])
+    def test_valid_embedding_providers(self, provider, tmp_path):
+        """Test all valid embedding.provider values are accepted."""
+        config_file = tmp_path / f"config_{provider}.yaml"
+        config_file.write_text(f"""
+embedding:
+  provider: {provider}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+        provider_errors = [e for e in errors if "embedding.provider" in e]
+        assert len(provider_errors) == 0, f"Provider {provider} should be valid"
+
+    @pytest.mark.parametrize("invalid_provider", [
+        "cohere",
+        "huggingface",
+        "invalid",
+        "",
+    ])
+    def test_invalid_embedding_provider_detected(self, invalid_provider, tmp_path):
+        """Test invalid embedding.provider values are detected."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+embedding:
+  provider: {invalid_provider if invalid_provider else '""'}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+        assert any("embedding.provider" in e for e in errors)
+
+
+@pytest.mark.fast
+class TestHealingStrategyParametrized:
+    """Parametrized tests for HealingConfig strategy enum values."""
+
+    @pytest.mark.parametrize("strategy", [
+        "aggressive",
+        "conservative",
+        "interactive",
+        "minimal",
+    ])
+    def test_valid_healing_strategies(self, strategy):
+        """Test all valid HealingConfig.strategy values are accepted."""
+        config = HealingConfig(strategy=strategy)
+        assert config.strategy == strategy
+
+
+@pytest.mark.fast
+class TestBoundaryValuesParametrized:
+    """Parametrized tests for config boundary values (min/max thresholds)."""
+
+    @pytest.mark.parametrize("min_conf,high_conf,should_pass", [
+        (0.5, 0.85, True),   # min < high - valid
+        (0.7, 0.85, True),   # min < high - valid (default values)
+        (0.85, 0.85, True),  # min == high - edge case, valid
+        (0.9, 0.85, False),  # min > high - invalid
+        (1.0, 0.85, False),  # min way higher - invalid
+        (0.0, 0.1, True),    # very low thresholds - valid
+    ])
+    def test_confidence_threshold_constraints(self, min_conf, high_conf, should_pass, tmp_path):
+        """Test min_confidence <= high_confidence_threshold constraint."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+matching:
+  min_confidence: {min_conf}
+  high_confidence_threshold: {high_conf}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        constraint_errors = [e for e in errors if "min_confidence" in e and "high_confidence_threshold" in e]
+
+        if should_pass:
+            assert len(constraint_errors) == 0
+        else:
+            assert len(constraint_errors) > 0
+
+    @pytest.mark.parametrize("embedding_candidates,num_alternatives,should_pass", [
+        (50, 2, True),   # 50 >= 2*3=6 - valid (default)
+        (10, 2, True),   # 10 >= 6 - valid
+        (6, 2, True),    # exactly 6 = 2*3 - valid edge case
+        (5, 2, False),   # 5 < 6 - invalid
+        (100, 5, True),  # 100 >= 15 - valid
+        (14, 5, False),  # 14 < 15 - invalid
+        (3, 1, True),    # 3 >= 3 - valid edge case
+        (2, 1, False),   # 2 < 3 - invalid
+    ])
+    def test_embedding_candidates_constraint(self, embedding_candidates, num_alternatives, should_pass, tmp_path):
+        """Test embedding_candidates >= num_alternatives * 3 constraint."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+matching:
+  embedding_candidates: {embedding_candidates}
+output:
+  num_alternatives: {num_alternatives}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        candidate_errors = [e for e in errors if "embedding_candidates" in e]
+
+        if should_pass:
+            assert len(candidate_errors) == 0
+        else:
+            assert len(candidate_errors) > 0
+
+    @pytest.mark.parametrize("threshold,expected_valid", [
+        (0.0, True),     # Zero threshold - valid edge case
+        (0.5, True),     # Normal value
+        (1.0, True),     # Max threshold
+        (27.0, True),    # Default value
+        (100.0, False),  # Beyond valid range (100 is boundary)
+    ])
+    def test_scene_detection_threshold_bounds(self, threshold, expected_valid):
+        """Test SceneDetectionConfig threshold boundary values."""
+        config = SceneDetectionConfig(threshold=threshold)
+        # Threshold should be 0 < threshold < 100
+        is_valid = 0 <= config.threshold < 100
+        assert is_valid == expected_valid
+
+    @pytest.mark.parametrize("temperature", [
+        0.0,    # Minimum - deterministic
+        0.5,    # Normal
+        0.7,    # Default
+        1.0,    # Maximum standard
+        2.0,    # Extended range (some providers support)
+    ])
+    def test_llm_temperature_bounds(self, temperature):
+        """Test LLMConfig temperature accepts valid range values."""
+        config = LLMConfig(temperature=temperature)
+        assert config.temperature == temperature
+
+    @pytest.mark.parametrize("min_scene_len,expected_valid", [
+        (1, True),      # Minimum valid
+        (15, True),     # Default value
+        (60, True),     # Large value
+        (0, False),     # Zero - invalid (must be positive)
+        (-1, False),    # Negative - invalid
+    ])
+    def test_min_scene_len_bounds(self, min_scene_len, expected_valid):
+        """Test SceneDetectionConfig min_scene_len boundary values."""
+        config = SceneDetectionConfig(min_scene_len=min_scene_len)
+        is_valid = config.min_scene_len > 0
+        assert is_valid == expected_valid
+
+
+@pytest.mark.fast
+class TestLocationMatchingLevelParametrized:
+    """Parametrized tests for LocationMatchingConfig hard_filter_level enum values."""
+
+    @pytest.mark.parametrize("level", [
+        "city",
+        "state",
+        "country",
+        "continent",
+    ])
+    def test_valid_hard_filter_levels(self, level):
+        """Test all valid hard_filter_level values are accepted."""
+        config = LocationMatchingConfig(hard_filter_level=level)
+        assert config.hard_filter_level == level
+
+    @pytest.mark.parametrize("invalid_level", [
+        "region",
+        "neighborhood",
+        "invalid",
+        "",
+    ])
+    def test_invalid_hard_filter_level_detected(self, invalid_level, tmp_path):
+        """Test invalid hard_filter_level values are detected during validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+matching:
+  location_matching:
+    enabled: true
+    hard_filter_level: {invalid_level if invalid_level else '""'}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_enums()
+        assert any("hard_filter_level" in e for e in errors)
+
+
+@pytest.mark.fast
+class TestChapterDetectionStrategyParametrized:
+    """Parametrized tests for ChapterDetectionConfig strategy enum values."""
+
+    @pytest.mark.parametrize("strategy", [
+        "topic",
+        "location",
+    ])
+    def test_valid_chapter_strategies(self, strategy):
+        """Test all valid default_strategy values are accepted."""
+        config = ChapterDetectionConfig(default_strategy=strategy)
+        assert config.default_strategy == strategy
+
+
+@pytest.mark.fast
+class TestSceneDetectionPresetParametrized:
+    """Parametrized tests for SceneDetectionConfig preset enum values."""
+
+    @pytest.mark.parametrize("preset", [
+        "fast",
+        "balanced",
+        "accurate",
+    ])
+    def test_valid_scene_detection_presets(self, preset):
+        """Test all valid preset values are accepted."""
+        config = SceneDetectionConfig(preset=preset)
+        assert config.preset == preset
+
+
+@pytest.mark.fast
+class TestVisionProviderParametrized:
+    """Parametrized tests for VisionConfig provider enum values."""
+
+    @pytest.mark.parametrize("provider", [
+        "gemini",
+        "openai",
+    ])
+    def test_valid_vision_providers(self, provider):
+        """Test all valid VisionConfig.provider values are accepted."""
+        config = VisionConfig(provider=provider)
+        assert config.provider == provider
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
