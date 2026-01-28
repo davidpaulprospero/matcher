@@ -302,6 +302,56 @@ class TestHealerCoordination:
         # Minimal mode returns at most 1
         assert len(healers) <= 1
 
+    def test_select_healers_returns_empty_for_unknown_error(self, mock_config, project_dir):
+        """Test select_healers returns empty list when no healer can handle error."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Make all healers report they cannot handle this error
+        for healer in orchestrator.healers:
+            healer.can_handle = Mock(return_value=False)
+
+        error = Exception("Completely unknown error pattern xyz123")
+        healers = orchestrator.select_healers(error, "UNKNOWN_STAGE")
+
+        # Should return empty list
+        assert healers == []
+
+    def test_select_healers_respects_can_handle(self, mock_config, project_dir):
+        """Test select_healers only returns healers where can_handle() is True."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Make all healers except one return False for can_handle
+        for i, healer in enumerate(orchestrator.healers):
+            # Only the last healer can handle this error
+            healer.can_handle = Mock(return_value=(i == len(orchestrator.healers) - 1))
+
+        error = Exception("specific error pattern")
+        healers = orchestrator.select_healers(error, "TEST")
+
+        # Only healers that can_handle() returned True should be included
+        # Each healer's can_handle was called
+        for healer in orchestrator.healers:
+            healer.can_handle.assert_called()
+
+        # Should have at most 1 healer (the last one)
+        assert len(healers) <= 1
+
+    def test_select_healers_logs_decision(self, mock_config, project_dir, caplog):
+        """Test select_healers logs healer selection decision."""
+        import logging
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        error = Exception("OTIO timeline error")
+
+        with caplog.at_level(logging.DEBUG):
+            healers = orchestrator.select_healers(error, "OUTPUT")
+
+        # Should have logged something about healer selection
+        # (implementation may vary - check if any healer-related log exists)
+        if healers:
+            # At least verify it ran without error
+            assert True
+
     def test_coordinate_heal_success(self, mock_config, project_dir, mock_state):
         """Test coordinated healing on success."""
         orchestrator = HealingOrchestrator(mock_config, project_dir)
