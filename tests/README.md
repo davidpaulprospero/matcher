@@ -437,6 +437,142 @@ Coverage settings are in `.coveragerc`:
 - XML reports go to `coverage.xml`
 - Excludes: legacy modules, test files, type-checking blocks
 
+### Per-Module Coverage Breakdown
+
+The `scripts/coverage_by_module.py` script generates per-module coverage reports with critical module highlighting and baseline comparison.
+
+#### Quick Usage
+
+```bash
+# Generate basic report
+python scripts/coverage_by_module.py
+
+# Verbose report (show all modules)
+python scripts/coverage_by_module.py --verbose
+
+# JSON output for CI
+python scripts/coverage_by_module.py --json --output report.json
+
+# Compare to baseline
+python scripts/coverage_by_module.py --compare-baseline baseline.json
+
+# Save current as baseline
+python scripts/coverage_by_module.py --save-baseline --output baseline.json
+
+# Fail on regression (CI integration)
+python scripts/coverage_by_module.py --compare-baseline baseline.json --fail-on-regression
+```
+
+#### Report Output
+
+```
+======================================================================
+COVERAGE REPORT BY MODULE
+======================================================================
+
+Overall Coverage: 87.5% (target: 85.0%)
+[OK] Coverage target met
+
+----------------------------------------------------------------------
+CRITICAL MODULES
+----------------------------------------------------------------------
+Module                                Coverage           Lines     Status
+----------------------------------------------------------------------
+matching                                92.50%        2356/2547     [OK]
+agents                                  88.00%        1243/1413     [OK]
+stages                                  85.50%        2962/3465     [OK]
+compilation                             84.00%           45/53     [WARN]
+
+----------------------------------------------------------------------
+WARNINGS
+----------------------------------------------------------------------
+  WARNING: compilation at 84.0% (target: 85.0%)
+======================================================================
+```
+
+#### Critical Modules
+
+The script highlights these critical modules that must maintain high coverage:
+
+| Module | Purpose | Target | Minimum |
+|--------|---------|--------|---------|
+| `matching/` | Video-to-voiceover matching | 85% | 80% |
+| `agents/` | Self-healing pipeline agents | 85% | 80% |
+| `compilation/` | Keyword compilation pipeline | 85% | 80% |
+| `stages/` | Pipeline stage implementations | 85% | 80% |
+
+#### JSON Output Format
+
+```json
+{
+  "timestamp": "2026-01-29T10:30:00.000000",
+  "overall_coverage": 87.5,
+  "target": 85.0,
+  "modules": [...],
+  "critical_modules": [...],
+  "warnings": [...],
+  "summary": {
+    "total_modules": 24,
+    "below_target_count": 3,
+    "critical_modules_count": 4,
+    "critical_below_target": 1,
+    "meets_target": true
+  }
+}
+```
+
+#### CI Integration
+
+Add to your GitHub Actions workflow:
+
+```yaml
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: pytest tests/ --cov=src --cov-report=xml
+
+      - name: Generate coverage report
+        run: python scripts/coverage_by_module.py --json --output coverage-report.json
+
+      - name: Compare to baseline
+        run: |
+          python scripts/coverage_by_module.py \
+            --compare-baseline coverage-baseline.json \
+            --fail-on-regression
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report.json
+```
+
+#### Updating Baseline
+
+When coverage improves and you want to update the baseline:
+
+```bash
+# Generate fresh coverage data
+pytest tests/ --cov=src --cov-report=xml
+
+# Save new baseline
+python scripts/coverage_by_module.py --save-baseline --output coverage-baseline.json
+
+# Commit the baseline
+git add coverage-baseline.json
+git commit -m "chore: update coverage baseline"
+```
+
 ## Assertion Helpers
 
 The `tests/helpers/` module provides reusable assertion helpers for common validation patterns.
