@@ -7100,3 +7100,22 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: src/feedback_learning.py, tests/test_feedback_learning.py
 - Test results: 30 tests passed in 0.45s
 - Commit: 19a8a34
+
+## Iteration US-010 (Sprint 22) - Add audio analysis and face detection threshold tests
+- Created tests/test_audio_face_threshold_us010.py with 30 tests in 7 classes:
+  - TestSilenceThresholdBoundariesUS010 (5 tests): AC1 - silence at exact -40 dB boundary
+  - TestVADShortAudioUS010 (5 tests): AC2 - short audio clip handling (<1 second)
+  - TestFaceScore03ThresholdUS010 (7 tests): AC3 - B-roll classification at 0.3 threshold
+  - TestMultipleFacesConfidenceUS010 (4 tests): AC4 - multiple face detection scoring
+  - TestSpeechVsMusicDetectionUS010 (6 tests): AC5 - speech vs music distinction
+  - TestAdditionalThresholdEdgeCasesUS010 (3 tests): additional edge cases
+- All 5 acceptance criteria verified:
+  - AC1: test_silence_detection_at_exact_threshold, test_silence_detection_just_below_threshold, etc.
+  - AC2: test_speech_detection_sub_second_audio, test_speech_detection_very_short_audio_100ms, etc.
+  - AC3: test_is_broll_at_exact_threshold, test_is_broll_just_below_threshold, test_apply_broll_preference_at_threshold
+  - AC4: test_mediapipe_multiple_faces_counted, test_opencv_multiple_faces_detected, test_mediapipe_mixed_face_counts_per_frame
+  - AC5: test_speech_like_features_detected_as_speech, test_music_like_features_not_detected_as_speech, etc.
+- Files created: tests/test_audio_face_threshold_us010.py (771 lines)
+- Test results: 30 tests passed in 1.01s
+- Commit: fcc83c1
+
