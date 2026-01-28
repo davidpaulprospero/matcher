@@ -328,6 +328,54 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
         }
     }
 
+    Context "Compare-TestBaseline subset detection" {
+        It "Does not flag regression for subset runs (fewer tests, all passing)" {
+            @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
+                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+
+            $result = Compare-TestBaseline -CurrentResults "38/38 pass"
+            $result.hasRegression | Should -Be $false
+            $result.isSubsetRun | Should -Be $true
+        }
+
+        It "Flags regression for subset runs with new failures" {
+            @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
+                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+
+            $result = Compare-TestBaseline -CurrentResults "35/38 pass, 3 fail"
+            $result.hasRegression | Should -Be $true
+            $result.failedDelta | Should -BeGreaterThan 0
+        }
+
+        It "Flags regression for comparable runs with fewer passing" {
+            @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
+                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+
+            # 48/52 is 92% of baseline - comparable run, so drop IS a regression
+            $result = Compare-TestBaseline -CurrentResults "48/52 pass"
+            $result.hasRegression | Should -Be $true
+            $result.isSubsetRun | Should -Be $false
+        }
+
+        It "Does not flag subset when current total is at threshold" {
+            @{ capturedAt = "2026-01-01"; passed = 100; failed = 0; totalTests = 100 } |
+                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+
+            # 80/80 is exactly 80% of baseline - NOT a subset (threshold is <80%)
+            $result = Compare-TestBaseline -CurrentResults "80/80 pass"
+            $result.isSubsetRun | Should -Be $false
+        }
+
+        It "Includes currentTotal and baselineTotal in result" {
+            @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
+                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+
+            $result = Compare-TestBaseline -CurrentResults "38/38 pass"
+            $result.currentTotal | Should -Be 38
+            $result.baselineTotal | Should -Be 52
+        }
+    }
+
     Context "Update-TestBaseline" {
         It "Creates baseline file from test results" {
             Update-TestBaseline -TestResults "41/41 pass"
@@ -344,6 +392,37 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
             Update-TestBaseline -TestResults ""
             $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
             Test-Path $baselineFile | Should -Be $false
+        }
+
+        It "Does not downgrade baseline from subset runs" {
+            $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+
+            # Set initial baseline with 52 tests
+            @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52; errors = 0 } |
+                ConvertTo-Json | Set-Content $baselineFile -Encoding UTF8
+
+            # Attempt update with subset (38 tests)
+            Update-TestBaseline -TestResults "38/38 pass"
+
+            # Baseline should NOT have been downgraded
+            $baseline = Get-Content $baselineFile -Raw | ConvertFrom-Json
+            $baseline.passed | Should -Be 52
+            $baseline.totalTests | Should -Be 52
+        }
+
+        It "Updates baseline when comparable or larger run" {
+            $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+
+            # Set initial baseline with 52 tests
+            @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52; errors = 0 } |
+                ConvertTo-Json | Set-Content $baselineFile -Encoding UTF8
+
+            # Update with larger run (60 tests)
+            Update-TestBaseline -TestResults "60/60 pass"
+
+            $baseline = Get-Content $baselineFile -Raw | ConvertFrom-Json
+            $baseline.passed | Should -Be 60
+            $baseline.totalTests | Should -Be 60
         }
     }
 }
@@ -599,6 +678,60 @@ Describe "New-SprintReport" -Tag "Unit", "QualityGate", "Phase1" {
             $content = Get-Content $result -Raw
             $content | Should -Match "Incomplete Stories"
             $content | Should -Match "Not done"
+
+            Remove-Item $result -Force -ErrorAction SilentlyContinue
+        }
+
+        It "Includes healing summary when healing events exist" {
+            Mock Get-HealingSummary {
+                return @{
+                    TotalHealingSessions = 3
+                    TotalResolved        = 2
+                    TotalFailed          = 1
+                    TotalAttempts        = 7
+                    TierBreakdown        = @{ 1 = 1; 2 = 1; 3 = 1 }
+                    Events               = @()
+                }
+            }
+
+            $prd = [PSCustomObject]@{
+                focusArea = "testing"
+                userStories = @(
+                    [PSCustomObject]@{ id = "US-001"; title = "Done"; passes = $true; acceptanceCriteria = @() }
+                )
+            }
+
+            $result = New-SprintReport -SprintData @{ sprintNumber = 101 } -Prd $prd
+            $content = Get-Content $result -Raw
+            $content | Should -Match "Self-Healing"
+            $content | Should -Match "Healing sessions"
+            $content | Should -Match "Tier breakdown"
+
+            Remove-Item $result -Force -ErrorAction SilentlyContinue
+        }
+
+        It "Omits healing section when no healing events" {
+            Mock Get-HealingSummary {
+                return @{
+                    TotalHealingSessions = 0
+                    TotalResolved        = 0
+                    TotalFailed          = 0
+                    TotalAttempts        = 0
+                    TierBreakdown        = @{ 1 = 0; 2 = 0; 3 = 0 }
+                    Events               = @()
+                }
+            }
+
+            $prd = [PSCustomObject]@{
+                focusArea = "testing"
+                userStories = @(
+                    [PSCustomObject]@{ id = "US-001"; title = "Done"; passes = $true; acceptanceCriteria = @() }
+                )
+            }
+
+            $result = New-SprintReport -SprintData @{ sprintNumber = 102 } -Prd $prd
+            $content = Get-Content $result -Raw
+            $content | Should -Not -Match "Self-Healing"
 
             Remove-Item $result -Force -ErrorAction SilentlyContinue
         }
