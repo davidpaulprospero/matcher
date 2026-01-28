@@ -6562,3 +6562,13 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5: test_missing_stage_data_returns_empty_dict — verifies empty dict for missing fields
 - Bonus: Added Path, unicode, nested structure tests
 - Test results: 12 passed in 0.43s
+
+## Iteration US-006 (Sprint 19) - Add test fixture factory patterns for common mock objects
+- Created 5 factory fixtures in tests/conftest.py with comprehensive docstrings
+- AC1: srt_segment_factory — creates SRTSegment with customizable attrs
+- AC2: config_factory — creates mock Config with nested section overrides
+- AC3: pipeline_state_factory — creates PipelineState with pre-populated data
+- AC4: match_result_factory — creates MatchResult with confidence/alternatives
+- AC5: All factories have usage examples and parameter docs in docstrings
+- Bonus: Added match_factory for individual Match objects
+- Test results: 14 tests in test_fixture_factories.py passed in 0.43s
