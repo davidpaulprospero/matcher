@@ -64,7 +64,8 @@
             "id": "US-005",
             "title": "Add escalation timeline checkpoint persistence tests",
             "priority": 5,
-            "passes": false,
+            "passes": true,
+            "notes": "Added timeline and tier_outcomes serialization to EscalationManager.to_dict() (under 'timeline' and 'tier_outcomes' keys) and restoration in from_dict() with backward compatibility and JSON string-key handling. Created tests/test_escalation_checkpoint_persistence.py with 22 tests across 5 classes: TestToDictIncludesTimeline (5 tests), TestFromDictRestoresTimeline (4 tests), TestToDictIncludesTierOutcomes (4 tests), TestFromDictRestoresTierOutcomes (5 tests), TestRoundtripHotKeywords (4 tests). All 22 new tests pass, all 164 existing escalation tests pass.",
             "acceptanceCriteria": [
                 "Test to_dict() includes _escalation_timeline under 'timeline' key with all recorded events per keyword",
                 "Test from_dict() restores _escalation_timeline correctly — record 5 events, serialize, deserialize, verify get_keyword_escalation_timeline() returns same data",
