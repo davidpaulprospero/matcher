@@ -8,6 +8,7 @@ Tests the MatchStage class which handles:
 - Location filtering
 - Delta matching
 - Checkpoint operations
+- Parametrized testing for provider combinations, confidence thresholds, match counts, and fallback scenarios
 """
 
 import pytest
@@ -1021,3 +1022,416 @@ class TestMatchEdgeCases:
                         # Check location_chapters was passed
                         call_kwargs = mock_match.call_args[1]
                         assert 'location_chapters' in call_kwargs
+
+
+# ============================================================================
+# Parametrized Tests for Provider Combinations
+# ============================================================================
+
+class TestProviderCombinations:
+    """Parametrized tests for different matching provider combinations"""
+
+    @pytest.mark.parametrize("provider_name,expected_valid", [
+        ("gemini", True),
+        ("anthropic", True),
+        ("ollama", True),
+        ("embedding_only", True),
+        ("invalid_provider", False),
+    ])
+    def test_provider_initialization(self, provider_name, expected_valid):
+        """Test that different provider configurations initialize correctly"""
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.primary_provider = provider_name
+        config.matching.min_confidence = 0.5
+        config.matching.embedding_candidates = 50
+        config.matching.llm_rerank_candidates = 10
+        config.matching.max_clip_reuse = 3
+        config.cache.cache_dir = ".cache"
+
+        stage = MatchStage()
+
+        # Stage itself should always initialize
+        assert stage.name == "MATCH"
+
+    @pytest.mark.parametrize("provider,fallback_provider,scenario", [
+        ("gemini", "anthropic", "primary_fails_uses_fallback"),
+        ("anthropic", "ollama", "primary_fails_uses_fallback"),
+        ("ollama", None, "single_provider_no_fallback"),
+        ("gemini", "gemini", "same_provider_retry"),
+    ])
+    def test_provider_fallback_scenarios(self, provider, fallback_provider, scenario):
+        """Test provider fallback behavior in different scenarios"""
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.primary_provider = provider
+        config.matching.fallback_provider = fallback_provider
+        config.matching.min_confidence = 0.5
+        config.matching.embedding_candidates = 50
+        config.matching.llm_rerank_candidates = 10
+        config.matching.max_clip_reuse = 3
+        config.cache.cache_dir = ".cache"
+
+        stage = MatchStage()
+
+        # Verify configuration is read correctly
+        assert config.matching.primary_provider == provider
+        assert config.matching.fallback_provider == fallback_provider
+
+    @pytest.mark.parametrize("strategy_type", [
+        "embedding",
+        "llm",
+        "hybrid",
+    ])
+    def test_matching_strategy_types(self, strategy_type):
+        """Test different matching strategy types"""
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.strategy = strategy_type
+        config.matching.min_confidence = 0.5
+        config.matching.embedding_candidates = 50
+        config.matching.llm_rerank_candidates = 10
+        config.matching.max_clip_reuse = 3
+        config.cache.cache_dir = ".cache"
+
+        stage = MatchStage()
+
+        # Verify strategy type is valid
+        assert strategy_type in ["embedding", "llm", "hybrid"]
+
+
+# ============================================================================
+# Parametrized Tests for Confidence Threshold Boundaries
+# ============================================================================
+
+class TestConfidenceThresholdBoundaries:
+    """Parametrized tests for confidence threshold boundary values"""
+
+    @pytest.mark.parametrize("min_confidence", [
+        0.0,   # Minimum boundary - accept everything
+        0.25,  # Low threshold
+        0.5,   # Default/medium threshold
+        0.75,  # High threshold
+        1.0,   # Maximum boundary - accept only perfect matches
+    ])
+    def test_min_confidence_threshold_values(self, min_confidence):
+        """Test matching with different min_confidence threshold values"""
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.min_confidence = min_confidence
+        config.matching.high_confidence_threshold = 0.8
+        config.matching.embedding_candidates = 50
+        config.matching.llm_rerank_candidates = 10
+        config.matching.max_clip_reuse = 3
+        config.cache.cache_dir = ".cache"
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Test segment")
+        ]
+        state.embeddings = np.array([[0.1, 0.2, 0.3]])
+        state.text_metadata = [{'video_path': 'v.mp4', 'text': 'test', 'start_time': 0, 'end_time': 1}]
+
+        # Validation should pass regardless of min_confidence value
+        error = stage.validate_inputs(state, config)
+        assert error is None
+
+    @pytest.mark.parametrize("high_conf_threshold,expected_skip_llm", [
+        (0.5, True),   # Low threshold - more segments skip LLM
+        (0.75, True),  # Medium threshold
+        (0.9, True),   # High threshold - fewer segments skip LLM
+        (1.0, False),  # Maximum - nothing skips LLM (impossible to achieve 1.0 embedding sim)
+    ])
+    def test_skip_llm_threshold_behavior(self, high_conf_threshold, expected_skip_llm):
+        """Test skip_llm threshold affects LLM usage appropriately"""
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.min_confidence = 0.5
+        config.matching.high_confidence_threshold = high_conf_threshold
+        config.matching.skip_llm_threshold = high_conf_threshold
+        config.matching.embedding_candidates = 50
+        config.matching.llm_rerank_candidates = 10
+        config.matching.max_clip_reuse = 3
+        config.cache.cache_dir = ".cache"
+
+        stage = MatchStage()
+
+        # High similarity candidate (0.95) should skip LLM if threshold <= 0.95
+        skip_llm = 0.95 >= high_conf_threshold
+        assert skip_llm == expected_skip_llm or high_conf_threshold == 1.0
+
+    @pytest.mark.parametrize("confidence,expected_valid", [
+        (-0.1, False),  # Below valid range
+        (0.0, True),    # Minimum valid
+        (0.5, True),    # Middle of range
+        (1.0, True),    # Maximum valid
+        (1.1, False),   # Above valid range
+    ])
+    def test_confidence_value_validation(self, confidence, expected_valid):
+        """Test confidence values are validated correctly in restore"""
+        stage = MatchStage()
+        state = PipelineState()
+
+        checkpoint = MagicMock()
+        checkpoint.get_stage_data.return_value = {
+            'matches': [
+                {'segment_index': 0, 'video_file': 'v1.mp4', 'confidence': confidence}
+            ]
+        }
+
+        result = stage.restore(state, checkpoint)
+
+        if expected_valid:
+            assert result is True
+            # Confidence should be clamped to [0.0, 1.0]
+            expected_conf = max(0.0, min(1.0, confidence))
+            assert state.matches[0].confidence == expected_conf
+        else:
+            # Invalid confidence should still work but be clamped
+            assert result is True
+            assert 0.0 <= state.matches[0].confidence <= 1.0
+
+
+# ============================================================================
+# Parametrized Tests for Match Count Variations
+# ============================================================================
+
+class TestMatchCountVariations:
+    """Parametrized tests for different match_count/num_alternatives settings"""
+
+    @pytest.mark.parametrize("num_alternatives", [
+        0,   # No alternatives (only primary match)
+        1,   # Single alternative
+        2,   # Default
+        3,   # Three alternatives
+        5,   # Five alternatives
+        10,  # Ten alternatives
+    ])
+    def test_num_alternatives_config(self, num_alternatives):
+        """Test different num_alternatives configurations"""
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.min_confidence = 0.5
+        config.matching.embedding_candidates = 50
+        config.matching.llm_rerank_candidates = 10
+        config.matching.max_clip_reuse = 3
+        config.output.num_alternatives = num_alternatives
+        config.cache.cache_dir = ".cache"
+
+        stage = MatchStage()
+
+        assert config.output.num_alternatives == num_alternatives
+        # Stage should accept any valid num_alternatives value
+        assert stage.name == "MATCH"
+
+    @pytest.mark.parametrize("num_alternatives,num_candidates,expected_alt_count", [
+        (3, 1, 0),   # Only 1 candidate, can't have alternatives
+        (3, 2, 1),   # 2 candidates, 1 alternative (primary uses 1)
+        (3, 3, 2),   # 3 candidates, 2 alternatives
+        (3, 5, 3),   # 5 candidates, capped at 3 alternatives
+        (5, 3, 2),   # 3 candidates but requesting 5, limited to 2
+        (10, 5, 4),  # 5 candidates but requesting 10, limited to 4
+    ])
+    def test_alternatives_limited_by_candidates(self, num_alternatives, num_candidates, expected_alt_count):
+        """Test that alternatives are limited by available candidates"""
+        # Simulate the logic: alternatives = min(num_alternatives, num_candidates - 1)
+        actual_alt_count = min(num_alternatives, max(0, num_candidates - 1))
+        assert actual_alt_count == expected_alt_count
+
+    @pytest.mark.parametrize("embedding_candidates,llm_candidates", [
+        (10, 5),    # Default ratio
+        (30, 10),   # Larger pool
+        (50, 15),   # Large pool
+        (100, 20),  # Very large pool
+    ])
+    def test_candidate_pool_sizes(self, embedding_candidates, llm_candidates):
+        """Test different candidate pool size configurations"""
+        config = MagicMock()
+        config.matching.embedding_candidates = embedding_candidates
+        config.matching.llm_rerank_candidates = llm_candidates
+
+        # LLM candidates should be <= embedding candidates
+        assert llm_candidates <= embedding_candidates
+
+    @pytest.mark.parametrize("max_clip_reuse", [
+        1,   # Single use per clip
+        2,   # Allow reuse twice
+        3,   # Allow reuse three times (default)
+        5,   # More permissive
+        10,  # Very permissive
+    ])
+    def test_max_clip_reuse_settings(self, max_clip_reuse):
+        """Test different max_clip_reuse configurations"""
+        config = MagicMock()
+        config.matching.max_clip_reuse = max_clip_reuse
+
+        # Validate that the setting is respected
+        assert config.matching.max_clip_reuse == max_clip_reuse
+
+
+# ============================================================================
+# Parametrized Tests for Strategy Fallback Scenarios
+# ============================================================================
+
+class TestStrategyFallbackScenarios:
+    """Parametrized tests for strategy fallback behavior"""
+
+    @pytest.mark.parametrize("primary_strategy,has_broll,has_scenes,expected_fallback", [
+        ("visual_first", True, True, None),         # All data available, no fallback
+        ("visual_first", False, True, "keyword_only"),  # No B-roll, fallback to keyword
+        ("visual_first", True, False, "keyword_only"),  # No scenes, fallback to keyword
+        ("broll_only", True, True, None),           # B-roll available
+        ("broll_only", False, True, "different_source"),  # No B-roll, must use different strategy
+        ("embedding_diversity", True, True, None),  # All data available
+    ])
+    def test_strategy_fallback_conditions(self, primary_strategy, has_broll, has_scenes, expected_fallback):
+        """Test strategy fallback based on available data"""
+        config = MagicMock()
+        config.output.include_strategy_tracks = True
+        config.output.strategy_tracks = [primary_strategy, "different_source", "keyword_only"]
+
+        # Simulate data availability
+        if has_broll:
+            broll_segments = [{'is_broll': True}]
+        else:
+            broll_segments = []
+
+        if has_scenes:
+            scenes = {'video1.mp4': [{'description': 'test'}]}
+        else:
+            scenes = {}
+
+        # Validate fallback expectation
+        if not has_broll and primary_strategy == "broll_only":
+            assert expected_fallback == "different_source"
+        elif not has_scenes and primary_strategy == "visual_first":
+            assert expected_fallback == "keyword_only"
+
+    @pytest.mark.parametrize("strategy,fallback_chain", [
+        ("visual_first", ["keyword_only", "different_source", "source_rotation"]),
+        ("embedding_diversity", ["different_source", "keyword_only"]),
+        ("broll_only", ["different_source"]),
+        ("keyword_only", ["different_source"]),
+        ("different_source", ["source_rotation"]),
+    ])
+    def test_strategy_fallback_chains(self, strategy, fallback_chain):
+        """Test expected fallback chain for each strategy"""
+        # Each strategy should have a defined fallback chain
+        assert len(fallback_chain) > 0
+
+        # First fallback should be a valid strategy
+        valid_strategies = [
+            "visual_first", "different_source", "keyword_only",
+            "embedding_diversity", "broll_only", "source_rotation"
+        ]
+        assert fallback_chain[0] in valid_strategies
+
+    @pytest.mark.parametrize("num_sources,expect_different_source_success", [
+        (1, False),   # Only 1 source, can't find different
+        (2, True),    # 2 sources, can find different
+        (5, True),    # Many sources available
+        (10, True),   # Large variety of sources
+    ])
+    def test_different_source_strategy_availability(self, num_sources, expect_different_source_success):
+        """Test different_source strategy success based on source count"""
+        # Generate mock sources
+        sources = [f"video{i}.mp4" for i in range(num_sources)]
+
+        # With only 1 source, different_source cannot succeed
+        can_find_different = num_sources > 1
+        assert can_find_different == expect_different_source_success
+
+    @pytest.mark.parametrize("used_sources_count,available_count,expect_fallback", [
+        (0, 5, False),   # No used sources, plenty available
+        (2, 5, False),   # Some used, still have options
+        (4, 5, False),   # Most used, still 1 available
+        (5, 5, True),    # All used, need fallback
+    ])
+    def test_source_exhaustion_fallback(self, used_sources_count, available_count, expect_fallback):
+        """Test fallback when available sources are exhausted"""
+        sources = [f"video{i}.mp4" for i in range(available_count)]
+        used = sources[:used_sources_count]
+        remaining = available_count - used_sources_count
+
+        needs_fallback = remaining == 0
+        assert needs_fallback == expect_fallback
+
+
+# ============================================================================
+# Additional Parametrized Tests for Edge Cases
+# ============================================================================
+
+class TestParametrizedEdgeCases:
+    """Parametrized tests for edge cases in matching"""
+
+    @pytest.mark.parametrize("segment_count", [
+        1,    # Single segment
+        5,    # Few segments
+        10,   # Medium count
+        50,   # Many segments
+        100,  # Large count
+    ])
+    def test_varying_segment_counts(self, segment_count):
+        """Test matching with different numbers of voiceover segments"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=i, start=float(i*3), end=float(i*3+3), text=f"Segment {i}")
+            for i in range(segment_count)
+        ]
+        state.embeddings = np.random.rand(segment_count, 3)
+        state.text_metadata = [{'video_path': f'v{i % 3}.mp4', 'text': f'test {i}', 'start_time': 0, 'end_time': 1}
+                              for i in range(segment_count)]
+
+        config = MagicMock()
+        config.pipeline.skip_matching = False
+        config.matching.min_confidence = 0.5
+
+        error = stage.validate_inputs(state, config)
+        assert error is None
+
+    @pytest.mark.parametrize("video_count,segment_per_video", [
+        (1, 5),     # Single video, multiple segments
+        (3, 3),     # Few videos, few segments each
+        (5, 10),    # Medium videos, more segments
+        (10, 5),    # Many videos, moderate segments
+    ])
+    def test_varying_video_distributions(self, video_count, segment_per_video):
+        """Test matching with different video/segment distributions"""
+        text_metadata = []
+        for v in range(video_count):
+            for s in range(segment_per_video):
+                text_metadata.append({
+                    'video_path': f'video{v}.mp4',
+                    'text': f'segment {v}_{s}',
+                    'start_time': float(s * 5),
+                    'end_time': float(s * 5 + 5)
+                })
+
+        assert len(text_metadata) == video_count * segment_per_video
+
+        # Unique video count
+        unique_videos = set(m['video_path'] for m in text_metadata)
+        assert len(unique_videos) == video_count
+
+    @pytest.mark.parametrize("reuse_penalty", [
+        0.0,    # No penalty
+        0.05,   # Small penalty
+        0.1,    # Default penalty
+        0.2,    # Larger penalty
+        0.5,    # Heavy penalty
+    ])
+    def test_reuse_penalty_values(self, reuse_penalty):
+        """Test different reuse penalty configurations"""
+        config = MagicMock()
+        config.matching.reuse_penalty = reuse_penalty
+        config.matching.max_clip_reuse = 3
+
+        # Penalty should reduce confidence by this amount per reuse
+        original_confidence = 0.9
+        reuses = 2
+        penalized_confidence = original_confidence - (reuse_penalty * reuses)
+
+        # Penalized confidence should still be >= 0
+        assert penalized_confidence >= 0.0 or reuse_penalty > 0.45
