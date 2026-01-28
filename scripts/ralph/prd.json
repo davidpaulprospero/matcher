@@ -113,8 +113,8 @@
             "id": "US-008",
             "title": "Add benchmark CI workflow configuration",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Updated tests/benchmarks/README.md with comprehensive CI benchmark guidelines including: DO/DON'T guidance, GitHub Actions workflow example, benchmark runner usage, baseline JSON structure, comparison/alerting with threshold table, baseline update workflow. Created scripts/benchmark_runner.py with: suite selection, JSON output, baseline comparison with configurable threshold, save-baseline flag, min-rounds config, warmup toggle. Fixed Windows encoding issue (using ASCII symbols instead of Unicode). All benchmarks execute and compare correctly.",
             "acceptanceCriteria": [
                 "Update tests/benchmarks/README.md with CI benchmark guidelines",
                 "Add performance baseline tracking approach documentation",
