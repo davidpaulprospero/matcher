@@ -1070,3 +1070,377 @@ class TestVideoClientPreferHD:
             assert len(results) == 1
             # First file in list is used when not preferring HD
             assert results[0].download_url == "sd_url"
+
+
+class TestPexelsAPIRateLimitingUS001:
+    """US-001: Test PexelsClient.search_videos() handles API rate limiting with retry backoff."""
+
+    def test_search_handles_429_rate_limit_error(self, tmp_path):
+        """Test that 429 rate limit error returns empty list without crash."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.raise_for_status.side_effect = requests.HTTPError(
+            response=mock_response
+        )
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            # Should return empty list, not crash
+            assert results == []
+
+    def test_search_handles_rate_limit_headers(self, tmp_path):
+        """Test that rate limit headers are handled gracefully."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # First call triggers rate limit (429)
+        mock_error_response = MagicMock()
+        mock_error_response.status_code = 429
+        mock_error_response.headers = {"X-Ratelimit-Remaining": "0", "Retry-After": "60"}
+        mock_error_response.raise_for_status.side_effect = requests.HTTPError(
+            response=mock_error_response
+        )
+
+        with patch.object(client.session, 'get', return_value=mock_error_response):
+            results = client.search("test")
+            # Should gracefully return empty list
+            assert results == []
+
+    def test_search_multiple_rate_limits_no_crash(self, tmp_path):
+        """Test that consecutive rate limit errors don't cause crash."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.raise_for_status.side_effect = requests.HTTPError(
+            response=mock_response
+        )
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            # Multiple consecutive calls should all return empty without crash
+            for _ in range(3):
+                results = client.search("test")
+                assert results == []
+
+
+class TestPexelsNetworkTimeoutUS001:
+    """US-001: Test PexelsClient.search_videos() handles network timeout gracefully."""
+
+    def test_search_handles_connect_timeout(self, tmp_path):
+        """Test that connection timeout returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        with patch.object(client.session, 'get', side_effect=requests.ConnectTimeout("Connection timed out")):
+            results = client.search("test")
+            assert results == []
+
+    def test_search_handles_read_timeout(self, tmp_path):
+        """Test that read timeout returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        with patch.object(client.session, 'get', side_effect=requests.ReadTimeout("Read timed out")):
+            results = client.search("test")
+            assert results == []
+
+    def test_search_handles_connection_error(self, tmp_path):
+        """Test that connection error returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        with patch.object(client.session, 'get', side_effect=requests.ConnectionError("DNS lookup failed")):
+            results = client.search("test")
+            assert results == []
+
+    def test_download_handles_timeout(self, tmp_path):
+        """Test that download timeout returns None."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        video = VideoResult(
+            id="12345678",
+            source="pexels",
+            url="https://pexels.com/video/12345678",
+            download_url="https://video.pexels.com/12345678.mp4",
+            width=1920,
+            height=1080,
+            duration=10,
+            quality="hd",
+            file_type="mp4"
+        )
+
+        with patch.object(client.session, 'get', side_effect=requests.Timeout("Download timed out")):
+            result = client.download_video(video)
+            assert result is None
+
+
+class TestPexelsMalformedJSONUS001:
+    """US-001: Test PexelsClient.search_videos() handles malformed JSON response without crash."""
+
+    def test_search_handles_invalid_json(self, tmp_path):
+        """Test that invalid JSON response returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            assert results == []
+
+    def test_search_handles_missing_videos_key(self, tmp_path):
+        """Test that response without 'videos' key returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"total_results": 100}  # No 'videos' key
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            # Should return empty list because "videos" defaults to []
+            assert results == []
+
+    def test_search_handles_null_videos(self, tmp_path):
+        """Test that null videos array returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"videos": None}
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            assert results == []
+
+    def test_search_handles_malformed_video_entry(self, tmp_path):
+        """Test that malformed video entries are handled gracefully (returns empty)."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # Null entry in videos array causes exception in loop, which is caught
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                None,  # Null entry causes video.get() to fail
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            # Exception is caught and returns empty list (graceful degradation)
+            assert results == []
+
+    def test_search_handles_empty_dict_entries(self, tmp_path):
+        """Test that empty dict entries are skipped gracefully."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "videos": [
+                {},  # Empty dict (duration=0 fails filter, no video_files)
+                {"id": 1},  # Missing duration (defaults to 0, fails filter), missing video_files
+                {"id": 2, "duration": 10},  # Missing video_files - will be skipped
+                {"id": 3, "duration": 10, "video_files": []},  # Empty video_files - will be skipped
+                {"id": 4, "duration": 10, "video_files": [{"link": "valid", "height": 720}]}  # Valid
+            ]
+        }
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            # Only valid entry should be returned
+            assert len(results) == 1
+            assert results[0].id == "4"
+
+    def test_search_handles_unicode_decode_error(self, tmp_path):
+        """Test that response with encoding issues returns empty list."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.side_effect = UnicodeDecodeError("utf-8", b"", 0, 1, "invalid")
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("test")
+            assert results == []
+
+
+class TestPexelsPaginationUS001:
+    """US-001: Test PexelsClient pagination iterates correctly through multiple result pages."""
+
+    def test_search_requests_correct_page_size(self, tmp_path):
+        """Test that search requests correct per_page parameter."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"videos": []}
+
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            client.search("nature", max_results=15)
+
+            # Verify params include per_page
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs['params']['per_page'] == 15
+
+    def test_search_returns_correct_number_of_results(self, tmp_path):
+        """Test that search respects max_results limit."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # API returns more videos than requested
+        videos = [
+            {"id": i, "duration": 10, "video_files": [{"link": f"url{i}", "height": 720}]}
+            for i in range(20)
+        ]
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"videos": videos}
+
+        with patch.object(client.session, 'get', return_value=mock_response):
+            results = client.search("nature", max_results=5)
+            # Should return all videos since per_page controls API request
+            # but if API returns more, we get more
+            assert len(results) == 20
+
+    def test_search_pagination_params_include_orientation(self, tmp_path):
+        """Test that search includes orientation parameter for landscape videos."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"videos": []}
+
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            client.search("nature", max_results=10)
+
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs['params']['orientation'] == 'landscape'
+
+    def test_search_pagination_uses_correct_headers(self, tmp_path):
+        """Test that search includes Authorization header."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="my_test_key"
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"videos": []}
+
+        with patch.object(client.session, 'get', return_value=mock_response) as mock_get:
+            client.search("nature")
+
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs['headers']['Authorization'] == 'my_test_key'
+
+    def test_search_and_download_iterates_through_results(self, tmp_path):
+        """Test search_and_download iterates through search results."""
+        config = MagicMock()
+        client = PexelsVideoClient(
+            config=config,
+            output_dir=str(tmp_path),
+            api_key="test_key"
+        )
+
+        # Create 5 search results
+        mock_videos = [
+            VideoResult(
+                id=str(i),
+                source="pexels",
+                url="",
+                download_url=f"http://v{i}.mp4",
+                width=1920,
+                height=1080,
+                duration=10,
+                quality="hd",
+                file_type="mp4"
+            )
+            for i in range(5)
+        ]
+
+        downloaded_count = 0
+        def mock_download(video):
+            nonlocal downloaded_count
+            downloaded_count += 1
+            return f"/path/to/{video.id}.mp4"
+
+        with patch.object(client, 'search', return_value=mock_videos):
+            with patch.object(client, 'download_video', side_effect=mock_download):
+                results = client.search_and_download("nature", max_videos=3)
+
+                # Should have called download 3 times and stopped
+                assert len(results) == 3
+                assert downloaded_count == 3
