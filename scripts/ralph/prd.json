@@ -67,8 +67,8 @@
             "id": "US-005",
             "title": "Add BrollMatchStage enrichment and matching pipeline tests",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "38 tests across 6 dedicated US-005 test classes in test_broll_match_us005.py: TestShouldUseVisionUS005 (6 tests, AC1), TestEnrichWithKeywordsUS005 (5 tests, AC2), TestExtractKeywordsFromFilenameUS005 (11 tests, AC3), TestMatchScenesToVoiceoverUS005 (5 tests, AC4), TestCanSkipUS005 (5 tests, AC5), TestRestoreUS005 (6 tests, AC6). All 207 broll tests pass in 15.55s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test BrollMatchStage._should_use_vision() returns False in audio-first mode and True in standard mode when Vision API key is configured — verify config checks are correct",
                 "Test BrollMatchStage._enrich_with_keywords() extracts keywords from filename, removing prefixes (pexels_, pixabay_) and video IDs — verify 'pexels_sunset_ocean_4k.mp4' yields ['sunset', 'ocean', '4k']",

@@ -1,4 +1,16 @@
 
+## Iteration US-005 (Sprint 17) - Add BrollMatchStage enrichment and matching pipeline tests
+- Added 38 new tests across 6 dedicated US-005 test classes in tests/test_broll_match_us005.py
+- TestShouldUseVisionUS005 (6 tests): AC1 — audio-first=False, standard=True, broll vision disabled, global vision disabled, no vision config, audio_first.enabled=False
+- TestEnrichWithKeywordsUS005 (5 tests): AC2 — pexels_sunset_ocean_4k yields [sunset, ocean, 4k], pixabay prefix stripped, skips existing descriptions, video ID removed, empty filename handling
+- TestExtractKeywordsFromFilenameUS005 (11 tests): AC3 — underscore separated, hyphen separated, mixed, video ID stripped, 5 prefixes (pexels_, pixabay_, entity_, yt_, broll_), trailing numbers, resolution suffix
+- TestMatchScenesToVoiceoverUS005 (5 tests): AC4 — best-scoring scene per segment (3 scenes, 2 segments), BrollMatch instances, one match per segment, min_score threshold, source boost ranking
+- TestCanSkipUS005 (5 tests): AC5 — checkpoint skip True/False, run() skips broll_disabled, no_voiceover, no broll config
+- TestRestoreUS005 (6 tests): AC6 — rebuilds matches, missing checkpoint data, empty matches, all fields populated, exception handling, default optional fields
+- All 6 acceptance criteria verified met
+- Files created: tests/test_broll_match_us005.py
+- Test results: 207 broll tests passed in 15.55s (169 existing + 38 new), 0 regressions
+
 ## Iteration US-004 (Sprint 17) - Add BrollMatchStage silent scene detection and scoring tests
 - Added 35 new tests across 6 dedicated US-004 test classes in tests/test_broll_match_us004.py
 - TestDetectSilentScenesWordCountUS004 (5 tests): AC1 — 5 entries (3 silent <10 words, 2 speech >=10), threshold verification, ignore marker stripping, custom threshold
