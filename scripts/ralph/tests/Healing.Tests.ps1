@@ -555,3 +555,143 @@ Describe 'Test-HealingInProgress' {
         Test-HealingInProgress | Should -BeFalse
     }
 }
+
+Describe 'Build-HealingPrompt' {
+    It 'includes tier-specific diagnostics' {
+        $state = @{
+            failedTier = 2
+            rawDiagnostics = "IMPORT: test_cache.py -> ImportError"
+            focusArea = "testing"
+            storyId = "US-005"
+        }
+
+        $prompt = Build-HealingPrompt -HealingState $state -Attempt 1
+        $prompt | Should -BeLike "*Tier 2*"
+        $prompt | Should -BeLike "*Import/Collection*"
+        $prompt | Should -BeLike "*IMPORT: test_cache.py*"
+        $prompt | Should -BeLike "*US-005*"
+    }
+
+    It 'includes previous attempt context on retry' {
+        $state = @{
+            failedTier = 1
+            rawDiagnostics = "SYNTAX error"
+            focusArea = "pipeline"
+            storyId = "US-003"
+        }
+
+        $prompt = Build-HealingPrompt -HealingState $state -Attempt 2 -PreviousOutput "Tried fixing import but failed"
+        $prompt | Should -BeLike "*Previous Attempt Output*"
+        $prompt | Should -BeLike "*DIFFERENT approach*"
+    }
+
+    It 'omits previous output on first attempt' {
+        $state = @{ failedTier = 1; rawDiagnostics = "err"; focusArea = "x"; storyId = "y" }
+
+        $prompt = Build-HealingPrompt -HealingState $state -Attempt 1
+        $prompt | Should -Not -BeLike "*Previous Attempt*"
+    }
+}
+
+Describe 'Invoke-HealingSession' {
+    BeforeEach {
+        $script:RalphDir = $TestDrive
+        $script:ProjectRoot = $TestDrive
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_session.jsonl"
+        $script:HealingStateFile = Join-Path $TestDrive "healing_state_session.json"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+        $script:State = @{
+            SessionId = "heal-test"; IterationCount = 10;
+            ConsecutiveFailures = 0; CurrentMode = "Standard"
+        }
+
+        @{
+            paused = $true; storyId = "US-005"; focusArea = "testing"
+            failedTier = 2; rawDiagnostics = "IMPORT: test_cache.py -> ImportError"
+        } | ConvertTo-Json -Depth 10 | Set-Content $script:HealingStateFile
+    }
+
+    It 'attempts healing and succeeds on first try' {
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "Fixed the import in test_cache.py by updating path"
+                ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+
+        # Validation re-check passes
+        Mock Invoke-TieredHealthCheck {
+            return @{ HasErrors = $false; FailedTier = 0; TierResults = @(); RawDiagnostics = "" }
+        }
+        Mock Write-Host {}
+
+        $result = Invoke-HealingSession
+        $result.Success | Should -BeTrue
+        $result.AttemptsUsed | Should -Be 1
+    }
+
+    It 'fails after max attempts exceeded' {
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "Attempted fix"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+
+        Mock Invoke-TieredHealthCheck {
+            return @{ HasErrors = $true; FailedTier = 2; RawDiagnostics = "still broken"; TierResults = @() }
+        }
+        Mock Write-Host {}
+
+        $result = Invoke-HealingSession -MaxAttempts 2
+        $result.Success | Should -BeFalse
+        $result.AttemptsUsed | Should -Be 2
+    }
+
+    It 'logs each attempt to healing_log.jsonl' {
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $true; ExitCode = 0; TimedOut = $false
+                Output = "Fixed it"; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+        Mock Invoke-TieredHealthCheck {
+            return @{ HasErrors = $false; FailedTier = 0 }
+        }
+        Mock Write-Host {}
+
+        Invoke-HealingSession -MaxAttempts 3
+
+        $lines = Get-Content $script:HealingLogFile
+        $lines.Count | Should -BeGreaterOrEqual 1
+        $hasAttempt = $lines | Where-Object { ($_ | ConvertFrom-Json).event -eq "healing_attempt" }
+        $hasAttempt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'returns failure when no healing state exists' {
+        Remove-Item $script:HealingStateFile -Force
+        $result = Invoke-HealingSession
+        $result.Success | Should -BeFalse
+        $result.AttemptsUsed | Should -Be 0
+    }
+
+    It 'handles Claude subprocess timeout gracefully' {
+        Mock Get-ClaudePath { return "claude" }
+        Mock Invoke-ClaudeSubprocess {
+            return @{
+                Exited = $false; ExitCode = -1; TimedOut = $true
+                Output = ""; ExecutionStart = (Get-Date); ExecutionEnd = (Get-Date)
+            }
+        }
+        Mock Invoke-TieredHealthCheck { return @{ HasErrors = $true; FailedTier = 2 } }
+        Mock Write-Host {}
+
+        $result = Invoke-HealingSession -MaxAttempts 1
+        $result.Success | Should -BeFalse
+        $result.AttemptsUsed | Should -Be 1
+    }
+}
