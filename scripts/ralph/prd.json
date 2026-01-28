@@ -134,8 +134,8 @@
             "id": "US-010",
             "title": "Add audio analysis and face detection threshold tests",
             "priority": 10,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 30 new tests in tests/test_audio_face_threshold_us010.py: TestSilenceThresholdBoundariesUS010 (5), TestVADShortAudioUS010 (5), TestFaceScore03ThresholdUS010 (7), TestMultipleFacesConfidenceUS010 (4), TestSpeechVsMusicDetectionUS010 (6), TestAdditionalThresholdEdgeCasesUS010 (3). All 5 AC verified. 30 tests pass in 1.01s.",
             "acceptanceCriteria": [
                 "Test silence detection at exact volume threshold boundaries",
                 "Test VAD handles very short audio clips (<1 second) gracefully",
