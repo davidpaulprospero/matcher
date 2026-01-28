@@ -625,6 +625,105 @@ class TestOTIOHealerPreflightCheck:
         assert any("overlapping" in i for i in issues)
 
 
+class TestOTIOHealerCanHandleAcceptanceCriteria:
+    """Test OTIOHealer.can_handle() acceptance criteria:
+    - True for OTIO-related errors (import, serialization, track corruption)
+    - False for download errors
+    """
+
+    def test_can_handle_import_errors(self, mock_config, project_dir):
+        """OTIOHealer handles OTIO import errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("opentimelineio import failed"), "OUTPUT") is True
+        assert healer.can_handle(ImportError("No module named 'opentimelineio'"), "OUTPUT") is True
+
+    def test_can_handle_serialization_failures(self, mock_config, project_dir):
+        """OTIOHealer handles serialization failures."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("Failed to serialize timeline metadata"), "OUTPUT") is True
+        assert healer.can_handle(Exception("JSON encode error in clip metadata"), "OUTPUT") is True
+
+    def test_can_handle_track_corruption(self, mock_config, project_dir):
+        """OTIOHealer handles track corruption errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("Track mismatch: expected 10, got 8"), "OUTPUT") is True
+        assert healer.can_handle(Exception("Video track count invalid"), "OUTPUT") is True
+
+    def test_cannot_handle_download_errors(self, mock_config, project_dir):
+        """OTIOHealer returns False for download-related errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        # Pure download errors shouldn't match OTIO patterns
+        assert healer.can_handle(Exception("HTTP 403 Forbidden from youtube.com"), "DOWNLOAD") is False
+        assert healer.can_handle(Exception("yt-dlp extraction failed for video ID"), "DOWNLOAD") is False
+        assert healer.can_handle(Exception("Connection refused to CDN server"), "DOWNLOAD") is False
+
+
+class TestOTIOHealerTimelineReconstruction:
+    """Test OTIOHealer.heal() attempts timeline reconstruction.
+    Acceptance criterion 5: logs reconstruction steps, returns .fixed() or .failed().
+    """
+
+    def test_fix_logs_attempt_on_media_error(self, mock_config, project_dir, mock_state):
+        """fix() calls log_attempt when handling media errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        with patch.object(healer, 'log_attempt') as mock_log:
+            healer.fix(FileNotFoundError("video.mp4 not found"), mock_state, "OUTPUT")
+
+        # Verify log_attempt was called (reconstruction steps logged)
+        assert mock_log.call_count >= 1
+        calls = [str(c) for c in mock_log.call_args_list]
+        assert any("Analyzing error" in str(c) or "Resolving" in str(c) for c in calls)
+
+    def test_fix_logs_success_on_duration_fix(self, mock_config, project_dir):
+        """fix() calls log_success when durations are successfully fixed."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        # Create state with a match that has a fixable negative duration
+        match = Mock()
+        match.segment = Mock()
+        match.segment.start = 10.0
+        match.segment.end = 5.0  # Negative duration - fixable
+        match.segment.duration = None
+        match.start_time = 0.0
+        match.end_time = 5.0
+        match.time_scalar = 1.0
+        match.speed = None
+        match.speed_factor = None
+        match.metadata = None
+
+        state = Mock()
+        state.matches = [match]
+
+        with patch.object(healer, 'log_success') as mock_success:
+            result = healer.fix(ValueError("negative duration"), state, "OUTPUT")
+
+        assert result.success is True
+        assert mock_success.call_count >= 1
+
+    def test_fix_returns_fixed_or_failed(self, mock_config, project_dir, mock_state):
+        """fix() always returns a HealerResult with success True or False."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        # Test various error types - all should return HealerResult
+        errors = [
+            FileNotFoundError("missing.mp4"),
+            ValueError("negative duration"),
+            Exception("Gap overflow in timeline"),
+            Exception("completely unknown xyz123"),
+        ]
+
+        for error in errors:
+            result = healer.fix(error, mock_state, "OUTPUT")
+            assert isinstance(result, HealerResult)
+            assert isinstance(result.success, bool)
+            assert result.action in list(HealerAction)
+
+
 class TestOTIOHealerIntegration:
     """Integration tests for full fix() method."""
 

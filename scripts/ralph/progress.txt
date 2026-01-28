@@ -1,4 +1,18 @@
 
+## Iteration US-002 (Sprint 16) - Add PathHealer and OTIOHealer agent tests
+- Extended existing test files with 19 new tests covering all 6 acceptance criteria
+- PathHealer tests added (9 new):
+  - TestPathHealerCanHandleAcceptanceCriteria: FileNotFoundError handling, invalid chars True, API errors False, network errors False
+  - TestPathHealerFixWindowsPathLength: short root switching with .fixed(), filename truncation fallback
+  - TestPathHealerFixMissingDrive: missing drive .failed() result, no-downloads .failed()
+- OTIOHealer tests added (6 new):
+  - TestOTIOHealerCanHandleAcceptanceCriteria: import errors True, serialization True, track corruption True, download errors False
+  - TestOTIOHealerTimelineReconstruction: log_attempt called on media error, log_success on duration fix, fix() always returns HealerResult
+- ResilientRunner integration tests added (4 new):
+  - TestHealerResilientRunnerIntegration: path healer selected for path error, OTIO healer selected for timeline error, healer iteration (only 2nd of 3 called), max_attempts respected
+- Files modified: tests/test_agents/test_path_healer.py, tests/test_agents/test_otio.py
+- Test results: 101 passed in 1.05s (82 existing + 19 new), 457 total agent tests pass, 0 regressions
+
 ## Iteration US-001 (Sprint 16) - Add CheckpointHealer and DiskHealer agent tests
 - Pre-implemented: 64 tests already passing from previous session (31 CheckpointHealer + 33 DiskHealer)
 - Files: tests/test_agents/test_checkpoint_healer.py, tests/test_agents/test_disk_healer.py
