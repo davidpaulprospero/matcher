@@ -36,8 +36,8 @@
             "id": "US-003",
             "title": "Add CLI config_utils root directory validation tests",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/test_cli_config_utils.py with 20 tests across 5 classes: TestValidateRootDirCreatesMissing (5 tests: creates download/image/both/nested dirs, existing dir ok), TestValidateRootDirRejectsRelative (4 tests: relative download/image/both paths cause SystemExit, error mentions path), TestValidateRootDirHandlesNone (3 tests: None/empty string root_dir, None image with valid download), TestValidateRootDirReportsFailure (3 tests: PermissionError/OSError include path for download/image roots), TestMakePathsProjectRelative (5 tests: output/download/cache relative resolved, absolute preserved, returns config).",
             "acceptanceCriteria": [
                 "Test validate_root_directories() creates missing directories — verify mkdir called for download.root_dir and image_search.root_dir when paths are absolute but don't exist",
                 "Test validate_root_directories() rejects relative paths — verify SystemExit when download.root_dir is './videos' (not absolute)",

@@ -6132,3 +6132,14 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_post_edit_analysis.py
 - Test results: 55 passed in 0.54s, 0 failures
 
+
+## Iteration US-003 (Sprint 15) - Add CLI config_utils root directory validation tests
+- Created tests/test_cli_config_utils.py with 20 tests across 5 classes
+- TestValidateRootDirCreatesMissing (5): creates download/image/both/nested dirs, existing dir ok
+- TestValidateRootDirRejectsRelative (4): relative download/image/both paths cause SystemExit, error mentions path
+- TestValidateRootDirHandlesNone (3): None/empty string root_dir no error, None image with valid download
+- TestValidateRootDirReportsFailure (3): PermissionError/OSError include path for download/image roots
+- TestMakePathsProjectRelative (5): output/download/cache relative resolved, absolute preserved, returns config
+- No source code changes needed (pure test-only story)
+- Files created: tests/test_cli_config_utils.py
+- Test results: 20 passed in 0.48s, 0 regressions
