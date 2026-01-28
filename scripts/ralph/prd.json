@@ -23,8 +23,8 @@
             "id": "US-002",
             "title": "Add PathHealer and OTIOHealer agent tests",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 19 new tests: PathHealer (9 tests — can_handle API/network false, FileNotFoundError, Windows path shortening, missing drive .failed()), OTIOHealer (6 tests — can_handle import/serialization/track corruption true, download errors false, logging verification, reconstruction result), ResilientRunner integration (4 tests — healer selection, healer iteration, max attempts). Total 101 tests passing across both files.",
             "acceptanceCriteria": [
                 "Test PathHealer.can_heal() returns True for path-related errors (FileNotFoundError, path too long, invalid characters) — False for API or network errors",
                 "Test PathHealer.heal() fixes Windows path length issues by shortening paths — verify .fixed() returned with corrected path in result",
