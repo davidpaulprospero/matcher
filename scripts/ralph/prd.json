@@ -98,8 +98,8 @@
             "id": "US-007",
             "title": "Enable benchmark regression detection in CI workflow",
             "priority": 7,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created .github/workflows/benchmarks.yml with: (1) Weekly schedule (Sundays midnight UTC) + push triggers on benchmark file changes + manual workflow_dispatch; (2) Baseline comparison using benchmark_runner.py --compare with configurable threshold (default 20%); (3) Artifact upload for results (90-day retention) and baseline (365-day retention); (4) Job summary with regression warnings; (5) Manual update_baseline and threshold override inputs. Updated tests/benchmarks/README.md with GitHub Actions workflow documentation section.",
             "acceptanceCriteria": [
                 "Create .github/workflows/benchmarks.yml for scheduled benchmark runs",
                 "Configure benchmark job to run on schedule (weekly) and on benchmark file changes",
