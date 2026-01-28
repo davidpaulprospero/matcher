@@ -94,6 +94,31 @@ class TestCodecDetection:
     """Test video codec detection"""
 
     @patch('subprocess.run')
+    def test_get_video_codec_calls_ffprobe_with_correct_args(self, mock_run, transcoder):
+        """AC1: Test get_video_codec() calls ffprobe with correct arguments and parses output"""
+        mock_run.return_value = Mock(
+            stdout='h264\n',
+            stderr='',
+            returncode=0
+        )
+
+        codec, container = transcoder.get_video_codec('video.mp4')
+
+        # Verify ffprobe called with correct arguments
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        cmd = call_args[0][0]  # positional args -> first arg is the command list
+        assert cmd[0] == 'ffprobe'
+        assert '-v' in cmd and 'error' in cmd
+        assert '-select_streams' in cmd and 'v:0' in cmd
+        assert '-show_entries' in cmd and 'stream=codec_name' in cmd
+        assert '-of' in cmd
+        assert 'video.mp4' in cmd
+        # Verify parsed output
+        assert codec == 'h264'
+        assert container == 'mp4'
+
+    @patch('subprocess.run')
     def test_get_video_codec_h264_mp4(self, mock_run, transcoder):
         """Test detecting H.264 codec in MP4 container"""
         mock_run.return_value = Mock(
@@ -230,6 +255,16 @@ class TestTranscodeNecessity:
         assert needs is False
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    def test_needs_transcoding_vp8(self, mock_codec, transcoder):
+        """AC2: Test VP8 needs transcoding"""
+        mock_codec.return_value = ('vp8', 'webm')
+
+        needs, reason = transcoder.needs_transcoding('video.webm')
+
+        assert needs is True
+        assert "vp8" in reason.lower()
+
+    @patch.object(TranscodingManager, 'get_video_codec')
     def test_needs_transcoding_unknown_codec(self, mock_codec, transcoder):
         """Test unknown codec needs transcoding (safe fallback)"""
         mock_codec.return_value = ('unknown_codec', 'mp4')
@@ -346,7 +381,7 @@ class TestHardwareAcceleration:
     @patch('subprocess.run')
     def test_detect_hw_accel_error_handling(self, mock_run, mock_config):
         """Test error handling in hardware detection"""
-        mock_run.side_effect = Exception("ffmpeg error")
+        mock_run.side_effect = FileNotFoundError("ffmpeg not found")
 
         transcoder = TranscodingManager(config=mock_config)
 

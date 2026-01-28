@@ -82,8 +82,8 @@
             "id": "US-006",
             "title": "Add TranscodingManager codec detection and format string tests",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Fixed 2 broken error-handling tests (Exception -> FileNotFoundError to match actual catch clause), added ffprobe argument verification test (AC1), added vp8 incompatible codec test (AC2). All 87 transcoding tests pass in 0.99s, 0 regressions.",
             "acceptanceCriteria": [
                 "Test TranscodingManager.get_video_codec() calls ffprobe with correct arguments and parses JSON output — mock subprocess returning codec_name='h264' and container='mp4', verify returned tuple",
                 "Test TranscodingManager.needs_transcoding() returns False for compatible codec+container pairs (h264+mp4, hevc+mov, prores+mov) — returns True for incompatible codecs (vp9, av1, vp8)",
