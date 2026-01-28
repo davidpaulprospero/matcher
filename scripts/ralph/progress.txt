@@ -6396,3 +6396,28 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC5: TestNormalizeConfidenceEdgeCasesUS009 (10 tests) - edge cases for float range, bool handling, large ints
 - All 52 tests pass in 0.46s, 0 regressions on existing LLM tests
 - Files created: tests/test_llm_client_us009.py
+
+## Focus Area: testing - 2026-01-28 17:31:31
+- Status: In Progress...
+
+
+## Focus Area: testing - 2026-01-28 19:50:52
+- Status: In Progress...
+
+
+## Sprint 18 - quality - 2026-01-28 19:56:27
+- PRD generated for 'quality' focus area (match scoring and confidence calibration)
+- 10 user stories targeting untested scoring functions in src/matching/scoring.py and src/matching/metrics.py
+- Key coverage gaps: temporal coherence, transcript quality, semantic coherence, pool normalization, metrics histogram
+- Approximately 400 LOC of untested confidence calibration logic
+- Stories: US-001 to US-010 with 5-6 acceptance criteria each
+
+## Iteration US-001 (Sprint 18) - Add compute_temporal_coherence same-source boost and context switch penalty tests
+- Pre-implemented: tests/test_temporal_coherence.py contains 38 comprehensive tests
+- AC1: test_same_source_as_previous_applies_boost — verifies +0.05 boost and 'same source as prev' in reason
+- AC2: test_same_source_as_next_applies_boost — verifies +0.05 boost and 'same source as next' in reason
+- AC3: test_same_source_both_directions_double_boost — verifies +0.10 total when both prev/next same source
+- AC4: test_jarring_switch_applies_penalty — verifies -0.05 penalty when _is_jarring_context_switch detects no overlap
+- AC5: test_disabled_config_returns_original_confidence — verifies (confidence, '') when disabled
+- Test results: 38 passed in 0.48s
+
