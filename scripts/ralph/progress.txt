@@ -7454,3 +7454,43 @@ def test_eta_accuracy_batch_50_videos(self):
 - Updated tests/README.md with comprehensive documentation (~130 lines added)
 - Files modified: tests/helpers/__init__.py (new), tests/test_helpers.py (new), tests/README.md
 - Test results: 36 passed in 0.33s
+
+
+## Iteration - [US-008] Add benchmark CI workflow configuration
+- Updated tests/benchmarks/README.md with comprehensive CI benchmark guidelines
+- Created scripts/benchmark_runner.py for CI benchmark execution
+
+**README.md Additions:**
+- CI benchmark DO/DON'T guidance (run in separate job, use dedicated runners)
+- GitHub Actions workflow example
+- Benchmark runner usage documentation
+- Baseline JSON structure with version, timestamp, runner metadata
+- Comparison and alerting with threshold table (strict 10%, standard 20%, lenient 50%)
+- When to update baselines documentation
+- Pytest benchmark flags reference (--benchmark-compare, --benchmark-save, etc.)
+- Handling benchmark failures and flaky benchmarks section
+
+**benchmark_runner.py Features:**
+- Suite selection (--suite pipeline keyword embedding transcription)
+- JSON output (--output results.json)
+- Baseline comparison with configurable threshold (--compare baseline.json --threshold 0.20)
+- Baseline saving with metadata (--save-baseline)
+- Configurable min-rounds and warmup
+- CI-friendly exit codes (0=pass, 1=regression)
+- List suites command (--list-suites)
+
+**Gotchas Fixed:**
+- Windows encoding issue: Changed Unicode symbols to ASCII ([OK], [WARN], [NEW], ->) to avoid cp1252 codec errors
+
+**Acceptance Criteria Verification:**
+- AC1: tests/benchmarks/README.md updated with CI guidelines (DO/DON'T, workflow example)
+- AC2: Performance baseline tracking documented (JSON structure, storage location)
+- AC3: scripts/benchmark_runner.py created with full feature set
+- AC4: 20% threshold comparison implemented with configurable --threshold
+- AC5: Baseline update documentation added (when to update, how to commit)
+- AC6: --benchmark flag documentation added (12 flags documented)
+
+- Files created: scripts/benchmark_runner.py (353 lines)
+- Files modified: tests/benchmarks/README.md (+200 lines)
+- Benchmark runner tested: 14 pipeline benchmarks run and compared successfully
+- Commit: 928b670
