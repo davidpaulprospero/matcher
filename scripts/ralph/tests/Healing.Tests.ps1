@@ -812,3 +812,18 @@ Describe 'Invoke-PostIterationHealing' {
         $script:passedChangedFiles.Count | Should -Be 2
     }
 }
+
+Describe 'Self-healing config' {
+    It 'ralph-config.json has selfHealing section with tiered settings' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+
+        $config.selfHealing | Should -Not -BeNullOrEmpty
+        $config.selfHealing.enabled | Should -BeOfType [bool]
+        $config.selfHealing.maxAttempts | Should -BeGreaterThan 0
+        $config.selfHealing.runAfterSuccess | Should -BeOfType [bool]
+        $config.selfHealing.runAfterFailure | Should -BeOfType [bool]
+        $config.selfHealing.fullRunCadence | Should -BeGreaterThan 0
+        $config.selfHealing.criticalFiles | Should -Not -BeNullOrEmpty
+    }
+}
