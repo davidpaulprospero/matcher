@@ -6649,3 +6649,23 @@ def test_eta_accuracy_batch_50_videos(self):
 - Status: COMPLETE (auto-detected from git commit, git-commit-detected)
 - Story was implemented in a previous session but prd.json was not updated (likely timeout)
 - Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration US-002 (Sprint 20) - Add HealingLogger atomic write and thread safety tests
+- Added 12 new tests to tests/test_agents/test_healing_logger.py
+- TestAtomicJsonWrite (5 tests):
+  - test_atomic_json_write_creates_temp_file_in_same_directory (AC1)
+  - test_atomic_json_write_uses_os_replace_for_atomic_rename (AC2)
+  - test_atomic_json_write_cleans_up_temp_file_on_write_failure (AC3)
+  - test_atomic_json_write_cleans_up_temp_on_replace_failure (additional)
+  - test_atomic_json_write_preserves_existing_entries (additional)
+- TestWriteThreadSafety (3 tests):
+  - test_write_is_thread_safe_under_concurrent_calls (AC4)
+  - test_write_lock_prevents_race_conditions (AC4)
+  - test_concurrent_log_methods_do_not_corrupt_json (AC4)
+- TestEntriesTruncation (4 tests):
+  - test_entries_truncates_at_max_entries_keeping_recent_half (AC5)
+  - test_truncation_keeps_most_recent_entries (AC5)
+  - test_truncation_logs_warning (AC5)
+  - test_no_truncation_below_max_entries (AC5)
+- Test results: 27 tests passed in 1.25s
+- Commit: d83e87b

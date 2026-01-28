@@ -22,8 +22,8 @@
                             "id":  "US-002",
                             "title":  "Add HealingLogger atomic write and thread safety tests",
                             "priority":  2,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Added 12 tests covering atomic writes, thread safety, and truncation. Classes: TestAtomicJsonWrite (5), TestWriteThreadSafety (3), TestEntriesTruncation (4). File: tests/test_agents/test_healing_logger.py. Commit: d83e87b",
                             "acceptanceCriteria":  [
                                                        "Test HealingLogger._atomic_json_write() creates temp file in same directory as target",
                                                        "Test HealingLogger._atomic_json_write() uses os.replace for atomic rename",
