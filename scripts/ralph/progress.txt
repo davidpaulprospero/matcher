@@ -1,4 +1,18 @@
 
+## Iteration US-002 (Sprint 18) - Add _is_jarring_context_switch topic overlap detection tests
+- Story was mostly pre-implemented in test_temporal_coherence.py (38 tests for US-001)
+- AC1-3, AC5-6 already covered by existing TestIsJarringContextSwitch tests
+- Added 1 new test: test_empty_adjacent_topics_not_jarring for AC4 (empty adjacent segment)
+- All 6 acceptance criteria now verified:
+  - AC1: test_no_overlap_is_jarring (disjoint topics returns True)
+  - AC2: test_overlap_is_not_jarring (shared topic returns False)
+  - AC3: test_empty_topics_not_jarring (empty current returns False)
+  - AC4: test_empty_adjacent_topics_not_jarring (empty adjacent returns False) **NEW**
+  - AC5: test_keywords_and_topics_combined (keywords overlap counts)
+  - AC6: test_case_insensitive_comparison ('Paris' matches 'paris')
+- Files modified: tests/test_temporal_coherence.py
+- Test results: 39 tests passed in 0.48s, 0 regressions
+
 ## Iteration US-010 (Sprint 17) - Add CLI interactive, logging_setup, and config merge helper tests
 - Added 31 new tests across 4 dedicated US-010 test classes in 2 files
 - tests/test_cli_interactive_us010.py:
