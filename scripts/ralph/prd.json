@@ -23,8 +23,8 @@
             "id": "US-002",
             "title": "Add README.md documentation for test_chapter_detection subdirectory",
             "priority": 2,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created comprehensive README.md with: chapter detection testing patterns, all 5 conftest.py fixtures documented (mock_config, sample_segments, single_topic_segments, mock_llm_client, mock_llm_response_two_chapters), all 7 test files listed with descriptions, pipeline passes table, testing chapter boundary detection examples, chunking strategies documentation (6 test classes covered), and transcript-to-chapter validation section with boundary/title/merge/missed chapter testing patterns.",
             "acceptanceCriteria": [
                 "Create tests/test_chapter_detection/README.md with chapter detection testing patterns",
                 "Document conftest.py fixtures and their purpose",
