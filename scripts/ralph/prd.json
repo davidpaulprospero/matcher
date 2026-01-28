@@ -113,8 +113,8 @@
             "id": "US-008",
             "title": "Add bulk marker assignment for unmarked unit tests",
             "priority": 8,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created scripts/assign_test_markers.py with: (1) --dry-run mode showing proposed additions with summary and optional verbose details; (2) --apply mode that modifies test files, inserting @pytest.mark.X decorators above test functions; (3) --marker flag to filter by specific marker type; (4) --output for JSON report export; (5) safeguard: skips tests already having known markers; (6) handles indentation correctly and adds pytest import if missing. Analysis: 10800 fast tests, 332 integration tests, 126 requires_network, 82 requires_api, 4 slow - far exceeding targets of 200+ fast and 50+ integration.",
             "acceptanceCriteria": [
                 "Create scripts/assign_test_markers.py to add markers based on categorize_tests.py output",
                 "Implement --dry-run mode showing proposed marker additions",
