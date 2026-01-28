@@ -1,154 +1,147 @@
 {
-    "branchName": "ralph/sprint-18",
-    "sprintNumber": 18,
-    "focusArea": "quality",
-    "projectContext": "Sprint 18 targets untested scoring functions in src/matching/scoring.py and src/matching/metrics.py. Previous sprints established strong coverage for duration, topic, B-roll, caption quality, and entity match scoring. This sprint focuses on the remaining 8 untested functions: temporal coherence (compute_temporal_coherence, _is_jarring_context_switch), transcript quality (calculate_transcript_quality, _calculate_sentence_coherence, _calculate_language_consistency), embedding weight adjustment (adjust_embedding_weight_for_transcript_quality), semantic coherence (compute_semantic_coherence), pool normalization (normalize_confidence_by_pool), and metrics histogram (log_confidence_histogram). These functions represent ~400 LOC of untested confidence calibration logic that directly affects match quality output.",
+    "branchName": "ralph/sprint-19",
+    "sprintNumber": 19,
+    "focusArea": "testing",
+    "projectContext": "Sprint 19 continues test coverage improvements, targeting the compilation module (GapAnalyzer, TopicBroadener, CompilationTimelineBuilder), stage checkpoint serialization edge cases, and test infrastructure enhancements. Previous testing sprints (13-17) established coverage for conftest fixtures, cache systems, and scoring functions. Sprint 18 completed comprehensive scoring function tests (temporal coherence, transcript quality, semantic coherence, pool normalization, confidence histogram). This sprint addresses ~300 LOC of untested compilation logic and test reliability patterns that affect CI/CD pipeline stability.",
     "userStories": [
         {
             "id": "US-001",
-            "title": "Add compute_temporal_coherence same-source boost and context switch penalty tests",
+            "title": "Add GapAnalyzer track duration calculation tests",
             "priority": 1,
             "passes": true,
-            "notes": "Pre-implemented: tests/test_temporal_coherence.py has 38 tests covering all 5 AC. AC1: test_same_source_as_previous_applies_boost, AC2: test_same_source_as_next_applies_boost, AC3: test_same_source_both_directions_double_boost, AC4: test_jarring_switch_applies_penalty, AC5: test_disabled_config_returns_original_confidence. All pass.",
+            "notes": "Pre-implemented in tests/test_compilation.py::TestGapAnalyzer (5 tests)",
             "acceptanceCriteria": [
-                "Test compute_temporal_coherence() returns +0.05 boost when current and previous match have same source_file — verify reason contains 'same source as prev'",
-                "Test compute_temporal_coherence() returns +0.05 boost when current and next match have same source_file — verify reason contains 'same source as next'",
-                "Test compute_temporal_coherence() applies double boost (+0.10) when both previous and next matches share same source_file as current",
-                "Test compute_temporal_coherence() returns -0.05 penalty when _is_jarring_context_switch() detects no topic overlap with previous match",
-                "Test compute_temporal_coherence() returns (confidence, '') when temporal_coherence_enabled is False in config — no adjustment applied"
+                "Test GapAnalyzer.analyze() returns complete=True when all tracks meet target_duration",
+                "Test GapAnalyzer.analyze() returns correct track_shortfalls list for each track below target",
+                "Test GapAnalyzer.analyze() returns complete=False when any track is empty even if total duration is met",
+                "Test GapAnalyzer.analyze() handles empty tracks list with default 4-track shortfall calculation",
+                "Test GapAnalyzer.analyze() returns total_shortfall as sum of individual track shortfalls"
             ]
         },
         {
             "id": "US-002",
-            "title": "Add _is_jarring_context_switch topic overlap detection tests",
+            "title": "Add TopicBroadener LLM integration and fallback tests",
             "priority": 2,
-            "passes": true,
-            "notes": "Pre-implemented in test_temporal_coherence.py. Added test_empty_adjacent_topics_not_jarring for AC4. All 6 AC verified: AC1-test_no_overlap_is_jarring, AC2-test_overlap_is_not_jarring, AC3-test_empty_topics_not_jarring, AC4-test_empty_adjacent_topics_not_jarring, AC5-test_keywords_and_topics_combined, AC6-test_case_insensitive_comparison.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test _is_jarring_context_switch() returns True when both segments have topics/keywords but zero overlap — verify segments with disjoint sets trigger jarring detection",
-                "Test _is_jarring_context_switch() returns False when segments share at least one common topic or keyword (case-insensitive)",
-                "Test _is_jarring_context_switch() returns False when current_segment has no topics/keywords (empty set cannot be jarring)",
-                "Test _is_jarring_context_switch() returns False when adjacent_segment has no topics/keywords (empty adjacent cannot trigger jarring)",
-                "Test _is_jarring_context_switch() handles mixed topics + keywords — overlap can come from either field",
-                "Test _is_jarring_context_switch() normalizes to lowercase for comparison — 'Paris' matches 'paris'"
+                "Test TopicBroadener.broaden() returns new keywords from LLM response parsing",
+                "Test TopicBroadener.broaden() excludes already-used keywords from results",
+                "Test TopicBroadener.broaden() lazy-loads LLM client only when first needed",
+                "Test TopicBroadener.broaden() limits keywords based on compilation_config.max_new_keywords",
+                "Test TopicBroadener.broaden() returns empty list when LLM fails or returns invalid JSON"
             ]
         },
         {
             "id": "US-003",
-            "title": "Add calculate_transcript_quality word count and tier scoring tests",
+            "title": "Add CompilationTimelineBuilder track arrangement tests",
             "priority": 3,
-            "passes": true,
-            "notes": "Pre-implemented: tests/test_transcript_quality.py has 32 tests covering all 6 AC. AC1: test_empty_transcript_returns_low_quality+test_none_transcript_returns_low_quality, AC2: test_long_transcript_high_word_score+test_well_structured_transcript_high_quality, AC3: test_medium_length_transcript, AC4: test_gibberish_transcript_low_quality, AC5: test_short_transcript_low_word_count+test_medium_length_transcript+test_long_transcript_high_word_score (word scoring coverage), AC6: test_short_transcript_low_word_count verifies 'words:6' in reason. All pass.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test calculate_transcript_quality() returns (0.0, 'low', 'empty_transcript') for empty or whitespace-only input",
-                "Test calculate_transcript_quality() returns quality_tier='high' when score >= 0.8 — verify word_count >= 50 with good coherence",
-                "Test calculate_transcript_quality() returns quality_tier='medium' when 0.5 <= score < 0.8 — verify intermediate word count",
-                "Test calculate_transcript_quality() returns quality_tier='low' when score < 0.5 — verify low word count or poor coherence",
-                "Test calculate_transcript_quality() word scoring: 50+ words = 0.4, 20-50 words = 0.2-0.4 (linear), <20 words = 0.0-0.2 (linear)",
-                "Test calculate_transcript_quality() reason string includes 'words:N' with actual word count"
+                "Test CompilationTimelineBuilder creates correct number of video/audio track pairs",
+                "Test CompilationTimelineBuilder clips are sorted by keyword group for visual coherence",
+                "Test CompilationTimelineBuilder handles clips with missing actual_duration gracefully",
+                "Test CompilationTimelineBuilder creates OTIO Timeline with correct framerate from config",
+                "Test CompilationTimelineBuilder generates unique clip names avoiding collisions"
             ]
         },
         {
             "id": "US-004",
-            "title": "Add _calculate_sentence_coherence punctuation and structure tests",
+            "title": "Add GapCheckStage orchestration and retry tests",
             "priority": 4,
-            "passes": true,
-            "notes": "Added 4 new tests to TestSentenceCoherence: test_long_words_boost_coherence (AC3), test_medium_word_length_partial_boost (AC3), test_score_capped_at_maximum (AC5), test_score_cap_with_excessive_input (AC5). Existing tests cover AC1 (punctuation), AC2 (capitalization), AC4 (short text). All 5 AC verified: 36 tests pass in 0.48s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test _calculate_sentence_coherence() returns score > 0 when text has sentence-ending punctuation (. ! ?) — verify punctuation_ratio contributes",
-                "Test _calculate_sentence_coherence() returns score > 0 for capitalized words indicating sentence structure — verify capitalization contributes",
-                "Test _calculate_sentence_coherence() returns higher score when average word length >= 4.0 (not gibberish)",
-                "Test _calculate_sentence_coherence() returns 0.0 for text with fewer than 3 words (too short to assess)",
-                "Test _calculate_sentence_coherence() returns score capped at 0.35 maximum — verify calculation respects ceiling"
+                "Test GapCheckStage.execute() returns success when GapReport.complete is True",
+                "Test GapCheckStage.execute() triggers TopicBroadener when shortfall exceeds threshold",
+                "Test GapCheckStage.execute() increments state.retry_count on each gap-fill attempt",
+                "Test GapCheckStage.execute() stops retrying after max_retries from compilation_config",
+                "Test GapCheckStage.execute() updates state.all_used_keywords with broadened keywords"
             ]
         },
         {
             "id": "US-005",
-            "title": "Add _calculate_language_consistency repetition and filler detection tests",
+            "title": "Add stage checkpoint serialization edge case tests",
             "priority": 5,
-            "passes": true,
-            "notes": "Added 7 new tests to TestLanguageConsistency: test_empty_word_list_returns_zero (AC5), test_non_ascii_content_deducts_score (AC6), test_high_ascii_ratio_no_deduction (AC6), test_repetition_exact_deduction_heavy (AC1), test_short_words_exact_deduction (AC2), test_filler_exact_deduction (AC3), test_well_formed_text_full_score (AC4). All 12 tests pass covering all 6 AC.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test _calculate_language_consistency() penalizes excessive word repetition — verify repetition_ratio < 0.3 deducts 0.15 from score",
-                "Test _calculate_language_consistency() penalizes many short words — verify short_ratio > 0.5 deducts 0.10 from score",
-                "Test _calculate_language_consistency() penalizes filler word overload (um, uh, like) — verify filler_ratio > 0.2 deducts 0.08",
-                "Test _calculate_language_consistency() returns 0.25 (full score) for well-formed text with no issues",
-                "Test _calculate_language_consistency() returns 0.0 for single-word or empty input — verify edge case handling",
-                "Test _calculate_language_consistency() handles non-ASCII content — verify ascii_ratio < 0.7 deducts 0.05"
+                "Test checkpoint.save() handles numpy arrays in stage data by converting to lists",
+                "Test checkpoint.save() handles datetime objects by converting to ISO format strings",
+                "Test checkpoint.load() restores numpy arrays from lists when type hint indicates ndarray",
+                "Test checkpoint.save() handles circular references with max_depth limit",
+                "Test checkpoint.load() returns None for missing optional stage data fields"
             ]
         },
         {
             "id": "US-006",
-            "title": "Add adjust_embedding_weight_for_transcript_quality tier-based adjustment tests",
+            "title": "Add test fixture factory patterns for common mock objects",
             "priority": 6,
-            "passes": true,
-            "notes": "Pre-implemented: TestAdjustEmbeddingWeight class in tests/test_transcript_quality.py has 6 tests covering all 5 AC. AC1: test_high_quality_no_reduction verifies (base_weight, reason with 'high_quality'). AC2: test_medium_quality_reduces_weight_by_10_percent verifies 0.4 -> 0.36. AC3: test_low_quality_reduces_weight_by_20_percent verifies 0.4 -> 0.32. AC4: test_disabled_returns_unchanged verifies (base_weight, reason with 'disabled'). AC5: test_custom_reduction_factor verifies custom low_quality_reduction parameter. All 6 tests pass in 0.44s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test adjust_embedding_weight_for_transcript_quality() returns (base_weight, 'high_quality_transcript') when quality_tier='high'",
-                "Test adjust_embedding_weight_for_transcript_quality() reduces weight by 10% for quality_tier='medium' — verify 0.4 becomes 0.36",
-                "Test adjust_embedding_weight_for_transcript_quality() reduces weight by 20% for quality_tier='low' — verify 0.4 becomes 0.32",
-                "Test adjust_embedding_weight_for_transcript_quality() returns (base_weight, 'quality_adjustment_disabled') when feature disabled",
-                "Test adjust_embedding_weight_for_transcript_quality() respects custom low_quality_reduction parameter — verify non-default reduction"
+                "Create conftest fixture factory for SRTSegment with customizable attributes",
+                "Create conftest fixture factory for mock Config with nested section overrides",
+                "Create conftest fixture factory for PipelineState with pre-populated stage data",
+                "Create conftest fixture factory for MatchResult with configurable confidence and alternatives",
+                "Add docstrings explaining factory pattern usage and parameter options"
             ]
         },
         {
             "id": "US-007",
-            "title": "Add compute_semantic_coherence embedding similarity adjustment tests",
+            "title": "Add test markers and collection optimization",
             "priority": 7,
-            "passes": true,
-            "notes": "Pre-implemented: tests/test_semantic_coherence.py has 34 tests covering all 6 AC. AC1: TestSmoothTopicFlow tests +0.03 for sim>0.6. AC2: TestAbruptTopicFlow tests -0.05 for sim<0.3. AC3: TestNeutralTopicFlow tests 0.0 for 0.3<=sim<=0.6. AC4: TestDisabledMode::test_disabled_returns_zero_adjustment verifies (0.0, 'semantic_coherence_disabled'). AC5: TestMissingEmbeddings covers None current/previous/both. AC6: TestReasonStrings verifies 'sim=X.XXX' format. All 34 tests pass in 0.45s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test compute_semantic_coherence() returns +0.03 adjustment when cosine similarity > 0.6 (smooth topic flow)",
-                "Test compute_semantic_coherence() returns -0.05 adjustment when cosine similarity < 0.3 (abrupt topic flow)",
-                "Test compute_semantic_coherence() returns 0.0 adjustment when 0.3 <= similarity <= 0.6 (neutral flow)",
-                "Test compute_semantic_coherence() returns (0.0, 'semantic_coherence_disabled') when feature disabled",
-                "Test compute_semantic_coherence() returns (0.0, 'missing_embedding') when either embedding is None",
-                "Test compute_semantic_coherence() reason string includes actual similarity value in format 'sim=X.XXX'"
+                "Add pytest marker 'fast' to all tests that complete in <100ms",
+                "Add pytest marker 'requires_api' to tests that need external API keys",
+                "Add pytest marker 'requires_network' to tests that make HTTP requests",
+                "Update pytest.ini with marker definitions and default deselect patterns",
+                "Document marker usage in tests/README.md or conftest.py docstring"
             ]
         },
         {
             "id": "US-008",
-            "title": "Add normalize_confidence_by_pool size-based normalization tests",
+            "title": "Add HealingOrchestrator strategy selection tests",
             "priority": 8,
-            "passes": true,
-            "notes": "Pre-implemented: tests/test_pool_normalization.py has 34 tests covering all 6 AC. AC1: test_small_pool_with_clear_winner_extra_boost verifies +0.05 for small pool (<10) with clear winner (margin >= 0.1). AC2: test_large_pool_with_tight_margin_extra_penalty verifies -0.05 for large pool (>100) with tight margin (<0.05). AC3: TestMediumPoolNormalization + TestNormalizationFormula verify inverse sqrt(pool_size/50) formula. AC4: test_disabled_returns_original_confidence verifies 'pool_normalization_disabled'. AC5: test_empty_pool_returns_original_confidence + test_negative_pool_returns_original_confidence verify 'empty_pool'. AC6: test_confidence_capped_at_one + test_confidence_capped_at_zero verify [0.0, 1.0] clamping. All 34 tests pass in 0.44s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test normalize_confidence_by_pool() boosts confidence for small pools (<10) with clear winner (margin >= 0.1) — verify +0.05 adjustment",
-                "Test normalize_confidence_by_pool() reduces confidence for large pools (>100) with tight margins (<0.05) — verify -0.05 adjustment",
-                "Test normalize_confidence_by_pool() applies factor-based normalization for medium pools (10-100) — verify inverse sqrt formula",
-                "Test normalize_confidence_by_pool() returns (confidence, 'pool_normalization_disabled') when feature disabled",
-                "Test normalize_confidence_by_pool() returns (confidence, 'empty_pool') when pool_size <= 0",
-                "Test normalize_confidence_by_pool() clamps result to [0.0, 1.0] range — verify extreme adjustments don't exceed bounds"
+                "Test HealingOrchestrator.select_healer() returns highest-priority matching healer",
+                "Test HealingOrchestrator.select_healer() skips healers with exhausted retry budgets",
+                "Test HealingOrchestrator.select_healer() respects healer.can_handle() return values",
+                "Test HealingOrchestrator.select_healer() returns None when no healers match the error",
+                "Test HealingOrchestrator logs healer selection decision with reason"
             ]
         },
         {
             "id": "US-009",
-            "title": "Add log_confidence_histogram bucket counting and ASCII rendering tests",
+            "title": "Add ResilientRunner concurrent stage healing tests",
             "priority": 9,
-            "passes": true,
-            "notes": "Pre-implemented: tests/test_confidence_histogram.py has 31 tests covering all 6 AC. AC1: TestHistogramBuckets::test_bucket_ranges_correct verifies 6 buckets. AC2: TestBucketCounting::test_boundary_value_one verifies 1.0 in 0.9-1.0 bucket. AC3: TestHistogramFormatting::test_includes_header_and_footer verifies 'Confidence Distribution' header. AC4: TestHistogramBarScaling::test_custom_bar_width verifies bar_width parameter respected. AC5: TestHistogramFormatting::test_includes_percentages verifies 'N (X.X%)' format. AC6: TestHistogramEdgeCases::test_empty_confidences verifies empty list returns valid histogram with zero counts. All 31 tests pass in 0.44s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test log_confidence_histogram() correctly buckets confidences: 0.0-0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0",
-                "Test log_confidence_histogram() includes 1.0 in the 0.9-1.0 bucket (inclusive upper bound)",
-                "Test log_confidence_histogram() returns string containing 'Confidence Distribution' header",
-                "Test log_confidence_histogram() bar lengths scale proportionally to max count — verify bar_width parameter respected",
-                "Test log_confidence_histogram() shows percentage for each bucket — verify format 'N (X.X%)'",
-                "Test log_confidence_histogram() handles empty confidence list gracefully — returns valid histogram with zero counts"
+                "Test ResilientRunner.run_stage() retries up to MAX_HEAL_ATTEMPTS on recoverable errors",
+                "Test ResilientRunner.run_stage() respects HealerResult.action to determine next step",
+                "Test ResilientRunner.run_stage() accumulates healing time in metrics",
+                "Test ResilientRunner.run_stage() propagates HealerAction.ABORT to pipeline failure",
+                "Test ResilientRunner.run_stage() resets healer state after successful stage completion"
             ]
         },
         {
             "id": "US-010",
-            "title": "Add calculate_match_quality_metrics edge case and gap detection tests",
+            "title": "Add test coverage reporting and threshold enforcement",
             "priority": 10,
-            "passes": true,
-            "notes": "Pre-implemented: tests/test_match_quality_metrics.py has 30 tests covering all 6 AC. AC1: test_counts_gaps verifies has_gap=True increments gap_count. AC2: TestCalculateMatchQualityMetrics tests verify primary_match.confidence extraction. AC3: test_handles_direct_match_objects verifies Match.confidence access. AC4: test_match_rate_calculation verifies matched_segments/total_segments. AC5: test_calculates_std_deviation uses statistics.stdev, test_single_match_no_std verifies 0.0 for single value. AC6: test_empty_matches_returns_metrics verifies zero metrics when matches=[] and total_segments>0. All 30 tests pass in 0.47s.",
+            "passes": false,
+            "notes": "",
             "acceptanceCriteria": [
-                "Test calculate_match_quality_metrics() counts gaps correctly — verify has_gap=True on matches increments gap_count",
-                "Test calculate_match_quality_metrics() handles MatchResult structure with primary_match attribute — extract confidence correctly",
-                "Test calculate_match_quality_metrics() handles direct Match structure with confidence attribute",
-                "Test calculate_match_quality_metrics() returns MatchQualityMetrics with match_rate = matched_segments / total_segments",
-                "Test calculate_match_quality_metrics() calculates confidence_std using statistics.stdev for 2+ values, 0.0 for single value",
-                "Test calculate_match_quality_metrics() returns zero metrics when matches list is empty but total_segments > 0"
+                "Configure pytest-cov to generate HTML and XML coverage reports",
+                "Add coverage threshold check (80% minimum) to pytest configuration",
+                "Create coverage badge generation script for README display",
+                "Add per-module coverage tracking for src/matching/, src/agents/, src/compilation/",
+                "Document coverage requirements and how to check coverage locally"
             ]
         }
     ]
