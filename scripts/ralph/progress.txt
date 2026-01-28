@@ -7764,3 +7764,20 @@ def test_eta_accuracy_batch_50_videos(self):
 
 - Tests passed: Sanity check passed (22/22 tests)
 - Commit: 701cace
+
+## Iteration US-002 (Sprint 26) - Implement marker-based CI workflow for fast feedback
+- Updated .github/workflows/tests.yml with 5 jobs:
+  - fast-tests: Runs pytest -m fast on every PR update (target: 45s, limit: 60s)
+  - full-tests: Runs full test suite only on merge to main branch
+  - offline-tests: Runs pytest -m 'not requires_network' for network-restricted runners
+  - lint: black, isort, ruff checks (no longer continue-on-error)
+  - quality: mypy and extended ruff (informational, PRs only)
+- Added job summary generation with test count, pass/fail/skip, and duration metrics
+- Updated tests/README.md with new 'CI Workflow (Sprint 26)' section documenting:
+  - Workflow jobs and their triggers
+  - Performance targets (45s target, 60s limit)
+  - Local development commands to simulate CI
+- Verified 11,656 fast-marked tests available
+- Files modified: .github/workflows/tests.yml, tests/README.md
+- Commit: 9b3241a
+
