@@ -66,8 +66,8 @@
             "id": "US-005",
             "title": "Add _calculate_language_consistency repetition and filler detection tests",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 7 new tests to TestLanguageConsistency: test_empty_word_list_returns_zero (AC5), test_non_ascii_content_deducts_score (AC6), test_high_ascii_ratio_no_deduction (AC6), test_repetition_exact_deduction_heavy (AC1), test_short_words_exact_deduction (AC2), test_filler_exact_deduction (AC3), test_well_formed_text_full_score (AC4). All 12 tests pass covering all 6 AC.",
             "acceptanceCriteria": [
                 "Test _calculate_language_consistency() penalizes excessive word repetition — verify repetition_ratio < 0.3 deducts 0.15 from score",
                 "Test _calculate_language_consistency() penalizes many short words — verify short_ratio > 0.5 deducts 0.10 from score",
