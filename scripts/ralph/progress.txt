@@ -7227,3 +7227,36 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: 23 test files, tests/README.md
 - Commit: pending
 
+
+## Iteration US-006 (Sprint 23) - Add subdirectory conftest.py for test_agents
+- Enhanced tests/test_agents/conftest.py with healer-specific fixtures:
+  
+**AC1: Create tests/test_agents/conftest.py with healer-specific fixtures**
+- File already existed with base fixtures (project_dir, mock_config, mock_stage, etc.)
+- Added new healer-specific fixtures for isolated testing
+
+**AC2: Add mock_healing_context fixture for isolated healer tests**
+- Created MockHealingContext dataclass with config, project_dir, state, stage_name, error, metrics
+- Added .with_error(error) helper to create context with different error
+- Added .with_stage(stage_name) helper to create context for different stages
+- Fixture provides HealingMetrics instance from src.agents.strategy
+
+**AC3: Add mock_orchestrator fixture for runner integration tests**
+- Creates real HealingOrchestrator with conservative strategy
+- Added mock_orchestrator_factory for creating orchestrators with different strategies
+- Supports "conservative", "aggressive", "minimal", "interactive" strategies
+
+**AC4: Add agent_factory fixture following factory pattern**
+- Created AgentFactory class with:
+  - create_healer(healer_type): Create healer by short name ("checkpoint", "disk", "api", etc.)
+  - create_orchestrator(strategy, healers): Create orchestrator with specified strategy
+  - create_runner(with_orchestrator, strategy): Create runner optionally with orchestrator
+  - available_healers(): List registered healer types
+
+**AC5: Verify all test_agents/*.py tests pass with new fixtures**
+- All 558 tests in test_agents/ pass in 7.83s
+- Verified: pytest tests/test_agents/ -v --tb=short
+
+- Test results: 558 passed in 7.83s
+- Files modified: tests/test_agents/conftest.py (+230 lines)
+- Commit: ca91ef1
