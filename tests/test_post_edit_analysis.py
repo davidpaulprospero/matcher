@@ -307,3 +307,521 @@ class TestFilenameBasedAnalysis:
         assert analyzer._normalize("clip.MP4") == "clip"
         assert analyzer._normalize("clip.MoV") == "clip"
         assert analyzer._normalize("clip.WebM") == "clip"
+
+
+# =============================================================================
+# US-002: Track category statistics tests
+# =============================================================================
+
+
+# =============================================================================
+# AC1: Track category aggregation tests
+# =============================================================================
+
+class TestTrackCategoryAggregation:
+    """Test track category aggregation groups clips into v1, v2_v3, v4_v6, v7_plus buckets."""
+
+    def test_aggregation_10_clips_across_5_tracks(self):
+        """Verify counts per category with a mock result containing 10 clips across 5 tracks."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            total_segments=10,
+            v1_kept=4,
+            v2_v3_used=2,
+            v4_v6_used=2,
+            v7_plus_used=1,
+            external_added=1,
+            track_breakdown={
+                "V1": 4, "V2": 1, "V3": 1, "V5": 2, "V8": 1
+            },
+        )
+        # Verify each category bucket has correct count
+        assert result.v1_kept == 4
+        assert result.v2_v3_used == 2
+        assert result.v4_v6_used == 2
+        assert result.v7_plus_used == 1
+        assert result.external_added == 1
+        # Total across all buckets should equal total clips used
+        total_used = result.v1_kept + result.v2_v3_used + result.v4_v6_used + result.v7_plus_used + result.external_added
+        assert total_used == 10
+
+    def test_get_track_category_maps_all_tracks_to_buckets(self):
+        """Verify all V1-V10 map to correct category bucket."""
+        track_categories = {}
+        for i in range(1, 11):
+            cat = _get_track_category(f"V{i}")
+            if cat not in track_categories:
+                track_categories[cat] = []
+            track_categories[cat].append(f"V{i}")
+
+        assert track_categories["v1"] == ["V1"]
+        assert set(track_categories["v2_v3"]) == {"V2", "V3"}
+        assert set(track_categories["v4_v6"]) == {"V4", "V5", "V6"}
+        assert set(track_categories["v7_plus"]) == {"V7", "V8", "V9", "V10"}
+
+    def test_track_breakdown_dict_records_per_track_counts(self):
+        """Verify track_breakdown dict stores correct per-track clip counts."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            track_breakdown={"V1": 5, "V2": 3, "V3": 1, "V4": 2, "V8": 4}
+        )
+        assert result.track_breakdown["V1"] == 5
+        assert result.track_breakdown["V2"] == 3
+        assert result.track_breakdown["V3"] == 1
+        assert result.track_breakdown["V4"] == 2
+        assert result.track_breakdown["V8"] == 4
+        assert sum(result.track_breakdown.values()) == 15
+
+    def test_user_added_tracks_separated_from_matcher(self):
+        """Verify user-added tracks are tracked separately from matcher tracks."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            track_breakdown={"V1": 3, "V2": 2},
+            user_added_tracks={"Lower Thirds": 5, "Graphics": 3},
+        )
+        # Matcher tracks
+        assert "V1" in result.track_breakdown
+        assert "V2" in result.track_breakdown
+        # User tracks separate
+        assert "Lower Thirds" in result.user_added_tracks
+        assert result.user_added_tracks["Lower Thirds"] == 5
+        # No overlap
+        assert "Lower Thirds" not in result.track_breakdown
+
+    def test_aggregation_single_category_only(self):
+        """Verify aggregation works when only one category has clips."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            total_segments=6,
+            v1_kept=6,
+            v2_v3_used=0,
+            v4_v6_used=0,
+            v7_plus_used=0,
+            external_added=0,
+        )
+        assert result.v1_kept == 6
+        assert result.v2_v3_used == 0
+        assert result.v4_v6_used == 0
+        assert result.v7_plus_used == 0
+
+
+# =============================================================================
+# AC2: Coverage calculation per track category
+# =============================================================================
+
+class TestCoverageCalculation:
+    """Test coverage calculation per track category."""
+
+    def test_coverage_pct_calculation(self):
+        """Verify coverage_pct is (matched_duration / total_duration) * 100."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            total_segments=20,
+            segments_covered=15,
+            segments_not_covered=5,
+        )
+        coverage_pct = (result.segments_covered / result.total_segments) * 100
+        assert coverage_pct == 75.0
+
+    def test_v1_kept_pct_calculation(self):
+        """Verify v1_kept_pct = (v1_kept / total_segments) * 100."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            total_segments=40,
+            v1_kept=30,
+            v1_kept_pct=75.0,  # Pre-calculated as done in analyze()
+        )
+        expected = (30 / 40) * 100
+        assert result.v1_kept_pct == expected
+
+    def test_pct_helper_method(self):
+        """Verify _pct() helper computes percentage of total_segments."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(total_segments=50)
+        assert result._pct(25) == 50.0
+        assert result._pct(50) == 100.0
+        assert result._pct(0) == 0.0
+
+    def test_coverage_ratio_duration_based(self):
+        """Verify coverage_ratio = edited_duration / original_duration."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            duration_enabled=True,
+            original_duration_sec=120.0,
+            edited_duration_sec=90.0,
+            coverage_ratio=90.0 / 120.0,
+        )
+        assert abs(result.coverage_ratio - 0.75) < 0.001
+
+    def test_segments_covered_plus_not_covered_equals_total(self):
+        """Verify segments_covered + segments_not_covered == total when segment_order populated."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            total_segments=30,
+            segments_covered=22,
+            segments_not_covered=8,
+        )
+        assert result.segments_covered + result.segments_not_covered == result.total_segments
+
+
+# =============================================================================
+# AC3: Empty edited OTIO returns 0% coverage
+# =============================================================================
+
+class TestEmptyEditedOtio:
+    """Test empty edited OTIO returns 0% coverage for all categories."""
+
+    def test_zero_total_segments_no_division_by_zero(self):
+        """Verify no division by zero errors when total_segments is 0."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(total_segments=0)
+        # _pct should handle 0 total_segments
+        assert result._pct(0) == 0.0
+        assert result._pct(5) == 0.0
+
+    def test_empty_result_all_categories_zero(self):
+        """Verify all category counts are 0 when no clips matched."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult()
+        assert result.v1_kept == 0
+        assert result.v2_v3_used == 0
+        assert result.v4_v6_used == 0
+        assert result.v7_plus_used == 0
+        assert result.external_added == 0
+        assert result.segments_covered == 0
+        assert result.segments_not_covered == 0
+
+    def test_empty_result_v1_kept_pct_is_zero(self):
+        """Verify v1_kept_pct defaults to 0.0 on empty result."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult()
+        assert result.v1_kept_pct == 0.0
+
+    def test_empty_result_summary_no_crash(self):
+        """Verify summary() doesn't crash on empty result (0 segments)."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T00:00:00",
+        )
+        summary = result.summary()
+        assert isinstance(summary, str)
+        assert "0 total" in summary
+        # Should not raise any exception
+
+    def test_empty_result_to_dict_no_crash(self):
+        """Verify to_dict() doesn't crash on empty result."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult()
+        d = result.to_dict()
+        assert d["summary"]["total_segments"] == 0
+        assert d["summary"]["v1_kept"] == 0
+        assert d["summary"]["v1_kept_pct"] == 0.0
+        assert d["summary"]["segments_covered"] == 0
+
+    def test_empty_coverage_ratio_zero(self):
+        """Verify coverage_ratio is 0.0 when original_duration is 0."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            duration_enabled=True,
+            original_duration_sec=0.0,
+            edited_duration_sec=0.0,
+            coverage_ratio=0.0,
+        )
+        assert result.coverage_ratio == 0.0
+
+
+# =============================================================================
+# AC4: Position-based mode matches clips by frame position
+# =============================================================================
+
+class TestPositionBasedMatching:
+    """Test position-based mode matches clips by frame position."""
+
+    def test_position_exact_match_counted(self):
+        """Verify clips matched when original and edited positions align."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            position_match_enabled=True,
+            position_exact_matches=8,
+            position_alt_used=1,
+            position_secondary_used=1,
+            position_external_used=0,
+            position_gaps=0,
+        )
+        assert result.position_exact_matches == 8
+
+    def test_position_gaps_tracked(self):
+        """Verify gaps at segment positions are counted."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            position_match_enabled=True,
+            position_exact_matches=5,
+            position_gaps=3,
+        )
+        assert result.position_gaps == 3
+
+    def test_position_alt_and_secondary_counted(self):
+        """Verify alternative and secondary replacements at positions counted."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            position_match_enabled=True,
+            position_alt_used=3,
+            position_secondary_used=2,
+        )
+        assert result.position_alt_used == 3
+        assert result.position_secondary_used == 2
+
+    def test_position_mismatches_stored(self):
+        """Verify position mismatch details stored correctly."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        mismatches = [
+            {"segment": "S003", "expected": "clip_a.mp4", "actual": "clip_b.mp4", "type": "alternative"},
+            {"segment": "S007", "expected": "clip_c.mp4", "actual": "(gap/cut)", "type": "gap"},
+        ]
+        result = FilenameAnalysisResult(
+            position_match_enabled=True,
+            position_mismatches=mismatches,
+        )
+        assert len(result.position_mismatches) == 2
+        assert result.position_mismatches[0]["type"] == "alternative"
+        assert result.position_mismatches[1]["type"] == "gap"
+
+    def test_position_result_to_dict(self):
+        """Verify position matching data appears in to_dict() output."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            position_match_enabled=True,
+            position_exact_matches=7,
+            position_alt_used=2,
+            position_secondary_used=1,
+            position_external_used=0,
+            position_gaps=0,
+            position_mismatches=[
+                {"segment": "S001", "expected": "a.mp4", "actual": "b.mp4", "type": "alternative"},
+            ],
+        )
+        d = result.to_dict()
+        assert "position_matching" in d
+        assert d["position_matching"]["exact_matches"] == 7
+        assert d["position_matching"]["alt_used"] == 2
+        assert d["position_matching"]["gaps"] == 0
+
+    def test_position_analysis_result_separate_dataclass(self):
+        """Verify PositionAnalysisResult stores position stats correctly."""
+        from src.post_edit_analysis import PositionAnalysisResult
+        result = PositionAnalysisResult(
+            total_segments=20,
+            v1_kept=14,
+            v1_kept_pct=70.0,
+            replaced_with_alt=3,
+            replaced_with_secondary=2,
+            replaced_with_external=1,
+            track_usage={"V1": 14, "V2": 3, "V4": 2, "External": 1},
+        )
+        assert result.v1_kept == 14
+        assert result.replaced_with_alt == 3
+        assert result.track_usage["V1"] == 14
+
+    def test_position_analysis_result_to_dict(self):
+        """Verify PositionAnalysisResult.to_dict() has correct structure."""
+        from src.post_edit_analysis import PositionAnalysisResult
+        result = PositionAnalysisResult(
+            total_segments=10,
+            v1_kept=6,
+            v1_kept_pct=60.0,
+            replaced_with_alt=2,
+            replaced_with_secondary=1,
+            replaced_with_external=1,
+            all_disabled=0,
+            missing=0,
+            track_usage={"V1": 6, "V2": 2},
+        )
+        d = result.to_dict()
+        assert d["summary"]["total_segments"] == 10
+        assert d["summary"]["v1_kept"] == 6
+        assert d["summary"]["v1_kept_pct"] == 60.0
+        # "replaced" = total - v1_kept - all_disabled - missing
+        assert d["summary"]["replaced"] == 4
+
+
+# =============================================================================
+# AC5: Report generation produces valid markdown
+# =============================================================================
+
+class TestReportGeneration:
+    """Test report generation produces valid markdown with track breakdown, coverage bars, and summary."""
+
+    def test_summary_contains_header(self):
+        """Verify summary() output contains report header."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=10,
+        )
+        summary = result.summary()
+        assert "POST-EDIT ANALYSIS REPORT" in summary
+
+    def test_summary_contains_track_breakdown_section(self):
+        """Verify summary includes track preference breakdown section."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=10,
+            track_breakdown={"V1": 5, "V2": 3, "V5": 2},
+        )
+        summary = result.summary()
+        assert "TRACK PREFERENCE BREAKDOWN" in summary
+        assert "V1: 5 clips" in summary
+        assert "V2: 3 clips" in summary
+        assert "V5: 2 clips" in summary
+
+    def test_summary_contains_coverage_map_with_bars(self):
+        """Verify summary includes coverage map with ASCII bars when enabled."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=10,
+            coverage_map_enabled=True,
+            coverage_map=[
+                {"start_segment": "S000", "end_segment": "S009",
+                 "total": 10, "covered": 7, "coverage_pct": 70.0},
+            ],
+        )
+        summary = result.summary()
+        assert "SEGMENT COVERAGE MAP" in summary
+        # Should contain ASCII bar chars
+        assert "[" in summary and "#" in summary
+
+    def test_summary_contains_segment_counts(self):
+        """Verify summary includes segment count and coverage stats."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=20,
+            segments_covered=15,
+            segments_not_covered=5,
+            v1_kept=12,
+            v2_v3_used=3,
+            v4_v6_used=2,
+            v7_plus_used=1,
+            external_added=2,
+            segments_dropped=8,
+        )
+        summary = result.summary()
+        assert "20 total" in summary
+        assert "V1 CLIPS USED" in summary
+        assert "V2-V3 ALTERNATIVES" in summary
+        assert "V4-V6 SECONDARY" in summary
+        assert "V7+ STRATEGY" in summary
+        assert "EXTERNAL CLIPS" in summary
+
+    def test_summary_duration_section_when_enabled(self):
+        """Verify duration comparison appears when enabled."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=10,
+            duration_enabled=True,
+            original_duration_sec=300.0,
+            edited_duration_sec=240.0,
+            coverage_ratio=0.8,
+        )
+        summary = result.summary()
+        assert "DURATION COMPARISON" in summary
+        assert "5:00" in summary  # 300 seconds
+        assert "4:00" in summary  # 240 seconds
+
+    def test_summary_position_section_when_enabled(self):
+        """Verify position matching section appears when enabled."""
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=10,
+            position_match_enabled=True,
+            position_exact_matches=7,
+            position_alt_used=2,
+            position_secondary_used=1,
+            position_external_used=0,
+            position_gaps=0,
+        )
+        summary = result.summary()
+        assert "POSITION MATCHING" in summary
+        assert "V1 at correct position" in summary
+
+    def test_to_dict_json_serializable(self):
+        """Verify to_dict() output is fully JSON serializable."""
+        import json as json_mod
+        from src.post_edit_analysis import FilenameAnalysisResult
+        result = FilenameAnalysisResult(
+            original_file="original.otio",
+            edited_file="edited.otio",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=20,
+            v1_kept=15,
+            v1_kept_pct=75.0,
+            v2_v3_used=3,
+            v4_v6_used=1,
+            v7_plus_used=1,
+            external_added=0,
+            segments_dropped=5,
+            segments_covered=15,
+            segments_not_covered=5,
+            track_breakdown={"V1": 15, "V2": 2, "V3": 1, "V5": 1, "V8": 1},
+            duration_enabled=True,
+            original_duration_sec=600.0,
+            edited_duration_sec=480.0,
+            coverage_ratio=0.8,
+            confidence_enabled=True,
+            kept_avg_confidence=0.85,
+            dropped_avg_confidence=0.62,
+            confidence_correlation="positive",
+            kept_confidences=[0.9, 0.8],
+            dropped_confidences=[0.6, 0.64],
+        )
+        d = result.to_dict()
+        # Must not raise
+        json_str = json_mod.dumps(d)
+        assert isinstance(json_str, str)
+        parsed = json_mod.loads(json_str)
+        assert parsed["summary"]["total_segments"] == 20
+        assert parsed["summary"]["v1_kept_pct"] == 75.0
+        assert "duration" in parsed
+        assert "confidence" in parsed
+
+    def test_position_analysis_summary_format(self):
+        """Verify PositionAnalysisResult.summary() produces readable output."""
+        from src.post_edit_analysis import PositionAnalysisResult
+        result = PositionAnalysisResult(
+            edited_file="edited.otio",
+            segment_map_file="segments.json",
+            analyzed_at="2026-01-28T12:00:00",
+            total_segments=15,
+            v1_kept=10,
+            v1_kept_pct=66.7,
+            replaced_with_alt=3,
+            replaced_with_secondary=1,
+            replaced_with_external=1,
+            track_usage={"V1": 10, "V2": 3, "V4": 1},
+            replacements=[
+                {"segment": "S003", "original": "clip_a.mp4", "replaced_with": "clip_b.mp4", "new_track": "V2"},
+            ],
+        )
+        summary = result.summary()
+        assert "POST-EDIT ANALYSIS (POSITION-BASED)" in summary
+        assert "V1 clips kept" in summary
+        assert "Replaced with alt" in summary
+        assert "Track Usage:" in summary
