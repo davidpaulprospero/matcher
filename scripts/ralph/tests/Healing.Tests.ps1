@@ -448,3 +448,110 @@ Describe 'Log-HealingEvent' {
         $entry.iteration | Should -Be 5
     }
 }
+
+Describe 'Suspend-SprintForHealing' {
+    BeforeEach {
+        $script:HealingStateFile = Join-Path $TestDrive "healing_state.json"
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_suspend.jsonl"
+        if (Test-Path $script:HealingStateFile) { Remove-Item $script:HealingStateFile -Force }
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+        $script:State = @{
+            SessionId = "test-session"; IterationCount = 7;
+            ConsecutiveFailures = 0; CurrentMode = "Standard"
+        }
+    }
+
+    It 'creates healing_state.json with tier and sprint context' {
+        $healthResult = @{
+            HasErrors = $true; FailedTier = 2
+            RawDiagnostics = "IMPORT: test_cache.py -> ImportError"
+            TierResults = @(
+                @{ Tier = 1; HasErrors = $false },
+                @{ Tier = 2; HasErrors = $true; ErrorCount = 1;
+                   CollectionErrors = @(@{ File = "test_cache.py"; Error = "ImportError" }) }
+            )
+        }
+
+        Mock Write-Host {}
+        Suspend-SprintForHealing -HealthResult $healthResult -StoryId "US-005" -FocusArea "testing"
+
+        $script:HealingStateFile | Should -Exist
+        $state = Get-Content $script:HealingStateFile -Raw | ConvertFrom-Json
+        $state.paused | Should -BeTrue
+        $state.storyId | Should -Be "US-005"
+        $state.focusArea | Should -Be "testing"
+        $state.failedTier | Should -Be 2
+    }
+
+    It 'logs healing_started event with tier info' {
+        $healthResult = @{
+            HasErrors = $true; FailedTier = 1
+            RawDiagnostics = "SYNTAX: config.py -> SyntaxError"
+            TierResults = @(@{ Tier = 1; HasErrors = $true; SyntaxErrors = @(@{File="config.py";Error="bad"}) })
+        }
+
+        Mock Write-Host {}
+        Suspend-SprintForHealing -HealthResult $healthResult -StoryId "US-003" -FocusArea "pipeline"
+
+        $script:HealingLogFile | Should -Exist
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.event | Should -Be "healing_started"
+        $entry.data.failedTier | Should -Be 1
+    }
+}
+
+Describe 'Resume-SprintFromHealing' {
+    BeforeEach {
+        $script:HealingStateFile = Join-Path $TestDrive "healing_state_resume.json"
+        $script:HealingLogFile = Join-Path $TestDrive "healing_log_resume.jsonl"
+        if (Test-Path $script:HealingLogFile) { Remove-Item $script:HealingLogFile -Force }
+        $script:State = @{ SessionId = "s1"; IterationCount = 8; ConsecutiveFailures = 0 }
+    }
+
+    It 'clears healing_state.json on resume' {
+        @{ paused = $true; storyId = "US-005" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        Mock Write-Host {}
+        Resume-SprintFromHealing -Success $true -AttemptCount 1
+        $script:HealingStateFile | Should -Not -Exist
+    }
+
+    It 'logs healing_resolved on successful fix' {
+        @{ paused = $true; storyId = "US-005" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        Mock Write-Host {}
+        Resume-SprintFromHealing -Success $true -AttemptCount 2 -FixSummary "Fixed import path"
+
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.event | Should -Be "healing_resolved"
+        $entry.data.attempts | Should -Be 2
+    }
+
+    It 'logs healing_failed when fix unsuccessful' {
+        @{ paused = $true; storyId = "US-005" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        Mock Write-Host {}
+        Resume-SprintFromHealing -Success $false -AttemptCount 3
+
+        $entry = @(Get-Content $script:HealingLogFile)[0] | ConvertFrom-Json
+        $entry.event | Should -Be "healing_failed"
+    }
+}
+
+Describe 'Test-HealingInProgress' {
+    BeforeEach {
+        $script:HealingStateFile = Join-Path $TestDrive "healing_state_check.json"
+        if (Test-Path $script:HealingStateFile) { Remove-Item $script:HealingStateFile -Force }
+    }
+
+    It 'returns false when no healing state file' {
+        Test-HealingInProgress | Should -BeFalse
+    }
+
+    It 'returns true when healing is paused' {
+        @{ paused = $true; storyId = "US-005" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        Test-HealingInProgress | Should -BeTrue
+    }
+
+    It 'returns false when file exists but paused is false' {
+        @{ paused = $false; storyId = "US-005" } | ConvertTo-Json | Set-Content $script:HealingStateFile
+        Test-HealingInProgress | Should -BeFalse
+    }
+}

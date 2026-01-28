@@ -376,3 +376,96 @@ function Log-HealingEvent {
         try { Add-Content -Path $logPath -Value $json -Encoding UTF8 } catch {}
     }
 }
+
+function Test-HealingInProgress {
+    <#
+    .SYNOPSIS
+        Check if a healing session is currently in progress.
+    #>
+    $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
+                 else { Join-Path $script:RalphDir "healing_state.json" }
+
+    if (-not (Test-Path $statePath)) { return $false }
+
+    try {
+        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+        return ($state.paused -eq $true)
+    } catch {
+        return $false
+    }
+}
+
+function Suspend-SprintForHealing {
+    <#
+    .SYNOPSIS
+        Pause the current sprint to fix codebase errors.
+        Saves tier diagnostics and sprint context to healing_state.json.
+    #>
+    param(
+        [Parameter(Mandatory)][hashtable]$HealthResult,
+        [string]$StoryId = "",
+        [string]$FocusArea = ""
+    )
+
+    $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
+                 else { Join-Path $script:RalphDir "healing_state.json" }
+
+    $healingState = @{
+        paused         = $true
+        pausedAt       = (Get-Date -Format "o")
+        storyId        = $StoryId
+        focusArea      = $FocusArea
+        failedTier     = $HealthResult.FailedTier
+        rawDiagnostics = $HealthResult.RawDiagnostics
+    }
+
+    $healingState | ConvertTo-Json -Depth 10 | Set-Content $statePath -Encoding UTF8
+
+    Write-Host ""
+    Write-Host "  ========================================" -ForegroundColor Red
+    Write-Host "  HEALING MODE: Tier $($HealthResult.FailedTier) errors detected!" -ForegroundColor Red
+    Write-Host "  ========================================" -ForegroundColor Red
+    Write-Host "  Sprint paused at story: $StoryId" -ForegroundColor Yellow
+    Write-Host ""
+
+    Log-HealingEvent -Event "healing_started" -Data @{
+        trigger        = "tier_$($HealthResult.FailedTier)_failure"
+        storyId        = $StoryId
+        focusArea      = $FocusArea
+        failedTier     = $HealthResult.FailedTier
+        rawDiagnostics = $HealthResult.RawDiagnostics
+    }
+}
+
+function Resume-SprintFromHealing {
+    <#
+    .SYNOPSIS
+        Resume the sprint after healing completes (success or failure).
+    #>
+    param(
+        [Parameter(Mandatory)][bool]$Success,
+        [int]$AttemptCount = 0,
+        [string]$FixSummary = ""
+    )
+
+    $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
+                 else { Join-Path $script:RalphDir "healing_state.json" }
+
+    if ($Success) {
+        Log-HealingEvent -Event "healing_resolved" -Data @{
+            attempts   = $AttemptCount
+            fixSummary = $FixSummary
+        }
+        Write-Host "  Healing complete! Resuming sprint..." -ForegroundColor Green
+    } else {
+        Log-HealingEvent -Event "healing_failed" -Data @{
+            attempts = $AttemptCount
+            reason   = "Max healing attempts exhausted"
+        }
+        Write-Host "  Healing FAILED after $AttemptCount attempts. Sprint aborting." -ForegroundColor Red
+    }
+
+    if (Test-Path $statePath) {
+        Remove-Item $statePath -Force
+    }
+}
