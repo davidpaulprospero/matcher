@@ -120,7 +120,8 @@
             "id": "US-009",
             "title": "Add title filter escalation args integration tests",
             "priority": 9,
-            "passes": false,
+            "passes": true,
+            "notes": "Created tests/test_title_filter_escalation.py with 18 tests across 5 classes: TestSearchIncludesEscalationArgs (3 tests: Tier 1 --impersonate, Tier 2 --extractor-args, arg ordering before cookies), TestSearchHandles403WithEscalation (3 tests: 403 detection via is_escalation_trigger, caller records failure for escalation, 403 returns valid SearchResult), TestTimeoutDoesNotTriggerEscalation (3 tests: timeout doesn't escalate, returns timed_out SearchResult, preserves tier for next search), TestJsonParseErrorPreservesEscalation (4 tests: malformed JSON, mixed valid/invalid, empty output, generic exception all preserve escalation state), TestEscalationManagerNone (5 tests: works without manager, no args when both None, impersonation fallback, no error on 403, no error on timeout). All 18 tests pass.",
             "acceptanceCriteria": [
                 "Test filter_by_title() includes escalation args from get_escalation_args(keyword) in yt-dlp --dump-json search command",
                 "Test filter_by_title() handles 403 during search by calling escalation_manager.record_failure() and retrying with escalated args",
