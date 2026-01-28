@@ -7008,3 +7008,22 @@ def test_eta_accuracy_batch_50_videos(self):
 - Gotcha: Current PexelsVideoClient doesn't support HTTP Range resume - it skips if file exists (documented in test)
 - All 85 tests pass
 - Files modified: tests/test_media_sources_video_clients.py
+
+
+## Iteration - [US-004] Add ChapterDetector integration tests
+- Added 13 new tests in tests/test_chapter_detection/test_detector.py
+- Test classes created:
+  - TestDetectorReturnsValidBoundariesUS004 (2 tests): AC1 - valid boundary verification
+  - TestDetectorHandlesOverlappingChaptersUS004 (2 tests): AC2 - overlap resolution
+  - TestDetectorMergesShortChaptersUS004 (2 tests): AC3 - short chapter merging
+  - TestDetectorRejectsNegativeDurationsUS004 (3 tests): AC4 - negative duration handling
+  - TestDetectorHandlesEmptyTranscriptUS004 (4 tests): AC5 - empty transcript handling
+- Acceptance criteria mapping:
+  - AC1 (valid boundaries): test_detect_returns_result_with_valid_boundaries, test_detect_boundaries_cover_entire_transcript
+  - AC2 (overlapping): test_overlapping_chapters_from_llm_resolved, test_heavily_overlapping_chapters_handled
+  - AC3 (short chapters): test_short_chapters_merged_by_coverage, test_coverage_resolution_merges_tiny_directly
+  - AC4 (negative durations): test_validate_chapters_rejects_negative_duration, test_validate_chapters_clamps_out_of_bounds_indices, test_coverage_resolution_handles_inverted_boundaries
+  - AC5 (empty transcript): test_detect_with_empty_segments_returns_empty_result, test_detect_with_none_segments_handles_gracefully, test_detect_dict_output_with_empty_segments, test_coverage_resolution_with_zero_total_segments
+- Test results: 124 chapter detection tests pass in 0.59s
+- Files modified: tests/test_chapter_detection/test_detector.py (+335 lines)
+- Commit: 03df23f

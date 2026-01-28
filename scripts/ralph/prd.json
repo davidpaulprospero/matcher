@@ -50,8 +50,8 @@
             "id": "US-004",
             "title": "Add chapter detection ChapterDetector integration tests",
             "priority": 4,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added 13 new tests in 5 test classes: TestDetectorReturnsValidBoundariesUS004 (2), TestDetectorHandlesOverlappingChaptersUS004 (2), TestDetectorMergesShortChaptersUS004 (2), TestDetectorRejectsNegativeDurationsUS004 (3), TestDetectorHandlesEmptyTranscriptUS004 (4). All 5 AC verified. 124 total tests pass in chapter detection suite.",
             "acceptanceCriteria": [
                 "Test ChapterDetector.detect() returns ChapterResult with valid boundaries",
                 "Test ChapterDetector.detect() handles LLM response with overlapping chapters",
