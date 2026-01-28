@@ -7391,3 +7391,28 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_llm_client/README.md (571 lines)
 - Test results: 101 tests in test_llm_client/ pass
 - Commit: 12d053b
+
+
+## Iteration US-005 (Sprint 24) - Add flaky test detection and retry infrastructure
+- Added pytest-rerunfailures>=15.0 to requirements-dev.txt
+- Configured pytest.ini with @pytest.mark.flaky marker definition (auto-retried 2x)
+- Created tests/test_flaky_detection.py with 8 retry pattern demonstrations:
+  1. test_flaky_basic_pattern - Basic reruns=2 with delay
+  2. test_flaky_windows_only - Platform-conditional retries
+  3. test_flaky_network_pattern - Network-dependent with requires_network marker
+  4. test_flaky_timing_pattern - Timing-sensitive operations
+  5. test_flaky_resource_contention - Shared resource access
+  6. test_flaky_ci_aware - Different retry counts for CI vs local
+  7. test_rerun_infrastructure_validation - Validates retry setup works
+  8. test_documented_flaky_pattern - Documentation pattern example
+- Updated tests/README.md with comprehensive flaky test guidelines:
+  - What makes a test flaky (timing, network, resource, CI)
+  - When to use/not use flaky marker
+  - Documenting flaky tests with standard template
+  - Identifying flaky tests (signs, tools)
+  - Debugging techniques (--reruns 0, --count, --showlocals)
+  - Reference to all 8 patterns in test_flaky_detection.py
+- Files created: tests/test_flaky_detection.py
+- Files modified: requirements-dev.txt, pytest.ini, tests/README.md
+- Test results: 8 tests passed in 0.28s
+- Commit: c9da8e1

@@ -68,8 +68,8 @@
             "id": "US-005",
             "title": "Add flaky test detection and retry infrastructure",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added pytest-rerunfailures>=15.0 to requirements-dev.txt. Configured pytest.ini with @pytest.mark.flaky marker. Created tests/test_flaky_detection.py with 8 pattern demonstrations: basic, platform-conditional, network-dependent, timing-sensitive, resource contention, CI-aware, infrastructure validation, and documentation pattern. Updated tests/README.md with comprehensive flaky test guidelines covering when to use, how to identify, document, and debug flaky tests.",
             "acceptanceCriteria": [
                 "Add pytest-rerunfailures to requirements-dev.txt",
                 "Configure pytest.ini with default reruns=2 for tests marked flaky",
