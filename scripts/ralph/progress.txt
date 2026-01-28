@@ -1,4 +1,22 @@
 
+## Iteration US-003 (Sprint 22) - Add chapter detection ChunkingStrategy tests
+- Added 13 new tests in tests/test_chapter_detection/test_chunking.py
+- New test classes created:
+  - TestChunkingSentenceBoundaries (2 tests): segment boundary splitting, long segments kept together
+  - TestChunkingMaxSizeLimit (2 tests): max_chars limit enforcement, extremely small limits
+  - TestChunkingShortTranscripts (3 tests): single segment, fewer than overlap, empty input
+  - TestChunkingTimestampPreservation (3 tests): timestamp lookup via indices, boundary alignment, full coverage
+  - TestChunkingUnicode (3 tests): Japanese/Greek/Arabic/emoji, length calculation, mixed scripts
+- All 5 acceptance criteria verified:
+  - AC1: test_chunks_split_on_segment_boundaries - segments are atomic units (sentence-level)
+  - AC2: test_respects_max_chars_limit - chunks stay within max_chars
+  - AC3: test_single_segment_transcript + test_transcript_smaller_than_min_overlap - short transcripts handled
+  - AC4: test_timestamps_in_segments_preserved + 2 more - segment indices enable timestamp lookup
+  - AC5: test_unicode_characters_in_text + 2 more - Unicode preserved correctly
+- Note: Implementation uses create_chunks() function, not ChunkingStrategy class (PRD used speculative naming)
+- Files modified: tests/test_chapter_detection/test_chunking.py (+140 lines)
+- Test results: 24 tests passed in 0.43s (11 pre-existing + 13 new)
+
 ## Iteration US-001 (Sprint 22) - Add Pexels API client unit tests
 - Added 18 new tests in tests/test_media_sources_video_clients.py
 - New test classes created:
