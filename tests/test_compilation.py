@@ -950,3 +950,261 @@ class TestCompilationTimelineBuilder:
         assert clips[1].name == "Same Title"
         # But video_id in metadata is unique
         assert clips[0].metadata['video_id'] != clips[1].metadata['video_id']
+
+
+# ===================================================================
+# US-004: ADDITIONAL TESTS FOR GAP_CHECK INTEGRATION & DURATION LIMITS
+# ===================================================================
+
+class TestCompilationTimelineBuilderGapCheckIntegration:
+    """Tests for AC2: CompilationTimelineBuilder handles gap_check stage results correctly."""
+
+    @pytest.mark.fast
+    def test_builder_handles_tracks_after_gap_fill(self, clip_factory):
+        """Timeline builder should handle tracks that were supplemented after gap_check."""
+        builder = CompilationTimelineBuilder()
+
+        # Simulate initial track with shortfall
+        initial_clip = clip_factory(keyword="cats", actual_duration=50.0)
+
+        # Simulate additional clips added after gap_check triggered broadening
+        supplemental_clip = clip_factory(keyword="funny animals", actual_duration=100.0)
+
+        # Track now contains original + supplemental content
+        tracks = [[initial_clip, supplemental_clip]]
+        tl = builder.create_timeline(tracks=tracks)
+
+        video_track = tl.tracks[0]
+        clips = list(video_track)
+
+        assert len(clips) == 2
+        # Both keywords preserved even though added at different phases
+        assert clips[0].metadata['keyword'] == "cats"
+        assert clips[1].metadata['keyword'] == "funny animals"
+
+    @pytest.mark.fast
+    def test_builder_handles_mixed_keyword_tracks_from_gap_fill(self, clip_factory):
+        """Builder correctly handles tracks with clips from multiple gap_check iterations."""
+        builder = CompilationTimelineBuilder()
+
+        # Track 1: original keyword
+        track1_clips = [clip_factory(keyword="cats", actual_duration=60.0)]
+
+        # Track 2: mix of original + broadened keywords (gap_check result)
+        track2_clips = [
+            clip_factory(keyword="cats", actual_duration=30.0),
+            clip_factory(keyword="kittens", actual_duration=30.0),  # Iteration 1
+            clip_factory(keyword="pet videos", actual_duration=30.0),  # Iteration 2
+        ]
+
+        tl = builder.create_timeline(tracks=[track1_clips, track2_clips])
+
+        # Should have 4 tracks (2 video + 2 audio)
+        assert len(tl.tracks) == 4
+        assert tl.tracks[0].kind == otio.schema.TrackKind.Video
+        assert tl.tracks[2].kind == otio.schema.TrackKind.Video
+
+        # Track 2 should have all 3 clips with different keywords
+        track2_video = tl.tracks[2]
+        clips = list(track2_video)
+        keywords = [c.metadata['keyword'] for c in clips]
+        assert "cats" in keywords
+        assert "kittens" in keywords
+        assert "pet videos" in keywords
+
+    @pytest.mark.fast
+    def test_builder_calculates_total_duration_after_gap_fill(self, clip_factory):
+        """Builder stats should reflect total duration including gap_fill content."""
+        builder = CompilationTimelineBuilder()
+
+        clips = [
+            clip_factory(actual_duration=100.0),  # Original
+            clip_factory(actual_duration=50.0),   # Gap fill 1
+            clip_factory(actual_duration=150.0),  # Gap fill 2
+        ]
+
+        tl = builder.create_timeline(tracks=[clips])
+        stats = builder.get_timeline_stats(tl)
+
+        assert stats['total_clips'] == 3
+        assert stats['tracks'][0]['duration'] == 300.0  # Sum of all clips
+
+    @pytest.mark.fast
+    def test_builder_handles_empty_track_from_failed_gap_fill(self, clip_factory):
+        """Builder gracefully handles tracks that remain empty after gap_check retries."""
+        builder = CompilationTimelineBuilder()
+
+        # Track 1 has content, track 2 is still empty after gap_check exhausted retries
+        track1 = [clip_factory(actual_duration=100.0)]
+        track2 = []  # Failed to fill despite retries
+
+        tl = builder.create_timeline(tracks=[track1, track2])
+
+        # Should still create both tracks (even empty one)
+        assert len(tl.tracks) == 4  # V1, A1, V2 (empty), A2 (empty)
+        track2_video = tl.tracks[2]
+        assert list(track2_video) == []  # Empty but valid
+
+    @pytest.mark.fast
+    def test_builder_preserves_keyword_order_from_gap_check_iterations(self, clip_factory):
+        """Clips from successive gap_check iterations maintain insertion order."""
+        builder = CompilationTimelineBuilder()
+
+        # Simulate ordered additions from 3 gap_check iterations
+        clips = [
+            clip_factory(keyword="cats", title="1_cats", actual_duration=10.0),
+            clip_factory(keyword="kittens", title="2_kittens", actual_duration=10.0),
+            clip_factory(keyword="felines", title="3_felines", actual_duration=10.0),
+            clip_factory(keyword="pet videos", title="4_pet", actual_duration=10.0),
+        ]
+
+        tl = builder.create_timeline(tracks=[clips])
+        video_track = tl.tracks[0]
+        result_clips = list(video_track)
+
+        # Verify order preserved
+        assert result_clips[0].name == "1_cats"
+        assert result_clips[1].name == "2_kittens"
+        assert result_clips[2].name == "3_felines"
+        assert result_clips[3].name == "4_pet"
+
+
+class TestCompilationTimelineBuilderDurationLimits:
+    """Tests for AC3: CompilationTimelineBuilder respects duration limits from config."""
+
+    @pytest.mark.fast
+    def test_builder_calculates_correct_total_duration(self, clip_factory):
+        """Builder should calculate total duration from all clips accurately."""
+        builder = CompilationTimelineBuilder()
+
+        # Use whole-number durations to avoid frame truncation differences
+        clips = [
+            clip_factory(actual_duration=30.0),
+            clip_factory(actual_duration=60.0),
+            clip_factory(actual_duration=16.0),
+        ]
+
+        tl = builder.create_timeline(tracks=[clips])
+        stats = builder.get_timeline_stats(tl)
+
+        # Total should be 106.0 seconds (exact, no truncation issues)
+        expected = 30.0 + 60.0 + 16.0
+        assert stats['tracks'][0]['duration'] == expected
+
+    @pytest.mark.fast
+    def test_builder_handles_clips_near_duration_boundary(self, clip_factory):
+        """Builder handles clips that exactly meet duration target."""
+        builder = CompilationTimelineBuilder()
+
+        # If target is 300s, these clips exactly fill it
+        clips = [
+            clip_factory(actual_duration=100.0),
+            clip_factory(actual_duration=100.0),
+            clip_factory(actual_duration=100.0),
+        ]
+
+        tl = builder.create_timeline(tracks=[clips])
+        stats = builder.get_timeline_stats(tl)
+
+        assert stats['tracks'][0]['duration'] == 300.0
+
+    @pytest.mark.fast
+    def test_builder_handles_very_short_clips(self, clip_factory):
+        """Builder correctly processes clips shorter than 1 second."""
+        builder = CompilationTimelineBuilder()
+
+        clips = [
+            clip_factory(actual_duration=0.5),
+            clip_factory(actual_duration=0.25),
+            clip_factory(actual_duration=0.1),
+        ]
+
+        tl = builder.create_timeline(tracks=[clips])
+        video_track = tl.tracks[0]
+        result_clips = list(video_track)
+
+        # All clips should be created
+        assert len(result_clips) == 3
+
+        # Stats should reflect tiny durations
+        stats = builder.get_timeline_stats(tl)
+        assert 0.8 <= stats['tracks'][0]['duration'] <= 0.9
+
+    @pytest.mark.fast
+    def test_builder_handles_very_long_clips(self, clip_factory):
+        """Builder correctly processes clips longer than typical (10+ minutes)."""
+        builder = CompilationTimelineBuilder()
+
+        clips = [
+            clip_factory(actual_duration=600.0),  # 10 minutes
+            clip_factory(actual_duration=3600.0),  # 1 hour
+        ]
+
+        tl = builder.create_timeline(tracks=[clips])
+        video_track = tl.tracks[0]
+        result_clips = list(video_track)
+
+        assert len(result_clips) == 2
+        assert result_clips[0].source_range.duration.to_seconds() == 600.0
+        assert result_clips[1].source_range.duration.to_seconds() == 3600.0
+
+    @pytest.mark.fast
+    def test_builder_duration_frame_count_accuracy(self, clip_factory):
+        """Duration frame calculation should be accurate at different frame rates."""
+        # Test at 30fps
+        builder_30 = CompilationTimelineBuilder(frame_rate=30.0)
+        clips_30 = [clip_factory(actual_duration=10.0)]
+        tl_30 = builder_30.create_timeline(tracks=[clips_30])
+        clip_30 = list(tl_30.tracks[0])[0]
+
+        # 10 seconds at 30fps = 300 frames
+        assert clip_30.source_range.duration.value == 300
+
+        # Test at 24fps
+        builder_24 = CompilationTimelineBuilder(frame_rate=24.0)
+        clips_24 = [clip_factory(actual_duration=10.0)]
+        tl_24 = builder_24.create_timeline(tracks=[clips_24])
+        clip_24 = list(tl_24.tracks[0])[0]
+
+        # 10 seconds at 24fps = 240 frames
+        assert clip_24.source_range.duration.value == 240
+
+    @pytest.mark.fast
+    def test_builder_per_track_duration_stats(self, clip_factory):
+        """Builder stats should report per-track duration correctly."""
+        builder = CompilationTimelineBuilder()
+
+        track1 = [clip_factory(actual_duration=100.0)]
+        track2 = [
+            clip_factory(actual_duration=50.0),
+            clip_factory(actual_duration=75.0),
+        ]
+        track3 = [clip_factory(actual_duration=200.0)]
+
+        tl = builder.create_timeline(tracks=[track1, track2, track3])
+        stats = builder.get_timeline_stats(tl)
+
+        assert stats['tracks'][0]['duration'] == 100.0
+        assert stats['tracks'][1]['duration'] == 125.0  # 50 + 75
+        assert stats['tracks'][2]['duration'] == 200.0
+
+    @pytest.mark.fast
+    def test_builder_handles_fractional_durations_at_frame_boundary(self, clip_factory):
+        """Fractional durations truncate to frame boundaries (int() behavior)."""
+        builder = CompilationTimelineBuilder(frame_rate=30.0)
+
+        # The builder uses int(duration * frame_rate), so 10.033... * 30 = 300.999... -> 300 frames
+        # This documents the truncation behavior (not rounding)
+        clips = [clip_factory(actual_duration=10.033333)]
+
+        tl = builder.create_timeline(tracks=[clips])
+        clip = list(tl.tracks[0])[0]
+
+        # int(10.033333 * 30) = int(300.99999) = 300 frames (truncation)
+        assert clip.source_range.duration.value == 300
+
+        # Also test that slightly over a frame boundary still truncates
+        clips2 = [clip_factory(actual_duration=10.034)]  # 301.02 frames -> 301
+        tl2 = builder.create_timeline(tracks=[clips2])
+        clip2 = list(tl2.tracks[0])[0]
+        assert clip2.source_range.duration.value == 301  # Just over boundary
