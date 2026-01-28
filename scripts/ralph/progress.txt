@@ -7350,3 +7350,15 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files created: tests/test_agents/README.md
 - Tests verified: 19 tests in test_strategy.py pass in 0.44s
 
+
+## Iteration US-002 (Sprint 24) - Add README.md documentation for test_chapter_detection subdirectory
+- Created tests/test_chapter_detection/README.md (comprehensive documentation for chapter detection tests)
+- AC1: Documented chapter detection testing patterns with multi-pass pipeline overview
+- AC2: Documented all 5 conftest.py fixtures: mock_config, sample_segments, single_topic_segments, mock_llm_client, mock_llm_response_two_chapters
+- AC3: Listed all 7 test files in directory overview table with descriptions
+- AC4: Added Testing Chapter Boundary Detection section with full pipeline pass testing example
+- AC5: Added Testing Chunking Strategies section covering 6 test classes (sentence boundaries, max size, short transcripts, timestamp preservation, unicode)
+- AC6: Added Testing Transcript-to-Chapter Validation section with boundary correction, title correction, merge suggestions, and missed chapter detection examples
+- Additional: Testing Boundary Refinement section (embeddings, transition phrases, cosine similarity), Testing Coverage Resolution section (overlaps, gaps, tiny chapter merging)
+- Files created: tests/test_chapter_detection/README.md
+- All acceptance criteria met
