@@ -1129,3 +1129,152 @@ jobs:
 | Parallel fails | Install pytest-xdist: `pip install pytest-xdist` |
 | Artifacts not found | Use `--keep-artifacts` and check temp directory |
 | Permission errors | Ensure temp directory is writable |
+
+## Linting and Code Quality
+
+The project enforces code quality through automated linting checks that **block PR merges** on failure.
+
+### Linting Tools
+
+| Tool | Purpose | Fails CI |
+|------|---------|----------|
+| **black** | Code formatting (PEP 8 style) | Yes |
+| **isort** | Import sorting (grouped, alphabetized) | Yes |
+| **ruff** | Fast Python linter (replaces flake8, pylint) | Yes (for errors) |
+| **mypy** | Static type checking | No (informational) |
+
+### CI Linting Jobs
+
+| Job | When | What | Blocking |
+|-----|------|------|----------|
+| `lint` | Every PR | black, isort, ruff (errors only) | **Yes** |
+| `quality` | PRs only | mypy, extended ruff | No (informational) |
+
+### Local Development
+
+Run linting checks before committing:
+
+```bash
+# Check formatting (will show diff, not modify)
+black --check --diff src/ tests/
+
+# Auto-fix formatting
+black src/ tests/
+
+# Check import sorting
+isort --check-only --diff src/ tests/
+
+# Auto-fix imports
+isort src/ tests/
+
+# Run ruff linter (errors only - same as CI)
+ruff check src/ tests/ --select=E9,F63,F7,F82
+
+# Run full ruff (informational)
+ruff check src/ tests/
+
+# Auto-fix ruff issues
+ruff check src/ tests/ --fix
+
+# All checks in one command
+black --check src/ tests/ && isort --check-only src/ tests/ && ruff check src/ tests/ --select=E9,F63,F7,F82
+```
+
+### What Blocks PRs
+
+The `lint` job checks for **fatal errors only**:
+
+| Error Code | Description | Example |
+|------------|-------------|---------|
+| **E9** | Runtime/syntax errors | Invalid syntax, undefined names |
+| **F63** | String .format() issues | Missing/extra format arguments |
+| **F7** | Type errors | Incorrect type annotations |
+| **F82** | Undefined names | Using undefined variables |
+
+Other ruff warnings (unused imports, line length, etc.) are reported but don't block PRs.
+
+### Configuring Ruff
+
+Ruff configuration is in `pyproject.toml`:
+
+```toml
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]  # Line length (handled by black)
+```
+
+### Configuring Black
+
+Black configuration is in `pyproject.toml`:
+
+```toml
+[tool.black]
+line-length = 120
+target-version = ["py39", "py310", "py311"]
+```
+
+### Configuring isort
+
+isort configuration is in `pyproject.toml`:
+
+```toml
+[tool.isort]
+profile = "black"
+line_length = 120
+```
+
+### Pre-commit Hook (Recommended)
+
+For automatic linting on commit, add a pre-commit hook:
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Create .pre-commit-config.yaml
+cat > .pre-commit-config.yaml << 'EOF'
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3.11
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--select=E9,F63,F7,F82, --fix]
+EOF
+
+# Install hooks
+pre-commit install
+```
+
+### Troubleshooting Lint Failures
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| `black --check` fails | Code not formatted | Run `black src/ tests/` |
+| `isort --check-only` fails | Imports not sorted | Run `isort src/ tests/` |
+| `ruff check` E9 error | Syntax error | Fix syntax in reported file |
+| `ruff check` F82 error | Undefined name | Import or define the name |
+
+### Why Lint Errors Block PRs
+
+Code quality tools ensure:
+1. **Consistency** - All code follows the same style
+2. **Readability** - Standard formatting reduces cognitive load
+3. **Correctness** - Catches syntax errors before runtime
+4. **Maintainability** - Clean imports and structure
+
+The fatal error categories (E9, F63, F7, F82) catch bugs that would cause runtime failures, so blocking PRs prevents broken code from merging.

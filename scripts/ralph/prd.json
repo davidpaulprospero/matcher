@@ -143,8 +143,8 @@
                             "id":  "US-010",
                             "title":  "Fix linting workflow to fail on errors",
                             "priority":  10,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Verified lint job already configured to fail on errors (no continue-on-error). Quality job exists for optional mypy/extended ruff. Added comprehensive linting documentation to tests/README.md including: tool descriptions, CI job breakdown, local commands, error codes that block PRs (E9,F63,F7,F82), configuration examples, pre-commit hook setup, and troubleshooting guide.",
                             "acceptanceCriteria":  [
                                                        "Update .github/workflows/tests.yml linting job to fail on error",
                                                        "Remove continue-on-error: true from linting steps",
