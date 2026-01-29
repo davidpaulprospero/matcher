@@ -36,23 +36,23 @@ The following pytest markers are defined in `pytest.ini`:
 | `requires_network` | Tests making HTTP requests | When online |
 | `flaky` | Intermittent failures (timing, network, race conditions) | Auto-retried 2x |
 
-### Marker Statistics (Sprint 26)
+### Marker Statistics (Sprint 27)
 
 | Marker | Test Count | Approx. Runtime |
 |--------|------------|-----------------|
-| `fast` | 11,149 | ~45 seconds |
-| `integration` | 384 | Varies |
-| `requires_network` | 144 | Network-dependent |
-| `requires_api` | 86 | API-dependent |
-| `slow` | 14 | >5 seconds each |
-| `stress` | 6 | Minutes |
-| `simulation` | 10 | Variable |
-| `flaky` | 29 | Auto-retried |
-| Unmarked | ~292 | - |
+| `fast` | 11,225 | ~45 seconds |
+| `integration` | 409 | Varies |
+| `requires_network` | 148 | Network-dependent |
+| `requires_api` | 83 | API-dependent |
+| `simulation` | 43 | Variable |
+| `flaky` | 30 | Auto-retried |
+| `stress` | 15 | Minutes |
+| `slow` | 11 | >5 seconds each |
+| Unmarked | 25 | - |
 
-**Total tests collected: 12,114**
+**Total tests analyzed: 11,683**
 
-*Statistics updated in Sprint 26 after bulk marker assignment (10,957 markers applied).*
+*Statistics updated in Sprint 27 after completing marker assignment and fixing class-level marker inheritance in categorize_tests.py.*
 
 ## CI Workflow (Sprint 26)
 
