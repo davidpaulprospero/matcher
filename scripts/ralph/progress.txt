@@ -8113,3 +8113,77 @@ Files needing @pytest.mark.serial:
 - AC4: ✅ Marked 2 files with @pytest.mark.serial via pytestmark
 - AC5: ✅ Verified CI uses -n auto (lines 48, 136, 226 in tests.yml)
 - AC6: ✅ Added comprehensive parallelization docs to tests/README.md
+
+
+## Iteration - [US-005] Add property-based testing with hypothesis (Sprint 27)
+
+### Implementation Summary
+
+1. **Added hypothesis to requirements-dev.txt**:
+   - hypothesis>=6.0.0 for property-based testing
+
+2. **Created tests/test_matching_properties.py (385 lines)**:
+   - 20 property-based tests using hypothesis
+   - 7 test classes covering all matching module functions
+   - Custom strategies for confidence scores, embeddings, keywords
+
+3. **Property Tests Created**:
+   - **Confidence score calculations (5 tests)**:
+     - test_adaptive_threshold_stays_in_valid_range
+     - test_broll_boost_never_exceeds_one
+     - test_caption_quality_adjustment_bounded
+     - test_timing_penalty_monotonic
+     - test_pool_normalization_bounded
+   
+   - **Embedding similarity (3 tests)**:
+     - test_cosine_similarity_bounded
+     - test_cosine_similarity_self_is_one
+     - test_cosine_similarity_symmetric
+   
+   - **Match ranking (5 tests)**:
+     - test_keyword_overlap_score_bounded
+     - test_keyword_overlap_symmetric
+     - test_entity_match_score_bounded
+     - test_multimodal_score_bounded
+     - test_multimodal_score_with_custom_weights
+   
+   - **Additional tests (7)**:
+     - test_transcript_quality_bounded
+     - test_transcript_quality_tier_consistent_with_score
+     - test_duration_penalty_reduces_confidence
+     - test_ideal_speed_range_no_penalty
+     - test_semantic_coherence_adjustment_bounded
+     - test_confidence_edge_cases
+     - test_pool_size_edge_cases
+
+4. **Created tests/PROPERTY_TESTING.md documentation**:
+   - Overview of property-based testing
+   - Quick start commands
+   - Properties tested table
+   - Writing new property tests guide
+   - Custom strategies examples
+   - Debugging failures guide
+
+5. **Updated pytest.ini**:
+   - Added .hypothesis to norecursedirs
+
+### Test Results
+```
+20 passed in 4.63s
+```
+
+### Files Modified
+- requirements-dev.txt (added hypothesis>=6.0.0)
+- tests/test_matching_properties.py (NEW - 385 lines)
+- tests/PROPERTY_TESTING.md (NEW - comprehensive docs)
+- pytest.ini (added .hypothesis to norecursedirs)
+- scripts/ralph/prd.json (marked US-005 passes: true)
+
+### Acceptance Criteria Verification
+- AC1: ✅ hypothesis>=6.0.0 added to requirements-dev.txt
+- AC2: ✅ tests/test_matching_properties.py created with property-based tests
+- AC3: ✅ 5 property tests for confidence score calculations
+- AC4: ✅ 3 property tests for embedding similarity functions
+- AC5: ✅ 5 property tests for match ranking algorithms (exceeds requirement)
+- AC6: ✅ tests/PROPERTY_TESTING.md documents hypothesis usage patterns
+
