@@ -71,12 +71,12 @@ jobs:
           --min-rounds 5 \
           --verbose
 
-        # Check if baseline exists
+        # Check if baseline exists and compare with 20% threshold
         if [ -f tests/benchmarks/baseline.json ]; then
-          echo "Comparing against baseline..."
+          echo "Comparing against baseline with 20% threshold..."
           THRESHOLD="${{ github.event.inputs.threshold || '20' }}"
           python scripts/benchmark_runner.py \
-            --compare tests/benchmarks/baseline.json \
+            --compare-baseline \
             --threshold 0.${THRESHOLD} \
             --output benchmark-results.json || echo "regression_detected=true" >> $GITHUB_OUTPUT
         else
@@ -91,11 +91,13 @@ jobs:
     - name: Update baseline (manual trigger)
       if: github.event.inputs.update_baseline == 'true'
       run: |
+        # Update baseline with confirmation skipped (CI mode)
+        # Current baseline is automatically archived to baseline_history/
         python scripts/benchmark_runner.py \
-          --output tests/benchmarks/baseline.json \
-          --save-baseline \
+          --update-baseline \
+          --yes \
           --min-rounds 10
-        echo "Baseline updated!"
+        echo "Baseline updated! Previous baseline archived to baseline_history/"
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4

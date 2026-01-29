@@ -17,10 +17,17 @@ Usage:
 
     # Generate new baseline
     python scripts/benchmark_runner.py --output baseline.json --save-baseline
+
+    # Update existing baseline (with confirmation)
+    python scripts/benchmark_runner.py --update-baseline
+
+    # Force update without confirmation (CI mode)
+    python scripts/benchmark_runner.py --update-baseline --yes
 """
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -39,6 +46,8 @@ BENCHMARK_SUITES = {
 # Default paths
 BENCHMARK_DIR = Path(__file__).parent.parent / "tests" / "benchmarks"
 DEFAULT_BASELINE = BENCHMARK_DIR / "baseline.json"
+BASELINE_HISTORY_DIR = BENCHMARK_DIR / "baseline_history"
+MAX_BASELINE_HISTORY = 5
 
 
 def run_benchmarks(
@@ -234,6 +243,185 @@ def load_baseline(path: Path) -> dict:
         return json.load(f)
 
 
+def archive_baseline(baseline_path: Path) -> Optional[Path]:
+    """Archive current baseline to history directory.
+
+    Args:
+        baseline_path: Path to current baseline.json
+
+    Returns:
+        Path to archived baseline, or None if no baseline existed
+    """
+    if not baseline_path.exists():
+        return None
+
+    BASELINE_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Read current baseline to get timestamp
+    with open(baseline_path) as f:
+        current = json.load(f)
+
+    timestamp = current.get("timestamp", datetime.now().isoformat())
+    # Convert ISO timestamp to filename-safe format
+    safe_timestamp = timestamp.replace(":", "-").replace("T", "_")[:19]
+    archive_name = f"baseline_{safe_timestamp}.json"
+    archive_path = BASELINE_HISTORY_DIR / archive_name
+
+    # Copy to history
+    shutil.copy(baseline_path, archive_path)
+    print(f"Archived current baseline to {archive_path}")
+
+    # Prune old baselines (keep last MAX_BASELINE_HISTORY)
+    prune_baseline_history()
+
+    return archive_path
+
+
+def prune_baseline_history() -> list[Path]:
+    """Remove oldest baselines keeping only MAX_BASELINE_HISTORY.
+
+    Returns:
+        List of removed baseline paths
+    """
+    if not BASELINE_HISTORY_DIR.exists():
+        return []
+
+    baselines = sorted(
+        BASELINE_HISTORY_DIR.glob("baseline_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True  # Newest first
+    )
+
+    removed = []
+    for old_baseline in baselines[MAX_BASELINE_HISTORY:]:
+        old_baseline.unlink()
+        removed.append(old_baseline)
+        print(f"Pruned old baseline: {old_baseline.name}")
+
+    return removed
+
+
+def list_baseline_history() -> list[dict]:
+    """List all baselines in history with metadata.
+
+    Returns:
+        List of dicts with path, timestamp, and benchmark count
+    """
+    history = []
+
+    # Add current baseline if exists
+    if DEFAULT_BASELINE.exists():
+        with open(DEFAULT_BASELINE) as f:
+            data = json.load(f)
+        history.append({
+            "path": DEFAULT_BASELINE,
+            "timestamp": data.get("timestamp", "unknown"),
+            "benchmark_count": len(data.get("benchmarks", {})),
+            "is_current": True,
+        })
+
+    # Add archived baselines
+    if BASELINE_HISTORY_DIR.exists():
+        for baseline_path in sorted(
+            BASELINE_HISTORY_DIR.glob("baseline_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        ):
+            with open(baseline_path) as f:
+                data = json.load(f)
+            history.append({
+                "path": baseline_path,
+                "timestamp": data.get("timestamp", "unknown"),
+                "benchmark_count": len(data.get("benchmarks", {})),
+                "is_current": False,
+            })
+
+    return history
+
+
+def update_baseline(
+    min_rounds: int = 10,
+    warmup: bool = True,
+    verbose: bool = False,
+    skip_confirmation: bool = False,
+) -> bool:
+    """Update baseline with new benchmark results.
+
+    Archives current baseline to history, runs benchmarks, and saves new baseline.
+
+    Args:
+        min_rounds: Minimum benchmark rounds for accuracy
+        warmup: Enable warmup
+        verbose: Print verbose output
+        skip_confirmation: Skip safety confirmation prompt
+
+    Returns:
+        True if baseline was updated successfully
+    """
+    print("\n" + "=" * 60)
+    print("BASELINE UPDATE")
+    print("=" * 60)
+
+    # Show current baseline info
+    if DEFAULT_BASELINE.exists():
+        with open(DEFAULT_BASELINE) as f:
+            current = json.load(f)
+        print(f"\nCurrent baseline:")
+        print(f"  Timestamp: {current.get('timestamp', 'unknown')}")
+        print(f"  Benchmarks: {len(current.get('benchmarks', {}))}")
+        print(f"  Runner: {current.get('runner', 'unknown')}")
+    else:
+        print("\nNo existing baseline found. Will create new baseline.")
+
+    # Show history
+    history = list_baseline_history()
+    if len(history) > 1:
+        print(f"\nBaseline history ({len(history) - 1} archived):")
+        for h in history[1:MAX_BASELINE_HISTORY + 1]:
+            print(f"  - {h['timestamp']} ({h['benchmark_count']} benchmarks)")
+
+    # Safety confirmation
+    if not skip_confirmation:
+        print("\n" + "-" * 60)
+        print("WARNING: This will replace the current baseline with new results.")
+        print("The current baseline will be archived to baseline_history/")
+        print("-" * 60)
+        response = input("\nProceed with baseline update? [y/N]: ").strip().lower()
+        if response not in ("y", "yes"):
+            print("Baseline update cancelled.")
+            return False
+
+    # Archive current baseline
+    if DEFAULT_BASELINE.exists():
+        archive_baseline(DEFAULT_BASELINE)
+
+    # Run benchmarks with higher rounds for accuracy
+    print(f"\nRunning benchmarks (min-rounds={min_rounds})...")
+    results = run_benchmarks(
+        output_path=DEFAULT_BASELINE,
+        min_rounds=min_rounds,
+        warmup=warmup,
+        verbose=verbose,
+    )
+
+    if not results.get("benchmarks"):
+        print("ERROR: No benchmark results generated")
+        return False
+
+    # Add baseline metadata
+    results["is_baseline"] = True
+    results["created_by"] = "benchmark_runner.py --update-baseline"
+
+    with open(DEFAULT_BASELINE, "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\n✓ Baseline updated: {DEFAULT_BASELINE}")
+    print(f"  Benchmarks: {len(results.get('benchmarks', {}))}")
+    print(f"  Timestamp: {results.get('timestamp', 'unknown')}")
+
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="CI Benchmark Runner for pytest-benchmark",
@@ -289,6 +477,26 @@ def main():
         action="store_true",
         help="List available benchmark suites and exit",
     )
+    parser.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="Update baseline with new benchmark results (with confirmation)",
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Skip confirmation prompts (for CI use with --update-baseline)",
+    )
+    parser.add_argument(
+        "--list-history",
+        action="store_true",
+        help="List baseline history and exit",
+    )
+    parser.add_argument(
+        "--compare-baseline",
+        action="store_true",
+        help="Compare current run against default baseline (tests/benchmarks/baseline.json)",
+    )
 
     args = parser.parse_args()
 
@@ -297,6 +505,33 @@ def main():
         for name, file in BENCHMARK_SUITES.items():
             print(f"  {name}: {file}")
         return 0
+
+    if args.list_history:
+        print("Baseline History")
+        print("=" * 60)
+        history = list_baseline_history()
+        if not history:
+            print("No baselines found.")
+            return 0
+        for h in history:
+            current_marker = " (CURRENT)" if h.get("is_current") else ""
+            print(f"  {h['timestamp']} - {h['benchmark_count']} benchmarks{current_marker}")
+            print(f"    Path: {h['path']}")
+        return 0
+
+    # Handle --update-baseline
+    if args.update_baseline:
+        success = update_baseline(
+            min_rounds=args.min_rounds,
+            warmup=not args.no_warmup,
+            verbose=args.verbose,
+            skip_confirmation=args.yes,
+        )
+        return 0 if success else 1
+
+    # Handle --compare-baseline shorthand
+    if args.compare_baseline:
+        args.compare = DEFAULT_BASELINE
 
     # Run benchmarks
     results = run_benchmarks(

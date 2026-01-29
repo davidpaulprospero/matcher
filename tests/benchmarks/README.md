@@ -269,6 +269,9 @@ python scripts/benchmark_runner.py --output results.json
 # Compare results to baseline with 20% threshold
 python scripts/benchmark_runner.py --compare baseline.json --threshold 0.20
 
+# Compare against default baseline (tests/benchmarks/baseline.json)
+python scripts/benchmark_runner.py --compare-baseline --threshold 0.20
+
 # Run specific benchmark suites only
 python scripts/benchmark_runner.py --suite pipeline embedding --output results.json
 
@@ -277,20 +280,37 @@ python scripts/benchmark_runner.py --verbose
 
 # Generate baseline from current run
 python scripts/benchmark_runner.py --output baseline.json --save-baseline
+
+# Update baseline with confirmation prompt (interactive)
+python scripts/benchmark_runner.py --update-baseline
+
+# Update baseline without confirmation (CI mode)
+python scripts/benchmark_runner.py --update-baseline --yes
+
+# View baseline history
+python scripts/benchmark_runner.py --list-history
 ```
 
 ### Performance Baseline Tracking
 
-Baselines are stored as JSON files and checked into the repository:
+Baselines are stored as JSON files with automatic history tracking:
 
 ```
 tests/benchmarks/
 ├── baseline.json              # Current performance baseline
-├── baseline_history/          # Historical baselines (optional)
-│   ├── baseline_2026-01-15.json
-│   └── baseline_2026-01-20.json
+├── baseline_history/          # Automatic archive (last 5 baselines)
+│   ├── baseline_2026-01-15_10-30-00.json
+│   └── baseline_2026-01-20_14-45-30.json
 └── ...
 ```
+
+**Baseline History Management:**
+
+The benchmark runner automatically manages baseline history:
+- **Archiving**: Before updating, current baseline is archived to `baseline_history/`
+- **Pruning**: Only the last 5 baselines are kept (configurable via `MAX_BASELINE_HISTORY`)
+- **Timestamps**: Archive filenames include ISO timestamps for sorting
+- **Listing**: Use `--list-history` to view all archived baselines
 
 **Baseline JSON Structure:**
 
