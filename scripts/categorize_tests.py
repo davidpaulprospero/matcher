@@ -110,14 +110,23 @@ class TestAnalyzer(ast.NodeVisitor):
         self.source_lines = source_code.split("\n")
         self.tests: list[TestInfo] = []
         self.current_class = None
+        self.current_class_markers: list[str] = []
 
     def visit_ClassDef(self, node: ast.ClassDef):
-        """Track current class for test method names."""
+        """Track current class for test method names and inherit class-level markers."""
         old_class = self.current_class
+        old_class_markers = self.current_class_markers
         if node.name.startswith("Test"):
             self.current_class = node.name
+            # Extract class-level markers
+            self.current_class_markers = []
+            for decorator in node.decorator_list:
+                marker = self._extract_marker(decorator)
+                if marker:
+                    self.current_class_markers.append(marker)
         self.generic_visit(node)
         self.current_class = old_class
+        self.current_class_markers = old_class_markers
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         """Extract test functions and their markers."""
@@ -130,11 +139,11 @@ class TestAnalyzer(ast.NodeVisitor):
         else:
             test_name = node.name
 
-        # Extract markers
-        markers = []
+        # Extract markers (include class-level markers for methods in test classes)
+        markers = list(self.current_class_markers) if self.current_class else []
         for decorator in node.decorator_list:
             marker = self._extract_marker(decorator)
-            if marker:
+            if marker and marker not in markers:
                 markers.append(marker)
 
         # Get test body as string for I/O pattern analysis
