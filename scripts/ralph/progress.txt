@@ -7961,3 +7961,39 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: ✅ Updated tests/README.md with Sprint 27 statistics
 
 - Commit: f9bd166
+
+## Iteration - [US-002] Convert skipped integration tests to conditional tests
+- Converted 6 permanent @pytest.mark.skip() decorators in test_core.py to conditional skipif
+- Added comprehensive resource detection in conftest.py:
+  - has_*() detection functions: has_gemini_api_key, has_voyage_api_key, has_cookies_file, 
+    has_sentence_transformers, has_opentimelineio, has_numpy, has_test_project
+  - Module-level constants: HAS_GEMINI_API, HAS_VOYAGE_API, HAS_COOKIES, etc.
+  - Reusable skip conditions: SKIP_NO_GEMINI, SKIP_NO_COOKIES, SKIP_NO_OTIO, etc.
+- Updated fixtures to return mock data instead of unconditionally skipping:
+  - srt_path: Creates sample SRT file in tmp_path
+  - cookies_path: Returns path if found, None otherwise
+  - video_paths/video_path: Creates mock video files in tmp_path
+  - runner: Returns mock runner object with common attributes
+- Converted try/except ImportError patterns to skipif in:
+  - test_healing_simulations.py (DiskHealer, PathHealer tests)
+  - test_logger_full_coverage.py (numpy encoder tests)
+  - test_logger_utilities.py (numpy encoder tests)
+- Added comprehensive skip pattern documentation in tests/README.md
+
+**Files Modified:**
+- tests/conftest.py (added ~150 lines: resource detection, skip conditions)
+- tests/test_core.py (converted 6 @pytest.mark.skip to conditional skipif)
+- tests/test_healing_simulations.py (converted 7 try/except ImportError to skipif)
+- tests/test_logger_full_coverage.py (converted 4 tests with skipif)
+- tests/test_logger_utilities.py (converted 4 tests with skipif)
+- tests/README.md (added 83 lines: skip pattern documentation)
+
+**Acceptance Criteria Verification:**
+- AC1: ✅ Identified 24 files with skip/skipif patterns
+- AC2: ✅ Converted 15+ tests to conditional skipif (6 in test_core + 7 in healing + 8 in logger tests)
+- AC3: ✅ Created resource detection fixture with has_*() and SKIP_NO_* conditions
+- AC4: ✅ Path-based skips now use skipif with Path.exists() (test_healing_real_project.py pattern)
+- AC5: ✅ All remaining skipped tests have documented reasons in docstrings
+- AC6: ✅ Permanent skip count: 6 -> 0 (100% reduction, exceeds 50% target)
+
+- Commit: 873a7b5
