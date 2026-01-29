@@ -146,6 +146,89 @@ pytest -m "fast and not requires_api"
 pytest tests/test_flaky_detection.py --reruns 0 -v
 ```
 
+## Conditional Skip Patterns (Sprint 27)
+
+Tests that depend on external resources use conditional `skipif` decorators instead of permanent skips. This allows tests to run when resources are available while cleanly skipping when they're not.
+
+### Resource Detection
+
+The `conftest.py` provides resource detection functions and reusable skip conditions:
+
+```python
+# Available skip conditions in conftest.py
+from conftest import (
+    SKIP_NO_GEMINI,             # Requires GEMINI_API_KEY or GOOGLE_API_KEY
+    SKIP_NO_VOYAGE,             # Requires VOYAGE_API_KEY
+    SKIP_NO_COOKIES,            # Requires cookies.txt for yt-dlp
+    SKIP_NO_SENTENCE_TRANSFORMERS,  # Requires sentence-transformers
+    SKIP_NO_OTIO,               # Requires opentimelineio
+    SKIP_NO_NUMPY,              # Requires numpy
+    SKIP_NO_TEST_PROJECT,       # Requires test project directory
+)
+
+# Usage
+@pytest.mark.integration
+@SKIP_NO_GEMINI
+def test_gemini_embeddings():
+    """Test Gemini embeddings - runs only with API key available."""
+    pass
+```
+
+### Detection Functions
+
+```python
+# Import detection functions for custom conditions
+from conftest import (
+    has_gemini_api_key,         # Check GEMINI_API_KEY or GOOGLE_API_KEY
+    has_voyage_api_key,         # Check VOYAGE_API_KEY
+    has_cookies_file,           # Check cookies.txt in common locations
+    has_sentence_transformers,  # Check sentence-transformers importable
+    has_opentimelineio,         # Check opentimelineio importable
+    has_numpy,                  # Check numpy importable
+    has_test_project,           # Check test project directory exists
+)
+```
+
+### Module-Level Constants
+
+```python
+# Module-level constants for skipif conditions
+from conftest import (
+    HAS_GEMINI_API,             # True if Gemini API key available
+    HAS_VOYAGE_API,             # True if Voyage API key available
+    HAS_COOKIES,                # True if cookies.txt found
+    HAS_SENTENCE_TRANSFORMERS,  # True if sentence-transformers installed
+    HAS_OTIO,                   # True if opentimelineio installed
+    HAS_NUMPY,                  # True if numpy installed
+)
+
+# Custom skipif usage
+@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
+def test_numpy_operations():
+    import numpy as np
+    # ...
+```
+
+### Skip Reason Documentation
+
+All skipped tests should document their skip reason in the docstring:
+
+```python
+@pytest.mark.integration
+@SKIP_NO_COOKIES
+def test_video_download():
+    """
+    Test video downloading with yt-dlp.
+
+    Requires:
+        - cookies.txt file for yt-dlp authentication
+        - Network access to YouTube
+
+    Skip reason: Requires cookies.txt for yt-dlp video downloads
+    """
+    pass
+```
+
 ## Test Organization
 
 ```

@@ -18,6 +18,14 @@ from datetime import datetime
 from unittest.mock import patch, MagicMock
 from dataclasses import asdict
 
+# Check numpy availability (US-002, Sprint 27)
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 from src.logger import (
     RunLogger,
     RunLog,
@@ -117,51 +125,55 @@ class TestNumpyEncoder:
     """Test NumpyEncoder for JSON serialization."""
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_int(self):
-        """Test encoding numpy integers."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.int64(42))
-            assert result == 42
-            assert isinstance(result, int)
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy integers.
+
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.int64(42))
+        assert result == 42
+        assert isinstance(result, int)
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_float(self):
-        """Test encoding numpy floats."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.float64(3.14))
-            assert abs(result - 3.14) < 0.001
-            assert isinstance(result, float)
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy floats.
+
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.float64(3.14))
+        assert abs(result - 3.14) < 0.001
+        assert isinstance(result, float)
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_array(self):
-        """Test encoding numpy arrays."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.array([1, 2, 3]))
-            assert result == [1, 2, 3]
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy arrays.
+
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.array([1, 2, 3]))
+        assert result == [1, 2, 3]
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_bool(self):
-        """Test encoding numpy booleans."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.bool_(True))
-            assert result == True
-            assert isinstance(result, bool)
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy booleans.
+
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.bool_(True))
+        assert result == True
+        assert isinstance(result, bool)
 
     @pytest.mark.fast
     def test_numpy_encoder_fallback(self):

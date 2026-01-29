@@ -17,6 +17,14 @@ import pytest
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Check numpy availability (US-002, Sprint 27)
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 from src.logger import (
     NumpyEncoder,
     estimate_tokens,
@@ -46,79 +54,83 @@ class TestNumpyEncoder:
         assert json.loads(result) == data
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
     def test_encode_with_numpy_int(self):
-        """Test encoding numpy integers"""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
+        """
+        Test encoding numpy integers.
 
-            # Test int32
-            val = np.int32(42)
-            result = json.dumps(val, cls=NumpyEncoder)
-            assert result == '42'
+        Skip reason: numpy not installed
+        """
+        encoder = NumpyEncoder()
 
-            # Test int64
-            val = np.int64(100)
-            result = json.dumps(val, cls=NumpyEncoder)
-            assert result == '100'
-        except ImportError:
-            pytest.skip("numpy not installed")
+        # Test int32
+        val = np.int32(42)
+        result = json.dumps(val, cls=NumpyEncoder)
+        assert result == '42'
+
+        # Test int64
+        val = np.int64(100)
+        result = json.dumps(val, cls=NumpyEncoder)
+        assert result == '100'
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
     def test_encode_with_numpy_float(self):
-        """Test encoding numpy floats"""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
+        """
+        Test encoding numpy floats.
 
-            # Test float32
-            val = np.float32(3.14)
-            result = json.dumps(val, cls=NumpyEncoder)
-            assert abs(float(result) - 3.14) < 0.01
+        Skip reason: numpy not installed
+        """
+        encoder = NumpyEncoder()
 
-            # Test float64
-            val = np.float64(2.718)
-            result = json.dumps(val, cls=NumpyEncoder)
-            assert abs(float(result) - 2.718) < 0.001
-        except ImportError:
-            pytest.skip("numpy not installed")
+        # Test float32
+        val = np.float32(3.14)
+        result = json.dumps(val, cls=NumpyEncoder)
+        assert abs(float(result) - 3.14) < 0.01
+
+        # Test float64
+        val = np.float64(2.718)
+        result = json.dumps(val, cls=NumpyEncoder)
+        assert abs(float(result) - 2.718) < 0.001
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
     def test_encode_with_numpy_bool(self):
-        """Test encoding numpy booleans"""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
+        """
+        Test encoding numpy booleans.
 
-            # Test bool_
-            val = np.bool_(True)
-            result = json.dumps(val, cls=NumpyEncoder)
-            assert result == 'true'
+        Skip reason: numpy not installed
+        """
+        encoder = NumpyEncoder()
 
-            val = np.bool_(False)
-            result = json.dumps(val, cls=NumpyEncoder)
-            assert result == 'false'
-        except ImportError:
-            pytest.skip("numpy not installed")
+        # Test bool_
+        val = np.bool_(True)
+        result = json.dumps(val, cls=NumpyEncoder)
+        assert result == 'true'
+
+        val = np.bool_(False)
+        result = json.dumps(val, cls=NumpyEncoder)
+        assert result == 'false'
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
     def test_encode_with_numpy_array(self):
-        """Test encoding numpy arrays"""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
+        """
+        Test encoding numpy arrays.
 
-            # Test 1D array
-            arr = np.array([1, 2, 3])
-            result = json.dumps(arr.tolist(), cls=NumpyEncoder)
-            assert json.loads(result) == [1, 2, 3]
+        Skip reason: numpy not installed
+        """
+        encoder = NumpyEncoder()
 
-            # Test 2D array
-            arr = np.array([[1, 2], [3, 4]])
-            result = json.dumps(arr.tolist(), cls=NumpyEncoder)
-            assert json.loads(result) == [[1, 2], [3, 4]]
-        except ImportError:
-            pytest.skip("numpy not installed")
+        # Test 1D array
+        arr = np.array([1, 2, 3])
+        result = json.dumps(arr.tolist(), cls=NumpyEncoder)
+        assert json.loads(result) == [1, 2, 3]
+
+        # Test 2D array
+        arr = np.array([[1, 2], [3, 4]])
+        result = json.dumps(arr.tolist(), cls=NumpyEncoder)
+        assert json.loads(result) == [[1, 2], [3, 4]]
 
 
 # ============================================================================
