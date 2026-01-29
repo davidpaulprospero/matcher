@@ -145,7 +145,9 @@ class AudioAnalyzer:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=120
+                timeout=120,
+                encoding='utf-8',
+                errors='replace'
             )
             
             if audio_path.exists() and audio_path.stat().st_size > 0:
@@ -163,7 +165,7 @@ class AudioAnalyzer:
                 '-ac', '1',
                 str(audio_path)
             ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='replace')
             
             if audio_path.exists() and audio_path.stat().st_size > 0:
                 return str(audio_path)

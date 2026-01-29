@@ -174,7 +174,9 @@ class VPNManager:
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=60  # 1 minute timeout for VPN commands
+                timeout=60,  # 1 minute timeout for VPN commands
+                encoding='utf-8',
+                errors='replace'
             )
 
             if result.returncode == 0:
@@ -226,7 +228,9 @@ class VPNManager:
                     shell=True,
                     capture_output=True,
                     text=True,
-                    timeout=self.config.verify_timeout
+                    timeout=self.config.verify_timeout,
+                    encoding='utf-8',
+                    errors='replace'
                 )
 
                 if result.returncode == 0:

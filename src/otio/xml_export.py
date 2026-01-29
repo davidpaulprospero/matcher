@@ -223,7 +223,7 @@ def generate_resolve_xml_with_bins(
 
     if voiceover_path:
         vo_duration = sum(
-            m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time
+            m.primary_match.voiceover_segment.end - m.primary_match.voiceover_segment.start
             for m in matches
         )
         add_file(voiceover_path, vo_duration)
@@ -232,7 +232,7 @@ def generate_resolve_xml_with_bins(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         total_frames += int(target_duration * frame_rate)
 
     # Generate complete XML with bin AND timeline
@@ -372,7 +372,7 @@ def generate_resolve_xml_with_bins(
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         target_frames = int(target_duration * frame_rate)
 
         source_duration = vid_seg.end_time - vid_seg.start_time
@@ -756,7 +756,7 @@ def generate_davinci_sequence_xml(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        total_frames += int((vo_seg.end_time - vo_seg.start_time) * frame_rate)
+        total_frames += int((vo_seg.end - vo_seg.start) * frame_rate)
 
     xml_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -795,7 +795,7 @@ def generate_davinci_sequence_xml(
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         target_frames = int(target_duration * frame_rate)
 
         source_start = vid_seg.start_time

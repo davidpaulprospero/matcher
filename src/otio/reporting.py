@@ -45,7 +45,7 @@ def _calculate_track_coverage(
     total_duration = 0.0
     for match_result in matches:
         vo_seg = match_result.primary_match.voiceover_segment
-        total_duration += vo_seg.end_time - vo_seg.start_time
+        total_duration += vo_seg.end - vo_seg.start
 
     # Initialize track statistics
     track_stats = {}
@@ -75,7 +75,7 @@ def _calculate_track_coverage(
     # Count clips and gaps per track
     for match_idx, match_result in enumerate(matches):
         vo_seg = match_result.primary_match.voiceover_segment
-        segment_duration = vo_seg.end_time - vo_seg.start_time
+        segment_duration = vo_seg.end - vo_seg.start
 
         # V1 - Primary track
         if match_result.has_gap:
@@ -207,9 +207,9 @@ def generate_segment_map(
 
         # Calculate segment position using ABSOLUTE voiceover timestamps
         # This prevents drift from accumulating rounding errors
-        start_frame = round(vo_seg.start_time * frame_rate)
-        end_frame = round(vo_seg.end_time * frame_rate)
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        start_frame = round(vo_seg.start * frame_rate)
+        end_frame = round(vo_seg.end * frame_rate)
+        target_duration = vo_seg.end - vo_seg.start
 
         # Extract clip filename
         clip_file = Path(vid_seg.source_file).name

@@ -1,0 +1,17 @@
+﻿{
+    "timestampUtc":  "2026-01-29T10:05:21.4966296Z",
+    "mode":  "TrueAuto",
+    "focusArea":  "testing",
+    "sprintNumber":  27,
+    "iteration":  8,
+    "details":  {
+                    "processId":  59812,
+                    "timeSinceActivity":  20,
+                    "outputBytes":  0,
+                    "waitingSeconds":  270
+                },
+    "phase":  "waiting_for_claude",
+    "timestamp":  "2026-01-29 18:05:21",
+    "storyId":  "US-002",
+    "pid":  44920
+}

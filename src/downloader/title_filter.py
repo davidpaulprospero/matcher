@@ -56,6 +56,8 @@ class TitleFilter:
         get_tier_value_func,
         impersonation_manager: Optional['ImpersonationManager'] = None,
         escalation_manager: Optional['EscalationManager'] = None,
+        search_cache = None,
+        llm_filter_cache = None,
     ):
         """
         Initialize TitleFilter.
@@ -66,6 +68,8 @@ class TitleFilter:
             get_tier_value_func: Function to get tier config values (from CheckpointManager)
             impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
             escalation_manager: Optional EscalationManager for 3-tier bypass orchestration
+            search_cache: Optional SearchResultsCache for caching search results
+            llm_filter_cache: Optional LLMFilterCache for caching LLM filter results
         """
         self.config = config
         self.download_config = config.download
@@ -73,6 +77,39 @@ class TitleFilter:
         self._get_tier_value = get_tier_value_func
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
+        
+        # Initialize caches if not provided
+        from .search_cache import SearchResultsCache
+        from .llm_filter_cache import LLMFilterCache
+        
+        # Check if caching is enabled in config
+        cache_config = getattr(config, 'caching', None)
+        caching_enabled = getattr(cache_config, 'enabled', True) if cache_config else True
+        
+        if caching_enabled:
+            search_ttl = getattr(cache_config, 'search_cache_ttl_hours', 24) if cache_config else 24
+            llm_ttl_days = getattr(cache_config, 'llm_filter_cache_ttl_days', 7) if cache_config else 7
+            cache_dir = getattr(cache_config, 'cache_dir', None) if cache_config else None
+            
+            if search_cache:
+                self.search_cache = search_cache
+            else:
+                from pathlib import Path
+                search_dir = Path(cache_dir) / "search" if cache_dir else None
+                self.search_cache = SearchResultsCache(cache_dir=search_dir, ttl_hours=search_ttl)
+            
+            if llm_filter_cache:
+                self.llm_filter_cache = llm_filter_cache
+            else:
+                from pathlib import Path
+                llm_dir = Path(cache_dir) / "llm_filter" if cache_dir else None
+                self.llm_filter_cache = LLMFilterCache(cache_dir=llm_dir, ttl_days=llm_ttl_days)
+        else:
+            self.search_cache = None
+            self.llm_filter_cache = None
+        
+        # Track cache statistics for reporting
+        self._cache_stats = {'search_hits': 0, 'search_misses': 0, 'llm_hits': 0, 'llm_misses': 0}
 
     def search_video_metadata(
         self,
@@ -98,6 +135,15 @@ class TitleFilter:
             - timed_out: True if search timed out
             - error: Error message if search failed for other reasons
         """
+        # Check cache first
+        if self.search_cache:
+            cached_videos = self.search_cache.get_search_result(keyword, tier, max_results)
+            if cached_videos is not None:
+                self._cache_stats['search_hits'] += 1
+                logger.info(f"  Search cache hit: '{keyword}' ({tier}) -> {len(cached_videos)} videos")
+                return SearchResult(videos=cached_videos, timed_out=False)
+            self._cache_stats['search_misses'] += 1
+        
         min_dur = self._get_tier_value(tier, 'min', 0)
         max_dur = self._get_tier_value(tier, 'max', 120)
 
@@ -175,6 +221,11 @@ class TitleFilter:
                         continue
 
             logger.debug(f"  Parsed {len(videos)} valid videos")
+            
+            # Cache the search result
+            if self.search_cache and videos:
+                self.search_cache.set_search_result(keyword, tier, max_results, videos)
+            
             return SearchResult(videos=videos, timed_out=False)
 
         except subprocess.TimeoutExpired as e:
@@ -210,6 +261,15 @@ class TitleFilter:
 
         if not videos:
             return []
+        
+        # Check cache first
+        if self.llm_filter_cache:
+            cached_approved = self.llm_filter_cache.get_filter_result(keyword, videos)
+            if cached_approved is not None:
+                self._cache_stats['llm_hits'] += 1
+                logger.info(f"  LLM filter cache hit: '{keyword}' -> {len(cached_approved)}/{len(videos)} approved")
+                return cached_approved
+            self._cache_stats['llm_misses'] += 1
 
         provider = getattr(llm_config, 'provider', 'gemini')
         model = getattr(llm_config, 'model', 'gemini-2.0-flash')
@@ -327,6 +387,10 @@ Only output the JSON array, no other text."""
 
         # SORT by relevance score (highest first) before returning
         approved.sort(key=lambda v: v.get('llm_relevance', 0.5), reverse=True)
+        
+        # Cache the filter result
+        if self.llm_filter_cache and approved:
+            self.llm_filter_cache.set_filter_result(keyword, videos, approved)
 
         logger.info(f"    LLM filter: {len(approved)}/{len(videos)} videos approved (sorted by relevance)")
         return approved
@@ -410,3 +474,19 @@ Only output the JSON array, no other text."""
         except Exception as e:
             logger.warning(f"Anthropic API error: {e}")
             return "[]"
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for reporting."""
+        stats = dict(self._cache_stats)
+        
+        if self.search_cache:
+            search_stats = self.search_cache.get_stats()
+            stats['search_cache_entries'] = search_stats['entries']
+            stats['search_cache_hit_rate'] = search_stats['hit_rate']
+        
+        if self.llm_filter_cache:
+            llm_stats = self.llm_filter_cache.get_stats()
+            stats['llm_filter_cache_entries'] = llm_stats['entries']
+            stats['llm_filter_cache_hit_rate'] = llm_stats['hit_rate']
+        
+        return stats

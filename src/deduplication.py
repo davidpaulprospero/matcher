@@ -141,7 +141,9 @@ class VideoDeduplicator:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.frame_timeout
+                timeout=self.frame_timeout,
+                encoding='utf-8',
+                errors='replace'
             )
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
@@ -157,7 +159,7 @@ class VideoDeduplicator:
                 '-q:v', '2',
                 str(frame_path)
             ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout)
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout, encoding='utf-8', errors='replace')
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
                 return str(frame_path)

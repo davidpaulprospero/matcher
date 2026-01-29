@@ -109,6 +109,8 @@ from .sections import (
     # B-roll
     BrollSourceBoostConfig,
     BrollConfig,
+    # Iterative matching
+    IterativeMatchingConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -185,6 +187,7 @@ class Config:
     api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
     broll: BrollConfig = field(default_factory=BrollConfig)
     healing: HealingConfig = field(default_factory=HealingConfig)
+    iterative_matching: IterativeMatchingConfig = field(default_factory=IterativeMatchingConfig)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
@@ -364,6 +367,7 @@ class Config:
             'pipeline': (PipelineConfig, 'pipeline'),
             'api_keys': (APIKeysConfig, 'api_keys'),
             'healing': (HealingConfig, 'healing'),
+            'iterative_matching': (IterativeMatchingConfig, 'iterative_matching'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():

@@ -169,6 +169,9 @@ class GlobalCacheManager:
         self._keyword_index: Dict[str, List[str]] = {}  # keyword -> [video_hashes]
         self._loaded = False
 
+        # Relevance score cache (avoids recomputation across matching passes)
+        self._relevance_cache: Dict[str, float] = {}
+
         # Initialize directories
         self._init_directories()
 
@@ -514,10 +517,18 @@ class GlobalCacheManager:
         topics: List[str] = None
     ) -> float:
         """
-        Compute relevance score for a video entry.
+        Compute relevance score for a video entry with caching.
+
+        Uses a cache keyed by (video_hash, keywords_hash, topics_hash) to avoid
+        recomputation for the same video/query combinations across matching passes.
 
         Returns score from 0.0 to 1.0.
         """
+        # Check cache
+        cache_key = self._make_relevance_cache_key(entry.video_hash, keywords, topics)
+        if cache_key in self._relevance_cache:
+            return self._relevance_cache[cache_key]
+
         score = 0.0
         max_score = 0.0
 
@@ -555,7 +566,35 @@ class GlobalCacheManager:
             max_score += 0.4  # Give full score if no topics to match
             score += 0.4
 
-        return score / max_score if max_score > 0 else 0.0
+        result = score / max_score if max_score > 0 else 0.0
+
+        # Cache the result (limit cache size)
+        if len(self._relevance_cache) < 10000:
+            self._relevance_cache[cache_key] = result
+
+        return result
+
+    def _make_relevance_cache_key(
+        self,
+        video_hash: str,
+        keywords: List[str],
+        topics: List[str] = None
+    ) -> str:
+        """
+        Create cache key for relevance score lookup.
+
+        Args:
+            video_hash: Video identifier
+            keywords: Query keywords
+            topics: Optional query topics
+
+        Returns:
+            Cache key string
+        """
+        kw_sorted = sorted(k.lower() for k in keywords) if keywords else []
+        topic_sorted = sorted(t.lower() for t in topics) if topics else []
+        key_str = f"{video_hash}|{'|'.join(kw_sorted)}|{'|'.join(topic_sorted)}"
+        return hashlib.md5(key_str.encode()).hexdigest()[:16]
 
     def update_video_topics(self, video_hash: str, topics: List[str]):
         """Update topics for a video after transcription/analysis"""

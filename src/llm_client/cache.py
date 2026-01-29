@@ -249,13 +249,12 @@ class LLMCache:
                 logger.info(f"Cache skip (low-quality): key={cache_key}, quality_tier=low{conf_str}")
                 return None
 
-            # Log cache hit with quality tier info
+            # Log cache hit with quality tier info (INFO level for visibility)
+            prefix = request.cache_key_prefix
             if quality_tier != 'unknown':
-                # Get confidence range for logging
-                conf_range = self._get_confidence_range(quality_tier)
-                logger.debug(f"Cache hit for key {cache_key}, quality_tier={quality_tier} {conf_range}")
+                logger.info(f"LLM cache hit: {prefix} (quality={quality_tier})")
             else:
-                logger.debug(f"Cache hit for key {cache_key} (legacy entry, no quality_tier)")
+                logger.info(f"LLM cache hit: {prefix}")
 
             return data
 
@@ -311,11 +310,11 @@ class LLMCache:
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            # Log with quality tier info
+            # Log with quality tier info (DEBUG level - caching is expected behavior)
             if confidence is not None:
-                logger.debug(f"Cached response for key {cache_key}, quality_tier={quality_tier} (confidence: {confidence:.2f})")
+                logger.debug(f"Cached LLM response: {request.cache_key_prefix} (quality={quality_tier}, confidence={confidence:.2f})")
             else:
-                logger.debug(f"Cached response for key {cache_key}, quality_tier=unknown (no confidence in response)")
+                logger.debug(f"Cached LLM response: {request.cache_key_prefix}")
 
         except (OSError, TypeError) as e:
             logger.warning(f"Failed to cache LLM response: {e}")

@@ -1,7 +1,7 @@
 ﻿{
     "version":  1,
-    "totalSprintsCompleted":  19,
-    "totalStoriesCompleted":  187,
+    "totalSprintsCompleted":  23,
+    "totalStoriesCompleted":  227,
     "focusAreaBreakdown":  {
                                "caption":  {
                                                "sprints":  4,
@@ -20,8 +20,8 @@
                                                "stories":  10
                                            },
                                "testing":  {
-                                               "sprints":  9,
-                                               "stories":  83
+                                               "sprints":  13,
+                                               "stories":  123
                                            }
                            },
     "sprints":  [
@@ -186,6 +186,42 @@
                         "startedAt":  "2026-01-28T22:42:39.5536727+08:00",
                         "completedAt":  "2026-01-28T23:42:39.5551734+08:00",
                         "sprintNumber":  22
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-23.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-29T00:43:47.3397230+08:00",
+                        "completedAt":  "2026-01-29T01:43:47.3442235+08:00",
+                        "sprintNumber":  23
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-24.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-29T02:10:56.7663843+08:00",
+                        "completedAt":  "2026-01-29T03:10:56.7708850+08:00",
+                        "sprintNumber":  24
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-25.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-29T03:43:03.7697951+08:00",
+                        "completedAt":  "2026-01-29T04:43:03.7717947+08:00",
+                        "sprintNumber":  25
+                    },
+                    {
+                        "focusArea":  "testing",
+                        "archiveFile":  "sprint-26.json",
+                        "storiesTotal":  10,
+                        "storiesCompleted":  10,
+                        "startedAt":  "2026-01-29T16:45:31.2681542+08:00",
+                        "completedAt":  "2026-01-29T17:45:31.2961589+08:00",
+                        "sprintNumber":  26
                     }
                 ]
 }

@@ -108,6 +108,11 @@ from .broll import (
     BrollConfig,
 )
 
+# Iterative matching
+from .iterative_matching import (
+    IterativeMatchingConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -169,4 +174,6 @@ __all__ = [
     # B-roll
     'BrollSourceBoostConfig',
     'BrollConfig',
+    # Iterative matching
+    'IterativeMatchingConfig',
 ]

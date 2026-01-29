@@ -337,13 +337,14 @@ function Log-HealingEvent {
         Append a structured event to healing_log.jsonl.
         Every fix, diagnosis, and thought process is permanently recorded.
     .PARAMETER Event
-        Event type: healing_started, healing_attempt, healing_resolved, healing_failed, healing_skipped
+        Event type: healing_started, healing_attempt, healing_resolved, healing_failed, healing_skipped,
+                    stall_detected, stall_timeout, stall_recovery
     .PARAMETER Data
         Hashtable of event-specific data (tier, errors, fix description, thought process, etc.)
     #>
     param(
         [Parameter(Mandatory)]
-        [ValidateSet("healing_started", "healing_attempt", "healing_resolved", "healing_failed", "healing_skipped")]
+        [ValidateSet("healing_started", "healing_attempt", "healing_resolved", "healing_failed", "healing_skipped", "stall_detected", "stall_timeout", "stall_recovery")]
         [string]$Event,
 
         [Parameter(Mandatory)]
@@ -375,6 +376,149 @@ function Log-HealingEvent {
         Start-Sleep -Milliseconds 200
         try { Add-Content -Path $logPath -Value $json -Encoding UTF8 } catch {}
     }
+}
+
+# Track stall state across heartbeat calls
+$script:StallState = @{
+    StallStartTime = $null
+    StallWarningIssued = $false
+    ConsecutiveStalls = 0
+    LastActivityTime = $null
+}
+
+function Test-ClaudeStall {
+    <#
+    .SYNOPSIS
+        Check if Claude subprocess appears stalled and log healing events.
+        Called periodically during subprocess wait loop.
+    .PARAMETER WaitingSeconds
+        Total seconds spent waiting for Claude
+    .PARAMETER TimeSinceActivity
+        Seconds since last detected activity (output, file changes)
+    .PARAMETER StallThreshold
+        Seconds without activity before considered stalled (default: 120)
+    .RETURNS
+        Hashtable: IsStalled, ShouldWarn, ShouldKill
+    #>
+    param(
+        [Parameter(Mandatory)][int]$WaitingSeconds,
+        [Parameter(Mandatory)][int]$TimeSinceActivity,
+        [int]$StallThreshold = 120,
+        [int]$KillThreshold = 300
+    )
+
+    $result = @{
+        IsStalled = $false
+        ShouldWarn = $false
+        ShouldKill = $false
+    }
+
+    # Not stalled if recent activity
+    if ($TimeSinceActivity -lt $StallThreshold) {
+        $script:StallState.StallStartTime = $null
+        $script:StallState.StallWarningIssued = $false
+        $script:StallState.LastActivityTime = Get-Date
+        return $result
+    }
+
+    # Stall detected
+    $result.IsStalled = $true
+
+    # Record stall start time
+    if (-not $script:StallState.StallStartTime) {
+        $script:StallState.StallStartTime = Get-Date
+
+        # Log stall detection to healing log
+        Log-HealingEvent -Event "stall_detected" -Data @{
+            waitingSeconds = $WaitingSeconds
+            timeSinceActivity = $TimeSinceActivity
+            storyId = $script:State.CurrentStoryId
+            focusArea = $script:State.CurrentFocusArea
+        }
+
+        Write-Host "  [STALL] No activity for ${TimeSinceActivity}s - monitoring..." -ForegroundColor Yellow
+    }
+
+    # Issue warning once
+    if (-not $script:StallState.StallWarningIssued -and $TimeSinceActivity -ge ($StallThreshold + 60)) {
+        $script:StallState.StallWarningIssued = $true
+        $result.ShouldWarn = $true
+        Write-Host "  [STALL] Extended stall (${TimeSinceActivity}s) - Claude may be hung" -ForegroundColor Red
+    }
+
+    # Recommend kill if stall exceeds kill threshold
+    if ($TimeSinceActivity -ge $KillThreshold) {
+        $result.ShouldKill = $true
+    }
+
+    return $result
+}
+
+function Invoke-StallRecovery {
+    <#
+    .SYNOPSIS
+        Handle recovery after a Claude stall/timeout.
+        Logs the event and updates stall tracking state.
+    .PARAMETER Reason
+        Why recovery was triggered: "timeout", "manual_kill", "stall_threshold"
+    .PARAMETER WaitingSeconds
+        How long Claude was running before recovery
+    .PARAMETER ProcessId
+        The Claude process ID that was killed (if applicable)
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Reason,
+        [int]$WaitingSeconds = 0,
+        [int]$ProcessId = 0
+    )
+
+    $script:StallState.ConsecutiveStalls++
+
+    # Log to healing system
+    Log-HealingEvent -Event "stall_recovery" -Data @{
+        reason = $Reason
+        waitingSeconds = $WaitingSeconds
+        processId = $ProcessId
+        consecutiveStalls = $script:StallState.ConsecutiveStalls
+        storyId = $script:State.CurrentStoryId
+        focusArea = $script:State.CurrentFocusArea
+    }
+
+    # Update heartbeat with stall info
+    Write-Heartbeat -Phase "stall_recovery" -Details @{
+        reason = $Reason
+        consecutiveStalls = $script:StallState.ConsecutiveStalls
+    }
+
+    Write-SessionLog -Event "stall_recovery" -Message "Claude stall recovery: $Reason after ${WaitingSeconds}s" -Data @{
+        consecutiveStalls = $script:StallState.ConsecutiveStalls
+    }
+
+    # Reset stall tracking
+    $script:StallState.StallStartTime = $null
+    $script:StallState.StallWarningIssued = $false
+
+    # If too many consecutive stalls, recommend pause
+    if ($script:StallState.ConsecutiveStalls -ge 3) {
+        Write-Host ""
+        Write-Host "  [HEALING] $($script:StallState.ConsecutiveStalls) consecutive stalls detected" -ForegroundColor Red
+        Write-Host "  Consider: Network issues, Claude API problems, or resource exhaustion" -ForegroundColor Yellow
+        Write-Host ""
+        return @{ ShouldPause = $true }
+    }
+
+    return @{ ShouldPause = $false }
+}
+
+function Reset-StallTracking {
+    <#
+    .SYNOPSIS
+        Reset stall tracking after successful iteration.
+    #>
+    $script:StallState.ConsecutiveStalls = 0
+    $script:StallState.StallStartTime = $null
+    $script:StallState.StallWarningIssued = $false
+    $script:StallState.LastActivityTime = Get-Date
 }
 
 function Test-HealingInProgress {

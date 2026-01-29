@@ -345,6 +345,11 @@ class OutputStage(Stage):
             # Scan for downloaded video segments (for audio-first mode resolution)
             downloaded_segments = self._scan_video_segments(config)
 
+            # Normalize matches to MatchResult objects if needed
+            # Checkpoint restore creates simple Match objects, but create_timeline needs MatchResult
+            normalized_matches = self._normalize_matches(state)
+            state.matches = normalized_matches  # Update state so all methods use normalized matches
+
             # Calculate quality metrics for OTIO metadata and quality report
             quality_metrics = self._calculate_quality_metrics(state.matches)
             quality_metrics_dict = quality_metrics.to_dict() if quality_metrics else None
@@ -708,6 +713,91 @@ class OutputStage(Stage):
             elif isinstance(value, str):
                 paths.append(value)
         return paths
+
+    def _normalize_matches(self, state: 'PipelineState') -> List[Any]:
+        """
+        Normalize matches to MatchResult format.
+
+        When matches are restored from checkpoint, they're simple Match objects
+        from state.py with fields: segment_index, video_file, video_start, etc.
+
+        create_timeline expects MatchResult objects from utils.py with fields:
+        primary_match (containing voiceover_segment, video_segment), alternatives, etc.
+
+        This method converts simple Match objects to MatchResult objects.
+        """
+        from ..utils import Match as UtilsMatch, MatchResult, SRTSegment
+
+        if not state.matches:
+            return []
+
+        # Check if matches are already MatchResult objects
+        first_match = state.matches[0]
+        if hasattr(first_match, 'primary_match'):
+            # Already MatchResult format
+            return state.matches
+
+        # Need to convert simple Match objects to MatchResult
+        logger.info("Converting checkpoint matches to MatchResult format")
+        normalized = []
+
+        for match in state.matches:
+            if not match:
+                continue
+
+            # Get segment_index - simple Match uses segment_index field
+            segment_index = getattr(match, 'segment_index', 0)
+
+            # Get voiceover segment from state
+            if segment_index < len(state.voiceover_segments):
+                vo_seg = state.voiceover_segments[segment_index]
+            else:
+                # Create minimal voiceover segment
+                vo_seg = SRTSegment(
+                    index=segment_index,
+                    start_time=0.0,
+                    end_time=1.0,
+                    text="",
+                    source_file=""
+                )
+
+            # Create video segment from simple Match fields
+            video_file = getattr(match, 'video_file', '')
+            video_start = getattr(match, 'video_start', 0.0)
+            video_end = getattr(match, 'video_end', video_start + 1.0)
+
+            video_seg = SRTSegment(
+                index=segment_index,
+                start_time=video_start,
+                end_time=video_end,
+                text="",  # Not preserved in checkpoint
+                source_file=video_file
+            )
+
+            # Create Match (from utils.py) with the segments
+            confidence = getattr(match, 'confidence', 0.5)
+            reasoning = getattr(match, 'reason', '')
+
+            utils_match = UtilsMatch(
+                voiceover_segment=vo_seg,
+                video_segment=video_seg,
+                video_scene=None,
+                confidence=confidence,
+                reasoning=reasoning
+            )
+
+            # Wrap in MatchResult
+            match_result = MatchResult(
+                primary_match=utils_match,
+                alternatives=[],
+                secondary_matches=[],
+                strategy_matches=[]
+            )
+
+            normalized.append(match_result)
+
+        logger.info(f"Converted {len(normalized)} matches to MatchResult format")
+        return normalized
 
     def _calculate_quality_metrics(
         self,

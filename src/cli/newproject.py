@@ -159,7 +159,9 @@ def run_setup_project(project_path: Path) -> bool:
             [sys.executable, str(setup_script), str(project_path)],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'
         )
 
         if result.returncode != 0:

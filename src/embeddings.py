@@ -128,36 +128,77 @@ def cleanup_embeddings():
         logger.info("Embedding model unloaded")
 
 
-def cosine_similarity(a: Any, b: Any) -> float:
+def cosine_similarity(a: Any, b: Any, use_cache: bool = True) -> float:
     """
-    Compute cosine similarity between two vectors.
-    
+    Compute cosine similarity between two vectors with optional memoization.
+
+    Uses a global cache to avoid recomputing similarity for the same
+    embedding pairs across multiple strategy tracks (6+ per segment).
+
     Args:
         a: First vector (list or numpy array)
         b: Second vector (list or numpy array)
-    
+        use_cache: Whether to use memoization cache (default: True)
+
     Returns:
         Cosine similarity score between -1 and 1
     """
     import numpy as np
-    
+
     # Convert to numpy
     if isinstance(a, list):
         a = np.array(a, dtype='float32')
     if isinstance(b, list):
         b = np.array(b, dtype='float32')
-    
+
     # Flatten if needed
     a = a.flatten()
     b = b.flatten()
-    
+
+    # Check cache if enabled
+    if use_cache:
+        try:
+            from .matching.similarity_cache import get_similarity_cache, embedding_hash
+            cache = get_similarity_cache()
+            hash_a = embedding_hash(a)
+            hash_b = embedding_hash(b)
+
+            # Check cache
+            cached = cache.get(hash_a, hash_b)
+            if cached is not None:
+                return cached
+
+            # Compute and cache
+            result = _compute_cosine_similarity(a, b)
+            cache.put(hash_a, hash_b, result)
+            return result
+        except ImportError:
+            # Cache not available, compute directly
+            pass
+
+    return _compute_cosine_similarity(a, b)
+
+
+def _compute_cosine_similarity(a: Any, b: Any) -> float:
+    """
+    Raw cosine similarity computation without caching.
+
+    Args:
+        a: First vector (numpy array)
+        b: Second vector (numpy array)
+
+    Returns:
+        Cosine similarity score between -1 and 1
+    """
+    import numpy as np
+
     # Compute cosine similarity
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
-    
+
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    
+
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
@@ -470,12 +511,26 @@ class VoyageEmbeddings(EmbeddingProvider):
 class LocalEmbeddings(EmbeddingProvider):
     """Local sentence-transformers embeddings"""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", max_retries: int = 5, retry_delay: float = 5.0):
         global _local_embedding_model
         from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name)
-        # Store reference for cleanup
-        _local_embedding_model = self.model
+
+        # Retry logic for model loading (handles HuggingFace network issues)
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                self.model = SentenceTransformer(model_name)
+                # Store reference for cleanup
+                _local_embedding_model = self.model
+                return
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = retry_delay * (attempt + 1)
+                    logger.warning(f"Model load failed (attempt {attempt + 1}/{max_retries}), retrying in {wait:.0f}s: {e}")
+                    time.sleep(wait)
+
+        raise RuntimeError(f"Failed to load SentenceTransformer after {max_retries} attempts: {last_error}")
 
     def embed(self, texts: List[str]) -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]

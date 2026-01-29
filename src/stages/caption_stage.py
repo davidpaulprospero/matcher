@@ -707,7 +707,10 @@ class CaptionStage(Stage):
         try:
             data = checkpoint.get_stage_data(self.name)
             if not data:
-                return False
+                # No stage data means CAPTION stage had nothing to do
+                # (e.g., caption-first mode was disabled) - this is a valid no-op
+                logger.info("Restored CAPTION: no caption data (caption-first may be disabled)")
+                return True
 
             # Restore caption results to state
             caption_results = data.get('caption_results', {})
@@ -728,9 +731,11 @@ class CaptionStage(Stage):
                 else:
                     logger.info(f"Restored CAPTION: {len(caption_results)} videos, "
                                f"{data.get('total_segments', 0)} segments")
-                return True
+            else:
+                # Stage data exists but no caption results - valid empty case
+                logger.info("Restored CAPTION: 0 videos (no captions fetched)")
 
-            return False
+            return True
 
         except Exception as e:
             logger.warning(f"Failed to restore CAPTION: {e}")

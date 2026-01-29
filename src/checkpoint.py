@@ -35,6 +35,7 @@ STAGE_ORDER = [
     "SCENE_DETECTION",
     "MATCH",
     "BROLL_MATCH",
+    "ITERATIVE_MATCH",  # Multi-pass gap filling after initial match
     "DOWNLOAD_SEGMENTS",
     "OUTPUT"
 ]
@@ -83,8 +84,9 @@ class CheckpointData:
     scene_detection: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
     broll_match: Dict[str, Any] = field(default_factory=dict)
+    iterative_match: Dict[str, Any] = field(default_factory=dict)
     download_segments: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> dict:
         return asdict(self)
     
@@ -408,14 +410,31 @@ class CheckpointManager:
         try:
             # Backup existing checkpoint
             if self.checkpoint_path.exists():
-                shutil.copy2(self.checkpoint_path, self.backup_path)
+                try:
+                    shutil.copy2(self.checkpoint_path, self.backup_path)
+                except Exception as e:
+                    logger.warning(f"Failed to backup checkpoint: {e}")
 
             # Write to temp file
             with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data.to_dict(), f, indent=2, default=str)
 
-            # Atomic rename
-            temp_path.replace(self.checkpoint_path)
+            # Atomic rename/move
+            # On Windows, Path.replace() fails if the file is open.
+            # shutil.move() is more robust.
+            try:
+                if self.checkpoint_path.exists():
+                    self.checkpoint_path.unlink()
+                shutil.move(str(temp_path), str(self.checkpoint_path))
+            except Exception as e:
+                logger.debug(f"Path.replace failed, trying os.replace/rename fallback: {e}")
+                import os
+                if os.path.exists(self.checkpoint_path):
+                    try:
+                        os.remove(self.checkpoint_path)
+                    except:
+                        pass
+                os.rename(temp_path, self.checkpoint_path)
 
             # Log save time
             elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -424,7 +443,10 @@ class CheckpointManager:
         except Exception as e:
             logger.error(f"Failed to save checkpoint: {e}")
             if temp_path.exists():
-                temp_path.unlink()
+                try:
+                    temp_path.unlink()
+                except:
+                    pass
             raise
     
     def set_voiceover(self, voiceover_path: str):

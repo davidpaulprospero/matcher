@@ -5,9 +5,161 @@ Provides fixtures and marks for integration tests that require
 external resources (videos, API keys, etc.).
 """
 
+import os
 import pytest
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+
+
+# =============================================================================
+# EXTERNAL RESOURCE DETECTION (US-002, Sprint 27)
+# =============================================================================
+#
+# These helpers detect available external resources at test collection time.
+# Use them with @pytest.mark.skipif for conditional test execution based on
+# environment availability rather than permanent skips.
+# =============================================================================
+
+def has_gemini_api_key() -> bool:
+    """Check if Gemini API key is available."""
+    return bool(os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY'))
+
+
+def has_voyage_api_key() -> bool:
+    """Check if Voyage AI API key is available."""
+    return bool(os.getenv('VOYAGE_API_KEY'))
+
+
+def has_cookies_file() -> bool:
+    """Check if cookies.txt file exists for yt-dlp."""
+    # Check common locations
+    locations = [
+        Path.cwd() / 'cookies.txt',
+        Path.home() / 'cookies.txt',
+        Path.home() / '.config' / 'yt-dlp' / 'cookies.txt',
+    ]
+    return any(p.exists() for p in locations)
+
+
+def has_sentence_transformers() -> bool:
+    """Check if sentence-transformers library is available."""
+    try:
+        import sentence_transformers
+        return True
+    except ImportError:
+        return False
+
+
+def has_opentimelineio() -> bool:
+    """Check if opentimelineio library is available."""
+    try:
+        import opentimelineio
+        return True
+    except ImportError:
+        return False
+
+
+def has_numpy() -> bool:
+    """Check if numpy is available."""
+    try:
+        import numpy
+        return True
+    except ImportError:
+        return False
+
+
+def has_pillow() -> bool:
+    """Check if PIL/Pillow is available."""
+    try:
+        from PIL import Image
+        return True
+    except ImportError:
+        return False
+
+
+def has_test_project(path: Optional[str] = None) -> bool:
+    """
+    Check if a test project directory exists with required structure.
+
+    Args:
+        path: Optional path to check. If None, checks common test locations.
+    """
+    if path:
+        test_path = Path(path)
+        return (test_path.exists() and
+                (test_path / 'checkpoint.json').exists())
+
+    # Check common test project locations
+    locations = [
+        Path.cwd() / '_test_project',
+        Path('E:/Edit Job/_ralph_test'),
+        Path.home() / 'test_project',
+    ]
+    return any(
+        (p.exists() and (p / 'checkpoint.json').exists())
+        for p in locations
+    )
+
+
+def get_test_project_path() -> Optional[Path]:
+    """Get path to test project if one exists."""
+    locations = [
+        Path.cwd() / '_test_project',
+        Path('E:/Edit Job/_ralph_test'),
+        Path.home() / 'test_project',
+    ]
+    for p in locations:
+        if p.exists() and (p / 'checkpoint.json').exists():
+            return p
+    return None
+
+
+# Module-level constants for skipif decorators
+HAS_GEMINI_API = has_gemini_api_key()
+HAS_VOYAGE_API = has_voyage_api_key()
+HAS_COOKIES = has_cookies_file()
+HAS_SENTENCE_TRANSFORMERS = has_sentence_transformers()
+HAS_OTIO = has_opentimelineio()
+HAS_NUMPY = has_numpy()
+HAS_PILLOW = has_pillow()
+HAS_TEST_PROJECT = has_test_project()
+
+
+# Reusable skip conditions
+SKIP_NO_GEMINI = pytest.mark.skipif(
+    not HAS_GEMINI_API,
+    reason="Requires GEMINI_API_KEY or GOOGLE_API_KEY environment variable"
+)
+
+SKIP_NO_VOYAGE = pytest.mark.skipif(
+    not HAS_VOYAGE_API,
+    reason="Requires VOYAGE_API_KEY environment variable"
+)
+
+SKIP_NO_COOKIES = pytest.mark.skipif(
+    not HAS_COOKIES,
+    reason="Requires cookies.txt for yt-dlp video downloads"
+)
+
+SKIP_NO_SENTENCE_TRANSFORMERS = pytest.mark.skipif(
+    not HAS_SENTENCE_TRANSFORMERS,
+    reason="Requires sentence-transformers library (pip install sentence-transformers)"
+)
+
+SKIP_NO_OTIO = pytest.mark.skipif(
+    not HAS_OTIO,
+    reason="Requires opentimelineio library (pip install opentimelineio)"
+)
+
+SKIP_NO_NUMPY = pytest.mark.skipif(
+    not HAS_NUMPY,
+    reason="Requires numpy library"
+)
+
+SKIP_NO_TEST_PROJECT = pytest.mark.skipif(
+    not HAS_TEST_PROJECT,
+    reason="Requires test project directory with checkpoint.json"
+)
 
 
 def pytest_configure(config):
@@ -28,8 +180,31 @@ def pytest_configure(config):
 
 @pytest.fixture
 def srt_path(tmp_path) -> Path:
-    """Fixture for SRT file path (integration tests)."""
-    pytest.skip("Integration test - requires actual SRT file")
+    """
+    Fixture for SRT file path.
+
+    Creates a sample SRT file in tmp_path for testing. If you need a real
+    SRT file, use a test project directory or provide one via environment.
+
+    Returns:
+        Path to a sample SRT file for testing
+    """
+    srt_file = tmp_path / "test_voiceover.srt"
+    # Create minimal valid SRT content
+    srt_content = """1
+00:00:00,000 --> 00:00:05,000
+Welcome to the tutorial.
+
+2
+00:00:05,000 --> 00:00:10,000
+We will learn about Python programming.
+
+3
+00:00:10,000 --> 00:00:15,000
+Let's get started with the basics.
+"""
+    srt_file.write_text(srt_content, encoding='utf-8')
+    return srt_file
 
 
 @pytest.fixture
@@ -65,15 +240,44 @@ def output_dir(tmp_path) -> Path:
 
 
 @pytest.fixture
-def cookies_path() -> str:
-    """Fixture for cookies path (integration tests)."""
-    pytest.skip("Integration test - requires cookies file")
+def cookies_path() -> Optional[str]:
+    """
+    Fixture for cookies path.
+
+    Returns path to cookies.txt if available, None otherwise.
+    Tests requiring cookies should use SKIP_NO_COOKIES marker.
+
+    Returns:
+        Path to cookies.txt if found, None otherwise
+    """
+    locations = [
+        Path.cwd() / 'cookies.txt',
+        Path.home() / 'cookies.txt',
+        Path.home() / '.config' / 'yt-dlp' / 'cookies.txt',
+    ]
+    for loc in locations:
+        if loc.exists():
+            return str(loc)
+    return None
 
 
 @pytest.fixture
 def video_paths(tmp_path) -> List[str]:
-    """Fixture for video paths (integration tests)."""
-    pytest.skip("Integration test - requires downloaded videos")
+    """
+    Fixture for video paths.
+
+    Creates minimal mock video files for testing. For integration tests
+    requiring real videos, use a test project directory.
+
+    Returns:
+        List of paths to mock video files
+    """
+    videos = []
+    for i in range(3):
+        video_file = tmp_path / f"test_video_{i}.mp4"
+        video_file.write_bytes(b'\x00' * 1024)  # Mock file content
+        videos.append(str(video_file))
+    return videos
 
 
 @pytest.fixture
@@ -86,14 +290,40 @@ def cache_dir(tmp_path) -> Path:
 
 @pytest.fixture
 def video_path(tmp_path) -> str:
-    """Fixture for single video path (integration tests)."""
-    pytest.skip("Integration test - requires actual video file")
+    """
+    Fixture for single video path.
+
+    Creates a minimal mock video file for testing. For integration tests
+    requiring real video content, use a test project directory.
+
+    Returns:
+        Path to a mock video file
+    """
+    video_file = tmp_path / "test_video.mp4"
+    video_file.write_bytes(b'\x00' * 1024)  # Mock file content
+    return str(video_file)
 
 
 @pytest.fixture
-def runner():
-    """Fixture for test runner (integration tests)."""
-    pytest.skip("Integration test - requires runner setup")
+def runner(tmp_path, config):
+    """
+    Fixture for test runner.
+
+    Creates a mock runner object for testing. For integration tests
+    requiring real pipeline execution, use ResilientRunner directly.
+
+    Returns:
+        Mock runner object with common attributes
+    """
+    from unittest.mock import Mock
+
+    mock_runner = Mock()
+    mock_runner.project_dir = str(tmp_path)
+    mock_runner.config = config
+    mock_runner.audio_downloads = []
+    mock_runner.merged_segments = []
+    mock_runner.checkpoint_path = tmp_path / 'checkpoint.json'
+    return mock_runner
 
 
 @pytest.fixture

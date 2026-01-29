@@ -41,13 +41,15 @@ class MatchQualityMetrics:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metrics to dictionary for checkpoint storage."""
+        # Convert all float values to Python float to avoid numpy.float32 incompatibility
+        # with OpenTimelineIO's AnyDictionary which only accepts specific types
         return {
-            'avg_confidence': self.avg_confidence,
-            'min_confidence': self.min_confidence,
-            'max_confidence': self.max_confidence,
-            'confidence_std': self.confidence_std,
+            'avg_confidence': float(self.avg_confidence),
+            'min_confidence': float(self.min_confidence),
+            'max_confidence': float(self.max_confidence),
+            'confidence_std': float(self.confidence_std),
             'gap_count': self.gap_count,
-            'match_rate': self.match_rate,
+            'match_rate': float(self.match_rate),
             'total_segments': self.total_segments,
             'matched_segments': self.matched_segments,
         }
@@ -120,6 +122,10 @@ def calculate_match_quality_metrics(
             match_rate=0.0,
             matched_segments=0,
         )
+
+    # Convert all confidence values to Python float to avoid numpy.float32 issues
+    # numpy.float32 is not JSON serializable and causes errors in output stage
+    confidences = [float(c) for c in confidences]
 
     avg_confidence = sum(confidences) / len(confidences)
     min_confidence = min(confidences)

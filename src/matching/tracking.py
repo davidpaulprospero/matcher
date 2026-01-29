@@ -170,10 +170,17 @@ class GlobalClipTracker:
         """Initialize empty clip tracker with no used clips."""
         self.used_clips: Set[str] = set()
         self.clip_track_map: Dict[str, str] = {}  # clip_id -> "V1@S003"
+        # Clip ID cache: segment object id -> clip_id string
+        # Avoids recomputing clip IDs for same segment in tight matching loops
+        self._clip_id_cache: Dict[int, str] = {}
 
     def get_clip_id(self, segment: SRTSegment) -> str:
         """
-        Generate unique clip ID using ORIGINAL video coordinates.
+        Generate unique clip ID using ORIGINAL video coordinates with caching.
+
+        Memoizes clip IDs by segment object id to avoid repeated regex matching
+        and path operations in tight matching loops. Each segment is typically
+        checked multiple times (once per strategy track).
 
         This method handles two distinct video file patterns:
 
@@ -211,6 +218,11 @@ class GlobalClipTracker:
             The regex pattern expects exactly 11 alphanumeric characters for the
             video ID (standard YouTube format) followed by underscore and 4 digits.
         """
+        # Check cache first (uses object id as key for O(1) lookup)
+        seg_id = id(segment)
+        if seg_id in self._clip_id_cache:
+            return self._clip_id_cache[seg_id]
+
         file_path = segment.source_file
         filename = Path(file_path).stem
 
@@ -221,11 +233,15 @@ class GlobalClipTracker:
             file_offset = float(match.group(2))
             original_start = file_offset + segment.start_time
             original_end = file_offset + segment.end_time
-            return f"{video_id}:{original_start:.2f}-{original_end:.2f}"
+            clip_id = f"{video_id}:{original_start:.2f}-{original_end:.2f}"
+        else:
+            # Fallback for regular video files
+            path = file_path.replace('\\', '/').lower()
+            clip_id = f"{path}:{segment.start_time:.2f}-{segment.end_time:.2f}"
 
-        # Fallback for regular video files
-        path = file_path.replace('\\', '/').lower()
-        return f"{path}:{segment.start_time:.2f}-{segment.end_time:.2f}"
+        # Cache and return
+        self._clip_id_cache[seg_id] = clip_id
+        return clip_id
 
     def is_used(self, segment: SRTSegment) -> bool:
         """

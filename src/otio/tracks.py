@@ -72,6 +72,20 @@ class TrackBuilder(ABC):
     Each track type (V1-V10) implements this interface to build its video/audio tracks.
     """
 
+    # Class constant: track names (avoids recreating list on each _get_track_name call)
+    TRACK_NAMES = (
+        "Primary Video",
+        "Alternative Video 1",
+        "Alternative Video 2",
+        "Secondary Diversity 1",
+        "Secondary Diversity 2",
+        "Secondary Diversity 3",
+        "Embedding-Diversity Strategy",
+        "B-roll Only",
+        "Entity Images (Google)",
+        "Stock Videos (Pexels/Pixabay)",
+    )
+
     def __init__(
         self,
         matches: List['MatchResult'],
@@ -102,20 +116,10 @@ class TrackBuilder(ABC):
         pass
 
     def _get_track_name(self, track_idx: int) -> str:
-        """Get track display name based on index."""
-        track_names = [
-            "Primary Video",
-            "Alternative Video 1",
-            "Alternative Video 2",
-            "Secondary Diversity 1",
-            "Secondary Diversity 2",
-            "Secondary Diversity 3",
-            "Embedding-Diversity Strategy",
-            "B-roll Only",
-            "Entity Images (Google)",
-            "Stock Videos (Pexels/Pixabay)",
-        ]
-        return track_names[track_idx] if track_idx < len(track_names) else f"Track {track_idx+1}"
+        """Get track display name based on index (uses class constant)."""
+        if track_idx < len(self.TRACK_NAMES):
+            return self.TRACK_NAMES[track_idx]
+        return f"Track {track_idx+1}"
 
     def _create_clip(
         self,
@@ -208,7 +212,7 @@ class TrackBuilder(ABC):
             Updated timeline_frames position
         """
         # Check for gap before this segment (silence in voiceover)
-        expected_start_frames = round((vo_seg.start_time - first_segment_start) * self.frame_rate)
+        expected_start_frames = round((vo_seg.start - first_segment_start) * self.frame_rate)
 
         if expected_start_frames > timeline_frames:
             # There's a gap - insert silence/gap clips
@@ -298,7 +302,7 @@ class PrimaryTrackBuilder(TrackBuilder):
             vid_seg = match.video_segment
 
             # Target duration = voiceover segment duration
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             duration_frames = round(target_duration * self.frame_rate)
 
             # Source duration = video segment duration
@@ -386,7 +390,7 @@ class AlternativeTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             duration_frames = round(target_duration * self.frame_rate)
 
             if alt_idx < len(match_result.alternatives):
@@ -459,7 +463,7 @@ class DiversityTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             duration_frames = round(target_duration * self.frame_rate)
 
             if sec_idx < len(match_result.secondary_matches):
@@ -536,7 +540,7 @@ class EmbeddingDiversityTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             duration_frames = round(target_duration * self.frame_rate)
 
             # Find strategy match for this strategy
@@ -610,7 +614,7 @@ class BRollTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             duration_frames = round(target_duration * self.frame_rate)
 
             # Find B-roll strategy match

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import statistics
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -38,6 +39,9 @@ from .scoring import (
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
+from .similarity_cache import (
+    get_keyword_cache, text_hash as compute_text_hash, log_all_cache_stats
+)
 
 # Utils and data structures
 from ..utils import (
@@ -207,8 +211,8 @@ class TieredMatcher:
         if len(candidates) < 2:
             return 0.0
 
-        # Get top-N similarity scores
-        top_scores = [sim for _, sim in candidates[:top_n]]
+        # Get top-N similarity scores (convert to Python float to avoid numpy coercion error)
+        top_scores = [float(sim) for _, sim in candidates[:top_n]]
 
         if len(top_scores) < 2:
             return 0.0
@@ -226,6 +230,9 @@ class TieredMatcher:
         """
         Extract common keywords between voiceover and video transcript.
 
+        Uses caching to avoid re-extracting keywords from the same text
+        across multiple candidate comparisons.
+
         Finds keywords that appear in both the voiceover segment and the selected
         video's transcript/keywords. Returns unique matched keywords sorted by
         frequency of occurrence.
@@ -237,37 +244,9 @@ class TieredMatcher:
         Returns:
             List of matched keywords (lowercase, deduplicated)
         """
-        matched = set()
-
-        # Get voiceover keywords from both keywords list and text
-        vo_keywords = set()
-        if hasattr(vo_segment, 'keywords') and vo_segment.keywords:
-            vo_keywords.update(kw.lower().strip() for kw in vo_segment.keywords if kw)
-
-        # Extract significant words from voiceover text (>= 4 chars, not common words)
-        common_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
-                        'can', 'her', 'was', 'one', 'our', 'out', 'has', 'have',
-                        'been', 'from', 'this', 'that', 'with', 'they', 'what',
-                        'will', 'there', 'their', 'about', 'would', 'which', 'into'}
-        if vo_segment.text:
-            words = vo_segment.text.lower().split()
-            vo_keywords.update(
-                w.strip('.,!?:;"\'()[]{}') for w in words
-                if len(w) >= 4 and w.lower() not in common_words
-            )
-
-        # Get video keywords from both keywords list and text
-        video_keywords = set()
-        if hasattr(video_segment, 'keywords') and video_segment.keywords:
-            video_keywords.update(kw.lower().strip() for kw in video_segment.keywords if kw)
-
-        # Extract significant words from video text
-        if video_segment.text:
-            words = video_segment.text.lower().split()
-            video_keywords.update(
-                w.strip('.,!?:;"\'()[]{}') for w in words
-                if len(w) >= 4 and w.lower() not in common_words
-            )
+        # Get cached keyword extraction function
+        vo_keywords = self._get_keywords_for_segment(vo_segment)
+        video_keywords = self._get_keywords_for_segment(video_segment)
 
         # Find intersection
         matched = vo_keywords & video_keywords
@@ -276,6 +255,52 @@ class TieredMatcher:
         result = sorted([kw for kw in matched if len(kw) >= 3])
 
         return result
+
+    def _get_keywords_for_segment(self, segment: SRTSegment) -> set:
+        """
+        Extract keywords from segment with caching.
+
+        Caches extracted keywords by text hash to avoid recomputation
+        when the same segment is compared against multiple candidates.
+
+        Args:
+            segment: SRTSegment with text and optional keywords
+
+        Returns:
+            Set of lowercase keywords
+        """
+        # Generate cache key from segment text
+        text = segment.text or ""
+        cache_key = compute_text_hash(text)
+
+        # Check cache
+        cache = get_keyword_cache()
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Extract keywords
+        keywords = set()
+
+        # Get keywords from segment's keywords attribute
+        if hasattr(segment, 'keywords') and segment.keywords:
+            keywords.update(kw.lower().strip() for kw in segment.keywords if kw)
+
+        # Extract significant words from text (>= 4 chars, not common words)
+        common_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
+                        'can', 'her', 'was', 'one', 'our', 'out', 'has', 'have',
+                        'been', 'from', 'this', 'that', 'with', 'they', 'what',
+                        'will', 'there', 'their', 'about', 'would', 'which', 'into'}
+        if text:
+            words = text.lower().split()
+            keywords.update(
+                w.strip('.,!?:;"\'()[]{}') for w in words
+                if len(w) >= 4 and w.lower() not in common_words
+            )
+
+        # Cache and return
+        cache.put(cache_key, keywords)
+        return keywords
 
     def _compute_multimodal_confidence(
         self,
@@ -533,6 +558,7 @@ class TieredMatcher:
         """
         mc = self.config.matching
 
+        segment_start_time = time.time()
         logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
 
         # Guard: return gap if no candidates
@@ -548,6 +574,7 @@ class TieredMatcher:
             return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="No candidates")
 
         # Apply face preference if set
+        face_start_time = time.time()
         if self.face_preference != 'neutral':
             current_project_candidates = []
             global_cache_candidates = []
@@ -585,6 +612,10 @@ class TieredMatcher:
 
             candidates = current_project_candidates + global_cache_candidates
             candidates.sort(key=lambda x: x[1], reverse=True)
+
+        face_elapsed = time.time() - face_start_time
+        if face_elapsed > 1.0:
+            logger.info(f"  match_segment: face preference took {face_elapsed:.2f}s")
 
         # Apply location-based filtering (delegate to LocationMatcher)
         location_filter_applied = False
@@ -804,8 +835,12 @@ class TieredMatcher:
             )
 
         # Check cache
+        cache_check_start = time.time()
         cache_key = self._get_cache_key(vo_segment.text, valid_candidates)
         cached = self._get_cached_response(cache_key)
+        cache_check_elapsed = time.time() - cache_check_start
+        if cache_check_elapsed > 1.0:
+            logger.info(f"  match_segment: cache check took {cache_check_elapsed:.2f}s")
 
         if cached:
             selected_idx, confidence, reasoning = cached
@@ -893,9 +928,14 @@ class TieredMatcher:
                     confidence_variance=confidence_variance,
                     matched_keywords=matched_keywords
                 )
-
-        # Build context and use LLM
-        context = self._build_context(context_before, context_after)
+            else:
+                # Build context and use LLM (cache hit but segment not reusable)
+                llm_start_time = time.time()
+                context = self._build_context(context_before, context_after)
+        else:
+            # Build context and use LLM (no cache hit)
+            llm_start_time = time.time()
+            context = self._build_context(context_before, context_after)
         negative_rules = self.config.negative_matching.rules if self.config.negative_matching.enabled else None
 
         provider = self.primary_provider
@@ -909,7 +949,7 @@ class TieredMatcher:
                     negative_rules=negative_rules
                 )
                 logger.info(f"  match_segment: LLM returned results")
-                selected_idx, confidence, reasoning = results[0]
+                selected_idx, confidence, reasoning, _cot = results[0]
 
                 # Check if ambiguous - use secondary provider
                 if confidence < mc.ambiguous_threshold and self.secondary_provider:
@@ -919,7 +959,7 @@ class TieredMatcher:
                         context=context,
                         negative_rules=negative_rules
                     )
-                    sec_idx, sec_conf, sec_reason = secondary_results[0]
+                    sec_idx, sec_conf, sec_reason, _ = secondary_results[0]
 
                     if sec_conf > confidence:
                         selected_idx, confidence, reasoning = sec_idx, sec_conf, f"(secondary) {sec_reason}"
@@ -937,6 +977,10 @@ class TieredMatcher:
             embedding_sim = valid_candidates[0][1]
             confidence = 0.60
             reasoning = f"Embedding similarity only (sim={embedding_sim:.2f})"
+
+        llm_elapsed = time.time() - llm_start_time
+        if llm_elapsed > 1.0:
+            logger.info(f"  match_segment: LLM call took {llm_elapsed:.2f}s")
 
         # Build result
         selected_idx = min(selected_idx, len(valid_candidates) - 1)
@@ -1076,6 +1120,10 @@ class TieredMatcher:
 
         # Extract matched keywords between voiceover and selected video
         matched_keywords = self._extract_matched_keywords(vo_segment, best_seg)
+
+        total_elapsed = time.time() - segment_start_time
+        if total_elapsed > 2.0:
+            logger.info(f"  match_segment: TOTAL time for segment was {total_elapsed:.2f}s")
 
         return MatchResult(
             primary_match=match,
@@ -1253,8 +1301,11 @@ class TieredMatcher:
 
         logger.info(f"Reviewing {len(low_confidence)} low-confidence matches with local LLM...")
 
-        for idx, match_result in low_confidence:
+        for i, (idx, match_result) in enumerate(low_confidence):
             primary = match_result.primary_match
+
+            # Log progress every match
+            logger.info(f"  Local LLM review: {i+1}/{len(low_confidence)} - '{primary.voiceover_segment.text[:40]}...'")
 
             candidates = [
                 (primary.video_segment, primary.confidence),
@@ -1265,7 +1316,7 @@ class TieredMatcher:
                 results = self.local_provider.match_batch(
                     [(primary.voiceover_segment.text, candidates)]
                 )
-                new_idx, new_conf, new_reason = results[0]
+                new_idx, new_conf, new_reason, _ = results[0]
 
                 if new_conf > primary.confidence:
                     logger.debug(f"Local LLM improved match: {primary.confidence:.2f} -> {new_conf:.2f}")

@@ -34,7 +34,7 @@ class PauseSplitConfig:
     - Location patterns: "Atlanta, Georgia," splits at city/state pairs
     """
     enabled: bool = True
-    min_gap_ms: int = 300  # Minimum gap to consider a pause
+    min_gap_ms: int = 500  # Minimum gap to consider a pause (ms)
     split_at_sentences: bool = True  # Split at sentence boundaries (. ! ?)
     split_at_list_markers: bool = True  # Split before "1.", "2.", "Number 10", etc.
     split_at_locations: bool = True  # Split at "City, State" patterns
