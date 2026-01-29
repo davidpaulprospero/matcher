@@ -98,8 +98,8 @@
                             "id":  "US-007",
                             "title":  "Add coverage tests for matching strategy selection",
                             "priority":  7,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Created tests/test_matching_strategy_selection.py with 34 new tests. Coverage: AC2 strategy fallback chain (5 tests - high embedding skip LLM, medium uses LLM, low triggers fallback), AC3 confidence threshold boundaries (10 parametrized tests for skip_llm and fallback thresholds), AC4 multi-alternative selection (4 tests for source diversity and config limits), AC5 uses assert_valid_match_result() helper (5 validation tests). Additional coverage: adaptive threshold, reuse prevention, no-candidates handling, LLM provider fallback, integration tests. tiered_matcher.py coverage improved from 56.96% to 65.54%.",
                             "acceptanceCriteria":  [
                                                        "Analyze coverage gaps in src/matching/ using scripts/coverage_by_module.py",
                                                        "Add tests for strategy fallback chain (embedding -\u003e LLM -\u003e hybrid)",
