@@ -1,3 +1,25 @@
+## Iteration US-010 (Sprint 26) - Fix linting workflow to fail on errors
+- Verified lint job in .github/workflows/tests.yml already configured to fail on errors
+- No continue-on-error: true in lint job (only in test jobs which is correct)
+- Quality job already exists for optional mypy and extended ruff checks
+- Lint job checks: black --check --diff, isort --check-only --diff, ruff check --select=E9,F63,F7,F82
+- Added comprehensive linting documentation to tests/README.md:
+  - Tool descriptions (black, isort, ruff, mypy) with blocking status
+  - CI job breakdown (lint vs quality jobs)
+  - Local development commands for checking and auto-fixing
+  - Error codes that block PRs: E9 (runtime/syntax), F63 (format issues), F7 (type errors), F82 (undefined names)
+  - Configuration examples for pyproject.toml (ruff, black, isort)
+  - Pre-commit hook setup instructions
+  - Troubleshooting guide for common lint failures
+- Acceptance criteria verification:
+  - AC1: Lint job already fails on errors (no continue-on-error)
+  - AC2: No continue-on-error in lint steps
+  - AC3: Quality job exists for optional checks
+  - AC4: ruff --select=E9,F63,F7,F82 ensures fatal errors block PRs
+  - AC5: Fatal errors (E9, F63, F7, F82) are documented
+  - AC6: Comprehensive documentation added to tests/README.md
+- Files modified: tests/README.md (+140 lines)
+
 
 ## Iteration US-007 (Sprint 26) - Add coverage tests for matching strategy selection
 - Created tests/test_matching_strategy_selection.py with 34 new tests covering all 6 acceptance criteria
