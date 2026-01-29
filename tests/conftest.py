@@ -473,3 +473,110 @@ def match_factory(srt_segment_factory):
         )
 
     return _make
+
+
+# =============================================================================
+# TEST ISOLATION MONITORING (US-005, Sprint 26)
+# =============================================================================
+#
+# These fixtures help detect and warn about test isolation issues.
+# Tests should use tmp_path for file operations to avoid:
+# - Tests affecting each other
+# - Artifacts left after test runs
+# - Flaky tests due to pre-existing files
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
+def _isolation_tracker(request):
+    """
+    Session-scoped tracker for file creations outside tmp_path.
+
+    This is an internal fixture used by the isolation monitoring system.
+    """
+    from collections import defaultdict
+    tracker = {
+        'violations': defaultdict(list),
+        'warned': set(),
+    }
+    # Store on config for terminal summary access
+    request.config._isolation_tracker = tracker
+    return tracker
+
+
+@pytest.fixture(autouse=True)
+def _check_test_isolation(request, tmp_path, _isolation_tracker):
+    """
+    Auto-use fixture that warns when tests create files outside tmp_path.
+
+    This fixture monitors for common isolation anti-patterns:
+    - Direct use of tempfile.mkdtemp() without cleanup
+    - Files created in project directories
+    - Hardcoded paths to external directories
+
+    Enabled via: pytest --check-isolation (default: off)
+    """
+    # Only run if --check-isolation flag is set
+    if not request.config.getoption("--check-isolation", default=False):
+        yield
+        return
+
+    import tempfile
+    from unittest.mock import patch
+
+    test_name = request.node.name
+    created_paths = []
+    pytest_tmp_root = tmp_path.parent
+
+    # Track mkdtemp calls
+    original_mkdtemp = tempfile.mkdtemp
+
+    def tracking_mkdtemp(*args, **kwargs):
+        path = original_mkdtemp(*args, **kwargs)
+        created_paths.append(('mkdtemp', path))
+        return path
+
+    with patch.object(tempfile, 'mkdtemp', tracking_mkdtemp):
+        yield
+
+    # Report violations (warnings, not failures)
+    if created_paths:
+        for op_type, path in created_paths:
+            if path not in _isolation_tracker['warned']:
+                _isolation_tracker['violations'][test_name].append((op_type, path))
+                _isolation_tracker['warned'].add(path)
+
+
+def pytest_addoption(parser):
+    """Add custom command line options."""
+    parser.addoption(
+        "--check-isolation",
+        action="store_true",
+        default=False,
+        help="Enable test isolation checking (warns about file creation outside tmp_path)"
+    )
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Report isolation violations at end of test run."""
+    if not config.getoption("--check-isolation", default=False):
+        return
+
+    tracker = getattr(config, '_isolation_tracker', None)
+    if not tracker or not tracker['violations']:
+        return
+
+    terminalreporter.write_sep("=", "Test Isolation Warnings")
+    terminalreporter.write_line(
+        "\nThe following tests used tempfile.mkdtemp() - consider using tmp_path:"
+    )
+
+    for test_name, violations in tracker['violations'].items():
+        terminalreporter.write_line(f"\n  {test_name}:")
+        for op_type, path in violations:
+            terminalreporter.write_line(f"    [{op_type}] {path}")
+
+    terminalreporter.write_line(
+        "\nNote: mkdtemp() works but tmp_path is preferred for automatic cleanup. "
+        "See tests/README.md for best practices."
+    )

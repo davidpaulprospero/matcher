@@ -158,6 +158,112 @@ tests/
 └── benchmarks_broken/   # Disabled benchmarks (not discovered)
 ```
 
+## Test Isolation Best Practices (Sprint 26)
+
+Tests should be **isolated** - they shouldn't depend on or affect other tests. This section covers best practices for maintaining test isolation.
+
+### Use `tmp_path` Instead of `tempfile.mkdtemp()`
+
+**Preferred pattern:**
+```python
+def test_file_operations(tmp_path):
+    """tmp_path is automatically cleaned up after test."""
+    test_file = tmp_path / "data.json"
+    test_file.write_text('{"key": "value"}')
+    assert test_file.exists()
+    # Automatic cleanup - no teardown needed
+```
+
+**Avoid this pattern:**
+```python
+def test_file_operations():
+    """mkdtemp requires manual cleanup."""
+    import tempfile
+    import shutil
+    temp_dir = tempfile.mkdtemp()  # Creates directory that may leak
+    try:
+        # ... test code ...
+        pass
+    finally:
+        shutil.rmtree(temp_dir)  # Must clean up manually
+```
+
+**For unittest.TestCase style:**
+```python
+class TestSomething(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)  # REQUIRED
+```
+
+### Check for Isolation Issues
+
+Run tests with isolation checking enabled:
+
+```bash
+# Check for mkdtemp() usage (warns but doesn't fail)
+pytest tests/ --check-isolation -v
+
+# The summary will list tests using mkdtemp()
+```
+
+### Common Isolation Anti-Patterns
+
+| Anti-Pattern | Problem | Solution |
+|--------------|---------|----------|
+| Hardcoded paths (`Path("E:/test")`) | Won't work on other machines | Use `tmp_path` fixture |
+| `tempfile.mkdtemp()` without cleanup | Leaves files after test | Use `tmp_path` or add `tearDown` |
+| Writing to project directories | Pollutes repo | Use `tmp_path` |
+| Shared global state | Tests affect each other | Use fixtures with scope |
+| External file dependencies | Flaky on CI | Use skip conditions or fixtures |
+
+### When Fixed Paths Are Acceptable
+
+Some tests need external resources. Use skip conditions:
+
+```python
+PROJECT_DIR = Path("E:/Edit Job/test/jan_test/audio__2026-01-01")
+
+@pytest.mark.skipif(
+    not PROJECT_DIR.exists(),
+    reason=f"Test project not found at {PROJECT_DIR}"
+)
+def test_with_real_project():
+    """Only runs if external project exists."""
+    # Use PROJECT_DIR safely
+    pass
+```
+
+### Fixture Scopes for Resource Management
+
+| Scope | Use Case | Cleanup |
+|-------|----------|---------|
+| `function` (default) | Most tests | After each test |
+| `class` | Shared setup within class | After all methods |
+| `module` | Expensive setup for module | After module |
+| `session` | One-time global setup | After all tests |
+
+```python
+@pytest.fixture(scope="module")
+def expensive_resource(tmp_path_factory):
+    """Shared across all tests in module."""
+    return tmp_path_factory.mktemp("shared")
+```
+
+### Verifying Isolation
+
+After running tests, verify no artifacts remain:
+
+```bash
+# Check for leftover temp directories
+ls -la /tmp/pytest-* 2>/dev/null || echo "No pytest temp dirs found (good)"
+
+# Check for modified tracked files
+git status --porcelain
+```
+
 ## Fixture Factories
 
 The `conftest.py` file provides factory fixtures for creating test objects:
