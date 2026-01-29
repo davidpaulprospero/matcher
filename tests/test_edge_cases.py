@@ -531,6 +531,236 @@ class TestStateTransitions:
 
 
 # =============================================================================
+# CATEGORY 9: TESTS USING EDGE CASE GENERATORS (US-006)
+# =============================================================================
+
+from tests.fixtures.edge_cases import (
+    generate_empty_srt_segment,
+    generate_minimal_srt_segment,
+    generate_whitespace_only_segment,
+    generate_zero_duration_segment,
+    generate_negative_duration_segment,
+    generate_long_text_segment,
+    generate_long_word_segment,
+    generate_unicode_segment,
+    generate_emoji_segment,
+    generate_mixed_unicode_emoji_segment,
+    generate_special_chars_segment,
+    generate_corrupted_checkpoint,
+    generate_checkpoint_corruption_batch,
+    generate_edge_case_batch,
+    UNICODE_SAMPLES,
+    EMOJI_SAMPLES,
+)
+
+
+class TestEdgeCaseGenerators:
+    """Tests that use the edge case generators from fixtures/edge_cases.py (US-006)"""
+
+    # ---- Test 1: Empty segment from generator ----
+    @pytest.mark.fast
+    def test_empty_segment_generator_creates_valid_dict(self):
+        """Empty segment generator returns valid dict structure."""
+        seg = generate_empty_srt_segment()
+
+        assert "index" in seg
+        assert "start_time" in seg
+        assert "end_time" in seg
+        assert "text" in seg
+        assert seg["text"] == ""
+        assert seg["word_count"] == 0
+
+    # ---- Test 2: Minimal segment with single char ----
+    @pytest.mark.fast
+    def test_minimal_segment_generator_single_char(self):
+        """Minimal segment generator creates single-character text."""
+        seg = generate_minimal_srt_segment(char="X")
+
+        assert seg["text"] == "X"
+        assert len(seg["text"]) == 1
+        assert seg["word_count"] == 1
+
+    # ---- Test 3: SRTSegment from empty generator dict ----
+    @pytest.mark.fast
+    def test_srt_segment_from_empty_generator(self):
+        """SRTSegment can be created from empty generator dict."""
+        seg_data = generate_empty_srt_segment()
+
+        segment = SRTSegment(
+            index=seg_data["index"],
+            start_time=seg_data["start_time"],
+            end_time=seg_data["end_time"],
+            text=seg_data["text"],
+            source_file=seg_data["source_file"],
+        )
+
+        assert segment.text == ""
+        assert segment.duration > 0
+
+    # ---- Test 4: Long text segment (>10K chars) ----
+    @pytest.mark.fast
+    def test_long_text_generator_exceeds_10k(self):
+        """Long text generator creates text > 10K characters."""
+        seg = generate_long_text_segment(length=15000)
+
+        assert len(seg["text"]) == 15000
+        assert seg["text"] == "A" * 15000
+
+    # ---- Test 5: SRTSegment with long generated text ----
+    @pytest.mark.fast
+    def test_srt_segment_with_long_generated_text(self):
+        """SRTSegment handles long text from generator."""
+        seg_data = generate_long_text_segment(length=10001, pattern="B")
+
+        segment = SRTSegment(
+            index=seg_data["index"],
+            start_time=seg_data["start_time"],
+            end_time=seg_data["end_time"],
+            text=seg_data["text"],
+            source_file=seg_data["source_file"],
+        )
+
+        assert len(segment.text) == 10001
+        assert segment.text.startswith("BBB")
+
+    # ---- Test 6: Unicode segment from generator ----
+    @pytest.mark.fast
+    def test_unicode_segment_generator_japanese(self):
+        """Unicode generator creates Japanese text."""
+        seg = generate_unicode_segment(language="japanese")
+
+        assert "日本語" in seg["text"]
+        assert len(seg["text"]) > 0
+
+    # ---- Test 7: SRTSegment with unicode from generator ----
+    @pytest.mark.fast
+    def test_srt_segment_with_unicode_generator(self):
+        """SRTSegment handles unicode from generator."""
+        seg_data = generate_unicode_segment(language="mixed")
+
+        segment = SRTSegment(
+            index=seg_data["index"],
+            start_time=seg_data["start_time"],
+            end_time=seg_data["end_time"],
+            text=seg_data["text"],
+            source_file=seg_data["source_file"],
+        )
+
+        # Should contain multiple scripts
+        assert "日本語" in segment.text or "中文" in segment.text or "한국어" in segment.text
+
+    # ---- Test 8: Emoji segment from generator ----
+    @pytest.mark.fast
+    def test_emoji_segment_generator_objects(self):
+        """Emoji generator creates object emoji text."""
+        seg = generate_emoji_segment(category="objects")
+
+        assert "🎬" in seg["text"]
+        assert "🎥" in seg["text"]
+
+    # ---- Test 9: Mixed unicode/emoji segment ----
+    @pytest.mark.fast
+    def test_mixed_unicode_emoji_generator(self):
+        """Mixed generator combines unicode and emoji."""
+        seg = generate_mixed_unicode_emoji_segment()
+
+        # Should have both unicode scripts and emoji
+        assert any(c in seg["text"] for c in "日本語中文한국어")
+        assert any(c in seg["text"] for c in "🎬📹")
+
+    # ---- Test 10: Corrupted checkpoint - missing fields ----
+    @pytest.mark.fast
+    def test_corrupted_checkpoint_missing_fields(self):
+        """Corrupted checkpoint generator omits required fields."""
+        cp = generate_corrupted_checkpoint("missing_fields")
+
+        assert "version" not in cp
+        assert "last_completed_stage" not in cp
+
+    # ---- Test 11: Corrupted checkpoint - wrong types ----
+    @pytest.mark.fast
+    def test_corrupted_checkpoint_wrong_types(self):
+        """Corrupted checkpoint has wrong field types."""
+        cp = generate_corrupted_checkpoint("wrong_types")
+
+        assert isinstance(cp["version"], int)  # Should be string
+        assert isinstance(cp["last_completed_stage"], list)  # Should be string
+
+    # ---- Test 12: Checkpoint corruption batch ----
+    @pytest.mark.fast
+    def test_checkpoint_corruption_batch_completeness(self):
+        """Corruption batch contains all corruption types."""
+        batch = generate_checkpoint_corruption_batch()
+
+        corruption_types = [item[0] for item in batch]
+        assert "missing_fields" in corruption_types
+        assert "wrong_types" in corruption_types
+        assert "null_values" in corruption_types
+        assert "malformed_stage" in corruption_types
+
+    # ---- Test 13: Edge case batch generation ----
+    @pytest.mark.fast
+    def test_edge_case_batch_all_types(self):
+        """Batch generator creates all edge case types."""
+        batch = generate_edge_case_batch("all", count_per_type=1)
+
+        # Should have empty, long, and unicode types
+        assert len(batch) >= 10
+
+        # Check we have variety
+        texts = [seg["text"] for seg in batch]
+        assert "" in texts  # Empty
+        assert any(len(t) > 1000 for t in texts)  # Long
+
+    # ---- Test 14: Zero duration segment ----
+    @pytest.mark.fast
+    def test_zero_duration_segment_generator(self):
+        """Zero duration generator creates start == end."""
+        seg = generate_zero_duration_segment(timestamp=5.0)
+
+        assert seg["start_time"] == seg["end_time"]
+        assert seg["start_time"] == 5.0
+
+    # ---- Test 15: Negative duration segment ----
+    @pytest.mark.fast
+    def test_negative_duration_segment_generator(self):
+        """Negative duration generator creates end < start."""
+        seg = generate_negative_duration_segment()
+
+        assert seg["end_time"] < seg["start_time"]
+        duration = seg["end_time"] - seg["start_time"]
+        assert duration < 0
+
+    # ---- Test 16: Special characters segment ----
+    @pytest.mark.fast
+    def test_special_chars_segment_generator(self):
+        """Special chars generator includes XML-problematic chars."""
+        seg = generate_special_chars_segment()
+
+        assert "<" in seg["text"]
+        assert "&" in seg["text"]
+        assert '"' in seg["text"]
+
+    # ---- Test 17: Whitespace-only segment ----
+    @pytest.mark.fast
+    def test_whitespace_only_segment_generator(self):
+        """Whitespace generator creates spaces/tabs/newlines only."""
+        seg = generate_whitespace_only_segment(whitespace="\t\n  ")
+
+        assert seg["text"].strip() == ""
+        assert seg["word_count"] == 0
+
+    # ---- Test 18: Long word count segment ----
+    @pytest.mark.fast
+    def test_long_word_count_segment_generator(self):
+        """Long word generator creates many words."""
+        seg = generate_long_word_segment(word_count=500)
+
+        assert seg["word_count"] == 500
+        assert len(seg["text"].split()) >= 500
+
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 
