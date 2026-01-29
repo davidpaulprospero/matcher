@@ -146,6 +146,82 @@ pytest -m "fast and not requires_api"
 pytest tests/test_flaky_detection.py --reruns 0 -v
 ```
 
+## Parallel Test Execution (Sprint 27)
+
+Tests can be run in parallel using `pytest-xdist` for faster execution. CI workflows use `-n auto` by default.
+
+### Running Tests in Parallel
+
+```bash
+# Run all tests in parallel (auto-detect CPU count)
+pytest tests/ -n auto
+
+# Run with specific worker count
+pytest tests/ -n 4
+
+# Run parallel excluding serial tests (safest for complex suites)
+pytest tests/ -n auto -m 'not serial'
+
+# Run only serial tests (tests that must not run in parallel)
+pytest tests/ -m serial
+```
+
+### Serial Marker
+
+Some tests must run serially due to:
+- Use of `os.chdir()` which affects global state
+- Session-scoped fixtures with side effects
+- Tests that modify shared external resources
+
+These tests are marked with `@pytest.mark.serial`:
+
+| File | Reason |
+|------|--------|
+| `test_config_path_resolution.py` | Uses `os.chdir()` |
+| `test_utils_path_functions.py` | Uses `os.chdir()` |
+
+### Analyzing Parallelization Safety
+
+Use the analyzer script to identify tests that may need the serial marker:
+
+```bash
+# Run analysis and show summary
+python scripts/analyze_test_parallelization.py
+
+# Suggest files needing @pytest.mark.serial
+python scripts/analyze_test_parallelization.py --suggest-serial
+
+# Generate detailed report
+python scripts/analyze_test_parallelization.py --report tests/PARALLELIZATION_REPORT.md
+
+# Verbose output with all issues
+python scripts/analyze_test_parallelization.py -v
+```
+
+### Writing Parallel-Safe Tests
+
+**Safe Patterns:**
+- Use `tmp_path` fixture for file operations (each worker gets isolated temp directory)
+- Use `monkeypatch` for environment variables
+- Use function-scoped fixtures (default)
+- Mock external dependencies instead of using real I/O
+
+**Unsafe Patterns (require `@pytest.mark.serial`):**
+- `os.chdir()` - affects all workers
+- Global mutable state modified during tests
+- Session-scoped fixtures with side effects
+- File locks without worker isolation
+
+### CI Configuration
+
+CI workflows automatically run tests in parallel:
+
+| Job | Command | Notes |
+|-----|---------|-------|
+| `fast-tests` | `pytest -m fast -n auto` | Parallel for quick feedback |
+| `full-tests` | `pytest -n auto` | Parallel full suite |
+| `offline-tests` | `pytest -m "not requires_network" -n auto` | Parallel offline tests |
+
 ## Conditional Skip Patterns (Sprint 27)
 
 Tests that depend on external resources use conditional `skipif` decorators instead of permanent skips. This allows tests to run when resources are available while cleanly skipping when they're not.

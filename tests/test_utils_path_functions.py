@@ -9,6 +9,9 @@ Tests utility functions for:
 """
 
 import pytest
+
+# This module uses os.chdir() and must run serially to avoid affecting other tests
+pytestmark = pytest.mark.serial
 import sys
 import numpy as np
 from pathlib import Path
