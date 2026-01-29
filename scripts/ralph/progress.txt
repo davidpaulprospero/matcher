@@ -1,4 +1,28 @@
 
+## Iteration US-007 (Sprint 26) - Add coverage tests for matching strategy selection
+- Created tests/test_matching_strategy_selection.py with 34 new tests covering all 6 acceptance criteria
+- Test classes created:
+  - TestStrategyFallbackChain (5 tests): High embedding skip LLM, medium uses LLM, low triggers fallback, fallback chain order, embedding-only mode
+  - TestConfidenceThresholdBoundaries (10 parametrized tests): skip_llm_threshold and fallback_trigger_threshold boundary testing
+  - TestMultiAlternativeSelection (4 tests): Source diversity, secondary matches, config limits, single candidate handling
+  - TestMatchResultValidation (5 tests): Uses assert_valid_match_result() helper for validation
+  - TestAdaptiveThreshold (2 tests): Short voiceover and low variance threshold adjustments
+  - TestReusePrevention (2 tests): Clip reuse blocking and penalty application
+  - TestNoCanidatesHandling (2 tests): Gap handling when no candidates or all filtered
+  - TestLLMProviderFallback (2 tests): Secondary provider usage and error fallback
+  - TestMatchingIntegration (2 tests): Full matching flow and context handling
+- Coverage improvement: tiered_matcher.py 56.96% -> 65.54% (+8.58%)
+- All 34 tests passing
+- Acceptance criteria coverage:
+  - AC1: Analyzed coverage gaps using pytest --cov, identified uncovered paths in tiered_matcher, strategies, scoring
+  - AC2: 5 tests cover strategy fallback chain (embedding -> LLM -> hybrid modes)
+  - AC3: 10 parametrized tests cover confidence threshold boundaries
+  - AC4: 4 tests cover multi-alternative selection algorithm
+  - AC5: 5 tests use assert_valid_match_result() helper
+  - AC6: Coverage improved by 8.58% in tiered_matcher.py (primary matching logic)
+- Files modified: tests/test_matching_strategy_selection.py (+915 lines)
+- Test results: 34 tests passed in 1.87s
+
 ## Iteration US-004 (Sprint 25) - Expand parametrized tests for healer scenarios
 - Created tests/test_agents/test_parametrized_healers.py with 159 new parametrized test cases
 - Coverage far exceeds the 20 minimum requirement (7.95x the target)
