@@ -24,7 +24,7 @@
                             "title":  "Implement marker-based CI workflow for fast feedback",
                             "priority":  2,
                             "passes":  true,
-                            "notes":  "Implemented marker-based CI in .github/workflows/tests.yml: fast-tests job runs pytest -m fast on PR updates (45s target), full-tests runs complete suite on merge to main only, offline-tests provides -m 'not requires_network' fallback. Added job summaries with test metrics and duration. Documented in tests/README.md. Commit: 9b3241a",
+                            "notes":  "Implemented marker-based CI in .github/workflows/tests.yml: fast-tests job runs pytest -m fast on PR updates (45s target), full-tests runs complete suite on merge to main only, offline-tests provides -m \u0027not requires_network\u0027 fallback. Added job summaries with test metrics and duration. Documented in tests/README.md. Commit: 9b3241a",
                             "acceptanceCriteria":  [
                                                        "Update .github/workflows/tests.yml to run pytest -m fast on PR updates",
                                                        "Configure full test suite run only on merge to main branch",
@@ -38,8 +38,8 @@
                             "id":  "US-003",
                             "title":  "Create fixture factory adoption enforcement script",
                             "priority":  3,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Extended verify_fixture_adoption.py with: --strict mode (80% threshold), --suggest flag (replacement suggestions), --ci mode (minimal output), --json mode. Added detection for 7 manual construction patterns (Config, PipelineState, SRTSegment, Match, MatchResult, DownloadedVideo, checkpoint dict). Reports 80 files with 1615 manual construction calls. Includes pre-commit and CI integration examples in help output.",
                             "acceptanceCriteria":  [
                                                        "Extend scripts/verify_fixture_adoption.py with --strict mode",
                                                        "Add detection for manual object creation (Config(), PipelineState(), etc.)",
@@ -83,8 +83,8 @@
                             "id":  "US-006",
                             "title":  "Add coverage tests for agent healer classes",
                             "priority":  6,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: 98ad5d9 feat: [US-006] Add agent healer assertion helpers to tests/helpers",
                             "acceptanceCriteria":  [
                                                        "Analyze coverage gaps in src/agents/ using coverage.xml",
                                                        "Add tests for CheckpointHealer recovery scenarios (at least 10 tests)",

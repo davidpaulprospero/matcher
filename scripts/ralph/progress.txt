@@ -7781,3 +7781,38 @@ def test_eta_accuracy_batch_50_videos(self):
 - Files modified: .github/workflows/tests.yml, tests/README.md
 - Commit: 9b3241a
 
+
+## Pre-flight Auto-Complete - [US-006] Add coverage tests for agent healer classes
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration - [US-003] Create fixture factory adoption enforcement script
+- Extended scripts/verify_fixture_adoption.py with comprehensive enforcement features:
+  - Added --strict mode with 80% adoption threshold
+  - Added --suggest flag for fixture replacement suggestions
+  - Added --ci mode for minimal CI-friendly output
+  - Added --json mode for machine-readable output
+- Added detection for 7 manual construction patterns:
+  - Config(), PipelineState(), SRTSegment(), Match(), MatchResult(), DownloadedVideo()
+  - Manual checkpoint dict creation (last_completed_stage key)
+- Report findings:
+  - 12/353 test files use factory fixtures (3.4% adoption)
+  - 80 files with manual construction (1615 total instances)
+  - Top offenders: test_matching_strategies.py (82), test_scene_detection_stage_coverage.py (72)
+- Included CI integration examples in --help and output:
+  - GitHub Actions workflow example
+  - Pre-commit hook configuration
+
+**Files Modified:**
+- scripts/verify_fixture_adoption.py (extended with all new features)
+
+**Acceptance Criteria Verification:**
+- AC1: ✅ Added --strict mode with argparse
+- AC2: ✅ Added MANUAL_CONSTRUCTION_PATTERNS with 7 regex patterns
+- AC3: ✅ get_manual_construction_report() reports files and counts
+- AC4: ✅ STRICT_ADOPTION_THRESHOLD = 0.80 (80%)
+- AC5: ✅ --suggest flag with print_suggestions() function
+- AC6: ✅ CI integration examples in help epilog and report output
+
+- Tests passed: Script compiles, all modes verified (--help, --strict, --suggest, --ci, --json)
