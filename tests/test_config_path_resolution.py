@@ -11,6 +11,9 @@ which resolved to the current working directory (installation dir), not the proj
 """
 
 import pytest
+
+# This module uses os.chdir() and must run serially to avoid affecting other tests
+pytestmark = pytest.mark.serial
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
