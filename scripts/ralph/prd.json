@@ -68,8 +68,8 @@
                             "id":  "US-005",
                             "title":  "Audit and fix test isolation patterns",
                             "priority":  5,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Added --check-isolation pytest flag for monitoring mkdtemp() usage. Added _isolation_tracker and _check_test_isolation fixtures in conftest.py. Documented test isolation best practices in tests/README.md including: tmp_path vs mkdtemp patterns, common anti-patterns, acceptable fixed path usage with skipif, and fixture scopes. Analysis: 50+ files use mkdtemp() but most properly clean up with tearDown/teardown_method. Commit: c54e9e0",
                             "acceptanceCriteria":  [
                                                        "Search for file creation outside tmp_path fixture (potential isolation issues)",
                                                        "Identify tests creating files in project directories during test runs",

@@ -7857,3 +7857,25 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: ✅ CI workflow uses --compare-baseline with 0.20 threshold
 
 - Commit: ab30a98
+
+## Iteration US-005 (Sprint 26) - Audit and fix test isolation patterns
+- Added --check-isolation pytest flag for monitoring tempfile.mkdtemp() usage
+- Added _isolation_tracker session fixture to collect isolation violations
+- Added _check_test_isolation autouse fixture for mkdtemp() detection  
+- Added pytest_terminal_summary hook for violation reporting at test run end
+- Documented test isolation best practices in tests/README.md:
+  - Preferred tmp_path pattern vs mkdtemp()
+  - Common isolation anti-patterns table
+  - When fixed paths are acceptable (with skipif)
+  - Fixture scopes for resource management
+  - Verification steps for detecting artifacts
+- Analysis findings:
+  - 50+ files use tempfile.mkdtemp()
+  - Most properly clean up with tearDown/teardown_method/yield
+  - test_healing_real_project.py and test_output_baseline.py use external paths with proper skipif conditions
+  - No actual isolation issues found - tests clean up properly
+- Files created/modified:
+  - tests/conftest.py (+107 lines: isolation monitoring infrastructure)
+  - tests/README.md (+106 lines: test isolation documentation)
+- Test results: pytest --check-isolation detects and reports mkdtemp() usage
+- Commit: c54e9e0
