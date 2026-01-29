@@ -53,8 +53,8 @@
                             "id":  "US-004",
                             "title":  "Establish benchmark baseline tracking with JSON storage",
                             "priority":  4,
-                            "passes":  false,
-                            "notes":  "",
+                            "passes":  true,
+                            "notes":  "Generated initial baseline.json with 33 benchmarks. Added --update-baseline flag with --yes for CI mode. Implemented baseline history tracking (keeps last 5 in baseline_history/). Added --list-history and --compare-baseline flags. Updated CI workflow to use --compare-baseline with 20% threshold. Commit: ab30a98",
                             "acceptanceCriteria":  [
                                                        "Run scripts/benchmark_runner.py --save-baseline for all benchmark suites",
                                                        "Save baseline to tests/benchmarks/baseline.json with timestamp",
