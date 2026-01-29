@@ -83,8 +83,8 @@
             "id": "US-006",
             "title": "Add test data generators for edge cases",
             "priority": 6,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Created tests/fixtures/edge_cases.py (430 lines) with 20+ generator functions. Categories: (1) Empty/Minimal - generate_empty_srt_segment, generate_minimal_srt_segment, generate_whitespace_only_segment, generate_zero_duration_segment, generate_negative_duration_segment; (2) Long Text - generate_long_text_segment (>10K chars), generate_long_word_segment, generate_repeated_text_segment; (3) Unicode/Emoji - generate_unicode_segment (Japanese, Chinese, Korean, Arabic, Greek, Russian, etc.), generate_emoji_segment, generate_mixed_unicode_emoji_segment, generate_special_chars_segment; (4) Corrupted Checkpoints - generate_corrupted_checkpoint (8 corruption types), generate_checkpoint_with_numpy_simulation, generate_checkpoint_with_datetime_strings, generate_partial_checkpoint; (5) Batch generators - generate_edge_case_batch, generate_checkpoint_corruption_batch. Added 18 new tests in TestEdgeCaseGenerators class using these generators. Total: 48 tests in test_edge_cases.py.",
             "acceptanceCriteria": [
                 "Create tests/fixtures/edge_cases.py with edge case generators",
                 "Add generator for empty/minimal SRT segments (0 words, single char)",

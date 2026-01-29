@@ -8187,3 +8187,74 @@ Files needing @pytest.mark.serial:
 - AC5: ✅ 5 property tests for match ranking algorithms (exceeds requirement)
 - AC6: ✅ tests/PROPERTY_TESTING.md documents hypothesis usage patterns
 
+
+
+## Iteration - [US-006] Add test data generators for edge cases (Sprint 27)
+
+### Implementation Summary
+
+1. **Created tests/fixtures/edge_cases.py (430 lines)**:
+   - Comprehensive edge case generator module
+   - 20+ generator functions across 5 categories
+   - Full docstrings with usage examples
+   - Public API via __all__
+
+2. **Category 1: Empty/Minimal SRT Segments**:
+   - generate_empty_srt_segment() - 0 words, empty text
+   - generate_minimal_srt_segment() - single character
+   - generate_whitespace_only_segment() - spaces/tabs only
+   - generate_zero_duration_segment() - start == end
+   - generate_negative_duration_segment() - end < start
+
+3. **Category 2: Long Text Segments (>10K chars)**:
+   - generate_long_text_segment() - customizable length (default 10001)
+   - generate_long_word_segment() - high word count
+   - generate_repeated_text_segment() - realistic lorem ipsum
+
+4. **Category 3: Unicode/Emoji Content**:
+   - UNICODE_SAMPLES dict - Japanese, Chinese, Korean, Arabic, Greek, Russian, Hebrew, Thai, Hindi
+   - EMOJI_SAMPLES dict - basic, faces, objects, symbols, flags, compound
+   - generate_unicode_segment() - any language
+   - generate_emoji_segment() - any category
+   - generate_mixed_unicode_emoji_segment() - combined
+   - generate_special_chars_segment() - XML/JSON problematic chars
+
+5. **Category 4: Corrupted Checkpoint Dicts**:
+   - generate_corrupted_checkpoint() - 8 corruption types:
+     * missing_fields, wrong_types, circular_reference, null_values
+     * negative_values, empty_nested, extra_fields, malformed_stage
+   - generate_checkpoint_with_numpy_simulation()
+   - generate_checkpoint_with_datetime_strings()
+   - generate_partial_checkpoint()
+
+6. **Category 5: Batch Generators**:
+   - generate_edge_case_batch() - all types combined
+   - generate_checkpoint_corruption_batch() - all corruption types
+
+7. **Added 18 new tests in TestEdgeCaseGenerators class**:
+   - Tests verify generator output structure
+   - Tests create SRTSegment objects from generator dicts
+   - Tests exercise all categories
+   - All 18 tests pass
+
+### Files Created
+- tests/fixtures/edge_cases.py (NEW - 430 lines)
+
+### Files Modified
+- tests/test_edge_cases.py (added TestEdgeCaseGenerators class with 18 tests)
+- scripts/ralph/prd.json (marked US-006 passes: true)
+
+### Test Results
+```
+48 passed in 0.76s
+- 30 existing edge case tests
+- 18 new generator-based tests
+```
+
+### Acceptance Criteria Verification
+- AC1: ✅ Created tests/fixtures/edge_cases.py with edge case generators
+- AC2: ✅ Generator for empty/minimal SRT segments (5 functions)
+- AC3: ✅ Generator for extremely long text segments (3 functions, >10K chars)
+- AC4: ✅ Generator for unicode/emoji-heavy text (6 functions + sample dicts)
+- AC5: ✅ Generator for malformed/corrupted checkpoint dicts (4 functions, 8 types)
+- AC6: ✅ 18 edge case tests using generators (exceeds 10 requirement)
