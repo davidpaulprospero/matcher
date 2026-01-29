@@ -38,8 +38,8 @@
             "id": "US-003",
             "title": "Add mutation testing foundation with mutmut",
             "priority": 3,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "All artifacts created: mutmut>=2.4.0 in requirements-dev.txt, scripts/run_mutation_tests.py runner with CI mode, setup.cfg mutation config targeting src/matching/, tests/MUTATION_TESTING.md with baseline results (31 tested, 14 killed, 17 survived = 45.2% partial), CI job in .github/workflows/tests.yml with 70% threshold (optional, manual/nightly trigger).",
             "acceptanceCriteria": [
                 "Add mutmut to requirements-dev.txt if not present",
                 "Create scripts/run_mutation_tests.py runner script",
