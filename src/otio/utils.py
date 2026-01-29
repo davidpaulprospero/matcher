@@ -222,7 +222,9 @@ def _get_media_duration(media_path: str) -> Optional[float]:
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace'
         )
 
         if result.returncode == 0 and result.stdout.strip():

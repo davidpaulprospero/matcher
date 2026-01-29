@@ -1648,6 +1648,69 @@ broll:
   max_scenes_per_video: 15       # Cap on sampled scenes
 
 # -----------------------------------------------------------------------------
+# ITERATIVE MATCHING (Multi-Pass Gap Filling)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Initial matching often leaves gaps (low confidence segments)
+# Reasoning: Multi-pass iteration with smart strategies fills gaps more effectively
+# Decision: Target 90%+ confidence, enforce 5-minute source spacing for variety
+#
+# Algorithm per pass:
+# 1. Identify gaps (conf < target OR source spacing violation) and locks
+# 2. If gaps < 5%: stop (success!)
+# 3. Analyze gap patterns for smarter search (abstract, proper noun, action, etc.)
+# 4. Generate queries using multiple strategies
+# 5. YouTube search + caption fetch for new candidates
+# 6. Re-match ONLY gap segments with expanded pool
+# 7. Track successful strategies -> learning DB
+# 8. Merge locked (unchanged) + updated gaps
+# 9. Repeat until max_iterations
+
+iterative_matching:
+  enabled: true                    # Enable iterative gap filling
+  target_confidence: 0.90          # Lock segments above this (90%)
+  source_spacing_seconds: 300      # Same source only once per 5 minutes
+
+  # === Iteration control ===
+  max_iterations: 5                # Maximum passes to attempt
+  min_gap_percentage: 0.05         # Stop if fewer than 5% gaps
+
+  # === Search settings ===
+  search_results_per_gap: 10       # YouTube results per gap query
+  max_new_videos_per_pass: 50      # Cap on new videos per iteration
+
+  # === Multi-strategy search ===
+  use_voiceover_text_queries: true # Extract keywords from gap text
+  use_similar_to_locked: true      # Find videos like successful matches
+  use_entity_topic_queries: true   # Use entities and topics in queries
+  parallel_strategy_search: true   # Run strategies concurrently
+
+  # === Progressive refinement (passes 2+) ===
+  enable_progressive_refinement: true
+  refinement_synonyms: true        # Add synonyms to failing queries
+  refinement_broaden_scope: true   # Remove specific terms
+
+  # === Gap pattern analysis ===
+  analyze_gap_patterns: true       # Classify gaps for smarter search
+  gap_pattern_categories:
+    - abstract_concept             # Hard to visualize: freedom, love
+    - proper_noun                  # Names, places, brands
+    - action_verb                  # Visual actions: running, cooking
+    - location                     # Geographic references
+    - emotion                      # Sentiment-heavy content
+
+  # === Query learning (cross-project improvement) ===
+  enable_query_learning: true      # Learn from successful queries
+  learning_db_path: ".cache/query_learning.json"
+
+  # === Caption settings ===
+  fetch_captions_for_new_videos: true
+  caption_timeout: 30              # Seconds per caption fetch
+
+  # === Logging ===
+  log_pass_summaries: true         # Log summary after each pass
+  store_strategy_metrics: true     # Track per-strategy effectiveness
+
+# -----------------------------------------------------------------------------
 # API KEYS
 # -----------------------------------------------------------------------------
 # Chain-of-thought: API keys should be in environment variables

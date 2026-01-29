@@ -289,6 +289,7 @@ def create_default_pipeline(
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.broll_match import BrollMatchStage
+    from .stages.iterative_match import IterativeMatchStage
     from .stages.output import OutputStage
 
     # Add stages in STAGE_ORDER
@@ -304,6 +305,7 @@ def create_default_pipeline(
     pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())  # Match silent scenes for V8 track
+    pipeline.add_stage(IterativeMatchStage())  # Multi-pass gap filling
 
     # Audio-first mode adds video segment download after matching
     if audio_first_mode:
@@ -345,6 +347,7 @@ def create_match_only_pipeline(
     from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
     from .stages.broll_match import BrollMatchStage
+    from .stages.iterative_match import IterativeMatchStage
     from .stages.output import OutputStage
 
     # Add prerequisite stages for restoration only (will be skipped via checkpoint)
@@ -362,6 +365,7 @@ def create_match_only_pipeline(
     # Add stages to actually run
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(BrollMatchStage())    # Match silent scenes for V8 track
+    pipeline.add_stage(IterativeMatchStage())  # Multi-pass gap filling
     pipeline.add_stage(OutputStage())
 
     return pipeline

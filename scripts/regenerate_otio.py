@@ -561,6 +561,12 @@ Examples:
         help='Path to voiceover file (default: from segments.json)'
     )
 
+    parser.add_argument(
+        '--validate',
+        action='store_true',
+        help='Validate generated OTIO against media files on disk'
+    )
+
     args = parser.parse_args()
 
     project_dir = Path(args.project)
@@ -574,6 +580,21 @@ Examples:
             output_folder=args.output_folder,
             voiceover_path=args.voiceover
         )
+
+        # Validate if requested
+        if args.validate:
+            print("\nValidating media references...")
+            from validate_otio_media import validate_otio, print_report
+            otio_path = output_dir / "timeline_FULL.otio"
+            if otio_path.exists():
+                result = validate_otio(str(otio_path))
+                print_report(result, verbose=True)
+                if result['missing_files']:
+                    print("\n[WARNING] Some media files are missing!")
+                    sys.exit(1)
+            else:
+                print(f"  Could not find {otio_path} for validation")
+
         sys.exit(0)
     except Exception as e:
         print(f"\nError: {e}")

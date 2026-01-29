@@ -269,7 +269,9 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace'
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -331,15 +333,15 @@ def add_entity_media_to_track(
     timeline_frame = 0
 
     # Get first segment start time for reference (scaled)
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor if matches else 0.0
+    first_segment_start = matches[0].primary_match.voiceover_segment.start * time_scale_factor if matches else 0.0
 
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
 
         # Scale segment timing to match V1-V8 tracks
-        scaled_start = vo_seg.start_time * time_scale_factor
-        target_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
+        scaled_start = vo_seg.start * time_scale_factor
+        target_duration = (vo_seg.end - vo_seg.start) * time_scale_factor
         duration_frames = round(target_duration * frame_rate)
 
         # Calculate expected position (where this segment should start)

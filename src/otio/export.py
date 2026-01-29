@@ -374,7 +374,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         vo_seg = match.voiceover_segment
 
         # Calculate segment duration
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         duration_frames = int(target_duration * frame_rate)
 
         # Marker at segment start

@@ -55,6 +55,10 @@ $script:State = @{
     LastExplorationTime     = $null        # When last exploration ran
     SprintExplorationContext = ''          # Sprint-start exploration context
     LastExplorationCommit   = (git rev-parse HEAD 2>$null)  # Commit hash at last exploration
+    # Heartbeat tracking
+    CurrentStoryId          = ''           # Active story being worked on
+    CurrentFocusArea        = ''           # Active focus area
+    CurrentSprintNumber     = 0            # Current sprint number
 }
 
 # Ensure logs directory exists
@@ -83,6 +87,7 @@ $script:LibPath = Join-Path $PSScriptRoot 'lib'
 . "$script:LibPath\claude.ps1"
 . "$script:LibPath\display.ps1"
 . "$script:LibPath\loops.ps1"
+. "$script:LibPath\heartbeat.ps1"
 
 # ============================================================================
 # CONFIG LOADING
@@ -524,6 +529,20 @@ function Invoke-ClaudeForStory {
         $storyObj = $prd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
     }
 
+    # Update state for heartbeat tracking
+    $script:State.CurrentStoryId = $StoryId
+    $script:State.CurrentFocusArea = $focusArea
+    $script:State.CurrentSprintNumber = if ($prd.sprintNumber) { $prd.sprintNumber } else { 0 }
+
+    # Log story start
+    Write-SessionLog -Event "story_start" -Message "Starting story $StoryId" -Data @{
+        focusArea = $focusArea
+        title = if ($storyObj) { $storyObj.title } else { "unknown" }
+    }
+    Write-Heartbeat -Phase "story_starting" -Details @{
+        title = if ($storyObj) { $storyObj.title } else { "unknown" }
+    }
+
     # Pre-flight: skip stories already committed in git
     # Guard: track auto-completed stories to prevent infinite loop if prd.json write fails
     if (-not $script:AutoCompletedStories) { $script:AutoCompletedStories = @{} }
@@ -728,6 +747,12 @@ function Get-SprintStatus {
 
 Write-RalphBanner -Queue:$Queue -TrueAuto:$TrueAuto -RalphsChoice:$RalphsChoice -RalphsChoiceAuto:$RalphsChoiceAuto
 
+# Show diagnosis of last session (helps identify silent hangs)
+Show-LastSessionDiagnosis
+
+# Rotate session log if too large
+Clear-SessionLog
+
 # Initialize graceful stop state
 $script:GracefulStopTriggered = $false
 
@@ -773,6 +798,10 @@ Append-SessionTimeline -Event "session_start" -Data @{
     projectRoot = $script:ProjectRoot
 }
 
+# Write initial heartbeat and session log
+Write-SessionLog -Event "loop_start" -Message "Ralph Loop starting in $sessionMode mode"
+Write-Heartbeat -Phase "loop_starting" -Details @{ mode = $sessionMode }
+
 # Route to appropriate loop based on flags
 # Note: each mode function runs its own pre-flight at the right time (after PRD generation)
 # Wrapped in try-finally to ensure session_end event is always written
@@ -803,6 +832,13 @@ finally {
         iterations = $script:State.IterationCount
         durationMin = [math]::Round($duration.TotalMinutes, 1)
         consecutiveFailures = $script:State.ConsecutiveFailures
+    }
+
+    # Final heartbeat and session log
+    Write-SessionLog -Event "loop_end" -Message "Ralph Loop ended after $($script:State.IterationCount) iterations"
+    Write-Heartbeat -Phase "loop_ended" -Details @{
+        iterations = $script:State.IterationCount
+        durationMin = [math]::Round($duration.TotalMinutes, 1)
     }
     Write-Host ""
     Write-Host "-----------------------------------------------------" -ForegroundColor Cyan

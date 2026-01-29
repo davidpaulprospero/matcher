@@ -103,6 +103,10 @@ function Start-InterviewQueueLoop {
 
                 if (-not $success) {
                     Write-Host "  Story failed, continuing..." -ForegroundColor Yellow
+                    Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
+                }
+                else {
+                    Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed"
                 }
 
                 # After first story (US-001 generates full PRD), update context
@@ -120,6 +124,8 @@ function Start-InterviewQueueLoop {
                 break
             }
 
+            # Log between-iteration pause
+            Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
             Start-Sleep -Seconds 2
         }
 
@@ -436,9 +442,13 @@ function Start-StandardLoop {
                 break
             }
 
-            # Check for periodic exploration after story completion
+            # Log story result
             if ($success) {
+                Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed"
                 Invoke-PeriodicExplorationIfNeeded -FocusArea $status.focusArea | Out-Null
+            }
+            else {
+                Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
             }
         }
         else {
@@ -446,6 +456,8 @@ function Start-StandardLoop {
             break
         }
 
+        # Log between-iteration pause
+        Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
         Start-Sleep -Seconds 2
     }
 }
@@ -597,15 +609,21 @@ function Start-RalphsChoiceLoop {
                 break
             }
 
-            # Check for periodic exploration after story completion
+            # Log story result
             if ($success) {
+                Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed"
                 Invoke-PeriodicExplorationIfNeeded -FocusArea $status.focusArea | Out-Null
+            }
+            else {
+                Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
             }
         } else {
             Write-Host "  No stories found in PRD" -ForegroundColor Yellow
             break
         }
 
+        # Log between-iteration pause
+        Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
         Start-Sleep -Seconds 2
     }
 
@@ -787,15 +805,21 @@ function Start-RalphsChoiceAutoLoop {
                 break
             }
 
-            # Check for periodic exploration after story completion
+            # Log story result
             if ($success) {
+                Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed"
                 Invoke-PeriodicExplorationIfNeeded -FocusArea $status.focusArea | Out-Null
+            }
+            else {
+                Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
             }
         } else {
             Write-Host "  No stories found in PRD" -ForegroundColor Yellow
             break
         }
 
+        # Log between-iteration pause
+        Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
         Start-Sleep -Seconds 2
     }
 

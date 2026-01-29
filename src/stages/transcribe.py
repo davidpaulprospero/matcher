@@ -852,6 +852,10 @@ Return ONLY the description, no other text."""
                 self._rebuild_text_metadata(state, checkpoint)
                 logger.info(f"  After rebuild: text_metadata has {len(state.text_metadata)} entries")
 
+            # CRITICAL: After rebuilding text_metadata, re-run SCENE_DETECTION merge
+            # to restore B-roll flags that were lost during rebuild
+            self._restore_broll_flags(state, checkpoint)
+
             broll_before = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
             logger.info(f"  B-roll entries after rebuild: {broll_before}")
             return True
@@ -971,3 +975,67 @@ Return ONLY the description, no other text."""
         except Exception as e:
             logger.warning(f"Failed to load transcripts from cache: {e}")
             return {}
+
+    def _restore_broll_flags(
+        self,
+        state: 'PipelineState',
+        checkpoint: 'CheckpointManager'
+    ):
+        """
+        Restore B-roll flags to text_metadata after rebuild.
+
+        When text_metadata is rebuilt from transcripts, it loses the is_broll
+        flags that were added by SCENE_DETECTION. This method re-runs the
+        scene data merge to restore those flags.
+        """
+        try:
+            # Check if SCENE_DETECTION was completed (has checkpoint data)
+            scene_data = checkpoint.get_stage_data("SCENE_DETECTION")
+            if not scene_data or scene_data.get('skipped'):
+                logger.info("  SCENE_DETECTION not completed, skipping B-roll flag restore")
+                return
+
+            # Check if we have scene data available
+            if not state.text_metadata:
+                logger.info("  No text_metadata to restore B-roll flags to")
+                return
+
+            # Import scene detection stage to use its merge method
+            from .scene_detection import SceneDetectionStage
+
+            # Load config for scene detector using the proper public API
+            from ..config import load_config
+            config_path = checkpoint.checkpoint_path.parent / "project_config.yaml"
+            if not config_path.exists():
+                config_path = Path("config.yaml")
+
+            if config_path.exists():
+                config = load_config(str(config_path))
+            else:
+                logger.warning("  Cannot restore B-roll flags: config not found")
+                return
+
+            # Load scene data from SceneDetector's cache
+            from ..scene_detection import SceneDetector
+
+            scene_detector = SceneDetector(config)
+            scene_data_dict = scene_detector.scene_index
+
+            if not scene_data_dict:
+                logger.info("  No scene data available for B-roll flag restore")
+                return
+
+            # Use SceneDetectionStage's merge method to restore B-roll flags
+            stage = SceneDetectionStage()
+            broll_before = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
+            logger.info(f"  Restoring B-roll flags: {broll_before} entries have is_broll before merge")
+
+            stage._merge_scene_data_to_transcripts(state, scene_data_dict, config)
+
+            broll_after = sum(1 for m in state.text_metadata if isinstance(m, dict) and m.get('is_broll'))
+            logger.info(f"  Restored B-roll flags: {broll_after} entries now have is_broll")
+
+        except Exception as e:
+            logger.warning(f"  Failed to restore B-roll flags: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())

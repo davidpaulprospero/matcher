@@ -176,7 +176,9 @@ def _get_media_duration(media_path: str) -> Optional[float]:
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace'
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -695,7 +697,7 @@ def create_timeline(
         actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+    first_segment_start = matches[0].primary_match.voiceover_segment.start if matches else 0.0
 
     # Initialize leading_frames (may be set below if there's leading silence)
     leading_frames = 0
@@ -731,7 +733,7 @@ def create_timeline(
 
         # Check for gap before this segment (silence in voiceover)
         # Expected position = where this segment should start relative to first segment
-        expected_start_frames = round((vo_seg.start_time - first_segment_start) * frame_rate)
+        expected_start_frames = round((vo_seg.start - first_segment_start) * frame_rate)
 
         if expected_start_frames > timeline_frames:
             # There's a gap - insert silence/gap clips on all tracks
@@ -761,10 +763,10 @@ def create_timeline(
             timeline_frames = expected_start_frames
 
         # Target duration = voiceover segment duration
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         # Calculate duration using ABSOLUTE end position to prevent drift from accumulating
         # This ensures each segment ends at the correct absolute frame position
-        expected_end_frames = leading_frames + round((vo_seg.end_time - first_segment_start) * frame_rate)
+        expected_end_frames = leading_frames + round((vo_seg.end - first_segment_start) * frame_rate)
         duration_frames = max(1, expected_end_frames - timeline_frames)
         
         # Source duration = video segment duration
@@ -1341,7 +1343,7 @@ def _add_entity_images_to_track(
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         duration_frames = round(target_duration * frame_rate)
 
         segment_timing[i] = (current_frame, duration_frames, target_duration)
@@ -1539,7 +1541,7 @@ def _add_entity_videos_to_track(
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         duration_frames = round(target_duration * frame_rate)
 
         segment_timing[i] = (current_frame, duration_frames, target_duration)
@@ -1711,9 +1713,11 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace'
         )
-        
+
         if result.returncode == 0 and result.stdout.strip():
             duration_sec = float(result.stdout.strip())
             return int(duration_sec * frame_rate)
@@ -2052,9 +2056,9 @@ def generate_segment_map(
 
         # Calculate segment position using ABSOLUTE voiceover timestamps
         # This prevents drift from accumulating rounding errors
-        start_frame = round(vo_seg.start_time * frame_rate)
-        end_frame = round(vo_seg.end_time * frame_rate)
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        start_frame = round(vo_seg.start * frame_rate)
+        end_frame = round(vo_seg.end * frame_rate)
+        target_duration = vo_seg.end - vo_seg.start
 
         # Extract clip filename
         clip_file = Path(vid_seg.source_file).name
@@ -2171,7 +2175,7 @@ def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rat
         vid_seg = match.video_segment
         
         # Calculate target duration (voiceover duration) in frames
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         source_duration = vid_seg.end_time - vid_seg.start_time
         duration_frames = round(target_duration * frame_rate)
         
@@ -2290,7 +2294,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         total_frames += int(target_duration * frame_rate)
     
     fps_int = int(frame_rate)
@@ -2320,7 +2324,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
 
@@ -2396,7 +2400,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
 
         for match_idx, match_result in enumerate(matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             target_frames = int(target_duration * frame_rate)
 
             # Segment ID for tracing
@@ -2748,7 +2752,7 @@ def generate_resolve_xml_with_bins(
     
     if voiceover_path:
         vo_duration = sum(
-            m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time
+            m.primary_match.voiceover_segment.end - m.primary_match.voiceover_segment.start
             for m in matches
         )
         add_file(voiceover_path, vo_duration)
@@ -2757,7 +2761,7 @@ def generate_resolve_xml_with_bins(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         total_frames += int(target_duration * frame_rate)
     
     # Generate complete XML with bin AND timeline
@@ -2905,7 +2909,7 @@ def generate_resolve_xml_with_bins(
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         target_frames = int(target_duration * frame_rate)
 
         source_duration = vid_seg.end_time - vid_seg.start_time

@@ -523,7 +523,7 @@ def create_timeline(
         actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+    first_segment_start = matches[0].primary_match.voiceover_segment.start if matches else 0.0
 
     # Apply voiceover offset to fix alignment when SRT timestamps don't match audio
     # Positive offset = shift clips later (audio is ahead of SRT)
@@ -547,7 +547,7 @@ def create_timeline(
 
     if time_scale_factor == 0.0 and actual_vo_duration and matches:
         # Auto-calculate: actual audio duration / last SRT segment end time
-        last_srt_end = matches[-1].primary_match.voiceover_segment.end_time
+        last_srt_end = matches[-1].primary_match.voiceover_segment.end
         if last_srt_end > 0:
             time_scale_factor = actual_vo_duration / last_srt_end
             logger.info(f"Auto-calculated time scale: {time_scale_factor:.4f} (audio {actual_vo_duration:.1f}s / SRT {last_srt_end:.1f}s)")
@@ -575,21 +575,21 @@ def create_timeline(
     if gap_mode == 'proportional' and actual_vo_duration and matches:
         # Calculate total segment content duration (scaled)
         total_content_duration = sum(
-            (m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time) * time_scale_factor
+            (m.primary_match.voiceover_segment.end - m.primary_match.voiceover_segment.start) * time_scale_factor
             for m in matches
         )
 
         # Calculate total gap time available
         # Subtract leading silence and content from audio duration
-        first_seg_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor
+        first_seg_start = matches[0].primary_match.voiceover_segment.start * time_scale_factor
         total_gap_time = actual_vo_duration - first_seg_start - total_content_duration
 
         if total_gap_time > 0:
             # Calculate original SRT gaps for proportional distribution
             original_gaps = []
             for i in range(1, len(matches)):
-                prev_end = matches[i-1].primary_match.voiceover_segment.end_time
-                curr_start = matches[i].primary_match.voiceover_segment.start_time
+                prev_end = matches[i-1].primary_match.voiceover_segment.end
+                curr_start = matches[i].primary_match.voiceover_segment.start
                 original_gap = max(0, curr_start - prev_end)
                 original_gaps.append(original_gap)
 
@@ -601,7 +601,7 @@ def create_timeline(
 
                 for i, match_result in enumerate(matches):
                     vo_seg = match_result.primary_match.voiceover_segment
-                    segment_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
+                    segment_duration = (vo_seg.end - vo_seg.start) * time_scale_factor
 
                     proportional_gap_timing[i] = accumulated_time
 
@@ -684,7 +684,7 @@ def create_timeline(
         elif gap_mode == 'extend':
             # Extend mode - calculate where this segment should start based on SRT
             # Then extend previous clip to fill the gap (handled below)
-            scaled_segment_start = vo_seg.start_time * time_scale_factor
+            scaled_segment_start = vo_seg.start * time_scale_factor
             adjusted_segment_start = scaled_segment_start + voiceover_offset
             expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
         elif gap_mode == 'proportional' and match_idx in proportional_gap_timing:
@@ -693,7 +693,7 @@ def create_timeline(
             expected_start_frames = max(0, round(expected_start_seconds * frame_rate))
         else:
             # Scale mode (default) - use SRT gaps scaled by time_scale_factor
-            scaled_segment_start = vo_seg.start_time * time_scale_factor
+            scaled_segment_start = vo_seg.start * time_scale_factor
             adjusted_segment_start = scaled_segment_start + voiceover_offset
             expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
 
@@ -801,7 +801,7 @@ def create_timeline(
                 logger.debug(f"Segment {match_idx}: Collapsing {gap_seconds:.2f}s gap (below {min_gap_threshold:.2f}s threshold)")
 
         # Target duration = voiceover segment duration (scaled if time_scale_factor applied)
-        target_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
+        target_duration = (vo_seg.end - vo_seg.start) * time_scale_factor
         duration_frames = round(target_duration * frame_rate)
 
         # Source duration = video segment duration
@@ -1367,11 +1367,5 @@ def create_timeline(
     # Optimize gaps in all tracks (merge consecutive, remove trailing)
     # This improves DaVinci Resolve import performance
     optimize_timeline_gaps(timeline)
-
-    # Check clip count and log warnings if approaching DaVinci Resolve limits
-    # DaVinci OTIO import hangs when total clips exceed ~3130
-    clip_count = _count_timeline_clips(timeline)
-    logger.debug(f"Timeline contains {clip_count} clips across all tracks")
-    _log_clip_count_warnings(clip_count)
 
     return timeline

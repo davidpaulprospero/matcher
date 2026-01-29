@@ -2820,6 +2820,7 @@ class CaptionFetcher:
         config: Optional['Config'] = None,
         impersonation_manager: Optional['ImpersonationManager'] = None,
         escalation_manager: Optional['EscalationManager'] = None,
+        cookie_args: Optional[List[str]] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2827,10 +2828,13 @@ class CaptionFetcher:
             config: Optional config for cookies and other settings.
             impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass.
             escalation_manager: Optional EscalationManager for 3-tier bypass orchestration.
+            cookie_args: Optional pre-computed cookie arguments (e.g., from cookie rotator).
+                         If provided, overrides config-based cookie resolution.
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
+        self._cookie_args_override = cookie_args
         self._timeout = 60  # seconds
 
         # Retry settings from config (US-008)
@@ -4921,7 +4925,11 @@ class CaptionFetcher:
         return None
 
     def _get_cookies_args(self) -> List[str]:
-        """Get yt-dlp cookie arguments from config."""
+        """Get yt-dlp cookie arguments from config or override."""
+        # Use override if provided (e.g., from cookie rotator)
+        if self._cookie_args_override:
+            return self._cookie_args_override
+
         if not self.config:
             return []
 

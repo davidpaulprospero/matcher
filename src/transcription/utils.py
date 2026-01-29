@@ -60,7 +60,9 @@ def extract_audio(video_path: str, output_dir: str = None, timeout: int = 60) ->
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            encoding='utf-8',
+            errors='replace'
         )
 
         if result.returncode == 0 and audio_path.exists():

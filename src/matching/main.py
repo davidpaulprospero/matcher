@@ -92,7 +92,7 @@ def match_all_segments(
         matcher.set_location_chapters(location_chapters)
     if video_locations:
         matcher.set_video_locations(video_locations)
-    strategy_matcher = StrategyMatcher(config, scenes)
+    strategy_matcher = StrategyMatcher(config)
 
     # Store face preference for use during matching
     matcher.face_preference = face_preference
@@ -161,6 +161,14 @@ def match_all_segments(
         candidate_embeddings[clip_id] = emb
     logger.info(f"Candidate embeddings lookup built ({len(candidate_embeddings)} entries)")
 
+    # PRE-COMPUTE: B-roll segment list (computed once, used per voiceover segment)
+    # B-roll segments use placeholder text, so their embeddings don't match voiceover semantically
+    # We need to add them as candidates for the B-roll track (V8)
+    all_broll_segments = [(seg, 1.0) for seg in video_segments if getattr(seg, 'is_broll', False)]
+    broll_source_files = {seg.source_file for seg, _ in all_broll_segments}
+    if all_broll_segments:
+        logger.info(f"Pre-computed {len(all_broll_segments)} B-roll segments from {len(broll_source_files)} sources")
+
     progress = ProgressBar(len(voiceover_segments), "Matching")
 
     results = []
@@ -183,20 +191,19 @@ def match_all_segments(
         distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
         all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
 
-        # Add ALL B-roll segments to candidates (they may not be in top embedding matches)
-        # B-roll segments use placeholder text, so their embeddings don't match voiceover semantically
-        broll_segments = [(seg, 1.0) for seg in video_segments if getattr(seg, 'is_broll', False)]
-        if broll_segments:
+        # Add pre-computed B-roll segments to candidates (they may not be in top embedding matches)
+        # Uses pre-computed all_broll_segments list (computed once outside loop)
+        if all_broll_segments:
             # Add B-roll segments that aren't already in candidates
             candidate_sources = {seg.source_file for seg, _ in all_candidates}
-            new_broll = [(seg, dist) for seg, dist in broll_segments
+            new_broll = [(seg, dist) for seg, dist in all_broll_segments
                         if seg.source_file not in candidate_sources]
             all_candidates.extend(new_broll)
 
         if i == 0:
             logger.info(f"First segment: embedding search complete, {len(all_candidates)} candidates")
-            if broll_segments:
-                logger.info(f"  Added {len(broll_segments)} B-roll segments to candidates")
+            if all_broll_segments:
+                logger.info(f"  Added {len(all_broll_segments)} B-roll segments to candidates")
 
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
@@ -290,11 +297,10 @@ def match_all_segments(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,  # Use filtered candidates
                 primary_match=result.primary_match.video_segment,
-                alternatives=alt_segments,
+                secondary_matches=alt_segments,
                 vo_embedding=vo_emb,
                 candidate_embeddings=candidate_embeddings,
-                segment_index=i,
-                global_used_clips=None  # V7+ can reuse clips
+                segment_index=i
             )
 
             result.strategy_matches = strategy_matches
@@ -318,10 +324,9 @@ def match_all_segments(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,
                 primary_match=result.primary_match.video_segment,
-                alternatives=alt_segments,
+                secondary_matches=alt_segments,
                 vo_embedding=vo_emb,
-                candidate_embeddings=candidate_embeddings,
-                global_used_clips=None  # V4-V6 can reuse clips
+                candidate_embeddings=candidate_embeddings
             )
             result.secondary_matches = secondary_matches
 
@@ -445,6 +450,13 @@ def match_all_segments(
 
     # Analyze low confidence segments
     analyze_low_confidence_segments(results)
+
+    # Log cache statistics for performance analysis
+    try:
+        from .similarity_cache import log_all_cache_stats
+        log_all_cache_stats()
+    except ImportError:
+        pass
 
     return results
 

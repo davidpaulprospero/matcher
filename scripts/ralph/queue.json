@@ -14,9 +14,9 @@
                        },
                        {
                            "id":  "testing",
-                           "completed":  true,
-                           "startedAt":  "2026-01-27T23:34:10",
-                           "completedAt":  "2026-01-28T23:42:43"
+                           "completed":  false,
+                           "startedAt":  "2026-01-29T05:00:00",
+                           "completedAt":  null
                        },
                        {
                            "id":  "caption",
@@ -93,24 +93,25 @@
                    ],
     "sessionId":  "full-sweep-2026-01-28",
     "createdAt":  "2026-01-28T18:00:00Z",
-    "interviewContext":  "Sprint 23 addresses remaining test infrastructure gaps after Sprints 13-22 established ~197 stories of coverage. Key targets: Research clients (1,222 LOC, 0 tests), compilation mode edge cases (667 LOC), test marker distribution (only 4.3% have explicit markers), subdirectory conftest.py files for test_agents/ and others, SABR stall detection edge cases, XML/EDL export special characters, config section validation tests. This sprint focuses on test infrastructure quality and CI/CD optimization rather than module coverage.",
+    "interviewContext":  "Sprint 27 continues testing infrastructure maturity after Sprint 26 completed bulk marker assignment (10,957 markers), marker-based CI workflow, fixture adoption enforcement, benchmark baseline tracking, test isolation auditing, agent healer coverage, matching strategy coverage, mock patterns documentation, helper adoption measurement, and lint workflow fixes. This sprint focuses on: (1) completing marker assignment for remaining ~292 unmarked tests, (2) converting skipped integration tests to proper conditional tests, (3) adding mutation testing foundation with mutmut, (4) improving test parallelization with xdist optimization, (5) adding property-based testing with hypothesis for core algorithms, (6) creating test data generators for edge cases, (7) adding test performance profiling and slow test optimization, and (8) improving test coverage for compilation module (currently at 84%, target 85%).",
     "interviewDetails":  {
                              "workType":  "improvement",
                              "description":  "Broad codebase improvement across all untouched focus areas",
                              "completedAreas":  {
                                                     "download":  "3 sprints, 30 stories - core download, audio-first, impersonation, escalation",
                                                     "rate-limiting":  "1 sprint, 10 stories - cookie rotation, circuit breaker, rate budget",
-                                                    "testing":  "5 sprints, 43 stories - conftest, fixtures, coverage gaps, unit tests",
+                                                    "testing":  "6 sprints, 53 stories - conftest, fixtures, coverage gaps, markers, CI workflow",
                                                     "caption":  "4 sprints, 42 stories - caption-first mode, fetcher, cache, validation"
                                                 },
                              "keyPriorities":  [
-                                                   "Match quality scoring and confidence calibration",
-                                                   "Pipeline stage robustness and error handling",
-                                                   "Self-healing agent coverage and healer tests",
-                                                   "OTIO/EDL/XML output correctness",
-                                                   "Performance bottlenecks in transcription and embedding",
-                                                   "Config validation and edge cases",
-                                                   "CLI user experience improvements"
+                                                   "Complete marker assignment for remaining unmarked tests",
+                                                   "Convert skipped tests to proper conditional tests",
+                                                   "Add mutation testing foundation",
+                                                   "Optimize test parallelization",
+                                                   "Add property-based testing for algorithms",
+                                                   "Create edge case test data generators",
+                                                   "Performance profiling and slow test optimization",
+                                                   "Improve compilation module coverage to 85%"
                                                ]
                          }
 }

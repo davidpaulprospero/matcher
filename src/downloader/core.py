@@ -1360,6 +1360,13 @@ class VideoDownloader:
 
         # Log inter-keyword source diversity report
         self.log_source_diversity_report()
+        
+        # Log cache statistics if available
+        if hasattr(self, 'title_filter') and self.title_filter:
+            cache_stats = self.title_filter.get_cache_stats()
+            if cache_stats.get('search_hits', 0) > 0 or cache_stats.get('llm_hits', 0) > 0:
+                logger.info(f"Cache stats: search={cache_stats.get('search_hits', 0)}/{cache_stats.get('search_hits', 0) + cache_stats.get('search_misses', 0)} hits, "
+                           f"llm_filter={cache_stats.get('llm_hits', 0)}/{cache_stats.get('llm_hits', 0) + cache_stats.get('llm_misses', 0)} hits")
 
         # Clear checkpoint on success
         self._clear_checkpoint()
@@ -1495,10 +1502,14 @@ class VideoDownloader:
                                    if f.endswith(('.mp4', '.mkv', '.webm'))]
                 per_kw = self._get_tier_value(tier, 'per_keyword', 5)
                 if len(existing_videos) >= per_kw:
-                    logger.debug(f"  [{tier}] Already have {len(existing_videos)} videos (skipping)")
+                    logger.info(f"  [{tier}] Already have {len(existing_videos)} videos (skipping search + filter)")
                     # Count existing toward tier total
                     with self._lock:
                         self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(existing_videos)
+                    # Mark as completed in checkpoint to avoid re-processing
+                    if self.checkpoint:
+                        self.checkpoint.completed_videos.append(f"{keyword}|{tier}")
+                        self._save_checkpoint()
                     continue
                 elif existing_videos:
                     logger.debug(f"  [{tier}] Found {len(existing_videos)} existing, need {per_kw - len(existing_videos)} more")
@@ -1813,34 +1824,48 @@ class VideoDownloader:
         # Get filename length from config
         max_fn_len = getattr(self.download_config, 'max_filename_len', 10)
 
-        # Build URLs from IDs
-        urls = [f"https://www.youtube.com/watch?v={vid}" for vid in missing_ids]
+        # Download videos one at a time to avoid timeout on large batches
+        # Each video gets its own timeout, and partial progress is preserved
+        newly_downloaded = []
+        total_to_download = len(missing_ids)
+        for i, vid_id in enumerate(missing_ids, 1):
+            logger.info(f"    Downloading video {i}/{total_to_download}: {vid_id}")
 
-        cmd = [
-            'yt-dlp',
-            '--ignore-config',
-            '-f', self._build_format_string(),
-            '--merge-output-format', 'mp4',
-            '--no-playlist',
-            '--write-info-json',
-            '--restrict-filenames',
-            '--no-overwrites',
-            '--socket-timeout', '10',
-            '--retries', '10',
-            '--fragment-retries', '10',
-            '--throttled-rate', '100K',
-            '--force-ipv4',
-            '--http-chunk-size', '10M',
-            '--skip-unavailable-fragments',
-            '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
-            '--progress',
-            '--newline',
-        ] + urls
+            # Track existing files before this download
+            existing_now = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
 
-        self._add_escalation_to_cmd(cmd, keyword)
-        self._add_cookies_to_cmd(cmd)
+            url = f"https://www.youtube.com/watch?v={vid_id}"
+            cmd = [
+                'yt-dlp',
+                '--ignore-config',
+                '-f', self._build_format_string(),
+                '--merge-output-format', 'mp4',
+                '--no-playlist',
+                '--write-info-json',
+                '--restrict-filenames',
+                '--no-overwrites',
+                '--socket-timeout', '10',
+                '--retries', '10',
+                '--fragment-retries', '10',
+                '--throttled-rate', '100K',
+                '--force-ipv4',
+                '--http-chunk-size', '10M',
+                '--skip-unavailable-fragments',
+                '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
+                '--progress',
+                '--newline',
+                url
+            ]
 
-        newly_downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+            self._add_escalation_to_cmd(cmd, keyword)
+            self._add_cookies_to_cmd(cmd)
+
+            downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_now)
+            if downloaded:
+                newly_downloaded.extend(downloaded)
+                logger.debug(f"    ✓ Downloaded {vid_id}")
+            else:
+                logger.debug(f"    ✗ Failed to download {vid_id}")
 
         # Combine already downloaded + newly downloaded
         return already_downloaded + newly_downloaded

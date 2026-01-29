@@ -32,6 +32,13 @@ from .strategies import StrategyMatcher
 # Phase 4: Scoring (functions, not classes)
 from . import scoring
 
+# Phase 4a: Similarity and Matching Caches
+from .similarity_cache import (
+    get_similarity_cache, clear_similarity_cache, embedding_hash,
+    get_keyword_cache, get_topic_penalty_cache,
+    log_all_cache_stats, clear_all_caches
+)
+
 # Phase 4b: Quality Metrics
 from .metrics import MatchQualityMetrics, calculate_match_quality_metrics, log_quality_summary, log_confidence_histogram
 
@@ -69,4 +76,12 @@ __all__ = [
     'calculate_match_quality_metrics',
     'log_quality_summary',
     'log_confidence_histogram',
+
+    # Similarity Caches (performance optimization)
+    'get_similarity_cache',
+    'clear_similarity_cache',
+    'get_keyword_cache',
+    'get_topic_penalty_cache',
+    'log_all_cache_stats',
+    'clear_all_caches',
 ]

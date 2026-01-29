@@ -44,6 +44,19 @@ pytestmark_fast = pytest.mark.fast
 pytestmark_simulation = pytest.mark.simulation
 pytestmark_integration = pytest.mark.integration
 
+# Check healer availability at module load time (US-002, Sprint 27)
+try:
+    from src.agents.healers.disk import DiskHealer
+    HAS_DISK_HEALER = True
+except ImportError:
+    HAS_DISK_HEALER = False
+
+try:
+    from src.agents.healers.path import PathHealer
+    HAS_PATH_HEALER = True
+except ImportError:
+    HAS_PATH_HEALER = False
+
 
 # ==============================================================================
 # FIXTURES
@@ -838,52 +851,58 @@ class TestDiskHealerSimulations:
     """Simulate disk-related errors."""
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_DISK_HEALER, reason="DiskHealer not implemented")
     def test_disk_healer_import(self):
-        """Verify DiskHealer can be imported."""
-        try:
-            from src.agents.healers.disk import DiskHealer
-            assert DiskHealer is not None
-        except ImportError:
-            pytest.skip("DiskHealer not implemented yet")
+        """
+        Verify DiskHealer can be imported.
+
+        Skip reason: DiskHealer not implemented
+        """
+        from src.agents.healers.disk import DiskHealer
+        assert DiskHealer is not None
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_DISK_HEALER, reason="DiskHealer not implemented")
     def test_disk_full_detection(self, mock_config, temp_project_dir):
-        """DiskHealer should detect disk full errors."""
-        try:
-            from src.agents.healers.disk import DiskHealer
-            healer = DiskHealer(mock_config, temp_project_dir)
+        """
+        DiskHealer should detect disk full errors.
 
-            error = OSError(28, "No space left on device")
+        Skip reason: DiskHealer not implemented
+        """
+        from src.agents.healers.disk import DiskHealer
+        healer = DiskHealer(mock_config, temp_project_dir)
 
-            can_handle = healer.can_handle(error, "DOWNLOAD")
-            assert can_handle
-        except ImportError:
-            pytest.skip("DiskHealer not implemented")
+        error = OSError(28, "No space left on device")
+
+        can_handle = healer.can_handle(error, "DOWNLOAD")
+        assert can_handle
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_DISK_HEALER, reason="DiskHealer not implemented")
     def test_disk_full_cache_cleanup(self, mock_config, temp_project_dir):
-        """Simulate disk full - verify cache cleanup."""
-        try:
-            from src.agents.healers.disk import DiskHealer
-            healer = DiskHealer(mock_config, temp_project_dir)
+        """
+        Simulate disk full - verify cache cleanup.
 
-            # Create cache files
-            llm_cache = temp_project_dir / ".cache" / "llm_responses"
-            llm_cache.mkdir(parents=True, exist_ok=True)
-            for i in range(10):
-                (llm_cache / f"response_{i}.json").write_text("test" * 1000)
+        Skip reason: DiskHealer not implemented
+        """
+        from src.agents.healers.disk import DiskHealer
+        healer = DiskHealer(mock_config, temp_project_dir)
 
-            error = OSError(28, "No space left on device")
-            state = Mock()
-            state.config = mock_config
-            state.project_dir = temp_project_dir
+        # Create cache files
+        llm_cache = temp_project_dir / ".cache" / "llm_responses"
+        llm_cache.mkdir(parents=True, exist_ok=True)
+        for i in range(10):
+            (llm_cache / f"response_{i}.json").write_text("test" * 1000)
 
-            result = healer.fix(error, state, "DOWNLOAD")
+        error = OSError(28, "No space left on device")
+        state = Mock()
+        state.config = mock_config
+        state.project_dir = temp_project_dir
 
-            # Should attempt cleanup
-            assert result is not None
-        except ImportError:
-            pytest.skip("DiskHealer not implemented")
+        result = healer.fix(error, state, "DOWNLOAD")
+
+        # Should attempt cleanup
+        assert result is not None
 
 
 # ==============================================================================
@@ -896,63 +915,71 @@ class TestPathHealerSimulations:
     """Simulate path-related errors."""
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_PATH_HEALER, reason="PathHealer not implemented")
     def test_path_healer_import(self):
-        """Verify PathHealer can be imported."""
-        try:
-            from src.agents.healers.path import PathHealer
-            assert PathHealer is not None
-        except ImportError:
-            pytest.skip("PathHealer not implemented yet")
+        """
+        Verify PathHealer can be imported.
+
+        Skip reason: PathHealer not implemented
+        """
+        from src.agents.healers.path import PathHealer
+        assert PathHealer is not None
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_PATH_HEALER, reason="PathHealer not implemented")
     def test_long_path_detection(self, mock_config, temp_project_dir):
-        """PathHealer should detect path length errors."""
-        try:
-            from src.agents.healers.path import PathHealer
-            healer = PathHealer(mock_config, temp_project_dir)
+        """
+        PathHealer should detect path length errors.
 
-            error = OSError(206, "File name too long")
+        Skip reason: PathHealer not implemented
+        """
+        from src.agents.healers.path import PathHealer
+        healer = PathHealer(mock_config, temp_project_dir)
 
-            can_handle = healer.can_handle(error, "DOWNLOAD")
-            assert can_handle
-        except ImportError:
-            pytest.skip("PathHealer not implemented")
+        error = OSError(206, "File name too long")
+
+        can_handle = healer.can_handle(error, "DOWNLOAD")
+        assert can_handle
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_PATH_HEALER, reason="PathHealer not implemented")
     def test_unicode_path_detection(self, mock_config, temp_project_dir):
-        """PathHealer should detect unicode encoding errors."""
-        try:
-            from src.agents.healers.path import PathHealer
-            healer = PathHealer(mock_config, temp_project_dir)
+        """
+        PathHealer should detect unicode encoding errors.
 
-            error = UnicodeEncodeError("ascii", "日本語", 0, 3, "ordinal not in range")
+        Skip reason: PathHealer not implemented
+        """
+        from src.agents.healers.path import PathHealer
+        healer = PathHealer(mock_config, temp_project_dir)
 
-            can_handle = healer.can_handle(error, "DOWNLOAD")
-            assert can_handle
-        except ImportError:
-            pytest.skip("PathHealer not implemented")
+        error = UnicodeEncodeError("ascii", "日本語", 0, 3, "ordinal not in range")
+
+        can_handle = healer.can_handle(error, "DOWNLOAD")
+        assert can_handle
 
     @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_PATH_HEALER, reason="PathHealer not implemented")
     def test_short_path_switch(self, mock_config, temp_project_dir):
-        """Simulate long path - verify switch to short path."""
-        try:
-            from src.agents.healers.path import PathHealer
-            healer = PathHealer(mock_config, temp_project_dir)
+        """
+        Simulate long path - verify switch to short path.
 
-            # Long path error
-            long_path = "E:/Projects/VeryLongProjectName/" + "subdir/" * 20 + "video.mp4"
-            error = OSError(206, f"File name too long: {long_path}")
+        Skip reason: PathHealer not implemented
+        """
+        from src.agents.healers.path import PathHealer
+        healer = PathHealer(mock_config, temp_project_dir)
 
-            state = Mock()
-            state.config = mock_config
-            state.project_dir = temp_project_dir
+        # Long path error
+        long_path = "E:/Projects/VeryLongProjectName/" + "subdir/" * 20 + "video.mp4"
+        error = OSError(206, f"File name too long: {long_path}")
 
-            result = healer.fix(error, state, "DOWNLOAD")
+        state = Mock()
+        state.config = mock_config
+        state.project_dir = temp_project_dir
 
-            # Should suggest shorter path
-            assert result is not None
-        except ImportError:
-            pytest.skip("PathHealer not implemented")
+        result = healer.fix(error, state, "DOWNLOAD")
+
+        # Should suggest shorter path
+        assert result is not None
 
 
 # ==============================================================================

@@ -57,7 +57,8 @@ def calculate_adaptive_threshold(
     # Low variance means one candidate is clearly better than others
     # Can accept lower threshold when there's a clear winner
     if candidates and len(candidates) >= 2:
-        top_scores = [sim for _, sim in candidates[:5]]
+        # Convert to Python float to avoid numpy.float32 coercion error in statistics.stdev
+        top_scores = [float(sim) for _, sim in candidates[:5]]
         try:
             variance = statistics.stdev(top_scores) if len(top_scores) >= 2 else 0.0
         except statistics.StatisticsError:
@@ -117,6 +118,9 @@ def apply_topic_penalty(
     """
     Apply topic-based confidence penalty for chapter matching.
 
+    Uses caching to avoid recomputing penalties for the same topic pairs
+    across multiple matching iterations.
+
     Migrated from TieredMatcher._apply_topic_penalty (lines 561-610).
 
     Args:
@@ -148,6 +152,27 @@ def apply_topic_penalty(
     if not video_topics_list:
         return confidence, ""
 
+    # Check cache for this topic pair
+    try:
+        from .similarity_cache import get_topic_penalty_cache, topics_hash
+        cache = get_topic_penalty_cache()
+        vo_hash = topics_hash(vo_topics)
+        vid_hash = topics_hash(video_topics_list)
+
+        cached_penalty = cache.get(vo_hash, vid_hash)
+        if cached_penalty is not None:
+            if cached_penalty > 0:
+                adjusted_confidence = max(0.0, confidence - cached_penalty)
+                reason = f"topic mismatch penalty (cached): -{cached_penalty:.2f}"
+                return adjusted_confidence, reason
+            return confidence, ""
+    except ImportError:
+        # Cache not available, continue without caching
+        cached_penalty = None
+        vo_hash = None
+        vid_hash = None
+        cache = None
+
     # Compute penalty based on topic mismatch
     penalty = compute_topic_penalty(
         vo_topics=vo_topics,
@@ -155,6 +180,10 @@ def apply_topic_penalty(
         max_penalty=topic_mismatch_penalty,
         min_overlap=1
     )
+
+    # Cache the result
+    if cache is not None and vo_hash is not None and vid_hash is not None:
+        cache.put(vo_hash, vid_hash, penalty)
 
     if penalty > 0:
         adjusted_confidence = max(0.0, confidence - penalty)

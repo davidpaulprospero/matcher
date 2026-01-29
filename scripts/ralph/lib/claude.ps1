@@ -54,6 +54,16 @@ function Invoke-ClaudeSubprocess {
     $flagsString = ($ClaudeArgs -join ' ')
     $executionStart = Get-Date
 
+    # Log that we're about to call Claude
+    Write-SessionLog -Event "claude_call" -Message "Starting Claude subprocess" -Data @{
+        timeout = $timeout
+        argsCount = $ClaudeArgs.Count
+    }
+    Write-Heartbeat -Phase "starting_claude" -Details @{
+        timeout = $timeout
+        startTime = $executionStart.ToString("HH:mm:ss")
+    }
+
     # Create process with proper stdin redirection
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $ClaudePath
@@ -100,6 +110,7 @@ function Invoke-ClaudeSubprocess {
         $lastProgressTime = (Get-Item $script:ProgressFile -ErrorAction SilentlyContinue).LastWriteTime
         $lastGitStatus = (git status --porcelain 2>$null | Measure-Object -Line).Lines
         $lastBufferLength = $outBuilder.Length
+        $lastHeartbeatUpdate = 0
 
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
@@ -133,6 +144,24 @@ function Invoke-ClaudeSubprocess {
                 elseif ($mins -gt $lastMinuteShown) {
                     Write-Host "  [$mins min] Running..." -ForegroundColor DarkGray
                     $lastMinuteShown = $mins
+                }
+
+                # Update heartbeat every 30 seconds (6 check intervals)
+                if ($totalElapsed - $lastHeartbeatUpdate -ge 30) {
+                    Write-Heartbeat -Phase "waiting_for_claude" -Details @{
+                        waitingSeconds = $totalElapsed
+                        timeSinceActivity = $timeSinceProgress
+                        outputBytes = $currentBufferLength
+                        processId = $process.Id
+                    }
+                    $lastHeartbeatUpdate = $totalElapsed
+
+                    # Check for stall condition and log to healing system
+                    $stallCheck = Test-ClaudeStall -WaitingSeconds $totalElapsed -TimeSinceActivity $timeSinceProgress
+                    if ($stallCheck.ShouldKill) {
+                        Write-Host "  [HEALING] Stall threshold exceeded - triggering recovery" -ForegroundColor Red
+                        break  # Exit loop to trigger timeout handling
+                    }
                 }
             }
         }
@@ -184,7 +213,31 @@ function Invoke-ClaudeSubprocess {
     $timedOut = -not $exited
     if ($timedOut) {
         Write-Host "  Timeout after $timeout seconds" -ForegroundColor Yellow
-        # Process already killed in finally block
+        Write-SessionLog -Event "claude_timeout" -Message "Claude subprocess timed out after ${timeout}s" -Data @{
+            totalElapsed = $totalElapsed
+            outputLength = $outBuilder.Length
+        }
+        Write-Heartbeat -Phase "claude_timeout" -Details @{ timeout = $timeout; elapsed = $totalElapsed }
+
+        # Invoke stall recovery and log to healing system
+        $recoveryResult = Invoke-StallRecovery -Reason "timeout" -WaitingSeconds $totalElapsed -ProcessId $processId
+        if ($recoveryResult.ShouldPause) {
+            Write-Host "  [HEALING] Too many stalls - consider pausing session" -ForegroundColor Red
+        }
+    }
+    else {
+        $resultType = if ($exitCode -eq 0) { "success" } else { "failure" }
+        Write-SessionLog -Event "claude_return" -Message "Claude subprocess exited ($resultType)" -Data @{
+            exitCode = $exitCode
+            durationSec = $totalElapsed
+            outputLength = $outBuilder.Length
+        }
+        Write-Heartbeat -Phase "claude_returned" -Details @{ exitCode = $exitCode; durationSec = $totalElapsed }
+
+        # Reset stall tracking on successful completion
+        if ($exitCode -eq 0) {
+            Reset-StallTracking
+        }
     }
 
     return @{
