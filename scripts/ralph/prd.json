@@ -68,8 +68,8 @@
             "id": "US-005",
             "title": "Add property-based testing with hypothesis for matching algorithms",
             "priority": 5,
-            "passes": false,
-            "notes": "",
+            "passes": true,
+            "notes": "Added hypothesis>=6.0.0 to requirements-dev.txt. Created tests/test_matching_properties.py with 20 property tests: 5 for confidence scores, 3 for embedding similarity, 5 for match ranking, plus transcript quality, duration scoring, semantic coherence. Created tests/PROPERTY_TESTING.md documentation. Updated pytest.ini to exclude .hypothesis directory.",
             "acceptanceCriteria": [
                 "Add hypothesis to requirements-dev.txt if not present",
                 "Create tests/test_matching_properties.py with property-based tests",
