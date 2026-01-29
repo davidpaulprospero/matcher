@@ -7816,3 +7816,44 @@ def test_eta_accuracy_batch_50_videos(self):
 - AC6: ✅ CI integration examples in help epilog and report output
 
 - Tests passed: Script compiles, all modes verified (--help, --strict, --suggest, --ci, --json)
+
+
+## Iteration - [US-004] Establish benchmark baseline tracking with JSON storage
+- Implemented comprehensive baseline management in scripts/benchmark_runner.py:
+  - Added --update-baseline flag with interactive safety confirmation prompt
+  - Added --yes flag to skip confirmation (for CI use)
+  - Added --list-history flag to view all archived baselines
+  - Added --compare-baseline shorthand for comparing against default baseline
+- Created baseline history tracking system:
+  - archive_baseline() copies current baseline to baseline_history/ directory
+  - prune_baseline_history() keeps only last 5 baselines (MAX_BASELINE_HISTORY)
+  - list_baseline_history() returns metadata for all baselines
+  - Timestamps are preserved from original baseline.json
+- Generated initial baseline.json:
+  - 33 benchmarks captured from 4 test suites
+  - Suites: pipeline, keyword, embedding, transcription
+  - Includes mean, stddev, min, max, rounds for each benchmark
+- Updated CI workflow (.github/workflows/benchmarks.yml):
+  - Changed to use --compare-baseline flag for cleaner comparison
+  - Updated update baseline step to use --update-baseline --yes
+  - Added comment noting baseline is auto-archived to history
+- Updated documentation (tests/benchmarks/README.md):
+  - Added new flags to usage examples
+  - Documented baseline history management
+  - Added pruning and archiving behavior notes
+
+**Files Modified:**
+- scripts/benchmark_runner.py (added 179 lines)
+- tests/benchmarks/baseline.json (new, 241 lines)
+- tests/benchmarks/README.md (updated usage examples)
+- .github/workflows/benchmarks.yml (simplified comparison step)
+
+**Acceptance Criteria Verification:**
+- AC1: ✅ Ran --save-baseline, generated 33 benchmarks
+- AC2: ✅ baseline.json saved with timestamp field
+- AC3: ✅ README.md already documented format, added new flags
+- AC4: ✅ --update-baseline with confirmation, --yes to skip
+- AC5: ✅ baseline_history/ with MAX_BASELINE_HISTORY=5, auto-pruning
+- AC6: ✅ CI workflow uses --compare-baseline with 0.20 threshold
+
+- Commit: ab30a98
