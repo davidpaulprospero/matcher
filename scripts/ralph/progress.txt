@@ -7925,3 +7925,39 @@ def test_eta_accuracy_batch_50_videos(self):
   - tests/README.md (+106 lines: test isolation documentation)
 - Test results: pytest --check-isolation detects and reports mkdtemp() usage
 - Commit: c54e9e0
+
+## Focus Area: testing - 2026-01-29 17:50:35
+- Status: In Progress...
+
+
+## Iteration - [US-001] Complete marker assignment for remaining unmarked tests
+- Identified root cause: categorize_tests.py didn't inherit class-level markers to methods
+- Fixed TestAnalyzer to track class-level markers and pass them to test methods
+- Class decorators (@pytest.mark.fast) now correctly apply to all methods
+- Applied 25 additional markers via scripts/assign_test_markers.py --apply
+- Unmarked test count: 459 -> 25 (below 50 threshold requirement)
+
+**Marker Distribution (Sprint 27):**
+- fast: 11,225 tests
+- integration: 409 tests
+- requires_network: 148 tests
+- requires_api: 83 tests
+- simulation: 43 tests
+- flaky: 30 tests
+- stress: 15 tests
+- slow: 11 tests
+- Unmarked: 25 tests
+
+**Files Modified:**
+- scripts/categorize_tests.py (added class-level marker inheritance)
+- tests/README.md (updated marker statistics section)
+
+**Acceptance Criteria Verification:**
+- AC1: ✅ Ran --auto-suggest, found 459 unmarked initially
+- AC2: ✅ Applied @pytest.mark.fast via class inheritance fix
+- AC3: ✅ Integration markers already assigned via class-level decorators
+- AC4: ✅ Network markers already assigned via class-level decorators
+- AC5: ✅ Unmarked count: 25 (below 50 threshold)
+- AC6: ✅ Updated tests/README.md with Sprint 27 statistics
+
+- Commit: f9bd166
