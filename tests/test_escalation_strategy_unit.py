@@ -351,7 +351,7 @@ class TestEdgeCases:
 
         assert strategy.threshold == 2
         assert strategy.cooldown_seconds == 300.0
-        assert strategy.max_tier == EscalationTier.FULL_BYPASS
+        assert strategy.max_tier == EscalationTier.VPN_ROTATION
 
     @pytest.mark.fast
     def test_budget_exhausted_skips_to_max(self):
@@ -404,9 +404,9 @@ class TestEdgeCases:
     @pytest.mark.fast
     def test_max_tier_clamps_to_valid_range(self):
         """max_tier is clamped to valid EscalationTier range."""
-        # max_tier=5 should clamp to 3
+        # max_tier=5 should clamp to 4 (VPN_ROTATION)
         strategy = EscalationStrategy(MockExtractorArgsConfig(max_tier=5))
-        assert strategy.max_tier == EscalationTier.FULL_BYPASS
+        assert strategy.max_tier == EscalationTier.VPN_ROTATION
 
         # max_tier=0 should clamp to 1
         strategy = EscalationStrategy(MockExtractorArgsConfig(max_tier=0))

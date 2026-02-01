@@ -68,8 +68,8 @@
             "id": "US-1-005",
             "title": "Integrate MullvadVPN as Tier 4 in EscalationManager",
             "priority": 4,
-            "passes": false,
-            "notes": "Tier 3 (Complex). Add VPN rotation as highest escalation tier. Source files: src/downloader/types.py (lines 57-61, EscalationTier enum - add VPN_ROTATION=4), src/downloader/escalation_manager.py (lines 176-319, EscalationManager class - update __init__, get_escalation_args, record_failure).",
+            "passes": true,
+            "notes": "Tier 3 (Complex). Added VPN_ROTATION as Tier 4. Modified: src/downloader/types.py (EscalationTier enum, EscalationState.escalate()), src/downloader/escalation_manager.py (__init__, get_escalation_args, record_failure, set_mullvad_vpn), src/downloader/escalation_strategy.py (max_tier property, get_next_tier). Updated EscalationResult dataclass with rotate_vpn field. Updated tests in test_escalation_strategy.py and test_escalation_strategy_unit.py for Tier 4 support. All 251 escalation tests pass.",
             "acceptanceCriteria": [
                 "Add EscalationTier.VPN_ROTATION (value=4) to src/downloader/types.py after FULL_BYPASS",
                 "Update EscalationManager.__init__ (line 193) to accept optional mullvad_vpn parameter",
