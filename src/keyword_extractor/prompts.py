@@ -225,7 +225,39 @@ Return ONLY a JSON array of {max_keywords} refined, searchable keywords.
 
 REFINED KEYWORDS:"""
 
-# Prompt 6: Topic detection
+# Prompt 6: Grouped segment keyword extraction (N segments → 1 search query)
+GROUPED_SEGMENT_KEYWORDS_PROMPT = """Generate ONE YouTube search query for this GROUP of voiceover segments.
+
+DOCUMENTARY TOPIC: {topic}
+
+SEGMENT GROUP ({segment_count} segments):
+{segments_text}
+
+=== YOUR TASK ===
+Create ONE search query (3-6 words) that would find B-roll footage covering ALL these segments.
+
+=== CRITICAL: TRANSLATE TO VISUAL TERMS ===
+DO NOT copy phrases from the script. Translate narrative language to FILMABLE content.
+
+❌ BAD: "the death of entertainment footage" (script phrase)
+✅ GOOD: "Las Vegas casino floor 4K"
+
+❌ BAD: "whale economy documentary" (abstract concept)
+✅ GOOD: "VIP high roller casino footage"
+
+=== RULES ===
+1. Identify the COMMON VISUAL THEME across all segments
+2. Focus on LOCATIONS, ACTIVITIES, or OBJECTS that a camera can capture
+3. Use specific venue/place names if mentioned
+4. Add search-friendly terms: "footage", "4K", "tour", "walkthrough", "aerial"
+5. If segments are abstract, derive visual content from the topic
+
+=== OUTPUT ===
+Return ONLY the search query string (3-6 words). No explanation.
+
+SEARCH QUERY:"""
+
+# Prompt 7: Topic detection
 TOPIC_DETECTION_PROMPT = """Analyze this voiceover transcript and identify the MAIN TOPIC in 2-5 words.
 
 Transcript excerpt:

@@ -75,26 +75,20 @@ def find_images_dir_from_config(
     Find entity images directory by reading config files.
 
     Checks:
-    1. project_config.yaml in project_dir
-    2. config.yaml in install_dir
-    3. Combines image_search.root_dir + folder derived from project name
+    1. config.yaml in install_dir
+    2. Combines image_search.root_dir + folder derived from project name
     """
     if not HAS_YAML:
         print("Warning: PyYAML not installed, cannot read config files")
         return None
-
-    # Load project config (overrides)
-    project_config = load_yaml_config(project_dir / "project_config.yaml") or {}
 
     # Load install config
     install_config = {}
     if install_dir:
         install_config = load_yaml_config(install_dir / "config.yaml") or {}
 
-    # Get image_search settings (project overrides install)
-    image_search = project_config.get('image_search', {})
-    if not image_search and install_config:
-        image_search = install_config.get('image_search', {})
+    # Get image_search settings from install config
+    image_search = install_config.get('image_search', {})
 
     root_dir = image_search.get('root_dir', '')
     folder_name = image_search.get('folder_name', 'images')

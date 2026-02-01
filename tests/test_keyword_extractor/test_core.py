@@ -9,6 +9,7 @@ Integration tests covering:
 - Footage suffix addition
 """
 
+import json
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from src.keyword_extractor.core import LLMKeywordExtractor
@@ -111,7 +112,7 @@ class TestExtractKeywordsWithLLM:
                 {'text': 'We scaled alpine peaks covered in snow.'}
             ]
 
-            result = extractor.extract_keywords(segments, max_keywords=30)
+            result = extractor.extract_keywords(segments)
 
             assert isinstance(result, KeywordResult)
             assert len(result.keywords) > 0
@@ -178,24 +179,24 @@ class TestExtractKeywordsWithLLM:
             assert result.extraction_method == "none"
 
     @pytest.mark.fast
-    def test_extract_keywords_max_keywords_limit(self, mock_config):
-        """Test keyword extraction respects max_keywords"""
+    def test_extract_keywords_returns_all_keywords(self, mock_config):
+        """Test keyword extraction returns all extracted keywords without limit"""
         with patch('src.llm_client.create_client'):
             extractor = LLMKeywordExtractor(mock_config)
 
-            # Return many keywords
-            many_keywords = [f"keyword{i}" for i in range(50)]
+            # Return many keywords - should all be returned
+            many_keywords = [f"keyword{i}" for i in range(30)]
             extractor._call_llm = Mock(side_effect=[
                 '[]',  # entities
-                f'{many_keywords}',  # keywords
+                json.dumps(many_keywords),  # keywords
             ])
 
             segments = [{'text': 'Text with many concepts.'}]
 
-            result = extractor.extract_keywords(segments, max_keywords=10, expand=False)
+            result = extractor.extract_keywords(segments, expand=False)
 
-            # Should limit to max_keywords
-            assert len(result.keywords) <= 10
+            # Should return all keywords (no artificial limit)
+            assert len(result.keywords) == 30
 
 
 class TestExtractKeywordsWithTFIDF:
@@ -226,7 +227,7 @@ class TestExtractKeywordsWithTFIDF:
                 {'text': 'Climbing mountains requires skill.'}
             ]
 
-            result = extractor.extract_keywords(segments, max_keywords=30)
+            result = extractor.extract_keywords(segments)
 
             assert result.extraction_method == "tfidf"
             assert len(result.keywords) > 0

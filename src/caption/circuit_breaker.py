@@ -36,13 +36,7 @@ class CaptionCircuitBreakerConfig:
       - Wait 120 seconds before allowing new fetches
       - On next successful fetch → circuit resets to closed state
 
-    Enable per-project in project_config.yaml:
-        download:
-          caption_first:
-            circuit_breaker:
-              enabled: true
-              threshold: 10
-              pause_seconds: 120
+    Configure in config.yaml under download.caption_first.circuit_breaker.
     """
     # Enable/disable circuit breaker
     enabled: bool = True

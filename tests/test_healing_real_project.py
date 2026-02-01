@@ -54,26 +54,10 @@ def project_dir():
 @pytest.fixture
 def real_config(project_dir):
     """Load real configuration from the project."""
-    from src.config import Config, load_config
+    from src.cli.config_utils import load_project_config
 
-    # Load default config first
-    config = load_config()
-
-    # Try to load project config overrides
-    project_config_path = project_dir / "project_config.yaml"
-    if project_config_path.exists():
-        import yaml
-        with open(project_config_path, 'r') as f:
-            overrides = yaml.safe_load(f) or {}
-
-        # Apply overrides (simplified)
-        for section, values in overrides.items():
-            if hasattr(config, section) and isinstance(values, dict):
-                for key, value in values.items():
-                    if hasattr(getattr(config, section), key):
-                        setattr(getattr(config, section), key, value)
-
-    return config
+    # Load config with project directory set
+    return load_project_config(project_dir)
 
 
 @pytest.fixture

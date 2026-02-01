@@ -196,8 +196,8 @@ We scaled the highest peaks.
             os.unlink(srt_path)
 
     @pytest.mark.integration
-    def test_extract_keywords_from_srt_with_max_keywords(self):
-        """Test SRT extraction with custom max_keywords"""
+    def test_extract_keywords_from_srt_returns_all_keywords(self):
+        """Test SRT extraction returns all keywords without limit"""
         srt_content = """1
 00:00:00,000 --> 00:00:05,000
 Sample text.
@@ -209,24 +209,22 @@ Sample text.
         try:
             mock_config = Mock()
             mock_config.keyword = Mock()
-            mock_config.keyword.max_keywords = 30
 
             with patch('src.keyword_extractor.utils.LLMKeywordExtractor') as MockExtractor:
                 mock_extractor_instance = Mock()
                 mock_extractor_instance.extract_keywords = Mock(return_value=Mock(
-                    keywords=["kw1", "kw2"],
+                    keywords=["kw1", "kw2", "kw3"],
                     segments_analyzed=1,
                     extraction_method="llm"
                 ))
                 MockExtractor.return_value = mock_extractor_instance
 
-                # Call with custom max_keywords
-                result = extract_keywords_from_srt(srt_path, mock_config, max_keywords=10)
+                # Call function
+                result = extract_keywords_from_srt(srt_path, mock_config)
 
-                # Verify max_keywords was passed
+                # Verify extract_keywords was called
                 mock_extractor_instance.extract_keywords.assert_called_once()
-                call_kwargs = mock_extractor_instance.extract_keywords.call_args[1]
-                assert call_kwargs.get('max_keywords') == 10
+                assert result.keywords == ["kw1", "kw2", "kw3"]
 
         finally:
             os.unlink(srt_path)

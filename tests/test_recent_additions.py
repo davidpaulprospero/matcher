@@ -3,7 +3,7 @@ Tests for Recent Additions (January 2026)
 
 Tests the following features from CLAUDE.md session history:
 1. VAD filter separation (Rule 11) - Hardcoded OFF for videos, config only for voiceover
-2. Config loading fix - project_config.yaml now properly overlays defaults
+2. Config merge_config function - proper config merging
 3. video_source_dir fix - _resolve_paths() now checks pipeline.video_source_dir
 4. gap_mode added - scale/proportional/none for timeline gap distribution
 5. voiceover_offset added - Manual alignment adjustment for SRT drift
@@ -122,12 +122,12 @@ class TestVADFilterSeparation:
 
 
 # =============================================================================
-# TEST 2: Config Loading - project_config.yaml Overlay
+# TEST 2: Config Loading - merge_config function
 # =============================================================================
 @pytest.mark.fast
 class TestConfigLoading:
     """
-    Test that project_config.yaml properly overlays default config values.
+    Test that merge_config properly merges config values.
     """
 
     @pytest.fixture
@@ -198,65 +198,15 @@ class TestConfigLoading:
         assert merged.output.generate_otio == original_generate_otio
 
     @pytest.mark.fast
-    def test_load_project_config_with_overrides(self, temp_project_dir):
-        """Test full load_project_config with project_config.yaml"""
+    def test_load_project_config_sets_project_dir(self, temp_project_dir):
+        """Test that load_project_config sets project_dir correctly"""
         from src.cli.config_utils import load_project_config
-        import yaml
-
-        # Create project_config.yaml with overrides
-        project_config = {
-            'keyword': {'max_keywords': 42},
-            'output': {'voiceover_offset': 2.5}
-        }
-
-        config_path = temp_project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
 
         # Load config with project directory
         config = load_project_config(temp_project_dir)
 
-        assert config.keyword.max_keywords == 42, \
-            f"Expected max_keywords=42 from project_config.yaml, got {config.keyword.max_keywords}"
-        assert config.output.voiceover_offset == 2.5, \
-            f"Expected voiceover_offset=2.5, got {config.output.voiceover_offset}"
-
-    @pytest.mark.fast
-    def test_load_project_config_calls_resolve_paths(self, temp_project_dir):
-        """Test that load_project_config calls _resolve_paths after merge"""
-        from src.cli.config_utils import load_project_config
-        import yaml
-
-        # Create project_config.yaml
-        project_config = {'keyword': {'max_keywords': 5}}
-        config_path = temp_project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
-
-        # Load and verify project_dir is set
-        config = load_project_config(temp_project_dir)
-
         assert config.project_dir == str(temp_project_dir), \
             "project_dir should be set to the project directory"
-
-    @pytest.mark.fast
-    def test_project_config_detection_warning(self, temp_project_dir, capsys):
-        """Test warning when --config points to project_config.yaml"""
-        from src.cli.config_utils import load_project_config
-        import yaml
-
-        # Create project_config.yaml
-        project_config = {'keyword': {'max_keywords': 5}}
-        config_path = temp_project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
-
-        # Try to load with --config pointing to project_config.yaml
-        config = load_project_config(temp_project_dir, config_path=config_path)
-
-        captured = capsys.readouterr()
-        # Should show warning about using project_config.yaml as --config
-        assert "project_config.yaml" in captured.out
 
 
 # =============================================================================
@@ -641,16 +591,14 @@ class TestAudioDownloadCheckpoint:
 class TestRecentAdditionsIntegration:
     """Integration tests combining multiple recent additions."""
 
-    def test_project_config_with_gap_mode_and_offset(self, tmp_path):
-        """Test loading project config with gap_mode and voiceover_offset"""
-        from src.cli.config_utils import load_project_config
-        import yaml
+    def test_merge_config_with_gap_mode_and_offset(self, tmp_path):
+        """Test merge_config with gap_mode and voiceover_offset"""
+        from src.cli.config_utils import merge_config
+        from src.config import Config
 
-        project_dir = tmp_path / "test_project"
-        project_dir.mkdir()
+        config = Config()
 
-        # Create project_config.yaml with new options
-        project_config = {
+        overrides = {
             'output': {
                 'gap_mode': 'proportional',
                 'voiceover_offset': 1.5,
@@ -658,40 +606,32 @@ class TestRecentAdditionsIntegration:
             }
         }
 
-        config_path = project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
+        merged = merge_config(config, overrides)
 
-        config = load_project_config(project_dir)
-
-        assert config.output.gap_mode == 'proportional'
-        assert config.output.voiceover_offset == 1.5
-        assert config.output.frame_rate == 24.0
+        assert merged.output.gap_mode == 'proportional'
+        assert merged.output.voiceover_offset == 1.5
+        assert merged.output.frame_rate == 24.0
 
     @pytest.mark.fast
-    def test_project_config_with_video_source_dir(self, tmp_path):
-        """Test project config that sets video_source_dir"""
-        from src.cli.config_utils import load_project_config
-        import yaml
+    def test_merge_config_with_video_source_dir(self, tmp_path):
+        """Test merge_config that sets video_source_dir"""
+        from src.cli.config_utils import merge_config
+        from src.config import Config
 
-        project_dir = tmp_path / "test_project"
-        project_dir.mkdir()
+        config = Config()
+        config.project_dir = str(tmp_path)
 
-        # Create project_config.yaml with video_source_dir
-        project_config = {
+        overrides = {
             'pipeline': {
                 'video_source_dir': 'D:/shared/videos'
             }
         }
 
-        config_path = project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
+        merged = merge_config(config, overrides)
+        merged._resolve_paths()
 
-        config = load_project_config(project_dir)
-
-        assert config.pipeline.video_source_dir == 'D:/shared/videos'
-        assert config.downloaded_videos_dir == 'D:/shared/videos'
+        assert merged.pipeline.video_source_dir == 'D:/shared/videos'
+        assert merged.downloaded_videos_dir == 'D:/shared/videos'
 
 
 # =============================================================================
@@ -804,35 +744,17 @@ class TestConfigLoadingErrorHandling:
         assert not hasattr(merged.keyword, 'nonexistent_field')
 
     @pytest.mark.fast
-    def test_load_project_config_empty_yaml(self, tmp_path):
-        """Test loading empty project_config.yaml"""
+    def test_load_project_config_returns_defaults(self, tmp_path):
+        """Test load_project_config returns base config with defaults"""
         from src.cli.config_utils import load_project_config
 
         project_dir = tmp_path / "test_project"
         project_dir.mkdir()
 
-        # Create empty project_config.yaml
-        config_path = project_dir / 'project_config.yaml'
-        config_path.write_text("")
-
-        # Should not raise
         config = load_project_config(project_dir)
 
         # Should use defaults
         assert config.keyword.max_keywords > 0
-
-    @pytest.mark.fast
-    def test_load_project_config_no_project_config_file(self, tmp_path):
-        """Test loading when project_config.yaml doesn't exist"""
-        from src.cli.config_utils import load_project_config
-
-        project_dir = tmp_path / "test_project"
-        project_dir.mkdir()
-
-        # Don't create project_config.yaml
-        config = load_project_config(project_dir)
-
-        # Should use defaults without error
         assert config is not None
         assert config.project_dir == str(project_dir)
 
@@ -1281,16 +1203,16 @@ class TestAdditionalIntegration:
     """
 
     @pytest.mark.fast
-    def test_full_config_with_all_new_options(self, tmp_path):
-        """Test config with all new options combined"""
-        from src.cli.config_utils import load_project_config
-        import yaml
+    def test_merge_config_with_all_new_options(self, tmp_path):
+        """Test merge_config with all new options combined"""
+        from src.cli.config_utils import merge_config
+        from src.config import Config
 
-        project_dir = tmp_path / "test_project"
-        project_dir.mkdir()
+        config = Config()
+        config.project_dir = str(tmp_path)
 
-        # Create comprehensive project_config.yaml
-        project_config = {
+        # Comprehensive config overrides
+        overrides = {
             'output': {
                 'gap_mode': 'none',
                 'voiceover_offset': -0.5,
@@ -1308,44 +1230,36 @@ class TestAdditionalIntegration:
             }
         }
 
-        config_path = project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
-
-        config = load_project_config(project_dir)
+        merged = merge_config(config, overrides)
+        merged._resolve_paths()
 
         # Verify all options loaded
-        assert config.output.gap_mode == 'none'
-        assert config.output.voiceover_offset == -0.5
-        assert config.output.frame_rate == 29.97
-        assert config.output.min_gap_threshold == 0.5
-        assert config.pipeline.video_source_dir == 'E:/videos'
-        assert config.keyword.max_keywords == 20
-        assert config.transcription.vad_filter is False
+        assert merged.output.gap_mode == 'none'
+        assert merged.output.voiceover_offset == -0.5
+        assert merged.output.frame_rate == 29.97
+        assert merged.output.min_gap_threshold == 0.5
+        assert merged.pipeline.video_source_dir == 'E:/videos'
+        assert merged.keyword.max_keywords == 20
+        assert merged.transcription.vad_filter is False
 
     @pytest.mark.fast
     def test_config_vad_only_for_voiceover(self, tmp_path):
         """Test that transcription.vad_filter in config only affects voiceover"""
-        from src.cli.config_utils import load_project_config
-        import yaml
+        from src.cli.config_utils import merge_config
+        from src.config import Config
 
-        project_dir = tmp_path / "test_project"
-        project_dir.mkdir()
+        config = Config()
 
-        project_config = {
+        overrides = {
             'transcription': {
                 'vad_filter': False  # User disables VAD
             }
         }
 
-        config_path = project_dir / 'project_config.yaml'
-        with open(config_path, 'w') as f:
-            yaml.dump(project_config, f)
-
-        config = load_project_config(project_dir)
+        merged = merge_config(config, overrides)
 
         # Config should have VAD disabled
-        assert config.transcription.vad_filter is False
+        assert merged.transcription.vad_filter is False
 
         # But video transcription will still ignore this (verified in code inspection tests)
 

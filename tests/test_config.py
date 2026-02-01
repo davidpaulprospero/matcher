@@ -242,19 +242,19 @@ class TestConfigOverrides:
 
     @pytest.mark.fast
     def test_project_config_override(self, tmp_path):
-        """Test project config can override defaults."""
-        # Create project config
-        project_config = {
+        """Test custom config file can override defaults."""
+        # Create custom config
+        custom_config = {
             'keyword': {
                 'max_keywords': 20
             }
         }
 
-        project_file = tmp_path / "project_config.yaml"
-        with open(project_file, 'w') as f:
-            yaml.dump(project_config, f)
+        custom_file = tmp_path / "custom_config.yaml"
+        with open(custom_file, 'w') as f:
+            yaml.dump(custom_config, f)
 
-        config = load_config(str(project_file))
+        config = load_config(str(custom_file))
 
         keyword = config.keyword
         if isinstance(keyword, dict):

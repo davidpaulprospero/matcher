@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from .config.sections.download import CaptionFirstConfig
     from .downloader.impersonation import ImpersonationManager
     from .downloader.escalation_manager import EscalationManager
+    from .downloader.cookie_rotator import CookieRotator
     from .caption.rate_limiter import UnifiedCaptionRateLimiter
     from .caption.circuit_breaker import CaptionCircuitBreaker
     from .caption.retry_budget import CaptionRetryBudget
@@ -2261,6 +2262,7 @@ class CaptionFetcher:
         escalation_manager: Optional['EscalationManager'] = None,
         cookie_args: Optional[List[str]] = None,
         rate_limiter: Optional['UnifiedCaptionRateLimiter'] = None,
+        cookie_rotator: Optional['CookieRotator'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2272,12 +2274,18 @@ class CaptionFetcher:
                          If provided, overrides config-based cookie resolution.
             rate_limiter: Optional UnifiedCaptionRateLimiter for coordinated rate limiting
                           with exponential backoff and jitter (US-33-003).
+            cookie_rotator: Optional CookieRotator for rotating cookies on 403/rate limit errors.
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
         self._cookie_args_override = cookie_args
         self._rate_limiter = rate_limiter
+        self.cookie_rotator = cookie_rotator
+
+        # Log cookie rotator status
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            logger.info(f"CaptionFetcher: Cookie rotation enabled ({self.cookie_rotator.available_cookies} cookies)")
         self._timeout = 60  # seconds
 
         # Retry settings from config (US-008)
@@ -3052,9 +3060,14 @@ class CaptionFetcher:
                 # Retry is allowed for this category
                 wait_time = retry_delay * (2 ** attempt)
 
-                # RATE_LIMIT gets longer backoff
+                # RATE_LIMIT gets longer backoff and cookie rotation
                 if category == CaptionErrorCategory.RATE_LIMIT:
                     wait_time *= 2  # Double the backoff for rate limits
+                    # Try cookie rotation on rate limit errors
+                    error_str = str(e) if hasattr(e, '__str__') else e.reason if hasattr(e, 'reason') else ''
+                    if self._handle_cookie_rotation(error_str):
+                        logger.info(f"Caption {operation}: Cookie rotated after rate limit, retrying immediately")
+                        wait_time = 1.0  # Shorter wait after cookie rotation
 
                 logger.warning(
                     f"Caption {operation} failed for video {video_id}: "
@@ -4477,10 +4490,22 @@ class CaptionFetcher:
         return None
 
     def _get_cookies_args(self) -> List[str]:
-        """Get yt-dlp cookie arguments from config or override."""
-        # Use override if provided (e.g., from cookie rotator)
+        """Get yt-dlp cookie arguments from config, cookie rotator, or override.
+
+        Priority order:
+        1. Static override (cookie_args parameter)
+        2. Cookie rotator (if enabled)
+        3. Config-based cookies (browser or file)
+        """
+        # Use static override if provided
         if self._cookie_args_override:
             return self._cookie_args_override
+
+        # Use cookie rotator if enabled
+        if self.cookie_rotator and self.cookie_rotator.is_enabled:
+            current_cookie = self.cookie_rotator.get_current_cookie()
+            if current_cookie:
+                return ['--cookies', current_cookie]
 
         if not self.config:
             return []
@@ -4501,6 +4526,35 @@ class CaptionFetcher:
             pass
 
         return []
+
+    def _handle_cookie_rotation(self, error_message: str) -> bool:
+        """Handle cookie rotation on rate limit or auth errors.
+
+        Checks if the error should trigger cookie rotation and rotates
+        to the next available cookie if conditions are met.
+
+        Args:
+            error_message: Error string from yt-dlp or fetch process
+
+        Returns:
+            True if cookie was rotated, False otherwise
+        """
+        if not self.cookie_rotator:
+            return False
+
+        if not self.cookie_rotator.is_enabled:
+            return False
+
+        if self.cookie_rotator.should_rotate(error_message):
+            new_cookie = self.cookie_rotator.rotate()
+            if new_cookie:
+                logger.info(f"Caption fetcher: Rotated to new cookie: {Path(new_cookie).name}")
+                return True
+            else:
+                logger.warning("Caption fetcher: Cookie rotation requested but no cookies available")
+                return False
+
+        return False
 
     def _is_valid_video_id(self, video_id: str) -> bool:
         """Validate YouTube video ID format.

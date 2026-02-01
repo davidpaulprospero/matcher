@@ -62,8 +62,6 @@ class AnalyzeStage(Stage):
             if not Path(voiceover_path).exists():
                 return StageResult.fail(f"Voiceover file not found: {voiceover_path}")
 
-            num_keywords = config.keyword.max_keywords
-
             print(f"\n  ─── Stage 1: ANALYZE VOICEOVER ───")
 
             # Load voiceover segments
@@ -75,10 +73,8 @@ class AnalyzeStage(Stage):
             print(f"  ✓ {len(segments)} segments found")
 
             # Extract keywords
-            print(f"\n  Extracting keywords (max {num_keywords})...")
-            keywords, entities, topic = self._extract_keywords(
-                segments, num_keywords, config
-            )
+            print(f"\n  Extracting keywords...")
+            keywords, entities, topic = self._extract_keywords(segments, config)
 
             state.keywords = keywords
             state.extracted_entities = entities
@@ -286,7 +282,6 @@ class AnalyzeStage(Stage):
     def _extract_keywords(
         self,
         segments: List['VoiceoverSegment'],
-        max_keywords: int,
         config: 'Config'
     ) -> tuple:
         """Extract keywords from segments using per-segment method"""
@@ -302,7 +297,7 @@ class AnalyzeStage(Stage):
             ]
 
             # First, extract overall keywords and entities for context
-            result = extractor.extract_keywords(segment_dicts, max_keywords=max_keywords)
+            result = extractor.extract_keywords(segment_dicts)
             entities = result.entities if result.entities else []
             topic = result.topic if hasattr(result, 'topic') else ''
 
@@ -310,27 +305,31 @@ class AnalyzeStage(Stage):
             if not topic and result.keywords:
                 topic = self._detect_topic_from_keywords(result.keywords, config)
 
-            # Use per-segment extraction for better, more specific keywords
-            # This generates ONE keyword per segment instead of general keywords
-            print(f"  Using per-segment keyword extraction for {len(segments)} segments...")
-            keywords = extractor.extract_keyword_per_segment(segment_dicts, topic=topic)
+            # Use grouped extraction: every N segments → 1 search query
+            # This balances specificity with search efficiency
+            segments_per_query = getattr(config.keyword, 'segments_per_query', 3)
+            print(f"  Using grouped keyword extraction ({segments_per_query} segments per query)...")
+            keywords = extractor.extract_keywords_grouped(
+                segment_dicts,
+                topic=topic,
+                segments_per_query=segments_per_query
+            )
 
-            # Take unique keywords up to max_keywords limit
-            unique_keywords = list(dict.fromkeys(keywords))[:max_keywords]
+            # Deduplicate while preserving order
+            unique_keywords = list(dict.fromkeys(keywords))
 
-            logger.info(f"Per-segment extraction: {len(keywords)} total → {len(unique_keywords)} unique keywords")
+            logger.info(f"Grouped extraction: {len(segments)} segments → {len(keywords)} queries → {len(unique_keywords)} unique")
 
             return unique_keywords, entities, topic
 
         except Exception as e:
             logger.error(f"Keyword extraction failed: {e}")
             # TF-IDF fallback
-            return self._tfidf_fallback(segments, max_keywords, config)
+            return self._tfidf_fallback(segments, config)
 
     def _tfidf_fallback(
         self,
         segments: List['VoiceoverSegment'],
-        max_keywords: int,
         config: 'Config'
     ) -> tuple:
         """Fallback to TF-IDF keyword extraction"""
@@ -338,7 +337,8 @@ class AnalyzeStage(Stage):
             from sklearn.feature_extraction.text import TfidfVectorizer
 
             text = " ".join([s.text for s in segments])
-            vectorizer = TfidfVectorizer(max_features=max_keywords, stop_words='english')
+            max_features = getattr(config.keyword, 'tfidf_max_features', 100)
+            vectorizer = TfidfVectorizer(max_features=max_features, stop_words='english')
             vectorizer.fit_transform([text])
             keywords = list(vectorizer.get_feature_names_out())
 

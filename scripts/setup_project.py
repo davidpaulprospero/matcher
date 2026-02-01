@@ -850,57 +850,6 @@ endlocal
     return bat_path
 
 
-def create_project_config(project_dir: Path) -> Path:
-    """Create project-specific config that overrides central config"""
-    config_content = f'''# ============================================================
-# Project-Specific Configuration
-# Project: {project_dir.name}
-# Created: {datetime.now().strftime("%Y-%m-%d %H:%M")}
-# ============================================================
-#
-# This file overrides settings from the central config.yaml
-# Only include settings you want to change for this project.
-#
-# The central config is at: {INSTALL_DIR / 'config.yaml'}
-# ============================================================
-
-# Project identification
-project:
-  name: "{project_dir.name}"
-  
-# Uncomment and modify any settings you want to override:
-
-# keywords:
-#   num_keywords: 20
-#   tier_config:
-#     short:
-#       per_keyword: 1
-#     medium:
-#       per_keyword: 1
-#     long:
-#       per_keyword: 1
-#     longer:
-#       per_keyword: 0  # Disabled for speed
-
-# enhanced:
-#   enabled: true
-#   min_confidence: 0.70
-#   non_interactive: true  # Skip prompts, use defaults
-
-# image_search:
-#   enabled: true
-#   max_entities: 2
-
-# pipeline:
-#   skip_download: false
-#   skip_image_search: false
-'''
-    
-    config_path = project_dir / "project_config.yaml"
-    config_path.write_text(config_content)
-    return config_path
-
-
 def create_project_structure(project_dir: Path) -> dict:
     """Create standard project folder structure"""
     folders = {
@@ -977,16 +926,6 @@ def setup_project(project_path: str, install_dir: Path = None):
         analyze_path = create_analyze_sh(project_dir, install_dir)
         print(f"  + analyze.sh")
         result['analyze_script'] = str(analyze_path)
-    
-    # Create project config (if doesn't exist)
-    config_path = project_dir / "project_config.yaml"
-    if not config_path.exists():
-        create_project_config(project_dir)
-        print(f"  + project_config.yaml")
-        result['config'] = str(config_path)
-    else:
-        print(f"  * project_config.yaml (exists)")
-        result['config'] = str(config_path)
     
     print(f"\n{'-' * 60}")
     print(f"  Project Ready!")

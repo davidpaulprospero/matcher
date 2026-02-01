@@ -1,15 +1,15 @@
 """
 Caption Stage - Fetch YouTube Captions Before Transcription
 
-Stage that runs AFTER DOWNLOAD and BEFORE TRANSCRIBE:
+Stage that runs AFTER VIDEO_SEARCH and BEFORE MATCH:
 - Fetches YouTube captions for all video candidates
 - Stores caption data in state.text_metadata for matching
 - Supports checkpoint/resume from partial completion
-- Falls back to transcription if captions unavailable
+- Falls back to TRANSCRIBE stage if captions unavailable
 
-When caption-first mode is enabled (config.download.caption_first.enabled),
-this stage fetches captions BEFORE video download, enabling faster matching
-with lower bandwidth.
+Caption fetching is always enabled - this is the default behavior for
+faster matching with lower bandwidth. Videos without captions will be
+handled by the TRANSCRIBE stage as a fallback.
 """
 
 from __future__ import annotations
@@ -87,12 +87,8 @@ class CaptionStage(Stage):
         warnings = []
 
         try:
-            # Check if caption-first mode is enabled
+            # Get caption config (caption fetching is always enabled)
             caption_config = getattr(config.download, 'caption_first', None)
-            if not caption_config or not getattr(caption_config, 'enabled', False):
-                print("  >> Skipping caption fetch (caption-first mode disabled)")
-                logger.info("Skipping CAPTION stage (caption_first.enabled=false)")
-                return StageResult.ok({'skipped': True, 'reason': 'disabled'}, warnings)
 
             # US-005: Validate language config if not done at init
             if not self._config_validated:

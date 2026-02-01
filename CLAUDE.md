@@ -25,9 +25,6 @@ python main.py --match-only                    # Re-run matching only
 python main.py --output-only                   # Regenerate OTIO only (needs checkpoint)
 python main.py --resume                        # Resume from checkpoint
 
-# Caption-first (uses YouTube captions instead of Whisper)
-python main.py --voiceover script.srt --caption-first
-
 # Keywords
 python main.py --save-keywords mypreset        # Save after extraction
 python main.py --use-keywords mypreset         # Reuse saved
@@ -48,7 +45,6 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | `--resume` / `--fresh` | Resume from checkpoint / Force fresh start |
 | `--force-rematch` | Force rematch all videos |
 | `--non-interactive` | Skip prompts, use defaults |
-| `--caption-first` | Use YouTube captions instead of Whisper |
 | `--use-keywords [PRESET]` | Use saved keywords |
 | `--save-keywords [NAME]` | Save extracted keywords |
 
@@ -78,11 +74,12 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 10 | Test non-interactive | Tests MUST use `--non-interactive` |
 | 11 | Dataclass imports | Import from `src/state.py` or `src/config/` only |
 | 14 | OTIO paths | Use `file:///E:/...` URLs, forward slashes, skip audio-only |
-| 21 | Project vs Global config | Use `project_config.yaml` for project-specific settings |
-| 22 | Caption-first paths | Video IDs not file paths - don't filter as `caption_only` |
-| 23 | Project config merge | Deep merge preserves sibling sections |
+| 22 | Caption-first (always on) | Video IDs not file paths - don't filter as `caption_only` |
 | 27 | Subprocess encoding | ALL `subprocess.Popen/run` with `text=True` MUST add `encoding='utf-8', errors='replace'` |
 | 28 | Download one-at-a-time | `_download_by_ids` must loop per video, NOT batch |
+| 29 | LLM response format | Use `ResponseFormat.TEXT` for non-JSON responses, not `JSON_ARRAY` |
+| 30 | Per-project config | Use `--config custom.yaml` flag — project_config.yaml auto-merge removed |
+| 31 | Pipeline stages source | `src/checkpoint.py:STAGE_ORDER` is truth; sync `scripts/ralph/config/ralph-config.json` |
 
 ### Config Access Pattern
 
@@ -119,7 +116,7 @@ pip install -r requirements-dev.txt  # Test/dev (pytest, pester, coverage)
 
 | Package | Purpose |
 |---------|---------|
-| `stages/` | 15 modular pipeline stage classes |
+| `stages/` | 7 modular pipeline stage classes |
 | `config/` | Config dataclasses by section |
 | `cli/` | CLI arg parsing, config loading |
 | `llm_client/` | **Unified LLM abstraction** (Gemini, Anthropic, Ollama) |
@@ -135,7 +132,7 @@ pip install -r requirements-dev.txt  # Test/dev (pytest, pester, coverage)
 ### Pipeline Stages (Execution Order)
 
 ```
-ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_METADATA → CAPTION → DOWNLOAD → STOCK → BROLL_DOWNLOAD → REMIX → TRANSCRIBE → PREMISE → SCENE_DETECTION → MATCH → BROLL_MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
 ```
 
 ### OTIO Track Layout
@@ -147,15 +144,12 @@ ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_METADATA → CAPTION → D
 | V4-V6 | Secondary (diversity-scored) | Disabled |
 | V7 | Embedding-Diversity strategy | Disabled |
 | V8 | B-roll Only (silent footage) | Disabled |
-| V9 | Entity Images | Disabled |
-| V10 | Stock Videos | Disabled |
 
 ### Project Directory Structure
 
 ```
 ProjectName__2026-01-03/
 ├── run.bat              # Launcher script
-├── project_config.yaml  # Project-specific overrides
 ├── voiceover/           # User puts audio here
 ├── output/              # Generated OTIO, EDL, XML
 ├── checkpoint.json      # Resume state
@@ -195,18 +189,6 @@ rm -rf .cache/scene_detection          # Force re-detection
 ```
 
 ## Configuration
-
-### Project Overrides
-
-Create `project_config.yaml` in project folder (auto-loaded with `--project`):
-```yaml
-keyword:
-  max_keywords: 5
-pipeline:
-  skip_image_search: true
-```
-
-**IMPORTANT**: Don't pass `project_config.yaml` to `--config`. It's auto-loaded.
 
 ### Self-Healing
 
@@ -322,6 +304,8 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-02 | Removed project_config.yaml auto-merge — use `--config` flag for per-project settings |
+| 2026-02-01 | Caption-first always on, removed `--caption-first` flag, cookie rotation in caption fetcher, removed max_keywords param, fixed LLM text response format |
 | 2026-01-29 | Streamlined CLAUDE.md: consolidated rules, reduced verbosity |
 | 2026-01-29 | Fix: Download timeout — `_download_by_ids` now downloads one-at-a-time (Rule 28) |
 | 2026-01-28 | Feat: Ralph Loop self-healing — T1/T2/T3 health checks, sprint freeze |

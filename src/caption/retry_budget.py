@@ -27,13 +27,7 @@ class CaptionRetryBudgetConfig:
 
     Controls when caption fetching should stop due to resource exhaustion.
 
-    Example config in project_config.yaml:
-        download:
-          caption_first:
-            retry_budget:
-              enabled: true
-              max_attempts: 100
-              max_backoff_time_seconds: 300
+    Configure in config.yaml under download.caption_first.retry_budget.
     """
     # Enable/disable retry budget tracking
     enabled: bool = True

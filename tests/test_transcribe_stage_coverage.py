@@ -477,9 +477,7 @@ class TestYamlLoaderFallback:
 
         mock_checkpoint.checkpoint_path = temp_project_dir / "checkpoint.json"
 
-        # Create project_config.yaml
-        config_path = temp_project_dir / "project_config.yaml"
-        config_path.write_text('cache:\n  cache_dir: .cache')
+        # Note: Uses default cache_dir of ".cache"
 
         mock_glob.return_value = []  # No transcript files
 
@@ -497,9 +495,7 @@ class TestYamlLoaderFallback:
 
         mock_checkpoint.checkpoint_path = temp_project_dir / "checkpoint.json"
 
-        # Create project_config.yaml
-        config_path = temp_project_dir / "project_config.yaml"
-        config_path.write_text('cache:\n  cache_dir: .cache')
+        # Note: Uses default cache_dir of ".cache"
 
         # Create cache directory
         cache_dir = temp_project_dir / ".cache" / "transcriptions"
@@ -542,9 +538,7 @@ class TestTranscriptLoadingErrors:
 
         mock_checkpoint.checkpoint_path = temp_project_dir / "checkpoint.json"
 
-        # Create project_config.yaml
-        config_path = temp_project_dir / "project_config.yaml"
-        config_path.write_text('cache:\n  cache_dir: .cache')
+        # Note: Uses default cache_dir of ".cache"
 
         # Create cache directory with corrupt transcript
         cache_dir = temp_project_dir / ".cache" / "transcriptions"
@@ -572,9 +566,7 @@ class TestTranscriptLoadingErrors:
 
         mock_checkpoint.checkpoint_path = temp_project_dir / "checkpoint.json"
 
-        # Create project_config.yaml
-        config_path = temp_project_dir / "project_config.yaml"
-        config_path.write_text('cache:\n  cache_dir: .cache')
+        # Note: Uses default cache_dir of ".cache"
 
         # Create cache directory with valid transcript
         cache_dir = temp_project_dir / ".cache" / "transcriptions"
