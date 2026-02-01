@@ -131,18 +131,19 @@ function Show-ModeSelection {
 function Get-EmojiForCategory {
     param([string]$CategoryId)
 
+    # Use unicode box characters instead of brackets to avoid confusion with selectable options
     $emojiMap = @{
-        "core"         = "[C]"
-        "acquisition"  = "[A]"
-        "processing"   = "[P]"
-        "output"       = "[O]"
-        "intelligence" = "[I]"
-        "meta"         = "[M]"
+        "core"         = "■"
+        "acquisition"  = "■"
+        "processing"   = "■"
+        "output"       = "■"
+        "intelligence" = "■"
+        "meta"         = "■"
     }
 
     $emoji = $emojiMap[$CategoryId]
     if ($emoji) { return $emoji }
-    return "[?]"
+    return "■"
 }
 
 function Show-CategorizedFocusAreaSelection {
@@ -181,7 +182,8 @@ function Show-CategorizedFocusAreaSelection {
     }
 
     Write-Host ""
-    $selection = Read-Host "  Enter focus area (1-$($areaList.Count)), or press Enter for Ralph's Choice"
+    Write-Host "  Enter number (1-$($areaList.Count)) or press Enter for Ralph's Choice" -ForegroundColor DarkGray
+    $selection = Read-Host "  "
 
     if ([string]::IsNullOrWhiteSpace($selection)) {
         return $null
@@ -193,8 +195,16 @@ function Show-CategorizedFocusAreaSelection {
         if ($index -ge 0 -and $index -lt $areaList.Count) {
             return $areaList[$index]
         }
+        Write-Host "  Invalid number: $selection (must be 1-$($areaList.Count))" -ForegroundColor Yellow
+    } else {
+        # Try matching by area name
+        $selectionLower = $selection.ToLower().Trim()
+        $matchedArea = $areaList | Where-Object { $_ -eq $selectionLower }
+        if ($matchedArea) {
+            return $matchedArea
+        }
+        Write-Host "  Invalid selection: $selection (use numbers 1-$($areaList.Count) or area name)" -ForegroundColor Yellow
     }
-    Write-Host "  Invalid selection: $selection" -ForegroundColor Yellow
     return $null
 }
 

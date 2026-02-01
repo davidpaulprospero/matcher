@@ -53,8 +53,8 @@
             "id": "US-1-004",
             "title": "Add MullvadConfig dataclass to download config",
             "priority": 3,
-            "passes": false,
-            "notes": "Tier 1 (Quick Win). Add configuration section for Mullvad VPN. Source files: src/config/sections/download.py (lines 1-838, existing VPNConfig at lines ~200-250). Target: Add MullvadConfig dataclass after VPNConfig, update DownloadConfig.__post_init__.",
+            "passes": true,
+            "notes": "Tier 1 (Quick Win). Added MullvadConfig dataclass with fields: enabled, preferred_countries, rotation_strategy, max_rotations_per_session, verification_timeout, rotation_delay_seconds. Added to DownloadConfig with __post_init__ dict conversion. Exported in __all__.",
             "acceptanceCriteria": [
                 "Create MullvadConfig dataclass in src/config/sections/download.py",
                 "Add fields: enabled (bool), preferred_countries (List[str]), rotation_strategy (str)",
