@@ -44,6 +44,7 @@ from .cookie_method_fallback import CookieMethodFallback
 from .impersonation import ImpersonationManager
 from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
 from .vpn_manager import VPNManager
+from .mullvad_vpn import MullvadVPN
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig
@@ -330,6 +331,18 @@ class VideoDownloader:
                 logger.info("VPN manager enabled for IP rotation")
         else:
             self.vpn_manager = None
+
+        # Mullvad VPN manager (Tier 4 bypass - IP rotation via Mullvad)
+        mullvad_config = getattr(self.download_config, 'mullvad', None)
+        if mullvad_config and getattr(mullvad_config, 'enabled', False):
+            self.mullvad_vpn = MullvadVPN(mullvad_config)
+            logger.info("Mullvad VPN enabled for Tier 4 IP rotation")
+            # Connect Mullvad to escalation manager for Tier 4 escalation
+            if self.escalation_manager:
+                self.escalation_manager.set_mullvad_vpn(self.mullvad_vpn)
+                logger.info("Escalation manager upgraded to 4-tier bypass (with Mullvad VPN)")
+        else:
+            self.mullvad_vpn = None
 
         # Rate limit backoff state (progressive delay before cookie rotation)
         self._rate_limit_backoff_count = 0  # Current backoff attempt count (global fallback)
@@ -2199,9 +2212,27 @@ class VideoDownloader:
                     # Record escalation trigger (403/bot-detection) before error classification
                     if self.escalation_manager and is_escalation_trigger(stderr):
                         self.escalation_manager.record_failure(keyword, stderr)
-                        # Check if Tier 3 reached - trigger cookie rotation
+                        # Check escalation state - may trigger Tier 3 (cookies) or Tier 4 (VPN)
                         esc_result = self.escalation_manager.get_escalation_args(keyword)
-                        if esc_result.rotate_cookies and self.cookie_rotator and self.cookie_rotator.is_enabled:
+
+                        # Tier 4: VPN rotation (takes precedence - changes IP which resets other limits)
+                        if esc_result.rotate_vpn and self.mullvad_vpn:
+                            logger.info(f"Tier 4 escalation for '{keyword}' ({tier}) — rotating VPN server")
+                            if self.mullvad_vpn.rotate_server():
+                                # Record VPN rotation in budget
+                                if self._share_budget_across_keywords:
+                                    self.rate_limit_budget.record_vpn_rotation()
+                                    # Reset cookie/backoff budgets after IP change
+                                    self.rate_limit_budget.reset_on_ip_change()
+                                # Reset circuit breaker after successful VPN rotation
+                                if self.circuit_breaker:
+                                    self.circuit_breaker.reset()
+                                logger.info(f"VPN rotation successful — circuit breaker reset, budgets refreshed")
+                            else:
+                                logger.warning(f"VPN rotation failed for '{keyword}' ({tier})")
+
+                        # Tier 3: Cookie rotation (if not doing VPN rotation)
+                        elif esc_result.rotate_cookies and self.cookie_rotator and self.cookie_rotator.is_enabled:
                             new_cookie = self.cookie_rotator.rotate()
                             if new_cookie:
                                 for i, arg in enumerate(cmd):

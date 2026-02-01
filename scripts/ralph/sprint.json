@@ -98,8 +98,8 @@
             "id": "US-1-007",
             "title": "Create tests for MullvadVPN class",
             "priority": 6,
-            "passes": false,
-            "notes": "Tier 1 (Quick Win). Create comprehensive tests for Mullvad integration. Target: tests/test_mullvad_vpn.py (new file). Use unittest.mock to mock subprocess calls.",
+            "passes": true,
+            "notes": "Tier 1 (Quick Win). Tests already created during US-1-003. File: tests/test_mullvad_vpn.py with 8 tests covering connect, disconnect, verify_connection (3 tests), rotate_server, get_status (2 tests). All tests use unittest.mock to mock subprocess calls.",
             "acceptanceCriteria": [
                 "Create tests/test_mullvad_vpn.py",
                 "Add test_mullvad_connect_calls_cli mocking subprocess",
