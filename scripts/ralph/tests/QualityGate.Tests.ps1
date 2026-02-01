@@ -20,7 +20,7 @@ BeforeAll {
     $script:RalphDir = Split-Path -Parent $PSScriptRoot  # scripts/ralph
     $script:RalphScript = Join-Path $script:RalphDir "ralph.ps1"
     $script:TestDataDir = Join-Path $PSScriptRoot "testdata\qualitygate"
-    $script:ConfigFile = Join-Path $script:RalphDir "ralph-config.json"
+    $script:ConfigFile = Join-Path $script:RalphDir "config\ralph-config.json"
 
     # Create test data directory
     if (-not (Test-Path $script:TestDataDir)) {
