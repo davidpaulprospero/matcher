@@ -547,56 +547,35 @@ class TestStrategyMatcher:
     """Test matching strategies"""
 
     @pytest.mark.fast
-    def test_strategy_matcher_init(self, config, scenes):
+    def test_strategy_matcher_init(self, config):
         """Test StrategyMatcher initialization"""
-        matcher = StrategyMatcher(config, scenes)
+        matcher = StrategyMatcher(config)
 
         assert matcher.config == config
-        assert matcher.scenes == scenes
-        assert matcher.variety_config is not None
+        assert matcher.mc == config.matching
 
     @pytest.mark.fast
-    def test_get_clip_id_generates_unique_id(self, config, scenes, video_segments):
+    def test_get_clip_id_generates_unique_id(self, config, video_segments):
         """Test clip ID generation"""
-        matcher = StrategyMatcher(config, scenes)
+        matcher = StrategyMatcher(config)
 
         clip_id = matcher.get_clip_id(video_segments[0])
 
         assert "tokyo_footage.mp4" in clip_id
-        assert "0.00" in clip_id  # start time
-        assert "10.00" in clip_id  # end time
+        assert "0.0" in clip_id  # start time
+        assert "10.0" in clip_id  # end time
 
     @pytest.mark.fast
-    def test_is_clip_excluded_same_clip(self, config, scenes, video_segments):
-        """Test exclusion of same clip"""
-        matcher = StrategyMatcher(config, scenes)
+    def test_get_clip_id_is_cached(self, config, video_segments):
+        """Test clip ID is cached for same segment"""
+        matcher = StrategyMatcher(config)
 
-        existing = [video_segments[0]]
-        is_excluded, reason = matcher.is_clip_excluded(
-            video_segments[0],
-            existing,
-            force_different_source=False
-        )
+        clip_id1 = matcher.get_clip_id(video_segments[0])
+        clip_id2 = matcher.get_clip_id(video_segments[0])
 
-        assert is_excluded is True
-        assert "Same clip" in reason
-
-    @pytest.mark.fast
-    def test_is_clip_excluded_different_source_required(self, config, scenes, video_segments):
-        """Test exclusion when different source required"""
-        config.output.variety.require_different_source = True
-        matcher = StrategyMatcher(config, scenes)
-
-        # Both segments from same source file
-        existing = [video_segments[0]]
-        is_excluded, reason = matcher.is_clip_excluded(
-            video_segments[1],  # Different segment, same source
-            existing,
-            force_different_source=True
-        )
-
-        assert is_excluded is True
-        assert "source" in reason.lower()
+        assert clip_id1 == clip_id2
+        # Should be in cache
+        assert id(video_segments[0]) in matcher._clip_id_cache
 
 
 # ============================================================================
@@ -607,66 +586,9 @@ class TestMatchingStrategies:
     """Test individual matching strategies"""
 
     @pytest.mark.fast
-    def test_match_visual_first_uses_scene_descriptions(self, config, scenes, vo_segments, video_segments):
-        """Test visual_first strategy prioritizes scenes"""
-        matcher = StrategyMatcher(config, scenes)
-
-        candidates = [(seg, 0.7) for seg in video_segments]
-        existing_matches = []
-
-        result = matcher.match_visual_first(
-            vo_segments[0],
-            candidates,
-            existing_matches
-        )
-
-        # Should return a match
-        assert result is not None or len(existing_matches) > 0  # May fail if all excluded
-
-    @pytest.mark.fast
-    def test_match_different_source_enforces_variety(self, config, scenes, vo_segments, video_segments):
-        """Test different_source strategy enforces source variety"""
-        matcher = StrategyMatcher(config, scenes)
-
-        candidates = [(seg, 0.7) for seg in video_segments]
-        existing_matches = [video_segments[0]]  # tokyo_footage.mp4
-
-        result = matcher.match_different_source(
-            vo_segments[0],
-            candidates,
-            existing_matches
-        )
-
-        # Should select from different source or None
-        if result:
-            assert result.video_segment.source_file not in [m.source_file for m in existing_matches]
-
-    @pytest.mark.fast
-    def test_match_keyword_only_uses_keywords(self, config, scenes, vo_segments, video_segments):
-        """Test keyword_only strategy uses keyword overlap"""
-        matcher = StrategyMatcher(config, scenes)
-
-        # Add keywords to segments
-        vo_segments[0].keywords = ["tokyo", "japan"]
-        video_segments[0].keywords = ["tokyo", "city"]
-        video_segments[1].keywords = ["building", "architecture"]
-
-        candidates = [(seg, 0.7) for seg in video_segments]
-        existing_matches = []
-
-        result = matcher.match_keyword_only(
-            vo_segments[0],
-            candidates,
-            existing_matches
-        )
-
-        # Should return a match based on keywords
-        assert result is not None or len(candidates) == 0
-
-    @pytest.mark.fast
-    def test_match_embedding_diversity_maximizes_difference(self, config, scenes, vo_segments, video_segments):
+    def test_match_embedding_diversity_maximizes_difference(self, config, vo_segments, video_segments):
         """Test embedding_diversity finds different clips"""
-        matcher = StrategyMatcher(config, scenes)
+        matcher = StrategyMatcher(config)
 
         # Create embeddings for testing
         vo_embedding = [0.9, 0.1, 0.0]
@@ -695,9 +617,9 @@ class TestMatchingStrategies:
             assert result.strategy == "embedding_diversity"
 
     @pytest.mark.fast
-    def test_match_broll_only_filters_by_is_broll(self, config, scenes, vo_segments, video_segments):
+    def test_match_broll_only_filters_by_is_broll(self, config, vo_segments, video_segments):
         """Test broll_only strategy filters by is_broll flag"""
-        matcher = StrategyMatcher(config, scenes)
+        matcher = StrategyMatcher(config)
 
         # Mark one segment as broll
         video_segments[2].is_broll = True
@@ -724,6 +646,36 @@ class TestMatchingStrategies:
         if result:
             assert getattr(result.video_segment, 'is_broll', False) is True
 
+    @pytest.mark.fast
+    def test_match_source_rotation_cycles_sources(self, config, vo_segments, video_segments):
+        """Test source_rotation strategy cycles through sources"""
+        matcher = StrategyMatcher(config)
+
+        vo_embedding = [0.9, 0.1, 0.0]
+        candidate_embeddings = {
+            matcher.get_clip_id(seg): [0.8, 0.1, 0.1] for seg in video_segments
+        }
+
+        candidates = [(seg, 0.7) for seg in video_segments]
+        # Primary used tokyo_footage.mp4
+        existing_matches = [video_segments[0]]
+        existing_embeddings = [[1.0, 0.0, 0.0]]
+        segment_index = 0
+
+        result = matcher.match_source_rotation(
+            vo_segments[0],
+            candidates,
+            existing_matches,
+            existing_embeddings,
+            candidate_embeddings,
+            vo_embedding,
+            segment_index
+        )
+
+        # Should prefer a different source from existing
+        if result:
+            assert result.strategy == "source_rotation"
+
 
 # ============================================================================
 # Test match_all_segments
@@ -737,7 +689,7 @@ class TestMatchAllSegments:
         """Test matching all segments"""
         vo_embeddings, video_embeddings = embeddings
 
-        with patch('src.matching.main.find_top_k_similar') as mock_find:
+        with patch('src.matching.embedding_search.find_top_k_similar') as mock_find:
             # Mock embedding search
             mock_find.return_value = ([0.9, 0.8], [0, 1])
 
@@ -767,7 +719,7 @@ class TestMatchAllSegments:
 
         vo_embeddings, video_embeddings = embeddings
 
-        with patch('src.matching.main.find_top_k_similar') as mock_find:
+        with patch('src.matching.embedding_search.find_top_k_similar') as mock_find:
             mock_find.return_value = ([0.9, 0.8], [0, 1])
 
             with patch('src.matching.llm_providers.GeminiMatcher'):
