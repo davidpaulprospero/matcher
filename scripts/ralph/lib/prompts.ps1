@@ -245,7 +245,7 @@ function Build-StoryPrompt {
 
     # Section 3: Retrospective context
     if ($recommendation.useRetrospective) {
-        $retroFile = Join-Path $script:RalphDir "last_retrospective.json"
+        $retroFile = if ($script:Paths) { $script:Paths.LastRetrospectiveFile } else { Join-Path $script:RalphDir "state\last_retrospective.json" }
         $retro = Read-JsonFile -Path $retroFile
         if ($retro) {
             $retroContext = Get-RetrospectiveContext -Retro @{
@@ -294,24 +294,33 @@ function Build-StoryPrompt {
         catch {}
     }
 
-    # Section 7: Acceptance criteria (when backpressure enabled)
-    if ($recommendation.useCriteria -and $config.flags.acceptanceDrivenBackpressure -and $Story) {
+    # Section 7: ALWAYS include full story details in prompt (prevents exploration stalls)
+    $promptParts += ""
+    $promptParts += "============================================================"
+    $promptParts += "STORY: $StoryId - $($Story.title)"
+    $promptParts += "============================================================"
+    $promptParts += ""
+
+    # Include story notes (contains critical context like file locations)
+    if ($Story.notes) {
+        $promptParts += "CONTEXT: $($Story.notes)"
         $promptParts += ""
-        $promptParts += "STORY: $StoryId - $($Story.title)"
-        $promptParts += ""
-        if ($Story.acceptanceCriteria) {
-            $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
-            foreach ($criterion in $Story.acceptanceCriteria) {
-                $promptParts += "  [ ] $criterion"
-            }
-            $promptParts += ""
+    }
+
+    if ($Story.acceptanceCriteria) {
+        $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+        foreach ($criterion in $Story.acceptanceCriteria) {
+            $promptParts += "  [ ] $criterion"
         }
-        $promptParts += "Work on this story from scripts/ralph/prd.json. Read scripts/ralph/prompt.md for instructions."
-        $promptParts += "Before marking the story as passed, verify EACH acceptance criterion above is met."
+        $promptParts += ""
     }
-    else {
-        $promptParts += "Work on story $StoryId from scripts/ralph/prd.json. Read scripts/ralph/prompt.md for instructions."
-    }
+
+    # Concise instructions - story details already provided above
+    $promptParts += "INSTRUCTIONS:"
+    $promptParts += "1. All story details are above - DO NOT read prd.json (saves time)"
+    $promptParts += "2. Read scripts/ralph/prompt.md for project-level instructions"
+    $promptParts += "3. Implement the story, verify all acceptance criteria"
+    $promptParts += "4. Update prd.json to set passes: true when complete"
 
     $prompt = $promptParts -join "`n"
 

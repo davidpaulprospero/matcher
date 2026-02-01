@@ -13,6 +13,8 @@ __all__ = [
     'ZeroDownloadRemixConfig',
     'EnhancedFeaturesConfig',
     'LLMTitleFilterConfig',
+    'CaptionCircuitBreakerConfig',
+    'CaptionRetryBudgetConfig',
     'CaptionFirstConfig',
     'AudioFirstConfig',
     'SpeechScreeningConfig',
@@ -124,6 +126,70 @@ class LLMTitleFilterConfig:
     model: str = "gemini-2.0-flash"  # or claude-3-haiku-20240307
     batch_size: int = 20  # Check multiple titles at once
     min_relevance: float = 0.7  # 0-1, reject if below
+
+
+@dataclass
+class CaptionCircuitBreakerConfig:
+    """Circuit breaker for repeated caption fetch failures (US-33-009).
+
+    When multiple consecutive caption fetches fail, the circuit breaker
+    trips and pauses all fetches for a duration. This prevents hammering
+    YouTube during rate limit windows.
+
+    Example with defaults:
+      - 10 fetches fail in a row → circuit trips
+      - Wait 120 seconds before allowing new fetches
+      - On next successful fetch → circuit resets to closed state
+
+    Enable per-project in project_config.yaml:
+        download:
+          caption_first:
+            circuit_breaker:
+              enabled: true
+              threshold: 10
+              pause_seconds: 120
+    """
+    # Enable/disable circuit breaker
+    enabled: bool = True
+
+    # Number of consecutive failures before circuit trips (opens)
+    threshold: int = 10
+
+    # Duration to pause after circuit trips (seconds)
+    pause_seconds: float = 120.0
+
+    # Maximum pause duration cap (seconds) to prevent runaway pause scaling
+    max_pause_seconds: float = 300.0
+
+
+@dataclass
+class CaptionRetryBudgetConfig:
+    """Retry budget for caption fetching across all videos (US-33-010).
+
+    Tracks total attempts and backoff time used across the entire batch.
+    When limits are exceeded, remaining videos are skipped and use
+    transcription fallback.
+
+    Example in project_config.yaml:
+        download:
+          caption_first:
+            retry_budget:
+              enabled: true
+              max_attempts: 100
+              max_backoff_time_seconds: 300
+    """
+    # Enable/disable retry budget tracking
+    enabled: bool = True
+
+    # Maximum total fetch attempts across all videos in batch
+    # Includes both successful and failed attempts
+    # Set to 0 for unlimited attempts
+    max_attempts: int = 100
+
+    # Maximum cumulative backoff time (seconds) before exhaustion
+    # This prevents spending too much time waiting between retries
+    # Set to 0 for unlimited backoff
+    max_backoff_time_seconds: float = 300.0
 
 
 @dataclass
@@ -339,6 +405,33 @@ class CaptionFirstConfig:
     # Workers exceeding this threshold are reported in progress callbacks.
     # Set higher for slow networks or videos with many caption tracks.
     stuck_worker_threshold: float = 60.0
+
+    # Adaptive request spacing (US-33-004)
+    # Minimum interval between caption fetch requests in milliseconds.
+    # Increased automatically when error rate is high, decreased when stable.
+    # This helps avoid triggering rate limits during batch processing.
+    min_request_interval_ms: int = 500
+
+    # Circuit breaker for repeated failures (US-33-009)
+    # Pauses caption fetching when too many consecutive failures occur
+    circuit_breaker: CaptionCircuitBreakerConfig = field(default_factory=CaptionCircuitBreakerConfig)
+
+    # Retry budget tracking across all videos in batch (US-33-010)
+    # Tracks total attempts and backoff time; skips remaining when exhausted
+    retry_budget: CaptionRetryBudgetConfig = field(default_factory=CaptionRetryBudgetConfig)
+
+    # Global rate limit coordinator integration (US-34-002)
+    # When enabled, acquires slots from GlobalRateLimitCoordinator before each fetch
+    # This provides unified rate limiting across caption fetching, downloading, and API calls
+    # Disable to use the existing per-stage rate limiting only
+    use_global_coordinator: bool = True
+
+    def __post_init__(self):
+        """Convert nested dicts to proper dataclass instances."""
+        if isinstance(self.circuit_breaker, dict):
+            self.circuit_breaker = CaptionCircuitBreakerConfig(**self.circuit_breaker)
+        if isinstance(self.retry_budget, dict):
+            self.retry_budget = CaptionRetryBudgetConfig(**self.retry_budget)
 
 
 @dataclass

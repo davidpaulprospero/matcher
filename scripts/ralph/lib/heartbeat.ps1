@@ -1,21 +1,26 @@
 # scripts/ralph/lib/heartbeat.ps1
 # Persistent heartbeat logging for diagnosing silent hangs
 
-$script:HeartbeatFile = Join-Path $script:RalphDir "heartbeat.json"
-$script:SessionLogFile = Join-Path $script:RalphDir "session.log"
+# Use centralized paths (initialized by paths.ps1)
+$script:HeartbeatFile = if ($script:Paths) { $script:Paths.HeartbeatFile } else { Join-Path $script:RalphDir "state\heartbeat.json" }
+$script:SessionLogFile = if ($script:Paths) { $script:Paths.SessionLogFile } else { Join-Path $script:RalphDir "session\session.log" }
 
 function Write-Heartbeat {
     <#
     .SYNOPSIS
         Write current status to heartbeat file for crash diagnosis
+        Also saves session state to queue.json for resume capability
     .PARAMETER Phase
         Current phase: "starting", "waiting_for_claude", "processing_result", "between_iterations"
     .PARAMETER Details
         Hashtable with additional context
+    .PARAMETER SkipQueueSave
+        If true, skip saving to queue.json (for high-frequency calls)
     #>
     param(
         [Parameter(Mandatory)][string]$Phase,
-        [hashtable]$Details = @{}
+        [hashtable]$Details = @{},
+        [switch]$SkipQueueSave
     )
 
     $heartbeat = @{
@@ -36,6 +41,17 @@ function Write-Heartbeat {
     }
     catch {
         # Silent fail - don't break the loop for logging issues
+    }
+
+    # Progressive save: update queue.json with session state
+    # Only on significant phase changes to avoid I/O overhead
+    if (-not $SkipQueueSave -and $Phase -in @("between_iterations", "story_starting", "loop_starting", "sprint_complete")) {
+        try {
+            Save-SessionState -SessionState $script:State
+        }
+        catch {
+            # Silent fail
+        }
     }
 }
 

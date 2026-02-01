@@ -122,7 +122,7 @@ class TestVideoDownloaderParallelWorkers:
         with patch.object(downloader, '_load_checkpoint', return_value=None):
             with patch.object(downloader, '_save_checkpoint'):
                 with patch('builtins.print'):  # Suppress progress output
-                    with patch('src.downloader.core.logger') as mock_logger:
+                    with patch('src.downloader.orchestrator.logger') as mock_logger:
                         downloader.download_all(
                             keywords=["test"],
                             output_dir=output_dir,
@@ -165,7 +165,7 @@ class TestVideoDownloaderParallelWorkers:
         with patch.object(downloader, '_load_checkpoint', return_value=None):
             with patch.object(downloader, '_save_checkpoint'):
                 with patch('builtins.print'):
-                    with patch('src.downloader.core.logger') as mock_logger:
+                    with patch('src.downloader.orchestrator.logger') as mock_logger:
                         downloader.download_all(
                             keywords=["test"],
                             output_dir=output_dir,
@@ -209,7 +209,7 @@ class TestVideoDownloaderParallelWorkers:
         with patch.object(downloader, '_load_checkpoint', return_value=None):
             with patch.object(downloader, '_save_checkpoint'):
                 with patch('builtins.print'):
-                    with patch('src.downloader.core.logger') as mock_logger:
+                    with patch('src.downloader.orchestrator.logger') as mock_logger:
                         downloader.download_all(
                             keywords=["test"],
                             output_dir=output_dir,
@@ -279,7 +279,7 @@ class TestParallelWorkers8Configuration:
         with patch.object(downloader, '_load_checkpoint', return_value=None):
             with patch.object(downloader, '_save_checkpoint'):
                 with patch('builtins.print'):
-                    with patch('src.downloader.core.logger') as mock_logger:
+                    with patch('src.downloader.orchestrator.logger') as mock_logger:
                         downloader.download_all(
                             keywords=["test"],
                             output_dir=output_dir,

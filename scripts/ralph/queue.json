@@ -1,117 +1,118 @@
 ﻿{
     "focusAreas":  [
                        {
-                           "id":  "download",
-                           "completed":  true,
-                           "startedAt":  "2026-01-26T12:00:00Z",
-                           "completedAt":  "2026-01-26T17:44:27Z"
-                       },
-                       {
-                           "id":  "rate-limiting",
-                           "completed":  true,
+                           "completedAt":  null,
                            "startedAt":  null,
-                           "completedAt":  "2026-01-28T14:10:00"
-                       },
-                       {
-                           "id":  "testing",
                            "completed":  false,
-                           "startedAt":  "2026-01-29T05:00:00",
-                           "completedAt":  null
+                           "id":  "refactoring"
                        },
                        {
-                           "id":  "caption",
-                           "completed":  true,
+                           "completedAt":  null,
                            "startedAt":  null,
-                           "completedAt":  "2026-01-28T15:18:14"
-                       },
-                       {
-                           "id":  "quality",
-                           "completed":  true,
-                           "startedAt":  "2026-01-28T18:30:00",
-                           "completedAt":  "2026-01-28T20:22:48"
-                       },
-                       {
-                           "id":  "pipeline",
                            "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
+                           "id":  "rate-limiting"
                        },
                        {
-                           "id":  "agents",
-                           "completed":  false,
+                           "completedAt":  null,
                            "startedAt":  null,
-                           "completedAt":  null
+                           "completed":  false,
+                           "id":  "caption"
                        },
                        {
-                           "id":  "otio",
-                           "completed":  false,
+                           "completedAt":  null,
                            "startedAt":  null,
-                           "completedAt":  null
+                           "completed":  false,
+                           "id":  "download"
                        },
                        {
-                           "id":  "speed",
-                           "completed":  false,
+                           "completedAt":  null,
                            "startedAt":  null,
-                           "completedAt":  null
-                       },
-                       {
-                           "id":  "config",
                            "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
-                       },
-                       {
-                           "id":  "unit-tests",
-                           "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
-                       },
-                       {
-                           "id":  "compilation",
-                           "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
-                       },
-                       {
-                           "id":  "client-learning",
-                           "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
-                       },
-                       {
-                           "id":  "ux",
-                           "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
-                       },
-                       {
-                           "id":  "documentation",
-                           "completed":  false,
-                           "startedAt":  null,
-                           "completedAt":  null
+                           "id":  "testing"
                        }
                    ],
-    "sessionId":  "full-sweep-2026-01-28",
-    "createdAt":  "2026-01-28T18:00:00Z",
-    "interviewContext":  "Sprint 27 continues testing infrastructure maturity after Sprint 26 completed bulk marker assignment (10,957 markers), marker-based CI workflow, fixture adoption enforcement, benchmark baseline tracking, test isolation auditing, agent healer coverage, matching strategy coverage, mock patterns documentation, helper adoption measurement, and lint workflow fixes. This sprint focuses on: (1) completing marker assignment for remaining ~292 unmarked tests, (2) converting skipped integration tests to proper conditional tests, (3) adding mutation testing foundation with mutmut, (4) improving test parallelization with xdist optimization, (5) adding property-based testing with hypothesis for core algorithms, (6) creating test data generators for edge cases, (7) adding test performance profiling and slow test optimization, and (8) improving test coverage for compilation module (currently at 84%, target 85%).",
+    "sessionId":  "12048bef",
+    "createdAt":  "2026-02-01 10:43:14",
+    "interviewContext":  "improvement: Context: caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests\n\nImproved Specifications:\r\nGod File Refactoring:\r\n- Split large files in src/ that exceed 400 lines\r\n- Target files:   * src\\matching\\llm_providers.py   * src\\downloader\\title_filter.py   * src\\downloader\\retry_queue.py   * src\\matching\\main.py   * src\\matching\\tiered_matcher.py\r\n- Extract shared utilities into focused modules\r\n- Apply Single Responsibility Principle to classes handling \u003e3 concerns\n\r\nRate Limiting Infrastructure:\r\n- Implement bulletproof rate limiting for all yt-dlp/YouTube operations\r\n- Add exponential backoff with jitter for 429/quota errors\r\n- Existing patterns to integrate: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py\r\n- Do NOT reduce download quantities - implement smarter throttling instead\r\n- Add configurable rate limits to relevant config sections\n\r\nCaption Rate Limiting:\r\n- Add rate limiting/backoff to caption fetching in src/stages/caption_stage.py\r\n- Handle YouTube API 429 errors gracefully with exponential backoff\r\n- Integrate with existing CaptionTimeoutManager pattern (if exists)\r\n- Add configurable rate limits to src/config/sections/caption.py\r\n- Relevant files: src/caption_fetcher.py, src/caption_fetcher_cache.py, src/caption_timeout_manager.py, src/stages/caption_stage.py\n\r\nTesting Requirements:\r\n- Current test count: ~356 test files\r\n- Source modules to cover: agents, cache, caption, chapter_detection, chapter_detector, cleanup, cli, compilation, config, downloader, feedback, iterative_match, keyword_extractor, llm_client, matching, media_sources, otio, pot_utils, research, stages, transcription, __pycache__\r\n- Focus on edge cases, error handling, and integration tests\r\n- Use pytest with markers (fast, integration, requires_api)\r\n- Achieve meaningful coverage, not just line coverage\n\nCodebase Analysis:\n- Large files detected: 10 files over 400 lines\n- Existing patterns to integrate with: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py",
     "interviewDetails":  {
+                             "details":  "Context: caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests\n\nImproved Specifications:\r\nGod File Refactoring:\r\n- Split large files in src/ that exceed 400 lines\r\n- Target files:   * src\\matching\\llm_providers.py   * src\\downloader\\title_filter.py   * src\\downloader\\retry_queue.py   * src\\matching\\main.py   * src\\matching\\tiered_matcher.py\r\n- Extract shared utilities into focused modules\r\n- Apply Single Responsibility Principle to classes handling \u003e3 concerns\n\r\nRate Limiting Infrastructure:\r\n- Implement bulletproof rate limiting for all yt-dlp/YouTube operations\r\n- Add exponential backoff with jitter for 429/quota errors\r\n- Existing patterns to integrate: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py\r\n- Do NOT reduce download quantities - implement smarter throttling instead\r\n- Add configurable rate limits to relevant config sections\n\r\nCaption Rate Limiting:\r\n- Add rate limiting/backoff to caption fetching in src/stages/caption_stage.py\r\n- Handle YouTube API 429 errors gracefully with exponential backoff\r\n- Integrate with existing CaptionTimeoutManager pattern (if exists)\r\n- Add configurable rate limits to src/config/sections/caption.py\r\n- Relevant files: src/caption_fetcher.py, src/caption_fetcher_cache.py, src/caption_timeout_manager.py, src/stages/caption_stage.py\n\r\nTesting Requirements:\r\n- Current test count: ~356 test files\r\n- Source modules to cover: agents, cache, caption, chapter_detection, chapter_detector, cleanup, cli, compilation, config, downloader, feedback, iterative_match, keyword_extractor, llm_client, matching, media_sources, otio, pot_utils, research, stages, transcription, __pycache__\r\n- Focus on edge cases, error handling, and integration tests\r\n- Use pytest with markers (fast, integration, requires_api)\r\n- Achieve meaningful coverage, not just line coverage\n\nCodebase Analysis:\n- Large files detected: 10 files over 400 lines\n- Existing patterns to integrate with: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py",
                              "workType":  "improvement",
-                             "description":  "Broad codebase improvement across all untouched focus areas",
-                             "completedAreas":  {
-                                                    "download":  "3 sprints, 30 stories - core download, audio-first, impersonation, escalation",
-                                                    "rate-limiting":  "1 sprint, 10 stories - cookie rotation, circuit breaker, rate budget",
-                                                    "testing":  "6 sprints, 53 stories - conftest, fixtures, coverage gaps, markers, CI workflow",
-                                                    "caption":  "4 sprints, 42 stories - caption-first mode, fetcher, cache, validation"
-                                                },
-                             "keyPriorities":  [
-                                                   "Complete marker assignment for remaining unmarked tests",
-                                                   "Convert skipped tests to proper conditional tests",
-                                                   "Add mutation testing foundation",
-                                                   "Optimize test parallelization",
-                                                   "Add property-based testing for algorithms",
-                                                   "Create edge case test data generators",
-                                                   "Performance profiling and slow test optimization",
-                                                   "Improve compilation module coverage to 85%"
-                                               ]
+                             "timestamp":  "2026-02-01T10:43:10",
+                             "client":  "",
+                             "priority":  "normal",
+                             "improvedContext":  {
+                                                     "detectedAreas":  [
+                                                                           "refactoring",
+                                                                           "rate-limiting",
+                                                                           "caption",
+                                                                           "download",
+                                                                           "testing"
+                                                                       ],
+                                                     "improvedContext":  "Context: caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests\n\nImproved Specifications:\r\nGod File Refactoring:\r\n- Split large files in src/ that exceed 400 lines\r\n- Target files:   * src\\matching\\llm_providers.py   * src\\downloader\\title_filter.py   * src\\downloader\\retry_queue.py   * src\\matching\\main.py   * src\\matching\\tiered_matcher.py\r\n- Extract shared utilities into focused modules\r\n- Apply Single Responsibility Principle to classes handling \u003e3 concerns\n\r\nRate Limiting Infrastructure:\r\n- Implement bulletproof rate limiting for all yt-dlp/YouTube operations\r\n- Add exponential backoff with jitter for 429/quota errors\r\n- Existing patterns to integrate: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py\r\n- Do NOT reduce download quantities - implement smarter throttling instead\r\n- Add configurable rate limits to relevant config sections\n\r\nCaption Rate Limiting:\r\n- Add rate limiting/backoff to caption fetching in src/stages/caption_stage.py\r\n- Handle YouTube API 429 errors gracefully with exponential backoff\r\n- Integrate with existing CaptionTimeoutManager pattern (if exists)\r\n- Add configurable rate limits to src/config/sections/caption.py\r\n- Relevant files: src/caption_fetcher.py, src/caption_fetcher_cache.py, src/caption_timeout_manager.py, src/stages/caption_stage.py\n\r\nTesting Requirements:\r\n- Current test count: ~356 test files\r\n- Source modules to cover: agents, cache, caption, chapter_detection, chapter_detector, cleanup, cli, compilation, config, downloader, feedback, iterative_match, keyword_extractor, llm_client, matching, media_sources, otio, pot_utils, research, stages, transcription, __pycache__\r\n- Focus on edge cases, error handling, and integration tests\r\n- Use pytest with markers (fast, integration, requires_api)\r\n- Achieve meaningful coverage, not just line coverage\n\nCodebase Analysis:\n- Large files detected: 10 files over 400 lines\n- Existing patterns to integrate with: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py",
+                                                     "rawInput":  "caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests",
+                                                     "codebaseFindings":  {
+                                                                              "configOptions":  [
+
+                                                                                                ],
+                                                                              "largeFiles":  [
+                                                                                                 {
+                                                                                                     "lines":  850,
+                                                                                                     "path":  "src\\matching\\llm_providers.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  418,
+                                                                                                     "path":  "src\\downloader\\title_filter.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  551,
+                                                                                                     "path":  "src\\downloader\\retry_queue.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  563,
+                                                                                                     "path":  "src\\matching\\main.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  1113,
+                                                                                                     "path":  "src\\matching\\tiered_matcher.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  625,
+                                                                                                     "path":  "src\\matching\\strategies.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  1204,
+                                                                                                     "path":  "src\\matching\\scoring.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  838,
+                                                                                                     "path":  "src\\config\\sections\\download.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  706,
+                                                                                                     "path":  "src\\config\\base.py"
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "lines":  470,
+                                                                                                     "path":  "src\\cli\\cache_commands.py"
+                                                                                                 }
+                                                                                             ],
+                                                                              "existingPatterns":  [
+                                                                                                       "src/downloader/rate_limit_budget.py",
+                                                                                                       "src/downloader/cookie_rotator.py",
+                                                                                                       "src/caption_fetcher.py",
+                                                                                                       "src/caption_timeout_manager.py"
+                                                                                                   ],
+                                                                              "relevantCode":  [
+                                                                                                   "src/caption_fetcher.py",
+                                                                                                   "src/caption_fetcher_cache.py",
+                                                                                                   "src/caption_timeout_manager.py",
+                                                                                                   "src/stages/caption_stage.py",
+                                                                                                   "src/downloader/core.py",
+                                                                                                   "src/downloader/rate_limit_budget.py",
+                                                                                                   "src/downloader/impersonation.py"
+                                                                                               ]
+                                                                          }
+                                                 },
+                             "area":  ""
                          }
 }

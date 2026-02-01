@@ -1,21 +1,27 @@
 """
-Tiered Matcher - Two-stage matching with LLM reranking
+Tiered Matcher - Two-stage matching with LLM reranking.
 
-Extracted from monolithic matching.py (Jan 2026).
-Uses refactored modules to eliminate 406 lines of duplication.
+Refactored architecture (Feb 2026):
+- Uses composition with extracted modules for single responsibility
+- EmbeddingSearch (in main.py): Embedding similarity search
+- LLMReranker: LLM-based candidate reranking
+- AlternativeSelector: V2-V6 track selection
+- LocationMatcher: Geographic filtering
+- CandidateFilter: Face/location/reuse filtering (US-33-006)
+- scoring.py: Confidence adjustments and penalties
 
 Core functionality:
 - Two-stage matching: embedding similarity → LLM reranking
 - Smart reuse prevention and confidence adjustment
 - Location-aware filtering (delegates to LocationMatcher)
+- Candidate filtering (delegates to CandidateFilter - face, location, reuse)
 - Topic-based penalty for chapter matching (uses scoring.py)
 - B-roll boost and project boost (uses scoring.py)
-- Alternative and secondary match generation
+- Alternative and secondary match generation (delegates to AlternativeSelector)
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import statistics
 import time
@@ -24,6 +30,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 # Refactored modules - REUSE instead of duplicating (406 lines saved)
 from .scoring import (
+    MatchScoring,  # US-33-005: Composition class for scoring
     apply_topic_penalty,
     apply_broll_boost,
     apply_caption_quality_adjustment,  # US-007
@@ -39,6 +46,9 @@ from .scoring import (
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
+from .llm_reranker import LLMReranker, LLMRerankerConfig
+from .alternative_selection import AlternativeSelector, AlternativeSelectionConfig
+from .candidate_filter import CandidateFilter  # US-33-006: Extracted filtering
 from .similarity_cache import (
     get_keyword_cache, text_hash as compute_text_hash, log_all_cache_stats
 )
@@ -135,6 +145,27 @@ class TieredMatcher:
         self.secondary_provider = None
         self.local_provider = None
         self._init_providers()
+
+        # Initialize LLM reranker (delegates LLM selection logic)
+        self.llm_reranker = LLMReranker(
+            config=LLMRerankerConfig(
+                ambiguous_threshold=getattr(mc, 'ambiguous_threshold', 0.65),
+                cache_llm_responses=getattr(mc, 'cache_llm_responses', True)
+            ),
+            cache=cache
+        )
+
+        # Initialize alternative selector (delegates V2-V6 selection)
+        self.alt_selector = AlternativeSelector.from_output_config(self.config.output)
+
+        # Initialize scoring module (US-33-005: composition for scoring logic)
+        self.scoring = MatchScoring(self.config)
+
+        # Initialize candidate filter (US-33-006: composition for filtering logic)
+        self.candidate_filter = CandidateFilter(
+            config=self.config,
+            location_matcher=self.location_matcher
+        )
 
     def _init_providers(self):
         """Initialize LLM providers based on config"""
@@ -469,33 +500,7 @@ class TieredMatcher:
 
         return boosted_confidence, reasoning, matched_entity_names
 
-    def _should_skip_llm(self, similarity: float) -> bool:
-        """Skip LLM if embedding similarity is high enough"""
-        return similarity >= self.config.matching.high_confidence_threshold
-
-    def _get_cache_key(self, vo_text: str, candidates: List[Tuple[SRTSegment, float]]) -> str:
-        """Generate cache key for LLM response"""
-        content = vo_text + "|" + "|".join(c[0].text for c in candidates[:5])
-        return hashlib.md5(content.encode()).hexdigest()[:16]
-
-    def _get_cached_response(self, cache_key: str) -> Optional[Tuple[int, float, str]]:
-        """Get cached LLM response"""
-        if not self.config.matching.cache_llm_responses or not self.cache:
-            return None
-
-        cached = self.cache.get_llm_response(cache_key)
-        if cached:
-            return (cached['selected'], cached['confidence'], cached['reasoning'])
-        return None
-
-    def _cache_response(self, cache_key: str, selected: int, confidence: float, reasoning: str):
-        """Cache LLM response"""
-        if self.config.matching.cache_llm_responses and self.cache:
-            self.cache.save_llm_response(cache_key, {
-                'selected': selected,
-                'confidence': confidence,
-                'reasoning': reasoning
-            })
+    # Note: _get_cache_key, _get_cached_response, _cache_response moved to LLMReranker
 
     def _get_scene_for_segment(
         self,
@@ -573,68 +578,27 @@ class TieredMatcher:
             )
             return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="No candidates")
 
-        # Apply face preference if set
-        face_start_time = time.time()
-        if self.face_preference != 'neutral':
-            current_project_candidates = []
-            global_cache_candidates = []
+        # Apply all candidate filters (US-33-006: delegated to CandidateFilter)
+        filter_start_time = time.time()
+        cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
 
-            for seg, sim in candidates:
-                source = getattr(seg, 'source', None)
-                if source == 'global_cache':
-                    global_cache_candidates.append((seg, sim))
-                else:
-                    current_project_candidates.append((seg, sim))
+        filter_result = self.candidate_filter.apply_all_filters(
+            vo_segment=vo_segment,
+            candidates=candidates,
+            segment_idx=segment_idx,
+            reuse_tracker=self.reuse_tracker,
+            cache_dir=cache_dir
+        )
+        valid_candidates = filter_result.candidates
 
-            # Apply face detection to current project videos
-            if current_project_candidates:
-                logger.info(f"  match_segment: face preference '{self.face_preference}' - {len(current_project_candidates)} project, {len(global_cache_candidates)} cached")
-                cache_dir = self.cache.cache_dir if hasattr(self.cache, 'cache_dir') else None
-                current_project_candidates = apply_face_preference(current_project_candidates, self.face_preference, cache_dir)
+        filter_elapsed = time.time() - filter_start_time
+        if filter_elapsed > 1.0:
+            logger.info(f"  match_segment: filtering took {filter_elapsed:.2f}s")
 
-            # Apply cached face scores to global cache candidates
-            if global_cache_candidates:
-                adjusted_cache = []
-                for seg, score in global_cache_candidates:
-                    cached_face_score = getattr(seg, 'face_score', None)
-                    if cached_face_score is not None:
-                        if self.face_preference == "more":
-                            boost = cached_face_score * 0.3
-                            adjusted_cache.append((seg, min(1.0, score + boost)))
-                        elif self.face_preference == "none":
-                            boost = (1.0 - cached_face_score) * 0.3
-                            adjusted_cache.append((seg, min(1.0, score + boost)))
-                        else:
-                            adjusted_cache.append((seg, score))
-                    else:
-                        adjusted_cache.append((seg, score))
-                global_cache_candidates = adjusted_cache
-
-            candidates = current_project_candidates + global_cache_candidates
-            candidates.sort(key=lambda x: x[1], reverse=True)
-
-        face_elapsed = time.time() - face_start_time
-        if face_elapsed > 1.0:
-            logger.info(f"  match_segment: face preference took {face_elapsed:.2f}s")
-
-        # Apply location-based filtering (delegate to LocationMatcher)
-        location_filter_applied = False
-        location_reason = ""
-        if self.location_matcher:
-            candidates, location_filter_applied, location_reason = self.location_matcher.apply_location_filter(
-                vo_segment, candidates, segment_idx,
-                self.location_matching_enabled, self.location_matching_config
-            )
-
-        # Apply smart reuse filtering
-        valid_candidates = []
-        for seg, sim in candidates:
-            if self.reuse_tracker.can_use(seg):
-                adjusted_sim = self.reuse_tracker.adjust_confidence(seg, sim)
-                valid_candidates.append((seg, adjusted_sim))
-
-        if not valid_candidates:
-            valid_candidates = [(seg, sim * 0.5) for seg, sim in candidates[:5]]
+        if filter_result.face_filter_applied:
+            logger.debug(f"  Face preference applied: {self.face_preference}")
+        if filter_result.location_filter_applied:
+            logger.debug(f"  Location filter: {filter_result.location_reason}")
 
         if not valid_candidates:
             logger.warning(f"  match_segment: no valid candidates after filtering")
@@ -730,7 +694,9 @@ class TieredMatcher:
                 clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
             )
 
-            alternatives = self._get_alternatives(valid_candidates[1:4], scenes, best_seg)
+            alternatives = self.alt_selector.get_alternatives(
+                valid_candidates[1:4], scenes, best_seg, self._get_scene_for_segment
+            )
 
             used_video_files = {best_seg.source_file}
             alt_segments = []
@@ -738,9 +704,10 @@ class TieredMatcher:
                 used_video_files.add(alt.video_segment.source_file)
                 alt_segments.append(alt.video_segment)
 
-            secondary_matches = self._get_secondary_matches(
+            secondary_matches = self.alt_selector.get_secondary_matches(
                 valid_candidates, scenes, used_video_files,
-                primary_segment=best_seg, alt_segments=alt_segments
+                primary_segment=best_seg, alt_segments=alt_segments,
+                get_scene_fn=self._get_scene_for_segment
             )
 
             confidence_variance = self._calculate_confidence_variance(valid_candidates)
@@ -807,7 +774,9 @@ class TieredMatcher:
                 clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
             )
 
-            alternatives = self._get_alternatives(valid_candidates[1:4], scenes, best_seg)
+            alternatives = self.alt_selector.get_alternatives(
+                valid_candidates[1:4], scenes, best_seg, self._get_scene_for_segment
+            )
 
             used_video_files = {best_seg.source_file}
             alt_segments = []
@@ -815,9 +784,10 @@ class TieredMatcher:
                 used_video_files.add(alt.video_segment.source_file)
                 alt_segments.append(alt.video_segment)
 
-            secondary_matches = self._get_secondary_matches(
+            secondary_matches = self.alt_selector.get_secondary_matches(
                 valid_candidates, scenes, used_video_files,
-                primary_segment=best_seg, alt_segments=alt_segments
+                primary_segment=best_seg, alt_segments=alt_segments,
+                get_scene_fn=self._get_scene_for_segment
             )
 
             # Calculate confidence variance for top candidates
@@ -834,149 +804,25 @@ class TieredMatcher:
                 matched_keywords=matched_keywords
             )
 
-        # Check cache
-        cache_check_start = time.time()
-        cache_key = self._get_cache_key(vo_segment.text, valid_candidates)
-        cached = self._get_cached_response(cache_key)
-        cache_check_elapsed = time.time() - cache_check_start
-        if cache_check_elapsed > 1.0:
-            logger.info(f"  match_segment: cache check took {cache_check_elapsed:.2f}s")
-
-        if cached:
-            selected_idx, confidence, reasoning = cached
-            selected_idx = min(selected_idx, len(valid_candidates) - 1)
-            cached_seg = valid_candidates[selected_idx][0]
-
-            if self.reuse_tracker.can_use(cached_seg):
-                self.reuse_tracker.record_usage(cached_seg)
-                scene = self._get_scene_for_segment(cached_seg, scenes)
-
-                # Apply scoring adjustments
-                adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
-                    confidence, vo_segment, cached_seg,
-                    video_topics=self.video_topics,
-                    chapter_matching_enabled=self.chapter_matching_enabled,
-                    topic_mismatch_penalty=self.topic_mismatch_penalty
-                )
-
-                adjusted_confidence, broll_reason = apply_broll_boost(
-                    adjusted_confidence, cached_seg, self.config
-                )
-
-                # US-007: Apply caption quality adjustment
-                adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
-                    adjusted_confidence, cached_seg, self.config
-                )
-
-                # US-008 Sprint 7: Apply timing penalty for poor caption timing
-                adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
-                    adjusted_confidence, cached_seg, self.config
-                )
-
-                adjusted_confidence, project_reason = apply_current_project_boost(
-                    adjusted_confidence, cached_seg, self.config
-                )
-
-                final_reasoning = f"(cached) {reasoning}"
-                if topic_penalty_reason:
-                    final_reasoning += f" [{topic_penalty_reason}]"
-                if broll_reason:
-                    final_reasoning += f" [{broll_reason}]"
-                if caption_quality_reason:
-                    final_reasoning += f" [{caption_quality_reason}]"
-                if timing_penalty_reason:
-                    final_reasoning += f" [{timing_penalty_reason}]"
-                if project_reason:
-                    final_reasoning += f" [{project_reason}]"
-
-                match = Match(
-                    voiceover_segment=vo_segment,
-                    video_segment=cached_seg,
-                    video_scene=scene,
-                    confidence=adjusted_confidence,
-                    reasoning=final_reasoning,
-                    embedding_similarity=valid_candidates[selected_idx][1],
-                    clip_reuse_count=self.reuse_tracker.get_usage_count(cached_seg)
-                )
-
-                alternatives = self._get_alternatives(
-                    [c for i, c in enumerate(valid_candidates[:4]) if i != selected_idx],
-                    scenes, cached_seg
-                )
-
-                used_video_files = {cached_seg.source_file}
-                alt_segments = []
-                for alt in alternatives:
-                    used_video_files.add(alt.video_segment.source_file)
-                    alt_segments.append(alt.video_segment)
-
-                secondary_matches = self._get_secondary_matches(
-                    valid_candidates, scenes, used_video_files,
-                    primary_segment=cached_seg, alt_segments=alt_segments
-                )
-
-                # Calculate confidence variance for top candidates
-                confidence_variance = self._calculate_confidence_variance(valid_candidates)
-
-                # Extract matched keywords between voiceover and selected video
-                matched_keywords = self._extract_matched_keywords(vo_segment, cached_seg)
-
-                return MatchResult(
-                    primary_match=match,
-                    alternatives=alternatives,
-                    secondary_matches=secondary_matches,
-                    confidence_variance=confidence_variance,
-                    matched_keywords=matched_keywords
-                )
-            else:
-                # Build context and use LLM (cache hit but segment not reusable)
-                llm_start_time = time.time()
-                context = self._build_context(context_before, context_after)
-        else:
-            # Build context and use LLM (no cache hit)
-            llm_start_time = time.time()
-            context = self._build_context(context_before, context_after)
+        # Build context and call LLMReranker (handles caching internally)
+        llm_start_time = time.time()
+        context = self._build_context(context_before, context_after)
         negative_rules = self.config.negative_matching.rules if self.config.negative_matching.enabled else None
 
-        provider = self.primary_provider
-
-        if provider:
-            logger.info(f"  match_segment: calling {type(provider).__name__}.match_batch()...")
-            try:
-                results = provider.match_batch(
-                    [(vo_segment.text, valid_candidates[:5])],
-                    context=context,
-                    negative_rules=negative_rules
-                )
-                logger.info(f"  match_segment: LLM returned results")
-                selected_idx, confidence, reasoning, _cot = results[0]
-
-                # Check if ambiguous - use secondary provider
-                if confidence < mc.ambiguous_threshold and self.secondary_provider:
-                    logger.debug(f"Ambiguous match ({confidence:.2f}), using secondary LLM")
-                    secondary_results = self.secondary_provider.match_batch(
-                        [(vo_segment.text, valid_candidates[:5])],
-                        context=context,
-                        negative_rules=negative_rules
-                    )
-                    sec_idx, sec_conf, sec_reason, _ = secondary_results[0]
-
-                    if sec_conf > confidence:
-                        selected_idx, confidence, reasoning = sec_idx, sec_conf, f"(secondary) {sec_reason}"
-
-                self._cache_response(cache_key, selected_idx, confidence, reasoning)
-
-            except Exception as e:
-                logger.warning(f"LLM matching failed: {e}")
-                selected_idx = 0
-                embedding_sim = valid_candidates[0][1]
-                confidence = 0.60
-                reasoning = f"LLM fallback (emb_sim={embedding_sim:.2f})"
-        else:
-            selected_idx = 0
-            embedding_sim = valid_candidates[0][1]
-            confidence = 0.60
-            reasoning = f"Embedding similarity only (sim={embedding_sim:.2f})"
+        # Use LLMReranker for candidate selection
+        logger.info(f"  match_segment: calling LLMReranker.rerank()...")
+        rerank_result = self.llm_reranker.rerank(
+            voiceover_text=vo_segment.text,
+            candidates=valid_candidates[:5],
+            primary_provider=self.primary_provider,
+            secondary_provider=self.secondary_provider,
+            context=context,
+            negative_rules=negative_rules
+        )
+        selected_idx = rerank_result.selected_idx
+        confidence = rerank_result.confidence
+        reasoning = rerank_result.reasoning
+        logger.info(f"  match_segment: LLM reranker returned results")
 
         llm_elapsed = time.time() - llm_start_time
         if llm_elapsed > 1.0:
@@ -1089,9 +935,9 @@ class TieredMatcher:
             )
 
         # Get alternatives and secondary matches
-        alternatives = self._get_alternatives(
+        alternatives = self.alt_selector.get_alternatives(
             [c for i, c in enumerate(valid_candidates[:4]) if i != selected_idx],
-            scenes, best_seg
+            scenes, best_seg, self._get_scene_for_segment
         )
 
         used_video_files = {best_seg.source_file}
@@ -1100,9 +946,10 @@ class TieredMatcher:
             used_video_files.add(alt.video_segment.source_file)
             alt_segments.append(alt.video_segment)
 
-        secondary_matches = self._get_secondary_matches(
+        secondary_matches = self.alt_selector.get_secondary_matches(
             valid_candidates, scenes, used_video_files,
-            primary_segment=best_seg, alt_segments=alt_segments
+            primary_segment=best_seg, alt_segments=alt_segments,
+            get_scene_fn=self._get_scene_for_segment
         )
 
         # Check for gap
@@ -1134,157 +981,6 @@ class TieredMatcher:
             confidence_variance=confidence_variance,
             matched_keywords=matched_keywords
         )
-
-    def _get_alternatives(
-        self,
-        candidates: List[Tuple[SRTSegment, float]],
-        scenes: Optional[Dict[str, List[SceneInfo]]],
-        primary_match: Optional[SRTSegment] = None
-    ) -> List[AlternativeMatch]:
-        """Get alternative matches, preferring different sources from primary"""
-        alternatives = []
-        used_sources = set()
-
-        if primary_match and primary_match.source_file:
-            used_sources.add(primary_match.source_file)
-
-        # First pass: prefer different sources
-        for seg, sim in candidates:
-            if len(alternatives) >= self.config.output.num_alternatives:
-                break
-
-            if seg.source_file not in used_sources:
-                scene = self._get_scene_for_segment(seg, scenes)
-                alternatives.append(AlternativeMatch(
-                    video_segment=seg,
-                    video_scene=scene,
-                    confidence=sim,
-                    reasoning=f"Alternative (different source: {Path(seg.source_file).stem})"
-                ))
-                used_sources.add(seg.source_file)
-
-        # Second pass: fill remaining slots
-        if len(alternatives) < self.config.output.num_alternatives:
-            for seg, sim in candidates:
-                if len(alternatives) >= self.config.output.num_alternatives:
-                    break
-
-                if any(alt.video_segment.source_file == seg.source_file and
-                       alt.video_segment.start_time == seg.start_time for alt in alternatives):
-                    continue
-
-                scene = self._get_scene_for_segment(seg, scenes)
-                alternatives.append(AlternativeMatch(
-                    video_segment=seg,
-                    video_scene=scene,
-                    confidence=sim * 0.9,
-                    reasoning="Alternative (fallback)"
-                ))
-
-        return alternatives
-
-    def _get_secondary_matches(
-        self,
-        candidates: List[Tuple[SRTSegment, float]],
-        scenes: Optional[Dict[str, List[SceneInfo]]],
-        excluded_video_files: set,
-        primary_segment: Optional[SRTSegment] = None,
-        alt_segments: Optional[List[SRTSegment]] = None
-    ) -> List[AlternativeMatch]:
-        """
-        Get secondary matches for V4-V6.
-
-        Three-pass approach:
-        1. Different video files from V1-V3, different from each other
-        2. Different video files from V1-V3, allow same source within V4-V6
-        3. Allow same video file as V1-V3 but different segment
-        """
-        secondary = []
-        used_sources = set()
-        num_secondary = 3
-
-        # Collect exact segments used by V1-V3
-        used_segments = set()
-        if primary_segment:
-            used_segments.add((primary_segment.source_file, primary_segment.start_time))
-        if alt_segments:
-            for seg in alt_segments:
-                if seg:
-                    used_segments.add((seg.source_file, seg.start_time))
-
-        # First pass: Different video files, different from each other
-        for seg, sim in candidates:
-            if len(secondary) >= num_secondary:
-                break
-
-            if seg.source_file in excluded_video_files:
-                continue
-
-            if seg.source_file in used_sources:
-                continue
-
-            scene = self._get_scene_for_segment(seg, scenes)
-            position = len(secondary)
-            label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
-
-            secondary.append(AlternativeMatch(
-                video_segment=seg,
-                video_scene=scene,
-                confidence=sim,
-                reasoning=f"{label} (source: {Path(seg.source_file).stem})"
-            ))
-            used_sources.add(seg.source_file)
-
-        # Second pass: Different video files, allow same source within V4-V6
-        if len(secondary) < num_secondary:
-            for seg, sim in candidates:
-                if len(secondary) >= num_secondary:
-                    break
-
-                if seg.source_file in excluded_video_files:
-                    continue
-
-                if any(s.video_segment.source_file == seg.source_file and
-                       s.video_segment.start_time == seg.start_time for s in secondary):
-                    continue
-
-                scene = self._get_scene_for_segment(seg, scenes)
-                position = len(secondary)
-                label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
-
-                secondary.append(AlternativeMatch(
-                    video_segment=seg,
-                    video_scene=scene,
-                    confidence=sim * 0.95,
-                    reasoning=f"{label} (same source ok)"
-                ))
-
-        # Third pass: Allow same video file but different segment
-        if len(secondary) < num_secondary:
-            for seg, sim in candidates:
-                if len(secondary) >= num_secondary:
-                    break
-
-                seg_key = (seg.source_file, seg.start_time)
-                if seg_key in used_segments:
-                    continue
-
-                if any(s.video_segment.source_file == seg.source_file and
-                       s.video_segment.start_time == seg.start_time for s in secondary):
-                    continue
-
-                scene = self._get_scene_for_segment(seg, scenes)
-                position = len(secondary)
-                label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
-
-                secondary.append(AlternativeMatch(
-                    video_segment=seg,
-                    video_scene=scene,
-                    confidence=sim * 0.85,
-                    reasoning=f"{label} (fallback - different segment)"
-                ))
-
-        return secondary
 
     def review_with_local_llm(self, matches: List[MatchResult]) -> List[MatchResult]:
         """Use local LLM to review and potentially adjust low-confidence matches"""

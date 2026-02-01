@@ -2,6 +2,9 @@
 # Usage: .\graceful-stop.ps1           - Request graceful stop
 #        .\graceful-stop.ps1 -Cancel   - Cancel graceful stop request
 #        .\graceful-stop.ps1 -Status   - Check current status
+#
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
 
 param(
     [switch]$Cancel,

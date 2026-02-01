@@ -170,6 +170,42 @@ class CaptionStage(Stage):
             # Initialize metrics tracker (US-011, US-001: thread-safe)
             metrics = CaptionMetrics()
 
+            # US-33-009: Initialize circuit breaker for consecutive failure protection
+            from ..caption.circuit_breaker import (
+                CaptionCircuitBreaker,
+                CaptionCircuitBreakerConfig,
+            )
+            circuit_breaker = None
+            cb_config = getattr(caption_config, 'circuit_breaker', None)
+            if cb_config:
+                # Convert dict to config if needed
+                if isinstance(cb_config, dict):
+                    cb_config = CaptionCircuitBreakerConfig(**cb_config)
+                if getattr(cb_config, 'enabled', True):
+                    circuit_breaker = CaptionCircuitBreaker(cb_config)
+                    logger.info(
+                        f"Caption circuit breaker enabled: threshold={cb_config.threshold}, "
+                        f"pause_seconds={cb_config.pause_seconds}"
+                    )
+
+            # US-33-010: Initialize retry budget for cross-video resource tracking
+            from ..caption.retry_budget import (
+                CaptionRetryBudget,
+                CaptionRetryBudgetConfig,
+            )
+            retry_budget = None
+            rb_config = getattr(caption_config, 'retry_budget', None)
+            if rb_config:
+                # Convert dict to config if needed
+                if isinstance(rb_config, dict):
+                    rb_config = CaptionRetryBudgetConfig(**rb_config)
+                if getattr(rb_config, 'enabled', True):
+                    retry_budget = CaptionRetryBudget.from_config(rb_config)
+                    logger.info(
+                        f"Caption retry budget enabled: max_attempts={retry_budget.max_attempts}, "
+                        f"max_backoff_time={retry_budget.max_backoff_time}s"
+                    )
+
             # US-002 Sprint 7: Initialize caption cache for adaptive format ordering
             caption_cache = CaptionCache(caption_config)
 
@@ -494,8 +530,27 @@ class CaptionStage(Stage):
                         remaining_video_ids=list(ids_to_fetch)
                     )
 
+                # US-34-002: Initialize global rate limit coordinator if enabled
+                rate_limit_coordinator = None
+                use_global_coordinator = getattr(caption_config, 'use_global_coordinator', True)
+                if use_global_coordinator:
+                    try:
+                        from ..rate_limit.coordinator import GlobalRateLimitCoordinator
+                        rate_limit_coordinator = GlobalRateLimitCoordinator()
+                        if rate_limit_coordinator.is_enabled():
+                            logger.info(
+                                f"Using global rate limit coordinator: "
+                                f"slots_per_second={rate_limit_coordinator._config.slots_per_second}"
+                            )
+                    except ImportError:
+                        logger.debug("GlobalRateLimitCoordinator not available, using local rate limiting")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize GlobalRateLimitCoordinator: {e}")
+
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
+                # US-33-009: With circuit breaker for consecutive failure protection
+                # US-34-002: With global rate limit coordinator for unified rate limiting
                 try:
                     batch_results = self._fetcher.fetch_captions_batch(
                         video_ids=ids_to_fetch,
@@ -505,6 +560,9 @@ class CaptionStage(Stage):
                         progress_callback=on_progress,
                         batch_checkpoint=batch_checkpoint,
                         checkpoint_save_interval=checkpoint_save_interval,
+                        circuit_breaker=circuit_breaker,
+                        retry_budget=retry_budget,
+                        rate_limit_coordinator=rate_limit_coordinator,
                     )
                     # US-005 Sprint 8: Save final checkpoint on success
                     if batch_checkpoint and batch_checkpoint_path:
@@ -653,6 +711,25 @@ class CaptionStage(Stage):
                 slowest_str = ", ".join(f"{vid}={t:.1f}s" for vid, t in slowest)
                 print(f"    - Slowest fetches: {slowest_str}")
 
+            # US-33-009: Print circuit breaker stats if used
+            if circuit_breaker and circuit_breaker.is_enabled:
+                cb_stats = circuit_breaker.get_stats()
+                if cb_stats['total_trips'] > 0 or cb_stats['consecutive_failures'] > 0:
+                    print(f"    - Circuit breaker: {cb_stats['total_trips']} trips, "
+                          f"{cb_stats['total_paused_seconds']:.1f}s total pause, "
+                          f"{cb_stats['consecutive_failures']} recent failures")
+
+            # US-33-010: Print retry budget stats if used
+            if retry_budget:
+                rb_summary = retry_budget.get_summary()
+                if rb_summary['attempts'] > 0 or rb_summary['videos_skipped'] > 0:
+                    print(f"    - Retry budget: {rb_summary['attempts']} attempts, "
+                          f"{rb_summary['failures']} failures, "
+                          f"{rb_summary['backoff_time_spent']:.1f}s backoff, "
+                          f"{rb_summary['videos_skipped']} skipped")
+                    if rb_summary['is_exhausted']:
+                        print(f"    ! Retry budget EXHAUSTED - remaining videos skipped")
+
             # US-002 Sprint 7: Save format statistics for cross-run learning
             # This enables adaptive format ordering in future runs
             if caption_cache.enabled and metrics.format_success_counts:
@@ -720,7 +797,7 @@ class CaptionStage(Stage):
                 # US-011: Log metrics if available
                 metrics_data = data.get('caption_metrics')
                 if metrics_data:
-                    from ..caption_fetcher import CaptionMetrics
+                    from ..caption.metrics import CaptionMetrics
                     metrics = CaptionMetrics.from_dict(metrics_data)
                     logger.info(
                         f"Restored CAPTION: {len(caption_results)} videos, "

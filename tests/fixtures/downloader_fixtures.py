@@ -396,6 +396,11 @@ def patch_video_downloader_dependencies():
 
     stack = ExitStack()
 
+    # Create a mock coordinator that always succeeds immediately
+    mock_coordinator = MagicMock()
+    mock_coordinator.acquire_slot.return_value = True
+    mock_coordinator.release_slot.return_value = None
+
     patches = [
         patch('src.downloader.core.CheckpointManager'),
         patch('src.downloader.core.TranscodingManager'),
@@ -404,6 +409,7 @@ def patch_video_downloader_dependencies():
         patch('src.downloader.core.SearchOptimizer'),
         patch('src.downloader.core.AudioFirstPipeline'),
         patch('src.downloader.core.utils.get_cookies_args', return_value=[]),
+        patch('src.downloader.core.GlobalRateLimitCoordinator', return_value=mock_coordinator),
     ]
 
     for p in patches:

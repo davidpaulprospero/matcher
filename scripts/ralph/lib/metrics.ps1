@@ -724,7 +724,7 @@ function Measure-CodebaseHealth {
     }
 
     # Save metrics
-    $healthFile = Join-Path $script:RalphDir "health_metrics.json"
+    $healthFile = if ($script:Paths) { $script:Paths.HealthMetricsFile } else { Join-Path $script:RalphDir "state\health_metrics.json" }
     Write-JsonNoBom -Path $healthFile -Content ($health | ConvertTo-Json -Depth 5)
 
     return $health
@@ -745,7 +745,7 @@ function Compare-HealthMetrics {
 
     if (-not $Current) { return $null }
 
-    $healthFile = Join-Path $script:RalphDir "health_metrics.json"
+    $healthFile = if ($script:Paths) { $script:Paths.HealthMetricsFile } else { Join-Path $script:RalphDir "state\health_metrics.json" }
     $previous = Read-JsonFile -Path $healthFile
     if (-not $previous) {
         return @{ isBaseline = $true; trends = @() }
@@ -840,7 +840,7 @@ function Get-StoryProgress {
         [string]$StoryId
     )
 
-    $progressFile = Join-Path $script:RalphDir "story_progress.json"
+    $progressFile = if ($script:Paths) { $script:Paths.StoryProgressFile } else { Join-Path $script:RalphDir "state\story_progress.json" }
     $progress = @{
         storyId = $StoryId
         milestones = @{
@@ -898,7 +898,7 @@ function Save-StoryProgress {
         [hashtable]$Data = @{}
     )
 
-    $progressFile = Join-Path $script:RalphDir "story_progress.json"
+    $progressFile = if ($script:Paths) { $script:Paths.StoryProgressFile } else { Join-Path $script:RalphDir "state\story_progress.json" }
     $allProgress = @{}
 
     $existing = Read-JsonFile -Path $progressFile
@@ -1495,6 +1495,176 @@ $pairsList
     catch {
         Write-Host "    Pre-flight: LLM verification failed: $_" -ForegroundColor DarkYellow
         return @()
+    }
+}
+
+function Invoke-StoryRefinement {
+    <#
+    .SYNOPSIS
+        Generate a more specific follow-on story after preflight auto-completes a generic one
+    .DESCRIPTION
+        When preflight detects a story was already completed via git commit, this function
+        uses LLM to analyze what was done and generate a more specific, refined follow-on
+        story to replace the completed slot in the sprint.
+    .PARAMETER CompletedStory
+        The story object that was auto-completed
+    .PARAMETER CommitMessage
+        The git commit message that completed the story
+    .PARAMETER SprintContext
+        The sprint's projectContext for additional context
+    .RETURNS
+        Hashtable with new story fields (id, title, priority, acceptanceCriteria) or $null if refinement fails
+    #>
+    param(
+        [Parameter(Mandatory)][object]$CompletedStory,
+        [Parameter(Mandatory)][string]$CommitMessage,
+        [string]$SprintContext = ""
+    )
+
+    $claudePath = Get-ClaudePath
+    if (-not $claudePath) {
+        Write-Host "    Refinement: Claude not available, skipping" -ForegroundColor DarkYellow
+        return $null
+    }
+
+    # Generate suffixed ID for follow-on story
+    $baseId = $CompletedStory.id
+    $newId = "$baseId-A"
+
+    # Build refinement prompt
+    $acList = if ($CompletedStory.acceptanceCriteria) {
+        ($CompletedStory.acceptanceCriteria | ForEach-Object { "- $_" }) -join "`n"
+    } else { "- (none specified)" }
+
+    $prompt = @"
+You are a sprint planning assistant. A user story was auto-completed by detecting an existing git commit.
+Generate a MORE SPECIFIC follow-on story that builds on what was done.
+
+COMPLETED STORY:
+- ID: $($CompletedStory.id)
+- Title: $($CompletedStory.title)
+- Acceptance Criteria:
+$acList
+
+GIT COMMIT THAT COMPLETED IT:
+$CommitMessage
+
+SPRINT CONTEXT:
+$SprintContext
+
+Generate a follow-on story that:
+1. Is more specific than the original (deeper implementation, tests, integration, etc.)
+2. Builds naturally on what was completed
+3. Has 3-5 concrete acceptance criteria
+4. Is achievable in a single sprint iteration
+
+Reply in EXACTLY this format (nothing else):
+TITLE: <concise title for the follow-on story>
+AC1: <first acceptance criterion>
+AC2: <second acceptance criterion>
+AC3: <third acceptance criterion>
+AC4: <optional fourth criterion>
+AC5: <optional fifth criterion>
+"@
+
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $claudePath
+        $psi.Arguments = "--print --dangerously-skip-permissions --model haiku"
+        $psi.WorkingDirectory = $script:ProjectRoot
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
+
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $errHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
+
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+
+            # 90 second timeout for story generation
+            $deadline = (Get-Date).AddSeconds(90)
+            while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            $completed = $process.HasExited
+
+            if (-not $completed) {
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
+                Write-Host "    Refinement: LLM timed out" -ForegroundColor DarkYellow
+                return $null
+            }
+
+            try { $process.CancelOutputRead() } catch {}
+            try { $process.CancelErrorRead() } catch {}
+            Start-Sleep -Milliseconds 200
+
+            $output = $outBuilder.ToString()
+
+            # Parse response
+            $title = $null
+            $criteria = @()
+            foreach ($line in ($output -split "`n")) {
+                $trimmed = $line.Trim()
+                if ($trimmed -match '^TITLE:\s*(.+)$') {
+                    $title = $Matches[1].Trim()
+                }
+                elseif ($trimmed -match '^AC\d+:\s*(.+)$') {
+                    $ac = $Matches[1].Trim()
+                    if ($ac -and $ac -ne "(optional)" -and $ac -notmatch '^\(optional') {
+                        $criteria += $ac
+                    }
+                }
+            }
+
+            if (-not $title -or $criteria.Count -lt 2) {
+                Write-Host "    Refinement: Could not parse LLM response" -ForegroundColor DarkYellow
+                return $null
+            }
+
+            # Build new story object
+            $newStory = @{
+                id = $newId
+                title = $title
+                priority = $CompletedStory.priority
+                passes = $false
+                notes = "Auto-generated follow-on from $($CompletedStory.id)"
+                acceptanceCriteria = $criteria
+            }
+
+            Write-Host "    Refinement: Generated follow-on $newId" -ForegroundColor Cyan
+            Write-Host "      Title: $title" -ForegroundColor DarkCyan
+            return $newStory
+        }
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+            if ($process) { $process.Dispose() }
+        }
+    }
+    catch {
+        Write-Host "    Refinement: Failed - $_" -ForegroundColor DarkYellow
+        return $null
     }
 }
 

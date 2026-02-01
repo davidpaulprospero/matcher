@@ -791,3 +791,253 @@ class TestVideoFixtureValidation:
             if "unavailable" in str(e).lower():
                 pytest.skip(f"Video {video_id} not accessible - may need update")
             raise
+
+
+# =============================================================================
+# Rate Limiter Integration Tests (US-33-003)
+# =============================================================================
+
+class TestCaptionFetcherRateLimiterIntegration:
+    """Tests for rate limiter integration in CaptionFetcher (US-33-003).
+
+    Verifies:
+    - CaptionFetcher accepts optional rate_limiter parameter
+    - Pre-fetch delay via rate_limiter.wait_if_needed()
+    - Success recording via rate_limiter.record_success()
+    - Rate limit recording on 429/quota errors
+    """
+
+    def test_init_accepts_rate_limiter(self):
+        """Test CaptionFetcher.__init__ accepts optional rate_limiter parameter."""
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+
+        rate_limiter = UnifiedCaptionRateLimiter()
+        fetcher = CaptionFetcher(rate_limiter=rate_limiter)
+
+        assert fetcher._rate_limiter is rate_limiter
+
+    def test_init_without_rate_limiter(self):
+        """Test CaptionFetcher works without rate_limiter (backwards compatible)."""
+        fetcher = CaptionFetcher()
+
+        assert fetcher._rate_limiter is None
+
+    def test_fetch_calls_wait_if_needed_before_fetch(self):
+        """Test fetch_captions calls rate_limiter.wait_if_needed() before fetching."""
+        from unittest.mock import MagicMock
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+
+        mock_limiter = MagicMock(spec=UnifiedCaptionRateLimiter)
+        mock_limiter.wait_if_needed.return_value = 0.5
+
+        fetcher = CaptionFetcher(rate_limiter=mock_limiter)
+
+        # Mock _is_valid_video_id to fail early (avoid actual fetch)
+        fetcher._is_valid_video_id = MagicMock(return_value=False)
+
+        with pytest.raises(CaptionFetchError):
+            fetcher.fetch_captions("test_id")
+
+        # wait_if_needed should be called BEFORE validation
+        mock_limiter.wait_if_needed.assert_called_once()
+
+    def test_fetch_records_success_on_successful_fetch(self):
+        """Test fetch_captions calls rate_limiter.record_success() on success."""
+        from unittest.mock import MagicMock, patch
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+        from src.caption_fetcher import CaptionSegment
+
+        mock_limiter = MagicMock(spec=UnifiedCaptionRateLimiter)
+        mock_limiter.wait_if_needed.return_value = 0.0
+
+        fetcher = CaptionFetcher(rate_limiter=mock_limiter)
+
+        # Mock the internal methods to simulate successful fetch
+        mock_segment = CaptionSegment(
+            index=0,
+            start_time=0.0,
+            end_time=1.0,
+            text="test",
+            source_file="dQw4w9WgXcQ",
+        )
+        mock_result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=[mock_segment],
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+
+        with patch.object(fetcher, '_fetch_subtitle', return_value=mock_result):
+            with patch.object(fetcher, '_is_valid_video_id', return_value=True):
+                result = fetcher.fetch_captions("dQw4w9WgXcQ")
+
+        assert result is mock_result
+        mock_limiter.record_success.assert_called_once()
+
+    def test_fetch_records_rate_limit_on_429_error(self):
+        """Test fetch_captions calls rate_limiter.record_rate_limit() on 429 errors."""
+        from unittest.mock import MagicMock, patch
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+
+        mock_limiter = MagicMock(spec=UnifiedCaptionRateLimiter)
+        mock_limiter.wait_if_needed.return_value = 0.0
+
+        fetcher = CaptionFetcher(rate_limiter=mock_limiter)
+
+        # Create a rate limit error
+        rate_limit_error = CaptionFetchError("test_id", "HTTP 429 Too Many Requests")
+
+        with patch.object(fetcher, '_fetch_subtitle', side_effect=rate_limit_error):
+            with patch.object(fetcher, '_is_valid_video_id', return_value=True):
+                with pytest.raises(CaptionFetchError):
+                    fetcher.fetch_captions("dQw4w9WgXcQ")
+
+        # Should record rate limit for the video
+        mock_limiter.record_rate_limit.assert_called()
+
+    def test_fetch_does_not_record_rate_limit_on_other_errors(self):
+        """Test fetch_captions does NOT call record_rate_limit on non-429 errors."""
+        from unittest.mock import MagicMock, patch
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+
+        mock_limiter = MagicMock(spec=UnifiedCaptionRateLimiter)
+        mock_limiter.wait_if_needed.return_value = 0.0
+
+        fetcher = CaptionFetcher(rate_limiter=mock_limiter)
+
+        # Create a non-rate-limit error (network error)
+        network_error = CaptionFetchError("test_id", "Connection refused")
+
+        with patch.object(fetcher, '_fetch_subtitle', side_effect=network_error):
+            with patch.object(fetcher, '_is_valid_video_id', return_value=True):
+                with pytest.raises(CaptionFetchError):
+                    fetcher.fetch_captions("dQw4w9WgXcQ")
+
+        # Should NOT record rate limit for network errors
+        mock_limiter.record_rate_limit.assert_not_called()
+
+    def test_fetch_without_rate_limiter_still_works(self):
+        """Test fetch_captions works normally without rate_limiter."""
+        from unittest.mock import patch
+        from src.caption_fetcher import CaptionSegment
+
+        fetcher = CaptionFetcher()  # No rate limiter
+
+        mock_segment = CaptionSegment(
+            index=0,
+            start_time=0.0,
+            end_time=1.0,
+            text="test",
+            source_file="dQw4w9WgXcQ",
+        )
+        mock_result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=[mock_segment],
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+
+        with patch.object(fetcher, '_fetch_subtitle', return_value=mock_result):
+            with patch.object(fetcher, '_is_valid_video_id', return_value=True):
+                result = fetcher.fetch_captions("dQw4w9WgXcQ")
+
+        assert result is mock_result
+
+
+class TestCaptionFetcherRateLimiterConfig:
+    """Tests for rate limiter configuration in CaptionFetcher (US-33-003)."""
+
+    def test_custom_rate_limit_config(self):
+        """Test CaptionFetcher with custom rate limit config."""
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter, RateLimitConfig
+
+        config = RateLimitConfig(
+            enabled=True,
+            base_delay_seconds=5.0,
+            max_delay_seconds=60.0,
+            jitter_factor=0.2
+        )
+        rate_limiter = UnifiedCaptionRateLimiter(config)
+
+        fetcher = CaptionFetcher(rate_limiter=rate_limiter)
+
+        assert fetcher._rate_limiter.config.base_delay_seconds == 5.0
+        assert fetcher._rate_limiter.config.max_delay_seconds == 60.0
+        assert fetcher._rate_limiter.config.jitter_factor == 0.2
+
+    def test_disabled_rate_limiter_skips_delay(self):
+        """Test disabled rate limiter doesn't add delay."""
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter, RateLimitConfig
+
+        config = RateLimitConfig(enabled=False)
+        rate_limiter = UnifiedCaptionRateLimiter(config)
+
+        fetcher = CaptionFetcher(rate_limiter=rate_limiter)
+
+        # Even with consecutive rate limits, disabled limiter returns 0
+        rate_limiter.record_rate_limit("test")
+        rate_limiter.record_rate_limit("test")
+
+        delay = rate_limiter.get_rate_limit_delay()
+        assert delay == 0.0
+
+
+class TestCaptionFetcherRateLimiterStateTracking:
+    """Tests for rate limiter state tracking during fetches (US-33-003)."""
+
+    def test_consecutive_rate_limits_increase_delay(self):
+        """Test consecutive rate limits increase backoff delay."""
+        from unittest.mock import patch
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+
+        rate_limiter = UnifiedCaptionRateLimiter()
+        fetcher = CaptionFetcher(rate_limiter=rate_limiter)
+
+        # Simulate multiple rate limit errors
+        rate_limit_error = CaptionFetchError("test_id", "HTTP 429 quota exceeded")
+
+        with patch.object(fetcher, '_fetch_subtitle', side_effect=rate_limit_error):
+            with patch.object(fetcher, '_is_valid_video_id', return_value=True):
+                with pytest.raises(CaptionFetchError):
+                    fetcher.fetch_captions("video1")
+
+        assert rate_limiter.consecutive_rate_limits >= 1
+
+    def test_success_resets_consecutive_rate_limits(self):
+        """Test successful fetch resets consecutive rate limit count."""
+        from unittest.mock import patch
+        from src.caption.rate_limiter import UnifiedCaptionRateLimiter
+        from src.caption_fetcher import CaptionSegment
+
+        rate_limiter = UnifiedCaptionRateLimiter()
+        fetcher = CaptionFetcher(rate_limiter=rate_limiter)
+
+        # First record some rate limits
+        rate_limiter.record_rate_limit("test")
+        rate_limiter.record_rate_limit("test")
+        assert rate_limiter.consecutive_rate_limits == 2
+
+        # Now simulate a successful fetch
+        mock_segment = CaptionSegment(
+            index=0,
+            start_time=0.0,
+            end_time=1.0,
+            text="test",
+            source_file="dQw4w9WgXcQ",
+        )
+        mock_result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=[mock_segment],
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt"
+        )
+
+        with patch.object(fetcher, '_fetch_subtitle', return_value=mock_result):
+            with patch.object(fetcher, '_is_valid_video_id', return_value=True):
+                fetcher.fetch_captions("dQw4w9WgXcQ")
+
+        # Consecutive count should be reset
+        assert rate_limiter.consecutive_rate_limits == 0

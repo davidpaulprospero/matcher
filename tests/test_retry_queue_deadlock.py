@@ -321,7 +321,7 @@ class TestWaitCombined:
         queue.set_cookie_rotator(rotator)
 
         with patch('time.sleep'), \
-             patch('src.downloader.retry_queue.logger') as mock_logger:
+             patch('src.downloader.retry_processor.logger') as mock_logger:
             queue._wait_combined()
 
         # Should log warning with deadlock message
@@ -452,7 +452,7 @@ class TestStartRetryPassWithDeadlock:
         queue.set_cookie_rotator(rotator)
 
         with patch('time.sleep'), \
-             patch('src.downloader.retry_queue.logger') as mock_logger:
+             patch('src.downloader.retry_processor.logger') as mock_logger:
             queue.start_retry_pass()
 
         # Look for FORCED in INFO logs

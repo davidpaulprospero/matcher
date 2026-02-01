@@ -284,7 +284,8 @@ function Invoke-ClaudeProcess {
             -OutFile $outFile `
             -ErrFile $errFile `
             -StoryId $(if ($storyId) { $storyId } else { $Identifier }) `
-            -StoryStartTime $script:State.CurrentStoryStartTime
+            -StoryStartTime $script:State.CurrentStoryStartTime `
+            -FocusArea $focusAreaId
 
         # === COMPUTE METRICS ===
         $iterationDuration = (Get-Date) - $iterationStart

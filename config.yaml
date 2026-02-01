@@ -49,6 +49,30 @@ defaults:
     max_requests_per_minute: 60
 
 # -----------------------------------------------------------------------------
+# RATE LIMITING (global settings)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Centralized rate limit config prevents scattered values
+# Reasoning: One place to tune all rate limit behavior across the pipeline
+# Decision: Reasonable defaults that work for most download scenarios
+
+rate_limit:
+  # Slots per second: how many download/request slots available per second
+  # Higher values = more aggressive downloading (0.5 = 1 request every 2 seconds)
+  slots_per_second: 0.5
+
+  # Burst size: how many requests can be made in a burst before rate limiting kicks in
+  # Allows short bursts above the steady-state rate
+  burst_size: 3
+
+  # Jitter factor: randomization factor for request timing (0.0-1.0)
+  # Adds randomness to avoid detection patterns: actual_delay = delay * (1 + random * jitter)
+  jitter_factor: 0.2
+
+  # Maximum backoff time in seconds when rate limited
+  # After this limit, requests will proceed even if rate limited
+  max_backoff_seconds: 60.0
+
+# -----------------------------------------------------------------------------
 # TRANSCRIPTION (faster-whisper)
 # -----------------------------------------------------------------------------
 # Chain-of-thought: GPU acceleration critical for performance

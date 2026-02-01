@@ -71,7 +71,8 @@ function Invoke-FastHealthCheck {
     # --- Check 4: Config validation ---
     $result.ChecksRun += "config_validation"
     try {
-        $configOutput = Invoke-Expression "python main.py --validate-config 2>&1"
+        $mainPy = Join-Path $projectRoot "main.py"
+        $configOutput = Invoke-Expression "python `"$mainPy`" --validate-config 2>&1"
         if ($LASTEXITCODE -ne 0) {
             $result.ConfigErrors += ($configOutput | Out-String).Trim()
         }
@@ -354,7 +355,7 @@ function Log-HealingEvent {
     $logPath = if ($script:HealingLogFile) {
         $script:HealingLogFile
     } else {
-        Join-Path $script:RalphDir "healing_log.jsonl"
+        if ($script:Paths) { $script:Paths.HealingLogFile } else { Join-Path $script:RalphDir "session\healing_log.jsonl" }
     }
 
     $entry = @{
@@ -403,8 +404,8 @@ function Test-ClaudeStall {
     param(
         [Parameter(Mandatory)][int]$WaitingSeconds,
         [Parameter(Mandatory)][int]$TimeSinceActivity,
-        [int]$StallThreshold = 120,
-        [int]$KillThreshold = 300
+        [int]$StallThreshold = 180,   # Increased from 120 - complex tasks need more time
+        [int]$KillThreshold = 360     # Increased from 300 - give more breathing room
     )
 
     $result = @{
@@ -527,7 +528,7 @@ function Test-HealingInProgress {
         Check if a healing session is currently in progress.
     #>
     $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
-                 else { Join-Path $script:RalphDir "healing_state.json" }
+                 else { if ($script:Paths) { $script:Paths.HealingStateFile } else { Join-Path $script:RalphDir "state\healing_state.json" } }
 
     if (-not (Test-Path $statePath)) { return $false }
 
@@ -552,7 +553,7 @@ function Suspend-SprintForHealing {
     )
 
     $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
-                 else { Join-Path $script:RalphDir "healing_state.json" }
+                 else { if ($script:Paths) { $script:Paths.HealingStateFile } else { Join-Path $script:RalphDir "state\healing_state.json" } }
 
     $healingState = @{
         paused         = $true
@@ -593,7 +594,7 @@ function Resume-SprintFromHealing {
     )
 
     $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
-                 else { Join-Path $script:RalphDir "healing_state.json" }
+                 else { if ($script:Paths) { $script:Paths.HealingStateFile } else { Join-Path $script:RalphDir "state\healing_state.json" } }
 
     if ($Success) {
         Log-HealingEvent -Event "healing_resolved" -Data @{
@@ -689,7 +690,7 @@ function Invoke-HealingSession {
     )
 
     $statePath = if ($script:HealingStateFile) { $script:HealingStateFile }
-                 else { Join-Path $script:RalphDir "healing_state.json" }
+                 else { if ($script:Paths) { $script:Paths.HealingStateFile } else { Join-Path $script:RalphDir "state\healing_state.json" } }
 
     $healingState = $null
     if (Test-Path $statePath) {
@@ -846,7 +847,7 @@ function Get-HealingSummary {
         Summarize healing activity for sprint reports.
     #>
     $logPath = if ($script:HealingLogFile) { $script:HealingLogFile }
-               else { Join-Path $script:RalphDir "healing_log.jsonl" }
+               else { if ($script:Paths) { $script:Paths.HealingLogFile } else { Join-Path $script:RalphDir "session\healing_log.jsonl" } }
 
     $summary = @{
         TotalHealingSessions = 0
