@@ -1,6 +1,9 @@
 # Ralph Loop Progress Watcher
 # Usage: .\scripts\ralph\watch.ps1 [-Interval 5]
 #
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
+#
 # Run in a separate terminal to monitor Ralph loop progress.
 # Press Ctrl+C to stop.
 
@@ -10,14 +13,15 @@ param(
 
 # Import library functions
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $ScriptDir "watch-lib.ps1")
+. (Join-Path $ScriptDir "lib\watch.ps1")
 
-# Paths
-$PrdPath = Join-Path $ScriptDir "prd.json"
-$ProgressPath = Join-Path $ScriptDir "progress.txt"
-$MetricsPath = Join-Path $ScriptDir "metrics.csv"
+# Paths - state files are in state/ subdirectory
+$StateDir = Join-Path $ScriptDir "state"
+$PrdPath = Join-Path $StateDir "prd.json"
+$ProgressPath = Join-Path $StateDir "progress.txt"
+$MetricsPath = Join-Path $StateDir "metrics.csv"
 $BlockedPath = Join-Path $ScriptDir "BLOCKED.md"
-$QueuePath = Join-Path $ScriptDir "queue.json"
+$QueuePath = Join-Path $StateDir "queue.json"
 $LogsDir = Join-Path $ScriptDir "logs"
 
 $loopCount = 0

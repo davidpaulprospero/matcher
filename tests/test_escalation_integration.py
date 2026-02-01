@@ -9,6 +9,7 @@ Pytest marker: fast
 """
 
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import List
 from unittest.mock import MagicMock, patch
@@ -26,6 +27,35 @@ from src.downloader.types import EscalationState, EscalationTier
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
+@contextmanager
+def patch_time_modules(time_func):
+    """Patch time.time() in all escalation-related modules.
+
+    Since US-35-009 extracted EscalationStrategy from EscalationManager,
+    we now need to patch time in three modules:
+    - escalation_manager.time
+    - escalation_strategy.time
+    - types.time
+
+    Args:
+        time_func: A callable that returns the mocked time value.
+            Can be a lambda, a function, or a MagicMock side_effect.
+    """
+    with patch("src.downloader.escalation_manager.time") as em_time, \
+         patch("src.downloader.escalation_strategy.time") as strat_time, \
+         patch("src.downloader.types.time") as types_time:
+
+        if callable(time_func):
+            em_time.time.side_effect = time_func
+            strat_time.time.side_effect = time_func
+            types_time.time.side_effect = time_func
+        else:
+            em_time.time.return_value = time_func
+            strat_time.time.return_value = time_func
+            types_time.time.return_value = time_func
+
+        yield (em_time, strat_time, types_time)
 
 @dataclass
 class FakeExtractorArgsConfig:
@@ -167,11 +197,7 @@ class TestFullEscalationFlow:
 
         # --- Advance past cooldown and trigger Tier 3 ---
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             stderr_bot = "ERROR: [youtube] abc123: Sign in to confirm you're not a bot."
             assert is_escalation_trigger(stderr_bot) is True
             manager.record_failure(keyword, stderr_bot)
@@ -343,11 +369,7 @@ class TestSuccessReset:
         keyword = "aerial footage"
 
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             # Escalate to Tier 3
             manager.record_failure(keyword, "403")
             manager.record_failure(keyword, "403")
@@ -405,11 +427,7 @@ class TestExtractorArgsRotation:
         # Can't reset keyword (that clears state), so instead:
         # Advance past cooldown and escalate again -> Tier 3, index increments again
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             mgr.record_failure(keyword, "403")
             mgr.record_failure(keyword, "403")
 
@@ -474,10 +492,7 @@ class TestExtractorArgsRotation:
 
         # Second escalation -> Tier 3 (index becomes 2)
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
+        with patch_time_modules(advancing):
             mgr.record_failure(keyword, "403")
             mgr.record_failure(keyword, "403")
 

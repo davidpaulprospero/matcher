@@ -308,7 +308,8 @@ class TestCheckAndWait:
         """Should track total paused time for reporting."""
         config = CircuitBreakerConfig(
             consecutive_failures_threshold=1,
-            pause_seconds=0.05
+            pause_seconds=0.05,
+            jitter_factor=0.0  # Disable jitter for deterministic test
         )
         breaker = CircuitBreaker(config)
 
@@ -316,6 +317,7 @@ class TestCheckAndWait:
         breaker.record_failure()
         breaker.check_and_wait()
 
+        # Without jitter, should pause exactly pause_seconds
         assert breaker.state.total_paused_seconds >= 0.05
 
     def test_immediate_return_after_pause_expired(self):

@@ -1,6 +1,95 @@
 # scripts/ralph/lib/loops.ps1
 # Main loop implementations: interview queue, TrueAuto, standard, Ralph's Choice modes
 
+# ============================================================================
+# ERROR-FIXING SPRINT INTEGRATION
+# ============================================================================
+
+function Invoke-ErrorFixingSprintIfNeeded {
+    <#
+    .SYNOPSIS
+        Check if error-fixing sprint is needed and create it if so
+    .DESCRIPTION
+        Called after Save-SprintArchive. Checks if the completed sprint has
+        failed stories and creates an error-fixing sprint inserted into the queue.
+    .PARAMETER Prd
+        The completed sprint PRD
+    .PARAMETER SkipIfErrorFixing
+        If true, skip if current sprint is already an error-fixing sprint
+    .RETURNS
+        Hashtable with Created (bool), ErrorFixingAreaId (string)
+    #>
+    param(
+        [object]$Prd = $null,
+        [switch]$SkipIfErrorFixing
+    )
+
+    $result = @{
+        Created = $false
+        ErrorFixingAreaId = $null
+        ResumeOriginalPath = $false
+    }
+
+    # Load PRD if not provided
+    if (-not $Prd) {
+        $Prd = Get-Sprint
+    }
+
+    if (-not $Prd) {
+        return $result
+    }
+
+    # Check if we should create an error-fixing sprint
+    $check = Test-ShouldCreateErrorFixingSprint -Prd $Prd
+
+    if (-not $check.ShouldCreate) {
+        if ($check.Reason -and $check.Reason -ne "No failed stories") {
+            Write-Host "  [EF] Skip: $($check.Reason)" -ForegroundColor DarkGray
+        }
+
+        # If this WAS an error-fixing sprint that completed, mark for resuming original path
+        if ($Prd.isErrorFixingSprint -eq $true) {
+            $result.ResumeOriginalPath = $true
+            if ($Prd.sourceFocusArea) {
+                Write-Host "  Error-fixing complete. Resuming original queue path..." -ForegroundColor Green
+            }
+        }
+
+        return $result
+    }
+
+    $sprintNum = if ($Prd.sprintNumber) { [int]$Prd.sprintNumber } else { 1 }
+    $focusArea = if ($Prd.focusArea) { $Prd.focusArea } else { "unknown" }
+    $failedCount = $check.FailedStories.Count
+
+    Write-Host ""
+    Write-Host "  [EF] $failedCount failed stories detected - creating error-fixing sprint..." -ForegroundColor Yellow
+
+    # Create the error-fixing sprint PRD
+    $created = New-ErrorFixingSprint `
+        -FailedStories $check.FailedStories `
+        -SourceSprintNumber $sprintNum `
+        -SourceFocusArea $focusArea `
+        -SourcePrd $Prd
+
+    if ($created) {
+        # Insert into queue
+        Add-ErrorFixingSprintToQueue `
+            -SourceSprintNumber $sprintNum `
+            -SourceFocusArea $focusArea `
+            -FailedStoriesCount $failedCount
+
+        $result.Created = $true
+        $result.ErrorFixingAreaId = "error-fixing-$sprintNum"
+    }
+
+    return $result
+}
+
+# ============================================================================
+# LOOP IMPLEMENTATIONS
+# ============================================================================
+
 function Start-InterviewQueueLoop {
     <#
     .SYNOPSIS
@@ -79,22 +168,41 @@ function Start-InterviewQueueLoop {
                 Write-Host "  Sprint complete for $areaId!" -ForegroundColor Green
                 $sprintComplete = $true
                 try {
+                    # Capture PRD before archiving (needed for error-fixing check)
+                    $completedPrd = Get-Sprint
+
                     Save-SprintArchive -Reason "complete"
-                    Update-QueueProgress -AreaId $areaId
+
+                    # Check if error-fixing sprint is needed (failed stories from completed sprint)
+                    $efResult = Invoke-ErrorFixingSprintIfNeeded -Prd $completedPrd
+                    if ($efResult.Created) {
+                        # Error-fixing sprint was created - don't mark area as complete yet
+                        Write-Host "  Starting error-fixing sprint before continuing..." -ForegroundColor Yellow
+                        $sprintComplete = $false  # Continue working on error-fixing
+                        Start-Sleep -Seconds 2
+                        # Don't break - continue the inner while loop with error-fixing sprint
+                    }
+                    else {
+                        # No error-fixing needed, mark area complete
+                        Update-QueueProgress -AreaId $areaId
+                        $completedAreas += $area
+                    }
                 }
                 catch {
                     Write-Host "  Warning: Error during sprint archive: $_" -ForegroundColor Yellow
                 }
-                $completedAreas += $area
 
-                # Check for graceful stop before moving to next focus area
-                if (Test-GracefulStopRequested) {
-                    Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
-                    Clear-GracefulStopSignal
-                    $script:GracefulStopTriggered = $true
+                # Only break if sprint is truly complete (no error-fixing needed)
+                if ($sprintComplete) {
+                    # Check for graceful stop before moving to next focus area
+                    if (Test-GracefulStopRequested) {
+                        Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
+                        Clear-GracefulStopSignal
+                        $script:GracefulStopTriggered = $true
+                        break
+                    }
                     break
                 }
-                break
             }
 
             if ($status.nextStory) {
@@ -213,8 +321,35 @@ function Start-TrueAutoLoop {
 
             # Entire sprint transition wrapped in try-catch to prevent silent exits
             try {
+                # Capture PRD before archiving (needed for error-fixing check)
+                $completedPrd = Get-Sprint
+
                 # Archive the completed sprint
                 Save-SprintArchive -Reason "complete"
+
+                # Check if error-fixing sprint is needed (failed stories from completed sprint)
+                $efResult = Invoke-ErrorFixingSprintIfNeeded -Prd $completedPrd
+                if ($efResult.Created) {
+                    # Error-fixing sprint was created and is now the active PRD
+                    # Continue loop to work on error-fixing stories
+                    Write-Host "  Starting error-fixing sprint..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+
+                # Decompose hard stories before generating new sprint
+                $hardStories = Get-HardStoriesForArea -FocusArea $status.focusArea
+                if ($hardStories -and $hardStories.Count -gt 0) {
+                    Write-Host ""
+                    Write-Host "  Decomposing $($hardStories.Count) hard stories for next sprint..." -ForegroundColor Yellow
+                    $decomposedStories = @()
+                    foreach ($hs in $hardStories) {
+                        $newStories = Invoke-StoryDecomposition -HardStory $hs
+                        $decomposedStories += $newStories
+                    }
+                    # These will be picked up by the next PRD generation
+                    Write-Host "  Created $($decomposedStories.Count) decomposed stories" -ForegroundColor Green
+                }
 
                 # Check for graceful stop BEFORE generating new sprint
                 if (Test-GracefulStopRequested) {
@@ -373,6 +508,9 @@ function Start-StandardLoop {
             Write-Host "  Focus area: $($status.focusArea)" -ForegroundColor Cyan
             Write-Host ""
 
+            # Capture PRD before archiving (needed for error-fixing check)
+            $completedPrd = Get-Sprint
+
             # Archive the completed sprint
             Save-SprintArchive -Reason "complete"
 
@@ -381,6 +519,16 @@ function Start-StandardLoop {
                 Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
                 Clear-GracefulStopSignal
                 break
+            }
+
+            # Check if error-fixing sprint is needed (failed stories from completed sprint)
+            $efResult = Invoke-ErrorFixingSprintIfNeeded -Prd $completedPrd
+            if ($efResult.Created) {
+                # Error-fixing sprint was created and is now the active PRD
+                # Continue loop to work on error-fixing stories
+                Write-Host "  Starting error-fixing sprint..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
+                continue
             }
 
             # Mark current area as complete BEFORE checking for next
@@ -491,8 +639,21 @@ function Start-RalphsChoiceLoop {
                     Write-Host "=====================================================" -ForegroundColor Green
                     Write-Host ""
 
+                    # Capture PRD before archiving (needed for error-fixing check)
+                    $completedPrd = Get-Sprint
+
                     # Archive the completed sprint
                     Save-SprintArchive -Reason "complete"
+
+                    # Check if error-fixing sprint is needed (failed stories from completed sprint)
+                    $efResult = Invoke-ErrorFixingSprintIfNeeded -Prd $completedPrd
+                    if ($efResult.Created) {
+                        # Error-fixing sprint was created and is now the active PRD
+                        # Continue loop to work on error-fixing stories
+                        Write-Host "  Starting error-fixing sprint..." -ForegroundColor Yellow
+                        Start-Sleep -Seconds 2
+                        continue
+                    }
 
                     # Update queue if completed area is tracked
                     if ($status.focusArea) {
@@ -664,8 +825,22 @@ function Start-RalphsChoiceAutoLoop {
                     Write-Host "=====================================================" -ForegroundColor Green
                     Write-Host ""
 
+                    # Capture PRD before archiving (needed for error-fixing check)
+                    $completedPrd = Get-Sprint
+
                     # Archive the completed sprint
                     Save-SprintArchive -Reason "complete"
+
+                    # Check if error-fixing sprint is needed (failed stories from completed sprint)
+                    $efResult = Invoke-ErrorFixingSprintIfNeeded -Prd $completedPrd
+                    if ($efResult.Created) {
+                        # Error-fixing sprint was created and is now the active PRD
+                        # Continue loop to work on error-fixing stories
+                        Write-Host "  Starting error-fixing sprint..." -ForegroundColor Yellow
+                        $sprintCount++  # Count error-fixing as a sprint
+                        Start-Sleep -Seconds 2
+                        continue
+                    }
 
                     # Update queue if completed area is tracked
                     if ($status.focusArea) {
@@ -831,4 +1006,315 @@ function Start-RalphsChoiceAutoLoop {
     Write-Host ""
     Write-Host "  Ralph's Choice Auto session complete" -ForegroundColor Magenta
     Write-Host "  Sprints completed: $sprintCount" -ForegroundColor DarkGray
+}
+
+# ============================================================================
+# ADAPTIVE OVERNIGHT LOOP (Phase 4 - P1)
+# ============================================================================
+
+function Start-AdaptiveOvernightLoop {
+    <#
+    .SYNOPSIS
+        Adaptive multi-focus overnight mode with intelligent rotation
+    .DESCRIPTION
+        - Rotates between focus areas when sprint completes
+        - Tracks per-area success rates
+        - Spends less time on failing areas (pauses if <30% success)
+        - Stops and alerts if ALL areas failing
+        - Decomposes hard stories between sprints
+    .PARAMETER FocusAreas
+        Array of focus area IDs to work on
+    .PARAMETER MaxHours
+        Maximum hours to run (default: 12)
+    #>
+    param(
+        [array]$FocusAreas = @(),
+        [int]$MaxHours = 12
+    )
+
+    $script:State.CurrentMode = "AdaptiveOvernight"
+
+    # Run interview if no focus areas provided
+    if ($FocusAreas.Count -eq 0) {
+        Write-Host ""
+        Write-Host "  No focus areas specified - starting interview..." -ForegroundColor Cyan
+        Write-Host "  (Overnight mode: auto-detecting areas from problem description)" -ForegroundColor Gray
+
+        # Overnight mode uses -AutoAreas to skip area confirmation
+        $interviewResult = Invoke-DeepInterview -AutoAreas -AutoPriority "medium"
+
+        if ($interviewResult -and $interviewResult.areas -and $interviewResult.areas.Count -gt 0) {
+            $FocusAreas = @($interviewResult.areas)
+
+            # Save interview context to queue for future reference
+            $queueContext = ConvertTo-QueueContext -DeepContext $interviewResult
+            Save-InterviewQueue -Context $queueContext -FocusAreas $FocusAreas
+            Write-Host "  Interview complete. Focus areas: $($FocusAreas -join ', ')" -ForegroundColor Green
+        }
+    }
+
+    # Fall back to existing interview context from queue
+    if ($FocusAreas.Count -eq 0) {
+        $existingContext = Get-InterviewContext
+        if ($existingContext -and $existingContext.areas) {
+            Write-Host "  Using existing interview context from queue..." -ForegroundColor Yellow
+            $FocusAreas = @($existingContext.areas)
+        }
+    }
+
+    # Fall back to queue focus areas
+    if ($FocusAreas.Count -eq 0) {
+        $queue = Get-Queue
+        if ($queue -and $queue.focusAreas) {
+            Write-Host "  Using focus areas from queue..." -ForegroundColor Yellow
+            $FocusAreas = @($queue.focusAreas | Where-Object { -not $_.completed } | ForEach-Object { $_.id })
+        }
+    }
+
+    if ($FocusAreas.Count -eq 0) {
+        Write-Host "  No focus areas determined for overnight mode" -ForegroundColor Red
+        Write-Host "  Please provide focus areas via -FocusAreas parameter" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  =====================================================" -ForegroundColor Magenta
+    Write-Host "   ADAPTIVE OVERNIGHT MODE" -ForegroundColor Magenta
+    Write-Host "  =====================================================" -ForegroundColor Magenta
+    Write-Host ""
+    Write-Host "  Focus Areas: $($FocusAreas -join ', ')" -ForegroundColor Cyan
+    Write-Host "  Max Runtime: $MaxHours hours" -ForegroundColor DarkGray
+    Write-Host ""
+
+    # Initialize area states
+    $areaStates = @{}
+    foreach ($area in $FocusAreas) {
+        $areaStates[$area] = @{
+            Status = "active"           # active, completed, paused
+            SprintNumber = 0
+            StoriesCompleted = 0
+            StoriesFailed = 0
+            SuccessRate = 1.0           # Start optimistic
+            CurrentSprint = $null
+            TotalAttempts = 0
+        }
+    }
+
+    $activeAreas = [System.Collections.ArrayList]@($FocusAreas)
+    $currentIndex = 0
+    $startTime = Get-Date
+    $maxEndTime = $startTime.AddHours($MaxHours)
+
+    Write-SessionLog -Event "overnight_start" -Message "Starting adaptive overnight loop" -Data @{
+        focusAreas = $FocusAreas
+        maxHours = $MaxHours
+    }
+
+    while ($activeAreas.Count -gt 0 -and (Get-Date) -lt $maxEndTime -and -not (Test-MaxIterations)) {
+        $currentArea = $activeAreas[$currentIndex]
+        $state = $areaStates[$currentArea]
+
+        Write-Host ""
+        Write-Host "  ----- Focus: $currentArea (Sprint $($state.SprintNumber + 1)) -----" -ForegroundColor Cyan
+
+        # Check if area should be paused (too many failures)
+        if ($state.SuccessRate -lt 0.3 -and $state.TotalAttempts -gt 5) {
+            Write-Host "  [PAUSE] $currentArea - too many failures (success rate: $([math]::Round($state.SuccessRate * 100))%)" -ForegroundColor Red
+            $state.Status = "paused"
+            [void]$activeAreas.Remove($currentArea)
+
+            Write-SessionLog -Event "area_paused" -Message "Focus area paused due to low success rate" -Data @{
+                area = $currentArea
+                successRate = $state.SuccessRate
+                attempts = $state.TotalAttempts
+            }
+
+            if ($activeAreas.Count -gt 0) {
+                $currentIndex = $currentIndex % $activeAreas.Count
+            }
+            continue
+        }
+
+        # Generate new sprint if needed
+        $sprintStatus = Get-SprintStatus
+        $needsNewSprint = $false
+
+        if (-not $state.CurrentSprint) {
+            $needsNewSprint = $true
+        }
+        elseif ($sprintStatus.complete) {
+            # Sprint complete - calculate success rate and decompose hard stories
+            $total = $state.StoriesCompleted + $state.StoriesFailed
+            if ($total -gt 0) {
+                $state.SuccessRate = $state.StoriesCompleted / $total
+            }
+
+            $rateColor = if ($state.SuccessRate -gt 0.7) { "Green" } elseif ($state.SuccessRate -gt 0.4) { "Yellow" } else { "Red" }
+            Write-Host "  Sprint complete! Success rate: $([math]::Round($state.SuccessRate * 100))%" -ForegroundColor $rateColor
+
+            # Capture PRD before archiving (needed for error-fixing check)
+            $completedPrd = Get-Sprint
+
+            # Archive sprint
+            Save-SprintArchive -Reason "complete"
+
+            # Check if error-fixing sprint is needed (failed stories from completed sprint)
+            $efResult = Invoke-ErrorFixingSprintIfNeeded -Prd $completedPrd
+            if ($efResult.Created) {
+                # Error-fixing sprint was created and is now the active PRD
+                # Stay on current area, work error-fixing sprint first
+                $state.CurrentSprint = Get-Sprint
+                Write-Host "  Starting error-fixing sprint for $currentArea..." -ForegroundColor Yellow
+                # Rotate to give other areas a turn while error-fixing runs
+                $currentIndex = ($currentIndex + 1) % $activeAreas.Count
+                Start-Sleep -Seconds 2
+                continue
+            }
+
+            # Decompose hard stories
+            $hardStories = Get-HardStoriesForArea -FocusArea $currentArea
+            if ($hardStories -and $hardStories.Count -gt 0) {
+                Write-Host "  Decomposing $($hardStories.Count) hard stories..." -ForegroundColor Yellow
+                foreach ($hs in $hardStories) {
+                    Invoke-StoryDecomposition -HardStory $hs | Out-Null
+                }
+            }
+
+            # Check for graceful stop
+            if (Test-GracefulStopRequested) {
+                Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
+                Clear-GracefulStopSignal
+                break
+            }
+
+            $needsNewSprint = $true
+            $state.StoriesCompleted = 0
+            $state.StoriesFailed = 0
+        }
+
+        if ($needsNewSprint) {
+            $state.SprintNumber++
+            Write-Host "  Generating Sprint $($state.SprintNumber) for $currentArea..." -ForegroundColor Yellow
+
+            try {
+                $context = Get-InterviewContext
+                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $currentArea -Context $context -GeneratePRD
+
+                if (-not $prdGenerated) {
+                    Write-Host "  Failed to generate PRD for $currentArea" -ForegroundColor Red
+                    $state.StoriesFailed++
+                    $state.TotalAttempts++
+                }
+                else {
+                    $state.CurrentSprint = Get-Sprint
+                    Invoke-BatchPreFlight | Out-Null
+                }
+            }
+            catch {
+                Write-Host "  Error generating sprint: $_" -ForegroundColor Red
+                $state.StoriesFailed++
+                $state.TotalAttempts++
+            }
+
+            # Rotate to next area after generating sprint
+            $currentIndex = ($currentIndex + 1) % $activeAreas.Count
+            Start-Sleep -Seconds 2
+            continue
+        }
+
+        # Work on one story
+        $status = Get-SprintStatus
+        if ($status.nextStory) {
+            Write-Host "  Story: $($status.nextStory.id) - $($status.nextStory.title)" -ForegroundColor White
+
+            $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+            $state.TotalAttempts++
+
+            if ($success) {
+                $state.StoriesCompleted++
+                Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed" -Data @{
+                    area = $currentArea
+                    sprint = $state.SprintNumber
+                }
+            }
+            else {
+                $state.StoriesFailed++
+                Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed" -Data @{
+                    area = $currentArea
+                    sprint = $state.SprintNumber
+                }
+            }
+
+            if (Test-ShouldAbort) {
+                break
+            }
+        }
+        else {
+            Write-Host "  No more stories in sprint" -ForegroundColor Yellow
+        }
+
+        # Rotate to next active area
+        $currentIndex = ($currentIndex + 1) % $activeAreas.Count
+
+        # Brief pause between iterations
+        Write-Heartbeat -Phase "overnight_iteration" -Details @{
+            area = $currentArea
+            sprint = $state.SprintNumber
+            successRate = $state.SuccessRate
+            activeAreas = $activeAreas.Count
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    # === SESSION END ===
+
+    # Alert if all areas paused (everything failing)
+    if ($activeAreas.Count -eq 0 -and $FocusAreas.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  *** ALL FOCUS AREAS PAUSED - TOO MANY FAILURES ***" -ForegroundColor Red
+        Write-Host "  Check logs and investigate issues." -ForegroundColor Yellow
+        Write-Host ""
+
+        Write-SessionLog -Event "all_areas_paused" -Message "All focus areas paused due to failures" -Data @{
+            areas = $FocusAreas
+            states = $areaStates
+        }
+
+        # Generate emergency report
+        Generate-GracefulStopReport -TriggerReason "all_areas_failed"
+    }
+
+    # Generate overnight report
+    Write-Host ""
+    Write-Host "  =====================================================" -ForegroundColor Magenta
+    Write-Host "   OVERNIGHT SESSION COMPLETE" -ForegroundColor Magenta
+    Write-Host "  =====================================================" -ForegroundColor Magenta
+    Write-Host ""
+
+    $totalDuration = (Get-Date) - $startTime
+    Write-Host "  Duration: $([math]::Round($totalDuration.TotalHours, 1)) hours" -ForegroundColor DarkGray
+
+    # Summary per area
+    Write-Host ""
+    Write-Host "  Focus Area Summary:" -ForegroundColor Cyan
+    foreach ($area in $FocusAreas) {
+        $state = $areaStates[$area]
+        $statusColor = switch ($state.Status) {
+            "active" { "Green" }
+            "completed" { "Cyan" }
+            "paused" { "Red" }
+            default { "White" }
+        }
+        $rate = [math]::Round($state.SuccessRate * 100)
+        Write-Host "    $area : $($state.Status) | $($state.SprintNumber) sprints | ${rate}% success" -ForegroundColor $statusColor
+    }
+    Write-Host ""
+
+    # Generate final report
+    Generate-GracefulStopReport -TriggerReason "overnight_complete"
+
+    Write-SessionLog -Event "overnight_end" -Message "Adaptive overnight loop completed" -Data @{
+        durationHours = [math]::Round($totalDuration.TotalHours, 1)
+        areaStates = $areaStates
+    }
 }

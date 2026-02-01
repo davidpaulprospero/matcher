@@ -21,6 +21,7 @@ Original VideoDownloader (~2,388 lines) → streamlined core (~1,100 lines) = 54
 
 # Core class (NEW - Phase 9 complete)
 from .core import VideoDownloader
+from .orchestrator import DownloadOrchestrator, RateLimitHooks
 
 # Dataclasses and exceptions (from types.py)
 from .types import (
@@ -47,11 +48,13 @@ from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager, ImpersonationStats
 from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
+from .escalation_strategy import EscalationStrategy, EscalationDecision
 from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig, RetryItem
+from .retry_stats import RetryQueueStats
 from .rate_limit_metrics import RateLimitMetrics, RateLimitMetricsAggregator
 
 # Segment utilities (public helpers)
@@ -74,6 +77,8 @@ from ..state import AudioDownload
 __all__ = [
     # Core class
     'VideoDownloader',
+    'DownloadOrchestrator',
+    'RateLimitHooks',
 
     # Dataclasses and exceptions
     'MatchedSegment',
@@ -97,6 +102,8 @@ __all__ = [
     'EscalationManager',
     'EscalationResult',
     'is_escalation_trigger',
+    'EscalationStrategy',
+    'EscalationDecision',
     'CookieMethodFallback',
     'VPNManager',
     'DownloadSpeedTracker',
@@ -108,6 +115,7 @@ __all__ = [
     'RetryQueue',
     'BatchRetryConfig',
     'RetryItem',
+    'RetryQueueStats',
     'RateLimitMetrics',
     'RateLimitMetricsAggregator',
 

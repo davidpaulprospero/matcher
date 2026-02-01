@@ -548,10 +548,15 @@ class TestDownloadByIds:
 
     @pytest.mark.fast
     def test_download_by_ids_all_new(self, downloader, temp_dir):
-        """Test downloads all new video IDs"""
-        downloader._run_download_cmd = Mock(return_value=[
-            DownloadedVideo(file="test1.mp4", url="url1", title="Test1", duration_tier="short", keyword="travel"),
-            DownloadedVideo(file="test2.mp4", url="url2", title="Test2", duration_tier="short", keyword="travel")
+        """Test downloads all new video IDs.
+
+        Note: _download_by_ids downloads one-at-a-time (Rule 28), so
+        _run_download_cmd is called once per video ID.
+        """
+        # Each call returns one video (one-at-a-time download)
+        downloader._run_download_cmd = Mock(side_effect=[
+            [DownloadedVideo(file="test1.mp4", url="url1", title="Test1", duration_tier="short", keyword="travel")],
+            [DownloadedVideo(file="test2.mp4", url="url2", title="Test2", duration_tier="short", keyword="travel")]
         ])
 
         output_dir = temp_dir / "videos"
@@ -563,7 +568,8 @@ class TestDownloadByIds:
         result = downloader._download_by_ids(video_ids, keyword_dir, output_dir, "travel", "short")
 
         assert len(result) == 2
-        downloader._run_download_cmd.assert_called_once()
+        # Called once per video ID (one-at-a-time download per Rule 28)
+        assert downloader._run_download_cmd.call_count == 2
 
     @pytest.mark.fast
     def test_download_by_ids_skip_existing(self, downloader, temp_dir):

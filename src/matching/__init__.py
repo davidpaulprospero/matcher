@@ -51,6 +51,12 @@ from .main import match_all_segments
 # Phase 7: TieredMatcher (temporary import from tiered_matcher.py bridge)
 from .tiered_matcher import TieredMatcher
 
+# Phase 8: Extracted modules for composition (US-32-002)
+from .embedding_search import EmbeddingSearch, EmbeddingSearchConfig
+from .llm_reranker import LLMReranker, LLMRerankerConfig, RerankResult
+from .alternative_selection import AlternativeSelector, AlternativeSelectionConfig
+from .candidate_filter import CandidateFilter, CandidateFilterConfig, FilterResult  # US-33-006
+
 __all__ = [
     # Main API
     'match_all_segments',
@@ -84,4 +90,16 @@ __all__ = [
     'get_topic_penalty_cache',
     'log_all_cache_stats',
     'clear_all_caches',
+
+    # Extracted composition modules (US-32-002, US-33-006)
+    'EmbeddingSearch',
+    'EmbeddingSearchConfig',
+    'LLMReranker',
+    'LLMRerankerConfig',
+    'RerankResult',
+    'AlternativeSelector',
+    'AlternativeSelectionConfig',
+    'CandidateFilter',
+    'CandidateFilterConfig',
+    'FilterResult',
 ]

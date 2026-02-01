@@ -230,13 +230,17 @@ function Get-StoryFailureContext {
         [int]$RetryCount
     )
 
-    if ($RetryCount -le 1) {
+    if ($RetryCount -lt 1) {
         return ""
     }
 
     $context = @()
-    $context += "RETRY CONTEXT (attempt $RetryCount):"
-    $context += "This story has been attempted before and failed."
+    $context += "============================================================"
+    $context += "RETRY CONTEXT (attempt $($RetryCount + 1))"
+    $context += "============================================================"
+    $context += ""
+    $context += "Previous attempt failed or timed out. Focus on quick, targeted changes."
+    $context += "If the previous attempt stalled during exploration, skip exploration - story details are in this prompt."
 
     # Check for last output file
     $prevIteration = $script:State.IterationCount  # Current iteration (we're building prompt for next)
@@ -413,7 +417,7 @@ function Get-TestBaseline {
         Hashtable with test counts, or $null on failure
     #>
 
-    $baselineFile = Join-Path $script:RalphDir "test_baseline.json"
+    $baselineFile = if ($script:Paths) { $script:Paths.TestBaselineFile } else { Join-Path $script:RalphDir "config\test_baseline.json" }
 
     try {
         # Quick test collection count
@@ -473,7 +477,7 @@ function Compare-TestBaseline {
         [string]$CurrentResults
     )
 
-    $baselineFile = Join-Path $script:RalphDir "test_baseline.json"
+    $baselineFile = if ($script:Paths) { $script:Paths.TestBaselineFile } else { Join-Path $script:RalphDir "config\test_baseline.json" }
 
     if (-not (Test-Path $baselineFile)) {
         return $null
@@ -567,7 +571,7 @@ function Update-TestBaseline {
         [string]$TestResults
     )
 
-    $baselineFile = Join-Path $script:RalphDir "test_baseline.json"
+    $baselineFile = if ($script:Paths) { $script:Paths.TestBaselineFile } else { Join-Path $script:RalphDir "config\test_baseline.json" }
 
     if (-not $TestResults) { return }
 
@@ -618,7 +622,7 @@ function Import-HumanFeedback {
         Array of feedback entries, or empty array
     #>
 
-    $feedbackFile = Join-Path $script:RalphDir "feedback.json"
+    $feedbackFile = if ($script:Paths) { $script:Paths.FeedbackFile } else { Join-Path $script:RalphDir "config\feedback.json" }
 
     $data = Read-JsonFile -Path $feedbackFile
     if ($data -and $data.entries) {
@@ -1279,8 +1283,9 @@ function Invoke-BatchPreFlight {
     # Phase 2: LLM verification (single call for all candidates)
     $matchedIds = Confirm-CommitMatchesStory -Candidates $candidates
 
-    # Phase 3: Auto-complete verified matches
+    # Phase 3: Auto-complete verified matches and generate refined follow-ons
     $autoCompleted = 0
+    $refinedStories = @()
     foreach ($id in $matchedIds) {
         $candidate = $candidates | Where-Object { $_.storyId -eq $id } | Select-Object -First 1
         if ($candidate) {
@@ -1288,7 +1293,33 @@ function Invoke-BatchPreFlight {
             Write-Host "      $($candidate.commitMsg)" -ForegroundColor DarkCyan
             Complete-StoryAutomatically -StoryId $id -Story $candidate.storyObj -Reason "git-commit-detected"
             $autoCompleted++
+
+            # Phase 3.5: Generate refined follow-on story
+            $refinedStory = Invoke-StoryRefinement `
+                -CompletedStory $candidate.storyObj `
+                -CommitMessage $candidate.commitMsg `
+                -SprintContext $(if ($prd.projectContext) { $prd.projectContext } else { "" })
+
+            if ($refinedStory) {
+                $refinedStories += $refinedStory
+            }
         }
+    }
+
+    # Add refined stories to sprint
+    if ($refinedStories.Count -gt 0) {
+        $prd = Get-Sprint  # Reload after auto-complete updates
+        foreach ($refined in $refinedStories) {
+            # Check if ID already exists (avoid duplicates)
+            $exists = $prd.userStories | Where-Object { $_.id -eq $refined.id }
+            if (-not $exists) {
+                $storyObj = [PSCustomObject]$refined
+                $prd.userStories += $storyObj
+                Write-Host "    Pre-flight: Added refined story $($refined.id) to sprint" -ForegroundColor Cyan
+            }
+        }
+        Save-Sprint -Sprint $prd
+        Write-Host "  Pre-flight: Generated $($refinedStories.Count) refined follow-on stories" -ForegroundColor Cyan
     }
 
     # Log rejections

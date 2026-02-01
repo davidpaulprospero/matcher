@@ -50,6 +50,10 @@ from .retry_queue import RetryQueue, BatchRetryConfig
 from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
 from . import utils
+from ..rate_limit.coordinator import GlobalRateLimitCoordinator, RateLimitConfig
+
+# Lazy import to avoid circular dependency
+# DownloadOrchestrator is imported at runtime in download_all()
 
 logger = logging.getLogger(__name__)
 
@@ -533,6 +537,32 @@ class VideoDownloader:
             self.escalation_manager._budget = self.rate_limit_budget
             logger.debug("Rate limit budget wired into escalation manager")
 
+        # Global rate limit coordinator (US-35-002: unified slot-based rate limiting)
+        # Reads config from rate_limit.global section if available
+        global_rate_limit_config = None
+        if rate_limit_config:
+            global_section = getattr(rate_limit_config, 'global', None)
+            if global_section:
+                try:
+                    enabled = getattr(global_section, 'enabled', True)
+                    slots_per_sec = float(getattr(global_section, 'slots_per_second', 2.0))
+                    burst = int(getattr(global_section, 'burst_size', 5))
+                    global_rate_limit_config = RateLimitConfig(
+                        enabled=enabled,
+                        slots_per_second=slots_per_sec,
+                        burst_size=burst
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+        self.rate_limit_coordinator = GlobalRateLimitCoordinator(global_rate_limit_config)
+        if self.rate_limit_coordinator.is_enabled():
+            logger.debug(
+                f"Global rate limit coordinator enabled: "
+                f"{self.rate_limit_coordinator._config.slots_per_second} slots/sec, "
+                f"burst={self.rate_limit_coordinator._config.burst_size}"
+            )
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -581,6 +611,35 @@ class VideoDownloader:
     def _search_video_metadata(self, keyword: str, tier: str, max_results: int = 50):
         """Delegate to TitleFilter."""
         return self.title_filter.search_video_metadata(keyword, tier, max_results)
+
+    # =========================================================================
+    # RATE LIMIT COORDINATION (US-35-002)
+    # =========================================================================
+
+    def acquire_download_slot(self, timeout: float = 30.0) -> bool:
+        """Acquire a rate limit slot before downloading.
+
+        Uses the global rate limit coordinator to ensure downloads
+        don't exceed the configured rate limit across all operations.
+
+        Args:
+            timeout: Maximum time to wait for slot (seconds)
+
+        Returns:
+            True if slot acquired, False if timeout
+        """
+        acquired = self.rate_limit_coordinator.acquire_slot('download', timeout=timeout)
+        if acquired:
+            logger.debug("Download slot acquired")
+        else:
+            logger.warning(f"Failed to acquire download slot after {timeout}s")
+            self.rate_limit_metrics.record_slot_timeout()
+        return acquired
+
+    def release_download_slot(self) -> None:
+        """Release a rate limit slot after download completes."""
+        self.rate_limit_coordinator.release_slot('download')
+        logger.debug("Download slot released")
 
     def _filter_titles_with_llm(self, videos, keyword, topic=""):
         """Delegate to TitleFilter."""
@@ -1191,6 +1250,8 @@ class VideoDownloader:
         """
         Download videos for all keywords.
 
+        Delegates to DownloadOrchestrator for batch coordination.
+
         Args:
             keywords: List of search keywords
             output_dir: Output directory
@@ -1201,255 +1262,16 @@ class VideoDownloader:
         Returns:
             Tuple of (downloaded_videos, failed_keywords)
         """
-        # Use config value if not explicitly provided
-        if max_concurrent is None:
-            max_concurrent = getattr(self.download_config, 'parallel_workers', 4)
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Scan existing downloads (file-based resume)
-        existing_count = 0
-        if output_dir.exists():
-            for subdir in output_dir.iterdir():
-                if subdir.is_dir():
-                    videos = [f for f in os.listdir(subdir) if f.endswith(('.mp4', '.mkv', '.webm'))]
-                    existing_count += len(videos)
-        if existing_count > 0:
-            logger.info(f"Found {existing_count} existing videos on disk (will skip)")
-
-        # Load or create checkpoint
-        if resume:
-            self.checkpoint = self._load_checkpoint()
-            if self.checkpoint:
-                logger.info(f"Resuming from checkpoint ({len(self.checkpoint.completed_keywords)} keywords done)")
-                # Filter out completed keywords
-                keywords = [k for k in keywords if k not in self.checkpoint.completed_keywords]
-                # Restore speed tracker state from checkpoint
-                if self.checkpoint.speed_tracker_state:
-                    self.speed_tracker.from_checkpoint_dict(self.checkpoint.speed_tracker_state)
-                    logger.debug(f"Restored speed tracker state: {self.speed_tracker.get_speed_stats()['samples']} samples")
-                # Check rate limit cooldown from previous session
-                self._in_cooldown_recovery_mode = self._check_rate_limit_cooldown(self.checkpoint)
-                # Restore rate limit event count for continued tracking
-                self._rate_limit_event_count = self.checkpoint.rate_limit_event_count
-                # Restore rate limit metrics for cross-session aggregation (US-006)
-                if self.checkpoint.rate_limit_metrics:
-                    self.rate_limit_metrics = RateLimitMetrics.from_checkpoint(self.checkpoint.rate_limit_metrics)
-                    # from_checkpoint() increments session_count and logs the restore
-                # Restore cross-keyword rate limit budget (US-004)
-                if self._share_budget_across_keywords and self.checkpoint.rate_limit_budget:
-                    self.rate_limit_budget = RateLimitBudget.from_dict(self.checkpoint.rate_limit_budget)
-                    logger.debug(
-                        f"Restored rate limit budget: "
-                        f"rotations={self.rate_limit_budget.rotations_used}, "
-                        f"vpn_switches={self.rate_limit_budget.vpn_switches_used}, "
-                        f"backoff={self.rate_limit_budget.backoff_time_spent:.1f}s"
-                    )
-                # Restore VPN manager state for switch count persistence (US-005)
-                if self.vpn_manager and self.checkpoint.vpn_manager_state:
-                    self.vpn_manager.restore_from_checkpoint(self.checkpoint.vpn_manager_state)
-                # Restore escalation manager state for resume support (Sprint 10 US-007)
-                if self.checkpoint.escalation_state and self.escalation_manager is not None:
-                    restored_mgr = EscalationManager.from_dict(
-                        data=self.checkpoint.escalation_state,
-                        impersonation_manager=self.impersonation_manager,
-                        extractor_args_config=getattr(self.download_config, 'extractor_args', None),
-                        budget=getattr(self, 'rate_limit_budget', None),
-                    )
-                    self.escalation_manager = restored_mgr
-                    # Re-share with auxiliary modules
-                    if hasattr(self, 'audio_first') and self.audio_first:
-                        self.audio_first.escalation_manager = self.escalation_manager
-                    if hasattr(self, 'title_filter') and self.title_filter:
-                        self.title_filter.escalation_manager = self.escalation_manager
-                    if hasattr(self, 'speech_screener') and self.speech_screener:
-                        self.speech_screener.escalation_manager = self.escalation_manager
-                    metrics = self.escalation_manager.get_metrics()
-                    logger.info(
-                        f"Restored escalation state: {metrics['total_403s']} 403s, "
-                        f"{metrics['total_escalations']} escalations"
-                    )
-                # Restore per-tier backoff state (Sprint 12 US-003)
-                if self._per_tier_isolation and self.checkpoint.tier_backoff_state:
-                    self._restore_tier_backoff_state(self.checkpoint.tier_backoff_state)
-
-        if not self.checkpoint:
-            self.checkpoint = DownloadCheckpoint(
-                completed_keywords=[],
-                completed_videos=[],
-                failed_keywords=[],
-                current_keyword=None,
-                current_tier=None,
-                timestamp=datetime.now().isoformat(),
-                speed_tracker_state=None,
-                last_rate_limit_timestamp=None,
-                rate_limit_event_count=0
-            )
-
-        all_downloaded = []
-        failed_keywords = list(self.checkpoint.failed_keywords)
-
-        # Log title blacklist if enabled
-        title_blacklist = getattr(self.download_config, 'title_blacklist', [])
-        if title_blacklist:
-            logger.info(f"  Title blacklist: {len(title_blacklist)} terms (e.g., {', '.join(title_blacklist[:5])}...)")
-
-        # Log LLM filter status
-        llm_config = getattr(self.download_config, 'llm_title_filter', None)
-        if llm_config and getattr(llm_config, 'enabled', False):
-            provider = getattr(llm_config, 'provider', 'gemini')
-            logger.info(f"  LLM title filter: enabled ({provider})")
-
-        # Log parallel workers setting
-        logger.info(f"  Parallel workers: {max_concurrent}")
-
-        # Process keywords sequentially
-        total_videos_downloaded = 0
-        print(f"\n  Downloading videos for {len(keywords)} keywords...")
-
-        # Track which 10% milestones have been logged (10, 20, 30, ... 100)
-        logged_milestones = set()
-
-        for i, keyword in enumerate(keywords, 1):
-            # Compact progress line
-            progress_pct = (i - 1) / len(keywords) * 100
-            print(f"\r  [{i}/{len(keywords)}] {progress_pct:5.1f}% | {keyword[:40]:<40} | Videos: {total_videos_downloaded}", end='', flush=True)
-
-            # Log at 10% milestones (10%, 20%, ... 90%, 100%)
-            current_pct = (i - 1) / len(keywords) * 100
-            milestone = int(current_pct // 10) * 10
-            if milestone > 0 and milestone not in logged_milestones:
-                logger.info(f"Download progress: {milestone}% ({i-1}/{len(keywords)} keywords)")
-                logged_milestones.add(milestone)
-
-            logger.info(f"[{i}/{len(keywords)}] Processing: {keyword}")
-
-            self.checkpoint.current_keyword = keyword
-            self._save_checkpoint()
-
-            downloaded = self.download_for_keyword(keyword, output_dir, topic=topic)
-
-            if downloaded:
-                all_downloaded.extend(downloaded)
-                total_videos_downloaded += len(downloaded)
-                self.checkpoint.completed_keywords.append(keyword)
-            else:
-                failed_keywords.append(keyword)
-                self.checkpoint.failed_keywords.append(keyword)
-
-            self._save_checkpoint()
-
-            # Delay between keywords to avoid rate limiting
-            if i < len(keywords):
-                time.sleep(self.download_config.delay_between_keywords)
-
-        # Final progress line
-        print(f"\r  [{len(keywords)}/{len(keywords)}] 100.0% | Done{' ' * 50}")
-        print(f"  ✓ Downloaded {total_videos_downloaded} videos from {len(keywords)} keywords")
-
-        # Log 100% milestone
-        if 100 not in logged_milestones:
-            logger.info(f"Download progress: 100% ({len(keywords)}/{len(keywords)} keywords)")
-
-        # Process batch retry queue if there are pending items
-        retry_downloaded, retry_failed = self._process_retry_queue(output_dir, topic)
-        if retry_downloaded:
-            all_downloaded.extend(retry_downloaded)
-            total_videos_downloaded += len(retry_downloaded)
-            print(f"  ✓ Batch retry recovered {len(retry_downloaded)} additional videos")
-
-        # Log inter-keyword source diversity report
-        self.log_source_diversity_report()
-        
-        # Log cache statistics if available
-        if hasattr(self, 'title_filter') and self.title_filter:
-            cache_stats = self.title_filter.get_cache_stats()
-            if cache_stats.get('search_hits', 0) > 0 or cache_stats.get('llm_hits', 0) > 0:
-                logger.info(f"Cache stats: search={cache_stats.get('search_hits', 0)}/{cache_stats.get('search_hits', 0) + cache_stats.get('search_misses', 0)} hits, "
-                           f"llm_filter={cache_stats.get('llm_hits', 0)}/{cache_stats.get('llm_hits', 0) + cache_stats.get('llm_misses', 0)} hits")
-
-        # Clear checkpoint on success
-        self._clear_checkpoint()
-
-        return all_downloaded, failed_keywords
-
-    def _process_retry_queue(
-        self,
-        output_dir: Path,
-        topic: str = ""
-    ) -> Tuple[List[DownloadedVideo], List[str]]:
-        """
-        Process the batch retry queue after main download completes.
-
-        Retries all rate-limited keyword/tier combinations with a delay
-        between passes to allow rate limit windows to pass.
-
-        Args:
-            output_dir: Output directory for downloads
-            topic: Topic context for LLM filtering
-
-        Returns:
-            Tuple of (recovered_videos, still_failed_keywords)
-        """
-        if not self.retry_queue.is_enabled or not self.retry_queue.has_pending():
-            return [], []
-
-        # US-003: Pass budget state to retry queue so it knows remaining budget
-        if self._share_budget_across_keywords:
-            self.retry_queue.set_budget_state(self.rate_limit_budget.get_summary())
-
-        recovered = []
-        still_failed = []
-
-        # Process retry passes
-        while self.retry_queue.has_pending():
-            # Start retry pass (applies delay)
-            pass_num = self.retry_queue.start_retry_pass()
-            if pass_num == 0:
-                break
-
-            # Get items to retry
-            items = self.retry_queue.get_pending_items()
-            logger.info(f"Batch retry pass {pass_num}: attempting {len(items)} keyword/tier combinations")
-
-            for item in items:
-                keyword = item.keyword
-                tier = item.tier
-
-                # Reset rate limit flag before retry
-                self._last_download_rate_limited = False
-
-                # Try downloading again
-                downloaded = self._download_single(keyword, tier, output_dir, topic)
-
-                if downloaded:
-                    # Success - mark in queue and add to recovered
-                    self.retry_queue.mark_success(item.video_id)
-                    recovered.extend(downloaded)
-
-                    # Update tier counts and sources
-                    with self._lock:
-                        self.tier_download_counts[tier] = self.tier_download_counts.get(tier, 0) + len(downloaded)
-                        self.sources.extend(downloaded)
-                        self._save_sources()
-
-                    logger.info(f"  Batch retry: recovered {len(downloaded)} video(s) for '{keyword}' ({tier})")
-                else:
-                    # Still failing
-                    self.retry_queue.mark_failed(item.video_id)
-
-            # Finish this pass (moves exhausted items to permanently failed)
-            self.retry_queue.finish_retry_pass()
-
-        # Collect still-failed keywords
-        stats = self.retry_queue.get_stats()
-        if stats['failed'] > 0:
-            logger.warning(
-                f"Batch retry: {stats['failed']} keyword/tier combinations "
-                f"still failed after {stats['max_passes']} retry passes"
-            )
-
-        return recovered, still_failed
+        # Lazy import to avoid circular dependency
+        from .orchestrator import DownloadOrchestrator
+        orchestrator = DownloadOrchestrator(self)
+        return orchestrator.download_all(
+            keywords=keywords,
+            output_dir=output_dir,
+            max_concurrent=max_concurrent,
+            resume=resume,
+            topic=topic
+        )
 
     def download_for_keyword(
         self,
@@ -1831,41 +1653,52 @@ class VideoDownloader:
         for i, vid_id in enumerate(missing_ids, 1):
             logger.info(f"    Downloading video {i}/{total_to_download}: {vid_id}")
 
-            # Track existing files before this download
-            existing_now = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
+            # Acquire rate limit slot before download (US-35-002)
+            # Uses global coordinator to ensure downloads don't exceed rate limit
+            slot_acquired = self.acquire_download_slot(timeout=30.0)
+            if not slot_acquired:
+                logger.warning(f"    Skipping {vid_id} - rate limit slot timeout")
+                continue
 
-            url = f"https://www.youtube.com/watch?v={vid_id}"
-            cmd = [
-                'yt-dlp',
-                '--ignore-config',
-                '-f', self._build_format_string(),
-                '--merge-output-format', 'mp4',
-                '--no-playlist',
-                '--write-info-json',
-                '--restrict-filenames',
-                '--no-overwrites',
-                '--socket-timeout', '10',
-                '--retries', '10',
-                '--fragment-retries', '10',
-                '--throttled-rate', '100K',
-                '--force-ipv4',
-                '--http-chunk-size', '10M',
-                '--skip-unavailable-fragments',
-                '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
-                '--progress',
-                '--newline',
-                url
-            ]
+            try:
+                # Track existing files before this download
+                existing_now = set(os.listdir(keyword_dir)) if keyword_dir.exists() else set()
 
-            self._add_escalation_to_cmd(cmd, keyword)
-            self._add_cookies_to_cmd(cmd)
+                url = f"https://www.youtube.com/watch?v={vid_id}"
+                cmd = [
+                    'yt-dlp',
+                    '--ignore-config',
+                    '-f', self._build_format_string(),
+                    '--merge-output-format', 'mp4',
+                    '--no-playlist',
+                    '--write-info-json',
+                    '--restrict-filenames',
+                    '--no-overwrites',
+                    '--socket-timeout', '10',
+                    '--retries', '10',
+                    '--fragment-retries', '10',
+                    '--throttled-rate', '100K',
+                    '--force-ipv4',
+                    '--http-chunk-size', '10M',
+                    '--skip-unavailable-fragments',
+                    '-o', str(keyword_dir / f'%(title).{max_fn_len}s_%(id)s.%(ext)s'),
+                    '--progress',
+                    '--newline',
+                    url
+                ]
 
-            downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_now)
-            if downloaded:
-                newly_downloaded.extend(downloaded)
-                logger.debug(f"    ✓ Downloaded {vid_id}")
-            else:
-                logger.debug(f"    ✗ Failed to download {vid_id}")
+                self._add_escalation_to_cmd(cmd, keyword)
+                self._add_cookies_to_cmd(cmd)
+
+                downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_now)
+                if downloaded:
+                    newly_downloaded.extend(downloaded)
+                    logger.debug(f"    ✓ Downloaded {vid_id}")
+                else:
+                    logger.debug(f"    ✗ Failed to download {vid_id}")
+            finally:
+                # Always release slot after download attempt (US-35-002)
+                self.release_download_slot()
 
         # Combine already downloaded + newly downloaded
         return already_downloaded + newly_downloaded
@@ -2214,7 +2047,64 @@ class VideoDownloader:
         if not _is_method_retry:
             self.method_fallback.reset_for_next_download()
 
+        # US-35-002: Acquire rate limit slot before download
+        # This coordinates with caption fetching to prevent overwhelming YouTube
+        slot_acquired = self.acquire_download_slot(timeout=30.0)
+        if not slot_acquired:
+            logger.warning(f"Could not acquire download slot for '{keyword}' ({tier}) - proceeding anyway")
+            # Don't block download, just log - the coordinator will still apply backpressure
+
         # Retry loop with exponential backoff
+        try:
+            return self._run_download_retry_loop(
+                cmd=cmd,
+                keyword_dir=keyword_dir,
+                output_dir=output_dir,
+                keyword=keyword,
+                tier=tier,
+                existing_before=existing_before,
+                timeout_override=timeout_override,
+                _is_method_retry=_is_method_retry,
+                download_timeout=download_timeout,
+                download_start_time=download_start_time,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                retry_backoff=retry_backoff,
+                block_download_retries=block_download_retries
+            )
+        finally:
+            # US-35-002: Always release slot when done
+            if slot_acquired:
+                self.release_download_slot()
+
+    def _run_download_retry_loop(
+        self,
+        cmd: List[str],
+        keyword_dir: Path,
+        output_dir: Path,
+        keyword: str,
+        tier: str,
+        existing_before: set,
+        timeout_override: int,
+        _is_method_retry: bool,
+        download_timeout: int,
+        download_start_time: float,
+        max_retries: int,
+        retry_delay: float,
+        retry_backoff: float,
+        block_download_retries: bool
+    ) -> List[DownloadedVideo]:
+        """Execute the download retry loop (extracted for slot management).
+
+        Args:
+            All parameters from _run_download_cmd plus computed values
+
+        Returns:
+            List of DownloadedVideo objects
+        """
+        process = None
+        last_stderr = ""
+
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             # US-011: Check circuit breaker state before retry attempts (not first attempt)
             if attempt > 0 and block_download_retries and self.circuit_breaker.is_open:

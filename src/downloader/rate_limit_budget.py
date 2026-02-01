@@ -215,6 +215,20 @@ class RateLimitBudget:
             return True  # Unlimited
         return (self.backoff_time_spent + additional_seconds) <= self.max_backoff_time
 
+    def should_skip_backoff(self, proposed_seconds: float) -> bool:
+        """Check if backoff should be skipped because budget would be exceeded.
+
+        This is the inverse of can_backoff() - returns True when the proposed
+        backoff duration would exceed the remaining budget.
+
+        Args:
+            proposed_seconds: Proposed backoff duration to check
+
+        Returns:
+            True if backoff should be skipped (budget would be exceeded)
+        """
+        return not self.can_backoff(proposed_seconds)
+
     def rotations_remaining(self) -> Optional[int]:
         """Get remaining cookie rotations.
 

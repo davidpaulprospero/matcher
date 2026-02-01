@@ -103,6 +103,31 @@ __pycache__/
 src/__pycache__/__init__.cpython-310.pyc
 src/__pycache__/__init__.cpython-310.pyc
 tests/fixtures/*.npz
+testResults.xml
 
 
 *-cwd
+tmpclaude-*
+MagicMock/
+test_collection_mode/
+videos/
+~/
+
+# --- Ralph Loop ---
+# Session files (volatile, per-session)
+scripts/ralph/session/
+# Volatile state files
+scripts/ralph/state/heartbeat.json
+scripts/ralph/state/health_metrics.json
+scripts/ralph/state/crash_recovery.json
+scripts/ralph/state/healing_state.json
+# Session logs
+scripts/ralph/logs/
+# Temp files
+scripts/ralph/**/*.tmp
+# Legacy root-level files (during migration)
+scripts/ralph/*.jsonl
+scripts/ralph/graceful_stop.signal
+# Keep README.md for Ralph docs
+!scripts/ralph/README.md
+!scripts/ralph/docs/*.md

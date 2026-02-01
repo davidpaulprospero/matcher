@@ -161,6 +161,9 @@ class RateLimitMetrics:
     timeout_extensions: int = 0
     speed_escalations: int = 0  # US-001 Sprint 12: speed-triggered tier escalations
 
+    # Global rate limit coordinator (US-35-002)
+    slot_timeouts: int = 0  # Times acquire_download_slot timed out
+
     # Rate limit window estimation (US-002 Sprint 13)
     # Per-keyword list of (timestamp, event_type) where event_type is 'failure' or 'recovery'
     _rate_limit_events_log: Dict[str, List[Tuple[float, str]]] = field(
@@ -230,6 +233,10 @@ class RateLimitMetrics:
     def record_vpn_switch(self) -> None:
         """Record a VPN server switch."""
         self.vpn_switches += 1
+
+    def record_slot_timeout(self) -> None:
+        """Record a global rate limit slot acquisition timeout (US-35-002)."""
+        self.slot_timeouts += 1
 
     def record_circuit_breaker_trip(self, pause_seconds: float) -> None:
         """Record a circuit breaker trip.

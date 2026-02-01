@@ -254,19 +254,24 @@ class TestRetryBehavior:
                     )
                     mock_popen.return_value = mock_process
 
-                    result = downloader._run_download_cmd(
-                        cmd=['yt-dlp', 'test'],
-                        keyword_dir=keyword_dir,
-                        output_dir=tmp_path / "videos",
-                        keyword="test_keyword",
-                        tier="short",
-                        existing_before=set()
-                    )
+                    # Mock progress-aware wait to return the permanent error
+                    with patch.object(
+                        downloader, '_wait_for_process_with_progress',
+                        return_value=("", "ERROR: Video unavailable. This video has been removed.", None)
+                    ):
+                        result = downloader._run_download_cmd(
+                            cmd=['yt-dlp', 'test'],
+                            keyword_dir=keyword_dir,
+                            output_dir=tmp_path / "videos",
+                            keyword="test_keyword",
+                            tier="short",
+                            existing_before=set()
+                        )
 
-                    # Should return empty list immediately
-                    assert result == []
-                    # Should NOT have slept (no retry)
-                    assert mock_sleep.call_count == 0
+                        # Should return empty list immediately
+                        assert result == []
+                        # Should NOT have slept (no retry)
+                        assert mock_sleep.call_count == 0
 
     @pytest.mark.integration
     def test_success_on_first_attempt(self, tmp_path):

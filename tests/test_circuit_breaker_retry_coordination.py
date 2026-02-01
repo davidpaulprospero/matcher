@@ -150,7 +150,7 @@ class TestWaitForCircuitBreaker:
         queue.set_circuit_breaker(cb)
 
         with patch('time.sleep'), \
-             patch('src.downloader.retry_queue.logger') as mock_logger:
+             patch('src.downloader.retry_processor.logger') as mock_logger:
             queue._wait_for_circuit_breaker()
             mock_logger.info.assert_called_once()
             assert 'circuit breaker' in mock_logger.info.call_args[0][0].lower()
@@ -170,7 +170,8 @@ class TestStartRetryPassWithCircuitBreaker:
         cb.state.opened_at = time.time()
         queue.set_circuit_breaker(cb)
 
-        with patch.object(queue, '_wait_combined', return_value=0.01) as mock_wait, \
+        # Patch the processor's _wait_combined since that's where start_retry_pass delegates
+        with patch.object(queue.processor, '_wait_combined', return_value=0.01) as mock_wait, \
              patch('time.sleep'):
             queue.start_retry_pass()
             mock_wait.assert_called_once()
@@ -188,7 +189,7 @@ class TestStartRetryPassWithCircuitBreaker:
         queue.set_circuit_breaker(cb)
 
         with patch('time.sleep'), \
-             patch('src.downloader.retry_queue.logger') as mock_logger:
+             patch('src.downloader.retry_processor.logger') as mock_logger:
             queue.start_retry_pass()
 
             # Should log about the wait (combined or CB-specific)
@@ -203,7 +204,7 @@ class TestStartRetryPassWithCircuitBreaker:
         queue.add('video1', 'keyword', 'short', 'error')
 
         with patch('time.sleep'), \
-             patch('src.downloader.retry_queue.logger') as mock_logger:
+             patch('src.downloader.retry_processor.logger') as mock_logger:
             queue.start_retry_pass()
 
             info_calls = mock_logger.info.call_args_list
@@ -317,9 +318,10 @@ class TestVideoDownloaderIntegration:
         mock_config.download = MagicMock()
         mock_config.download.cookies_path = ''
         mock_config.download.cookies_from_browser = ''
-        mock_config.download.download_timeouts = {'short': 60, 'medium': 120}
-        mock_config.download.root_dir = ''
-        mock_config.download.folder_name = 'videos'
+        mock_config.download.cookie_rotation = None
+        mock_config.download.vpn = None
+        mock_config.cache_dir = '/tmp/test_cache'
+        mock_config.downloaded_videos_dir = '/tmp/test_videos'
 
         # Configure circuit breaker
         mock_config.download.circuit_breaker = MagicMock()
@@ -335,27 +337,18 @@ class TestVideoDownloaderIntegration:
         mock_config.download.batch_retry.respect_circuit_breaker = True
 
         # Other required config
-        mock_config.download.rate_limit = MagicMock()
-        mock_config.download.rate_limit.initial_backoff_seconds = 5.0
-        mock_config.download.rate_limit.max_backoff_before_rotate = 60.0
-        mock_config.download.rate_limit.backoff_multiplier = 2.0
-        mock_config.download.rate_limit.per_tier_isolation = True
         mock_config.download.speed_tracking = MagicMock()
         mock_config.download.speed_tracking.enabled = False
-        mock_config.download.cookie_rotation = MagicMock()
-        mock_config.download.cookie_rotation.enabled = False
-        mock_config.download.vpn = MagicMock()
-        mock_config.download.vpn.enabled = False
-        mock_config.download.llm_title_filter = MagicMock()
-        mock_config.download.llm_title_filter.enabled = False
 
-        mock_config.duration_tiers = MagicMock()
-
-        with patch('src.downloader.core.CookieRotator'), \
-             patch('src.downloader.core.VPNManager'):
+        with patch('src.downloader.core.CheckpointManager'), \
+             patch('src.downloader.core.TranscodingManager'), \
+             patch('src.downloader.core.TitleFilter'), \
+             patch('src.downloader.core.SpeechScreener'), \
+             patch('src.downloader.core.SearchOptimizer'), \
+             patch('src.downloader.core.AudioFirstPipeline'):
             downloader = VideoDownloader(mock_config)
 
-        # Verify circuit breaker is linked to retry queue
+        # Verify circuit breaker is linked to retry queue (via processor)
         assert downloader.retry_queue._circuit_breaker is downloader.circuit_breaker
 
     @pytest.mark.fast
@@ -367,9 +360,10 @@ class TestVideoDownloaderIntegration:
         mock_config.download = MagicMock()
         mock_config.download.cookies_path = ''
         mock_config.download.cookies_from_browser = ''
-        mock_config.download.download_timeouts = {'short': 60}
-        mock_config.download.root_dir = ''
-        mock_config.download.folder_name = 'videos'
+        mock_config.download.cookie_rotation = None
+        mock_config.download.vpn = None
+        mock_config.cache_dir = '/tmp/test_cache'
+        mock_config.downloaded_videos_dir = '/tmp/test_videos'
 
         mock_config.download.circuit_breaker = MagicMock()
         mock_config.download.circuit_breaker.enabled = True
@@ -382,24 +376,15 @@ class TestVideoDownloaderIntegration:
         mock_config.download.batch_retry.max_passes = 2
         mock_config.download.batch_retry.respect_circuit_breaker = False  # Explicitly disabled
 
-        mock_config.download.rate_limit = MagicMock()
-        mock_config.download.rate_limit.initial_backoff_seconds = 5.0
-        mock_config.download.rate_limit.max_backoff_before_rotate = 60.0
-        mock_config.download.rate_limit.backoff_multiplier = 2.0
-        mock_config.download.rate_limit.per_tier_isolation = True
         mock_config.download.speed_tracking = MagicMock()
         mock_config.download.speed_tracking.enabled = False
-        mock_config.download.cookie_rotation = MagicMock()
-        mock_config.download.cookie_rotation.enabled = False
-        mock_config.download.vpn = MagicMock()
-        mock_config.download.vpn.enabled = False
-        mock_config.download.llm_title_filter = MagicMock()
-        mock_config.download.llm_title_filter.enabled = False
 
-        mock_config.duration_tiers = MagicMock()
-
-        with patch('src.downloader.core.CookieRotator'), \
-             patch('src.downloader.core.VPNManager'):
+        with patch('src.downloader.core.CheckpointManager'), \
+             patch('src.downloader.core.TranscodingManager'), \
+             patch('src.downloader.core.TitleFilter'), \
+             patch('src.downloader.core.SpeechScreener'), \
+             patch('src.downloader.core.SearchOptimizer'), \
+             patch('src.downloader.core.AudioFirstPipeline'):
             downloader = VideoDownloader(mock_config)
 
         assert downloader.retry_queue.config.respect_circuit_breaker is False
@@ -657,8 +642,8 @@ class TestConcurrentRetryCoordination:
         result = queue.add('video1', 'keyword', 'short', 'error')
         assert result is True  # Added successfully without blocking
 
-        # But start_retry_pass SHOULD check CB via _wait_combined
-        with patch.object(queue, '_wait_combined', return_value=0.1) as mock_wait:
+        # But start_retry_pass SHOULD check CB via _wait_combined (delegated to processor)
+        with patch.object(queue.processor, '_wait_combined', return_value=0.1) as mock_wait:
             with patch('time.sleep'):
                 queue.start_retry_pass()
             mock_wait.assert_called_once()

@@ -1211,3 +1211,149 @@ Describe "Concurrent File Access" -Tag "Integration", "Concurrency" {
         $lines.Count | Should -Be 6  # header + 5 data rows
     }
 }
+
+# =============================================================================
+# CPU ACTIVITY DETECTION TESTS
+# =============================================================================
+
+Describe "CPU Activity Detection" -Tag "Unit", "StallDetection" {
+    BeforeAll {
+        # Simulate the CPU delta calculation logic from claude.ps1
+        function Test-CpuActivity {
+            param(
+                [double]$CurrentCpu,
+                [double]$LastCpuTime,
+                [double]$Threshold = 0.5,
+                [bool]$Enabled = $true
+            )
+
+            if (-not $Enabled -or $CurrentCpu -le 0) {
+                return @{ Active = $false; Delta = 0 }
+            }
+
+            $cpuDelta = $CurrentCpu - $LastCpuTime
+            $cpuActive = $cpuDelta -gt $Threshold
+
+            return @{
+                Active = $cpuActive
+                Delta = $cpuDelta
+            }
+        }
+    }
+
+    It "detects CPU activity when delta exceeds threshold" {
+        $result = Test-CpuActivity -CurrentCpu 5.0 -LastCpuTime 4.0 -Threshold 0.5
+        $result.Active | Should -Be $true
+        $result.Delta | Should -Be 1.0
+    }
+
+    It "does not detect activity when delta is below threshold" {
+        $result = Test-CpuActivity -CurrentCpu 4.3 -LastCpuTime 4.0 -Threshold 0.5
+        $result.Active | Should -Be $false
+        [math]::Round($result.Delta, 1) | Should -Be 0.3
+    }
+
+    It "does not detect activity when disabled" {
+        $result = Test-CpuActivity -CurrentCpu 10.0 -LastCpuTime 5.0 -Threshold 0.5 -Enabled $false
+        $result.Active | Should -Be $false
+    }
+
+    It "does not detect activity when CPU is zero" {
+        $result = Test-CpuActivity -CurrentCpu 0 -LastCpuTime 5.0 -Threshold 0.5
+        $result.Active | Should -Be $false
+        $result.Delta | Should -Be 0  # Early exit should return 0 delta, not negative
+    }
+
+    It "handles first sample (LastCpuTime = 0)" {
+        # First sample: delta = current CPU time (shows startup work)
+        $result = Test-CpuActivity -CurrentCpu 2.0 -LastCpuTime 0 -Threshold 0.5
+        $result.Active | Should -Be $true
+        $result.Delta | Should -Be 2.0
+    }
+
+    It "uses default threshold of 0.5 seconds" {
+        # 0.5 CPU-seconds in 5 seconds = 10% CPU utilization threshold
+        $result = Test-CpuActivity -CurrentCpu 10.5 -LastCpuTime 10.0
+        $result.Active | Should -Be $false  # exactly at threshold, not above
+
+        $result = Test-CpuActivity -CurrentCpu 10.6 -LastCpuTime 10.0
+        $result.Active | Should -Be $true  # above threshold
+    }
+
+    It "handles large CPU deltas during heavy computation" {
+        # During pytest runs, CPU time might increase significantly
+        $result = Test-CpuActivity -CurrentCpu 25.0 -LastCpuTime 10.0 -Threshold 0.5
+        $result.Active | Should -Be $true
+        $result.Delta | Should -Be 15.0
+    }
+}
+
+Describe "CPU Activity Config Loading" -Tag "Unit", "Config" {
+    It "loads cpuActivity config from stallDetection section" {
+        $configJson = @'
+{
+    "stallDetection": {
+        "default": { "stallThreshold": 180, "killThreshold": 360 },
+        "cpuActivity": { "enabled": true, "threshold": 0.5 }
+    }
+}
+'@
+        $config = $configJson | ConvertFrom-Json
+
+        $cpuActivityConfig = $config.stallDetection.cpuActivity
+        $cpuActivityConfig.enabled | Should -Be $true
+        $cpuActivityConfig.threshold | Should -Be 0.5
+    }
+
+    It "uses defaults when cpuActivity config is missing" {
+        $configJson = @'
+{
+    "stallDetection": {
+        "default": { "stallThreshold": 180, "killThreshold": 360 }
+    }
+}
+'@
+        $config = $configJson | ConvertFrom-Json
+
+        $cpuActivityConfig = $config.stallDetection.cpuActivity
+
+        # Simulate the default logic from claude.ps1
+        $enabled = if ($cpuActivityConfig -and $null -ne $cpuActivityConfig.enabled) { $cpuActivityConfig.enabled } else { $true }
+        $threshold = if ($cpuActivityConfig -and $cpuActivityConfig.threshold) { $cpuActivityConfig.threshold } else { 0.5 }
+
+        $enabled | Should -Be $true
+        $threshold | Should -Be 0.5
+    }
+
+    It "respects disabled cpuActivity config" {
+        $configJson = @'
+{
+    "stallDetection": {
+        "cpuActivity": { "enabled": false, "threshold": 1.0 }
+    }
+}
+'@
+        $config = $configJson | ConvertFrom-Json
+
+        $cpuActivityConfig = $config.stallDetection.cpuActivity
+        $enabled = if ($cpuActivityConfig -and $null -ne $cpuActivityConfig.enabled) { $cpuActivityConfig.enabled } else { $true }
+
+        $enabled | Should -Be $false
+    }
+
+    It "allows custom threshold values" {
+        $configJson = @'
+{
+    "stallDetection": {
+        "cpuActivity": { "enabled": true, "threshold": 2.0 }
+    }
+}
+'@
+        $config = $configJson | ConvertFrom-Json
+
+        $cpuActivityConfig = $config.stallDetection.cpuActivity
+        $threshold = if ($cpuActivityConfig -and $cpuActivityConfig.threshold) { $cpuActivityConfig.threshold } else { 0.5 }
+
+        $threshold | Should -Be 2.0
+    }
+}

@@ -113,6 +113,11 @@ from .iterative_matching import (
     IterativeMatchingConfig,
 )
 
+# Rate limiting
+from .rate_limit import (
+    RateLimitConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -176,4 +181,6 @@ __all__ = [
     'BrollConfig',
     # Iterative matching
     'IterativeMatchingConfig',
+    # Rate limiting
+    'RateLimitConfig',
 ]

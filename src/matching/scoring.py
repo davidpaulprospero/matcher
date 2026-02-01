@@ -10,12 +10,15 @@ Provides confidence adjustments for:
 - Adaptive thresholds based on voiceover length and candidate variance
 """
 
-from typing import Any, Tuple, List, Optional
+from typing import Any, Tuple, List, Optional, TYPE_CHECKING
 import logging
 import statistics
 
 from ..utils import SRTSegment
 from ..topic_extraction import compute_topic_penalty
+
+if TYPE_CHECKING:
+    from ..config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -1406,6 +1409,298 @@ POOL_NORMALIZATION_MAX_FACTOR = 1.2  # Maximum normalization factor (caps reduct
 POOL_SMALL_THRESHOLD = 10  # Pool considered "small" below this
 POOL_LARGE_THRESHOLD = 100  # Pool considered "large" above this
 POOL_TIGHT_MARGIN_THRESHOLD = 0.05  # Top-2 score difference threshold for "tight margin"
+
+
+class MatchScoring:
+    """
+    Centralized scoring class for match confidence calculations.
+
+    Provides a unified interface for all scoring operations, enabling:
+    - Configuration-driven scoring adjustments
+    - Easy testing and mocking
+    - Composition pattern for TieredMatcher
+
+    Usage:
+        scoring = MatchScoring(config)
+        confidence, reason = scoring.apply_all_adjustments(
+            base_confidence, vo_segment, video_segment, video_topics
+        )
+    """
+
+    def __init__(self, config=None):
+        """
+        Initialize MatchScoring with configuration.
+
+        Args:
+            config: Configuration object with matching settings
+        """
+        self.config = config
+        self._mc = config.matching if config else None
+
+    def calculate_confidence(
+        self,
+        embedding_similarity: float,
+        keyword_score: float = 0.0,
+        entity_score: float = 0.0,
+        visual_score: float = 0.0
+    ) -> Tuple[float, str, dict]:
+        """
+        Calculate multimodal confidence from component scores.
+
+        Args:
+            embedding_similarity: Raw embedding similarity (0-1)
+            keyword_score: Keyword overlap score (0-1)
+            entity_score: Entity match score (0-1)
+            visual_score: Visual description score (0-1)
+
+        Returns:
+            Tuple of (confidence, reason, component_scores)
+        """
+        weights = getattr(self._mc, 'multimodal_weights', None) if self._mc else None
+        multimodal_enabled = getattr(self._mc, 'multimodal_enabled', True) if self._mc else True
+
+        return compute_multimodal_score(
+            embedding_similarity=embedding_similarity,
+            keyword_overlap_score=keyword_score,
+            entity_match_score=entity_score,
+            visual_description_score=visual_score,
+            weights=weights,
+            multimodal_enabled=multimodal_enabled
+        )
+
+    def normalize_score(
+        self,
+        confidence: float,
+        pool_size: int,
+        candidates: Optional[List[Tuple[SRTSegment, float]]] = None
+    ) -> Tuple[float, str]:
+        """
+        Normalize confidence score based on candidate pool size.
+
+        Args:
+            confidence: Raw confidence score
+            pool_size: Number of candidates in pool
+            candidates: Optional sorted candidate list
+
+        Returns:
+            Tuple of (normalized_confidence, reason)
+        """
+        pool_norm_enabled = getattr(self._mc, 'pool_normalization_enabled', True) if self._mc else True
+
+        return normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=pool_size,
+            candidates=candidates,
+            pool_normalization_enabled=pool_norm_enabled
+        )
+
+    def apply_boost(
+        self,
+        confidence: float,
+        video_segment: SRTSegment,
+        boost_type: str
+    ) -> Tuple[float, str]:
+        """
+        Apply a specific boost to confidence score.
+
+        Args:
+            confidence: Current confidence
+            video_segment: Video segment being scored
+            boost_type: Type of boost ('broll', 'project', 'entity')
+
+        Returns:
+            Tuple of (boosted_confidence, reason)
+        """
+        if boost_type == 'broll':
+            return apply_broll_boost(confidence, video_segment, self.config)
+        elif boost_type == 'project':
+            return apply_current_project_boost(confidence, video_segment, self.config)
+        elif boost_type == 'entity':
+            # For entity boost, we need vo_segment too - return unchanged
+            logger.debug(f"Entity boost requires vo_segment, skipping for {boost_type}")
+            return confidence, ""
+        else:
+            logger.warning(f"Unknown boost type: {boost_type}")
+            return confidence, ""
+
+    def apply_penalty(
+        self,
+        confidence: float,
+        video_segment: SRTSegment,
+        penalty_type: str,
+        vo_segment: Optional[SRTSegment] = None,
+        video_topics: Optional[dict] = None
+    ) -> Tuple[float, str]:
+        """
+        Apply a specific penalty to confidence score.
+
+        Args:
+            confidence: Current confidence
+            video_segment: Video segment being scored
+            penalty_type: Type of penalty ('topic', 'timing', 'caption_quality')
+            vo_segment: Optional voiceover segment (required for topic penalty)
+            video_topics: Optional video topics dict (required for topic penalty)
+
+        Returns:
+            Tuple of (penalized_confidence, reason)
+        """
+        if penalty_type == 'topic':
+            if vo_segment is None:
+                return confidence, ""
+            chapter_enabled = getattr(self._mc, 'chapter_matching_enabled', False) if self._mc else False
+            topic_penalty = getattr(self._mc, 'topic_mismatch_penalty', 0.15) if self._mc else 0.15
+            return apply_topic_penalty(
+                confidence, vo_segment, video_segment,
+                video_topics or {},
+                chapter_enabled,
+                topic_penalty
+            )
+        elif penalty_type == 'timing':
+            return apply_timing_penalty(confidence, video_segment, self.config)
+        elif penalty_type == 'caption_quality':
+            return apply_caption_quality_adjustment(confidence, video_segment, self.config)
+        else:
+            logger.warning(f"Unknown penalty type: {penalty_type}")
+            return confidence, ""
+
+    def apply_all_adjustments(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment,
+        video_topics: Optional[dict] = None,
+        chapter_matching_enabled: bool = False,
+        topic_mismatch_penalty: float = 0.15
+    ) -> Tuple[float, str]:
+        """
+        Apply all scoring adjustments in the correct order.
+
+        Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty -> project_boost
+
+        Args:
+            confidence: Base confidence score
+            vo_segment: Voiceover segment
+            video_segment: Video segment
+            video_topics: Optional dict of video topics
+            chapter_matching_enabled: Whether chapter matching is enabled
+            topic_mismatch_penalty: Maximum topic mismatch penalty
+
+        Returns:
+            Tuple of (adjusted_confidence, combined_reason)
+        """
+        reasons = []
+
+        # 1. Topic penalty
+        confidence, topic_reason = apply_topic_penalty(
+            confidence, vo_segment, video_segment,
+            video_topics or {},
+            chapter_matching_enabled,
+            topic_mismatch_penalty
+        )
+        if topic_reason:
+            reasons.append(topic_reason)
+
+        # 2. B-roll boost
+        confidence, broll_reason = apply_broll_boost(
+            confidence, video_segment, self.config
+        )
+        if broll_reason:
+            reasons.append(broll_reason)
+
+        # 3. Caption quality adjustment
+        confidence, caption_reason = apply_caption_quality_adjustment(
+            confidence, video_segment, self.config
+        )
+        if caption_reason:
+            reasons.append(caption_reason)
+
+        # 4. Timing penalty
+        confidence, timing_reason = apply_timing_penalty(
+            confidence, video_segment, self.config
+        )
+        if timing_reason:
+            reasons.append(timing_reason)
+
+        # 5. Project boost (global cache penalty)
+        confidence, project_reason = apply_current_project_boost(
+            confidence, video_segment, self.config
+        )
+        if project_reason:
+            reasons.append(project_reason)
+
+        combined_reason = " | ".join(reasons) if reasons else ""
+
+        return confidence, combined_reason
+
+    def calculate_adaptive_threshold(
+        self,
+        base_threshold: float,
+        voiceover_text: str,
+        candidates: List[Tuple[SRTSegment, float]]
+    ) -> Tuple[float, str]:
+        """
+        Calculate adaptive LLM skip threshold.
+
+        Args:
+            base_threshold: Base skip_llm_threshold
+            voiceover_text: Voiceover segment text
+            candidates: Candidate list
+
+        Returns:
+            Tuple of (adjusted_threshold, reason)
+        """
+        return calculate_adaptive_threshold(
+            base_threshold,
+            voiceover_text,
+            candidates,
+            self.config
+        )
+
+    def extract_entity_texts(self, segment: SRTSegment) -> List[str]:
+        """
+        Extract entity texts from a segment.
+
+        Args:
+            segment: Segment to extract entities from
+
+        Returns:
+            List of entity text strings
+        """
+        return _extract_entity_texts(segment)
+
+    def calculate_keyword_overlap(
+        self,
+        vo_keywords: List[str],
+        video_keywords: List[str]
+    ) -> Tuple[float, List[str]]:
+        """
+        Calculate keyword overlap score.
+
+        Args:
+            vo_keywords: Voiceover keywords
+            video_keywords: Video keywords
+
+        Returns:
+            Tuple of (overlap_score, matched_keywords)
+        """
+        return calculate_keyword_overlap_score(vo_keywords, video_keywords)
+
+    def calculate_entity_match(
+        self,
+        vo_entities: List[str],
+        video_entities: List[str]
+    ) -> Tuple[float, List[str]]:
+        """
+        Calculate entity match score.
+
+        Args:
+            vo_entities: Voiceover entities
+            video_entities: Video entities
+
+        Returns:
+            Tuple of (entity_score, matched_entities)
+        """
+        return calculate_entity_match_score(vo_entities, video_entities)
 
 
 def normalize_confidence_by_pool(

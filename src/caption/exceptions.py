@@ -1,0 +1,140 @@
+"""
+Caption fetcher exceptions.
+
+Contains custom exception classes for caption fetching operations
+extracted from caption_fetcher.py.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from .models import ErrorPatternResult
+
+
+class CaptionError(Exception):
+    """Base exception for caption-related errors."""
+    pass
+
+
+class CaptionUnavailableError(CaptionError):
+    """Raised when captions are not available for a video.
+
+    This indicates the video genuinely has no captions (auto or manual),
+    as opposed to a temporary fetch failure.
+    """
+    def __init__(self, video_id: str, reason: str = ""):
+        self.video_id = video_id
+        self.reason = reason
+        message = f"No captions available for video {video_id}"
+        if reason:
+            message += f": {reason}"
+        super().__init__(message)
+
+
+class CaptionFetchError(CaptionError):
+    """Raised when caption fetch fails due to a temporary/network error.
+
+    This indicates a potentially retryable failure, not that captions
+    don't exist.
+    """
+    def __init__(self, video_id: str, reason: str = ""):
+        self.video_id = video_id
+        self.reason = reason
+        message = f"Failed to fetch captions for video {video_id}"
+        if reason:
+            message += f": {reason}"
+        super().__init__(message)
+
+
+class CaptionParseWarning(CaptionError):
+    """Non-fatal warning for caption parsing issues (US-005).
+
+    This indicates a segment could not be parsed but other segments
+    may still be usable. Use for graceful degradation with partial recovery.
+
+    Attributes:
+        video_id: YouTube video ID.
+        segment_index: Index of the problematic segment.
+        reason: Description of the parsing issue.
+    """
+    def __init__(self, video_id: str, segment_index: int, reason: str = ""):
+        self.video_id = video_id
+        self.segment_index = segment_index
+        self.reason = reason
+        message = f"Parse warning for video {video_id} segment {segment_index}"
+        if reason:
+            message += f": {reason}"
+        super().__init__(message)
+
+
+class ConfigValidationError(CaptionError):
+    """Raised when language configuration is invalid (US-005 Sprint 6).
+
+    This indicates a configuration error that should be fixed before
+    running the pipeline. Invalid configurations will cause silent failures
+    during fetch.
+
+    Attributes:
+        field: The config field with the issue (e.g., 'fallback_languages').
+        value: The invalid value.
+        reason: Description of why validation failed.
+        suggestion: Suggested fix for the issue.
+    """
+    def __init__(
+        self,
+        field: str,
+        value: Any,
+        reason: str = "",
+        suggestion: str = ""
+    ):
+        self.field = field
+        self.value = value
+        self.reason = reason
+        self.suggestion = suggestion
+        message = f"Invalid language configuration for '{field}': {value}"
+        if reason:
+            message += f" - {reason}"
+        if suggestion:
+            message += f". Suggestion: {suggestion}"
+        super().__init__(message)
+
+
+class ErrorPatternAbortError(CaptionError):
+    """Raised when batch fetch is aborted due to detected error pattern (US-007 Sprint 7).
+
+    This exception is raised when abort_on_error_pattern='abort' and a pattern
+    is detected (e.g., 30%+ of videos failing with the same error).
+
+    Attributes:
+        pattern_result: The ErrorPatternResult with detection details.
+        partial_results: Dict of results collected before abort.
+    """
+    def __init__(
+        self,
+        pattern_result: 'ErrorPatternResult',
+        partial_results: Optional[Dict[str, Any]] = None
+    ):
+        self.pattern_result = pattern_result
+        self.partial_results = partial_results or {}
+        message = str(pattern_result)
+        super().__init__(message)
+
+
+class CaptionNormalizationError(CaptionError):
+    """Raised when caption normalization fails.
+
+    This indicates that the normalization process could not complete,
+    typically due to too many malformed segments exceeding the partial
+    recovery threshold.
+
+    Attributes:
+        reason: Description of why normalization failed.
+    """
+    def __init__(self, reason: str = ""):
+        self.reason = reason
+        message = "Caption normalization failed"
+        if reason:
+            message += f": {reason}"
+        super().__init__(message)

@@ -1,5 +1,8 @@
 # Ralph Loop Status Check
 # Usage: .\scripts\ralph\status.ps1
+#
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PrdPath = Join-Path $ScriptDir "prd.json"

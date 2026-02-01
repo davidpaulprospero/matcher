@@ -144,6 +144,11 @@ except ImportError:  # pragma: no cover
     ImpersonationManager = None  # type: ignore[misc,assignment]
 
 try:
+    from .escalation_strategy import EscalationStrategy
+except ImportError:  # pragma: no cover
+    EscalationStrategy = None  # type: ignore[misc,assignment]
+
+try:
     from .rate_limit_budget import RateLimitBudget
 except ImportError:  # pragma: no cover
     RateLimitBudget = None  # type: ignore[misc,assignment]
@@ -190,10 +195,13 @@ class EscalationManager:
         impersonation_manager: "ImpersonationManager",
         extractor_args_config: Optional["ExtractorArgsConfig"] = None,
         budget: Optional["RateLimitBudget"] = None,
+        strategy: Optional["EscalationStrategy"] = None,
     ):
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
         self._budget = budget
+        # Create strategy if not provided (for backwards compatibility)
+        self._strategy = strategy or EscalationStrategy(extractor_args_config)
         self._circuit_breaker: Optional["CircuitBreaker"] = None
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
@@ -238,6 +246,11 @@ class EscalationManager:
         """Read-only access to keyword states (for metrics/debugging)."""
         return dict(self._keyword_states)
 
+    @property
+    def strategy(self) -> "EscalationStrategy":
+        """Access the escalation strategy (for testing/inspection)."""
+        return self._strategy
+
     def get_escalation_args(self, keyword: str) -> EscalationResult:
         """Get yt-dlp arguments for the current escalation tier of a keyword.
 
@@ -263,18 +276,15 @@ class EscalationManager:
             state = self._get_state(keyword)
             tier = state.current_tier
 
-            # Circuit breaker shortcut: when circuit breaker is open (paused),
-            # return Tier 3 args immediately to skip lower tiers
-            if (
-                self._circuit_breaker is not None
-                and self._circuit_breaker.is_open
-                and tier < EscalationTier.FULL_BYPASS
-            ):
+            # Delegate circuit breaker shortcut decision to strategy
+            cb_open = self._circuit_breaker is not None and self._circuit_breaker.is_open
+            shortcut_decision = self._strategy.should_shortcut_to_max(tier, cb_open)
+            if shortcut_decision.should_escalate:
                 logger.info(
                     f"Circuit breaker open: shortcutting keyword={keyword} "
                     f"from {tier.name} to FULL_BYPASS"
                 )
-                tier = EscalationTier.FULL_BYPASS
+                tier = shortcut_decision.target_tier
 
             # Tier 1: impersonation only
             args = self._impersonation_manager.get_impersonate_args()
@@ -371,43 +381,39 @@ class EscalationManager:
             state.consecutive_403s += 1
             self._total_403s += 1
 
-            if self._should_escalate(state):
+            # Delegate escalation decision to strategy
+            budget_exhausted = self._budget is not None and not self._budget.can_rotate()
+            decision = self._strategy.should_escalate_on_failure(state, budget_exhausted)
+
+            if decision.should_escalate:
                 old_tier = state.current_tier
                 n_403s = state.consecutive_403s
 
-                # Budget-aware escalation: if budget exhausted, skip to max tier
-                if self._budget is not None and not self._budget.can_rotate():
-                    if state.current_tier < EscalationTier.FULL_BYPASS:
-                        logger.warning(
-                            f"Budget exhausted for keyword={keyword}: "
-                            f"skipping to FULL_BYPASS (was {state.current_tier.name})"
-                        )
-                        state.current_tier = EscalationTier.FULL_BYPASS
-                        state.last_escalation_time = time.time()
-                        state.escalation_history.append(
-                            (state.last_escalation_time, state.current_tier)
-                        )
-                        state.consecutive_403s = 0
+                if decision.skip_to_max:
+                    # Budget exhausted: skip to max tier
+                    logger.warning(
+                        f"Budget exhausted for keyword={keyword}: "
+                        f"skipping to FULL_BYPASS (was {state.current_tier.name})"
+                    )
+                    state.current_tier = decision.target_tier
+                    state.last_escalation_time = time.time()
+                    state.escalation_history.append(
+                        (state.last_escalation_time, state.current_tier)
+                    )
+                    state.consecutive_403s = 0
+                    state.extractor_args_index += 1
+                else:
+                    # Normal escalation
+                    state.escalate()
+                    # Increment extractor_args_index on Tier 2 escalation
+                    if state.current_tier >= EscalationTier.EXTRACTOR_ARGS:
                         state.extractor_args_index += 1
-                        self._total_escalations += 1
-                        tier_name = state.current_tier.name
-                        self._escalations_per_tier[tier_name] = (
-                            self._escalations_per_tier.get(tier_name, 0) + 1
-                        )
-                        self._record_timeline_event(
-                            keyword, old_tier, state.current_tier, trigger_category
-                        )
-                        return
 
-                state.escalate()
                 self._total_escalations += 1
                 tier_name = state.current_tier.name
                 self._escalations_per_tier[tier_name] = (
                     self._escalations_per_tier.get(tier_name, 0) + 1
                 )
-                # Increment extractor_args_index on Tier 2 escalation
-                if state.current_tier >= EscalationTier.EXTRACTOR_ARGS:
-                    state.extractor_args_index += 1
 
                 # Budget tracking: record rotation when advancing to Tier 2 or Tier 3
                 if self._budget is not None and state.current_tier > old_tier:
@@ -459,45 +465,44 @@ class EscalationManager:
             count = self._slow_speed_counts.get(keyword, 0) + 1
             self._slow_speed_counts[keyword] = count
 
-            if count >= 3:
-                state = self._get_state(keyword)
-                if state.current_tier < EscalationTier.FULL_BYPASS:
-                    # Respect cooldown: don't escalate if recently escalated
-                    if not self._is_past_cooldown(state):
-                        logger.debug(
-                            f"Speed escalation suppressed for {keyword}: cooldown active"
-                        )
-                        # Reset counter so signals accumulate again after cooldown
-                        self._slow_speed_counts[keyword] = 0
-                        return
+            state = self._get_state(keyword)
+            # Delegate decision to strategy
+            decision = self._strategy.should_escalate_on_slow_speed(state, count)
 
-                    old_tier = state.current_tier
-                    state.escalate()
-                    self._speed_escalations += 1
-                    self._total_escalations += 1
-                    tier_name = state.current_tier.name
-                    self._escalations_per_tier[tier_name] = (
-                        self._escalations_per_tier.get(tier_name, 0) + 1
-                    )
+            if decision.should_escalate:
+                old_tier = state.current_tier
+                state.escalate()
+                self._speed_escalations += 1
+                self._total_escalations += 1
+                tier_name = state.current_tier.name
+                self._escalations_per_tier[tier_name] = (
+                    self._escalations_per_tier.get(tier_name, 0) + 1
+                )
 
-                    logger.info(
-                        f"Preemptive escalation for {keyword}: sustained low speed "
-                        f"({speed_mbps:.3f} MB/s) - "
-                        f"{old_tier.name} -> {state.current_tier.name} "
-                        f"(after {count} slow speed signals)"
-                    )
+                logger.info(
+                    f"Preemptive escalation for {keyword}: sustained low speed "
+                    f"({speed_mbps:.3f} MB/s) - "
+                    f"{old_tier.name} -> {state.current_tier.name} "
+                    f"(after {count} slow speed signals)"
+                )
 
-                    # Reset slow speed count after escalation
-                    self._slow_speed_counts[keyword] = 0
-                    # NOTE: No budget.record_rotation() here - speed signals
-                    # are preventive, not reactive, so they don't consume budget
-                else:
-                    logger.debug(
-                        f"Slow speed for {keyword} ({speed_mbps:.3f} MB/s) "
-                        f"but already at max tier"
-                    )
-                    # Reset counter since we can't escalate further
-                    self._slow_speed_counts[keyword] = 0
+                # Reset slow speed count after escalation
+                self._slow_speed_counts[keyword] = 0
+                # NOTE: No budget.record_rotation() here - speed signals
+                # are preventive, not reactive, so they don't consume budget
+            elif self._strategy.is_at_max_tier(state.current_tier):
+                logger.debug(
+                    f"Slow speed for {keyword} ({speed_mbps:.3f} MB/s) "
+                    f"but already at max tier"
+                )
+                # Reset counter since we can't escalate further
+                self._slow_speed_counts[keyword] = 0
+            elif "cooldown" in decision.reason.lower():
+                logger.debug(
+                    f"Speed escalation suppressed for {keyword}: cooldown active"
+                )
+                # Reset counter so signals accumulate again after cooldown
+                self._slow_speed_counts[keyword] = 0
 
     def _should_escalate(self, state: EscalationState) -> bool:
         """Check if escalation should proceed, considering cooldown.
@@ -505,34 +510,17 @@ class EscalationManager:
         Returns False if the keyword was escalated within the cooldown
         period, even if the 403 threshold has been reached again.
 
+        Note: This method delegates to the strategy but is kept for
+        backward compatibility with any external code that may call it.
+
         Args:
             state: The per-keyword escalation state.
 
         Returns:
             True if escalation should proceed, False if in cooldown.
         """
-        cooldown = 300.0
-        if self._extractor_config is not None:
-            cooldown = getattr(self._extractor_config, 'cooldown_seconds', 300.0)
-
-        threshold = 2
-        if self._extractor_config is not None:
-            threshold = getattr(self._extractor_config, 'escalation_threshold', 2)
-
-        if not state.should_escalate(threshold):
-            return False
-
-        # Check cooldown: if recently escalated, suppress
-        if state.last_escalation_time is not None:
-            elapsed = time.time() - state.last_escalation_time
-            if elapsed < cooldown:
-                logger.debug(
-                    f"Escalation suppressed: cooldown active "
-                    f"({elapsed:.0f}s / {cooldown:.0f}s elapsed)"
-                )
-                return False
-
-        return True
+        decision = self._strategy.should_escalate_on_failure(state, budget_exhausted=False)
+        return decision.should_escalate
 
     def _is_past_cooldown(self, state: EscalationState) -> bool:
         """Check if enough time has passed since the last escalation.
@@ -540,21 +528,16 @@ class EscalationManager:
         Used by record_slow_speed() to prevent rapid speed-triggered
         escalations within the cooldown window.
 
+        Note: This method delegates to the strategy but is kept for
+        backward compatibility.
+
         Args:
             state: The per-keyword escalation state.
 
         Returns:
             True if past cooldown (or never escalated), False if in cooldown.
         """
-        if state.last_escalation_time is None:
-            return True
-
-        cooldown = 300.0
-        if self._extractor_config is not None:
-            cooldown = getattr(self._extractor_config, 'cooldown_seconds', 300.0)
-
-        elapsed = time.time() - state.last_escalation_time
-        return elapsed >= cooldown
+        return self._strategy.is_past_cooldown(state)
 
     def get_cooldown_remaining(self, keyword: str) -> float:
         """Get remaining cooldown seconds for a keyword.
@@ -568,16 +551,7 @@ class EscalationManager:
         lock = self._get_lock(keyword)
         with lock:
             state = self._get_state(keyword)
-            if state.last_escalation_time is None:
-                return 0.0
-
-            cooldown = 300.0
-            if self._extractor_config is not None:
-                cooldown = getattr(self._extractor_config, 'cooldown_seconds', 300.0)
-
-            elapsed = time.time() - state.last_escalation_time
-            remaining = cooldown - elapsed
-            return max(0.0, remaining)
+            return self._strategy.get_cooldown_remaining(state)
 
     def reset_keyword(self, keyword: str) -> None:
         """Clear all escalation state for a keyword.
@@ -701,6 +675,7 @@ class EscalationManager:
         extractor_args_config: Optional["ExtractorArgsConfig"] = None,
         budget: Optional["RateLimitBudget"] = None,
         stale_threshold: float = 3600.0,
+        strategy: Optional["EscalationStrategy"] = None,
     ) -> "EscalationManager":
         """Restore an EscalationManager from checkpoint data.
 
@@ -715,6 +690,8 @@ class EscalationManager:
             budget: Optional RateLimitBudget for budget-aware escalation.
             stale_threshold: Seconds after which saved data is considered stale
                 and keywords are de-escalated by one tier. Default: 3600 (1 hour).
+            strategy: Optional EscalationStrategy for decision logic.
+                If not provided, a default strategy is created from config.
 
         Returns:
             A new EscalationManager with restored keyword states.
@@ -723,6 +700,7 @@ class EscalationManager:
             impersonation_manager=impersonation_manager,
             extractor_args_config=extractor_args_config,
             budget=budget,
+            strategy=strategy,
         )
 
         if not data or not isinstance(data, dict):

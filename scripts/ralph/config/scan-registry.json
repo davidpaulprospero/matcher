@@ -1,0 +1,135 @@
+{
+  "version": "1.0.0",
+  "description": "Declarative registry of available codebase scans for LLM-orchestrated sprint triggering",
+  "scans": {
+    "large_files": {
+      "id": "large_files",
+      "name": "Large File Detection",
+      "description": "Find Python files over 400 lines that may need splitting",
+      "relevantFor": [
+        "refactoring",
+        "architecture",
+        "maintainability",
+        "code organization",
+        "god file",
+        "unwieldy",
+        "modular",
+        "split",
+        "extract"
+      ],
+      "outputs": ["file paths", "line counts", "complexity indicators"],
+      "focusAreas": ["refactoring", "architecture"]
+    },
+    "rate_limit_patterns": {
+      "id": "rate_limit_patterns",
+      "name": "Rate Limiting Infrastructure",
+      "description": "Check existing rate limiting, backoff, and throttling patterns",
+      "relevantFor": [
+        "rate limiting",
+        "429 errors",
+        "API throttling",
+        "download failures",
+        "quota issues",
+        "backoff",
+        "too many requests"
+      ],
+      "outputs": ["existing pattern files", "implementation gaps"],
+      "focusAreas": ["rate-limiting", "download"]
+    },
+    "caption_infrastructure": {
+      "id": "caption_infrastructure",
+      "name": "Caption/Subtitle System",
+      "description": "Analyze caption fetching, caching, and error handling",
+      "relevantFor": [
+        "captions",
+        "subtitles",
+        "transcription",
+        "YouTube API",
+        "srt",
+        "whisper"
+      ],
+      "outputs": ["relevant files", "current implementation state"],
+      "focusAreas": ["caption", "transcription"]
+    },
+    "download_system": {
+      "id": "download_system",
+      "name": "Download Infrastructure",
+      "description": "Analyze yt-dlp integration, bypass mechanisms, cookie handling",
+      "relevantFor": [
+        "downloads",
+        "403 errors",
+        "cookies",
+        "bot detection",
+        "YouTube blocks",
+        "yt-dlp",
+        "forbidden"
+      ],
+      "outputs": ["downloader files", "escalation patterns", "bypass status"],
+      "focusAreas": ["download", "rate-limiting"]
+    },
+    "test_coverage": {
+      "id": "test_coverage",
+      "name": "Test Coverage Analysis",
+      "description": "Count tests, identify untested modules, find coverage gaps",
+      "relevantFor": [
+        "testing",
+        "coverage",
+        "quality",
+        "reliability",
+        "CI/CD",
+        "pytest",
+        "unit tests"
+      ],
+      "outputs": ["test count", "untested modules", "coverage percentage"],
+      "focusAreas": ["testing", "quality"]
+    },
+    "config_structure": {
+      "id": "config_structure",
+      "name": "Configuration System",
+      "description": "List config sections and their current state",
+      "relevantFor": [
+        "configuration",
+        "settings",
+        "yaml",
+        "options",
+        "customization",
+        "parameters"
+      ],
+      "outputs": ["config sections", "missing options"],
+      "focusAreas": ["config"]
+    },
+    "pipeline_stages": {
+      "id": "pipeline_stages",
+      "name": "Pipeline Stage Analysis",
+      "description": "Analyze pipeline stages, execution order, dependencies",
+      "relevantFor": [
+        "pipeline",
+        "stages",
+        "execution order",
+        "workflow",
+        "processing",
+        "bottleneck"
+      ],
+      "outputs": ["stage list", "stage health", "bottlenecks"],
+      "focusAreas": ["pipeline", "architecture"]
+    },
+    "error_patterns": {
+      "id": "error_patterns",
+      "name": "Error Pattern Detection",
+      "description": "Scan logs and code for common error patterns",
+      "relevantFor": [
+        "errors",
+        "crashes",
+        "exceptions",
+        "debugging",
+        "stability",
+        "bugs",
+        "broken"
+      ],
+      "outputs": ["error categories", "frequency", "affected modules"],
+      "focusAreas": ["healing", "quality", "agents"]
+    }
+  },
+  "defaultScans": ["large_files", "test_coverage"],
+  "maxScansPerAnalysis": 5
+}

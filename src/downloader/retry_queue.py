@@ -10,6 +10,14 @@ Key concepts:
 - Maximum 2 retry passes per download session (configurable)
 - Queue is cleared on session start or when all retries complete
 
+Architecture (Single Responsibility Principle):
+- RetryQueue: Pure data structure (add/get/clear items, track state)
+- RetryQueueProcessor: Execution logic (delay, circuit breaker wait, cookie cooldown)
+
+For processing, use RetryQueueProcessor which wraps a RetryQueue instance.
+RetryQueue still exposes processing methods for backward compatibility, but
+they delegate to an internal processor instance.
+
 Circuit breaker coordination:
 - When a circuit breaker is linked, the retry queue checks its state before processing
 - If the circuit breaker is tripped, waits for it to recover before starting retries
@@ -23,10 +31,13 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Set, TYPE_CHECKING
 
+from .retry_stats import RetryQueueStats
+
 if TYPE_CHECKING:
     from .circuit_breaker import CircuitBreaker
     from .cookie_rotator import CookieRotator
     from .rate_limit_budget import RateLimitBudget
+    from .retry_processor import RetryQueueProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +90,11 @@ class BatchRetryConfig:
     # for both to clear. Prevents deadlock when CB and cooldown overlap.
     max_combined_wait_seconds: float = 300.0
 
+    # Jitter factor for randomizing delay durations (0.0 to 1.0)
+    # Delay is computed as: base_delay * (1 + random.uniform(-jitter, +jitter))
+    # Default 0.2 means ±20% randomization to prevent thundering herd
+    jitter_factor: float = 0.2
+
 
 @dataclass
 class RetryItem:
@@ -89,6 +105,7 @@ class RetryItem:
     error_message: str
     retry_count: int = 0
     added_at: float = field(default_factory=time.time)
+    severity: str = 'medium'  # low, medium, high - determines delay multiplier
 
 
 class RetryQueue:
@@ -133,12 +150,106 @@ class RetryQueue:
         self._failed_ids: Set[str] = set()  # Permanently failed after max retries
         self._total_added: int = 0
         self._total_retried: int = 0
-        self._circuit_breaker: Optional['CircuitBreaker'] = None
-        self._circuit_breaker_wait_time: float = 0.0  # Total time spent waiting for circuit breaker
-        self._cookie_rotator: Optional['CookieRotator'] = None
-        self._cookie_cooldown_wait_time: float = 0.0  # Total time spent waiting for cookie cooldown
-        self._budget_state: Optional[Dict] = None  # Budget snapshot when items were queued
-        self._forced_retry: bool = False  # True when deadlock forced a retry without full wait
+
+        # Processor handles execution logic (delay, CB wait, cookie cooldown)
+        # Lazily created to avoid circular imports
+        self._processor: Optional['RetryQueueProcessor'] = None
+
+        # Initialize stats tracker with config values
+        self._stats = RetryQueueStats(
+            enabled=self.config.enabled,
+            max_passes=self.config.max_passes,
+            delay_seconds=self.config.delay_seconds,
+            respect_circuit_breaker=self.config.respect_circuit_breaker,
+            wait_for_cookie_cooldown=self.config.wait_for_cookie_cooldown,
+            max_combined_wait_seconds=self.config.max_combined_wait_seconds,
+        )
+
+    @property
+    def processor(self) -> 'RetryQueueProcessor':
+        """Get the processor instance, creating it lazily if needed."""
+        if self._processor is None:
+            from .retry_processor import RetryQueueProcessor
+            self._processor = RetryQueueProcessor(self)
+        return self._processor
+
+    # =========================================================================
+    # Backward compatibility properties - delegate to processor
+    # =========================================================================
+
+    @property
+    def _circuit_breaker(self) -> Optional['CircuitBreaker']:
+        """Get circuit breaker from processor (backward compat)."""
+        return self.processor._circuit_breaker
+
+    @_circuit_breaker.setter
+    def _circuit_breaker(self, value: Optional['CircuitBreaker']) -> None:
+        """Set circuit breaker on processor (backward compat)."""
+        self.processor._circuit_breaker = value
+
+    @property
+    def _cookie_rotator(self) -> Optional['CookieRotator']:
+        """Get cookie rotator from processor (backward compat)."""
+        return self.processor._cookie_rotator
+
+    @_cookie_rotator.setter
+    def _cookie_rotator(self, value: Optional['CookieRotator']) -> None:
+        """Set cookie rotator on processor (backward compat)."""
+        self.processor._cookie_rotator = value
+
+    @property
+    def _circuit_breaker_wait_time(self) -> float:
+        """Get CB wait time from processor (backward compat)."""
+        return self.processor._circuit_breaker_wait_time
+
+    @_circuit_breaker_wait_time.setter
+    def _circuit_breaker_wait_time(self, value: float) -> None:
+        """Set CB wait time on processor (backward compat)."""
+        self.processor._circuit_breaker_wait_time = value
+
+    @property
+    def _cookie_cooldown_wait_time(self) -> float:
+        """Get cookie cooldown wait time from processor (backward compat)."""
+        return self.processor._cookie_cooldown_wait_time
+
+    @_cookie_cooldown_wait_time.setter
+    def _cookie_cooldown_wait_time(self, value: float) -> None:
+        """Set cookie cooldown wait time on processor (backward compat)."""
+        self.processor._cookie_cooldown_wait_time = value
+
+    @property
+    def _budget_state(self) -> Optional[Dict]:
+        """Get budget state from processor (backward compat)."""
+        return self.processor._budget_state
+
+    @_budget_state.setter
+    def _budget_state(self, value: Optional[Dict]) -> None:
+        """Set budget state on processor (backward compat)."""
+        self.processor._budget_state = value
+
+    @property
+    def _forced_retry(self) -> bool:
+        """Get forced retry flag from processor (backward compat)."""
+        return self.processor._forced_retry
+
+    @_forced_retry.setter
+    def _forced_retry(self, value: bool) -> None:
+        """Set forced retry flag on processor (backward compat)."""
+        self.processor._forced_retry = value
+
+    @property
+    def _last_jitter_applied(self) -> float:
+        """Get last jitter from processor (backward compat)."""
+        return self.processor._last_jitter_applied
+
+    @_last_jitter_applied.setter
+    def _last_jitter_applied(self, value: float) -> None:
+        """Set last jitter on processor (backward compat)."""
+        self.processor._last_jitter_applied = value
+
+    # =========================================================================
+    # Processing methods - delegate to processor
+    # =========================================================================
 
     def set_circuit_breaker(self, circuit_breaker: 'CircuitBreaker') -> None:
         """Link a circuit breaker to coordinate retry timing.
@@ -150,7 +261,7 @@ class RetryQueue:
         Args:
             circuit_breaker: CircuitBreaker instance to coordinate with.
         """
-        self._circuit_breaker = circuit_breaker
+        self.processor.set_circuit_breaker(circuit_breaker)
         logger.debug("Retry queue: linked to circuit breaker")
 
     def set_cookie_rotator(self, cookie_rotator: 'CookieRotator') -> None:
@@ -164,7 +275,7 @@ class RetryQueue:
         Args:
             cookie_rotator: CookieRotator instance to coordinate with.
         """
-        self._cookie_rotator = cookie_rotator
+        self.processor.set_cookie_rotator(cookie_rotator)
         logger.debug("Retry queue: linked to cookie rotator")
 
     def set_budget_state(self, budget_summary: Dict) -> None:
@@ -176,12 +287,7 @@ class RetryQueue:
         Args:
             budget_summary: Dict from RateLimitBudget.get_summary()
         """
-        self._budget_state = budget_summary
-        logger.debug(
-            f"Retry queue: budget state updated — "
-            f"exhausted={budget_summary.get('is_exhausted', False)}, "
-            f"backoff_remaining={budget_summary.get('backoff_time_remaining', 'N/A')}s"
-        )
+        self.processor.set_budget_state(budget_summary)
 
     def get_budget_state(self) -> Optional[Dict]:
         """Get the stored budget state snapshot.
@@ -189,177 +295,31 @@ class RetryQueue:
         Returns:
             Budget summary dict, or None if not set.
         """
-        return self._budget_state
+        return self.processor.get_budget_state()
+
+    def _apply_jitter(self, delay: float) -> float:
+        """Apply random jitter to a delay value. Delegates to processor."""
+        return self.processor._apply_jitter(delay)
 
     def _get_cookie_cooldown_remaining(self) -> float:
-        """Get remaining cookie cooldown time without waiting.
-
-        Returns:
-            Remaining seconds until shortest cookie cooldown expires,
-            or 0.0 if cookies are available or cooldown check disabled.
-        """
-        if not self._cookie_rotator:
-            return 0.0
-
-        if not self.config.wait_for_cookie_cooldown:
-            return 0.0
-
-        if not self._cookie_rotator.is_enabled:
-            return 0.0
-
-        # Check if any cookies are available
-        if self._cookie_rotator.available_cookies > 0:
-            return 0.0
-
-        # All cookies are in cooldown - find the shortest remaining cooldown
-        if not self._cookie_rotator._failed_cookies:
-            return 0.0
-
-        cooldown_seconds = self._cookie_rotator.config.cooldown_seconds
-        now = time.time()
-
-        min_remaining = float('inf')
-        for cookie_path, failed_time in self._cookie_rotator._failed_cookies.items():
-            elapsed = now - failed_time
-            remaining = cooldown_seconds - elapsed
-            if remaining > 0 and remaining < min_remaining:
-                min_remaining = remaining
-
-        if min_remaining == float('inf') or min_remaining <= 0:
-            return 0.0
-
-        return min_remaining
+        """Get remaining cookie cooldown time. Delegates to processor."""
+        return self.processor._get_cookie_cooldown_remaining()
 
     def _get_cb_remaining(self) -> float:
-        """Get remaining circuit breaker pause time without waiting.
-
-        Returns:
-            Remaining seconds until circuit breaker recovers,
-            or 0.0 if CB is not tripped or check disabled.
-        """
-        if not self._circuit_breaker:
-            return 0.0
-
-        if not self.config.respect_circuit_breaker:
-            return 0.0
-
-        if not self._circuit_breaker.is_enabled:
-            return 0.0
-
-        if not self._circuit_breaker.is_open:
-            return 0.0
-
-        elapsed = time.time() - self._circuit_breaker.state.opened_at
-        remaining = self._circuit_breaker.config.pause_seconds - elapsed
-
-        return max(0.0, remaining)
+        """Get remaining circuit breaker pause time. Delegates to processor."""
+        return self.processor._get_cb_remaining()
 
     def _wait_for_cookie_cooldown(self) -> float:
-        """Wait for cookie cooldown to expire if all cookies are unavailable.
-
-        Checks if all cookies are in cooldown. If so, calculates the shortest
-        remaining cooldown time and waits for it to expire.
-
-        Returns:
-            The number of seconds waited (0 if cookies were available).
-        """
-        remaining = self._get_cookie_cooldown_remaining()
-        if remaining <= 0:
-            return 0.0
-
-        # Log and wait for cookie cooldown to expire
-        logger.info(
-            f"Batch retry: waiting {remaining:.1f}s for cookie cooldown to expire "
-            f"before processing retry queue"
-        )
-        time.sleep(remaining)
-        self._cookie_cooldown_wait_time += remaining
-
-        return remaining
+        """Wait for cookie cooldown to expire. Delegates to processor."""
+        return self.processor._wait_for_cookie_cooldown()
 
     def _wait_for_circuit_breaker(self) -> float:
-        """Wait for circuit breaker to recover if tripped.
-
-        Checks if the circuit breaker is open (tripped) and if so, waits for
-        the remaining pause duration before returning.
-
-        Returns:
-            The number of seconds waited (0 if circuit breaker was not tripped).
-        """
-        remaining = self._get_cb_remaining()
-        if remaining <= 0:
-            return 0.0
-
-        # Log and wait for circuit breaker to recover
-        logger.info(
-            f"Batch retry: waiting {remaining:.1f}s for circuit breaker to recover "
-            f"before processing retry queue"
-        )
-        time.sleep(remaining)
-        self._circuit_breaker_wait_time += remaining
-
-        return remaining
+        """Wait for circuit breaker to recover. Delegates to processor."""
+        return self.processor._wait_for_circuit_breaker()
 
     def _wait_combined(self) -> float:
-        """Wait for both circuit breaker and cookie cooldown using combined strategy.
-
-        Instead of waiting for CB and cooldown sequentially (which can deadlock),
-        uses min(cb_remaining, cooldown_remaining) + small buffer. If both are
-        blocking and the total wait would exceed max_combined_wait_seconds,
-        forces a retry with the best-available cookie method.
-
-        Sets self._forced_retry = True if the max combined wait was exceeded.
-
-        Returns:
-            Total seconds waited.
-        """
-        cb_remaining = self._get_cb_remaining()
-        cooldown_remaining = self._get_cookie_cooldown_remaining()
-
-        # Neither blocking — no wait needed
-        if cb_remaining <= 0 and cooldown_remaining <= 0:
-            self._forced_retry = False
-            return 0.0
-
-        # Only one is blocking — wait for it normally
-        if cb_remaining > 0 and cooldown_remaining <= 0:
-            self._forced_retry = False
-            return self._wait_for_circuit_breaker()
-
-        if cooldown_remaining > 0 and cb_remaining <= 0:
-            self._forced_retry = False
-            return self._wait_for_cookie_cooldown()
-
-        # Both are blocking — potential deadlock scenario
-        # Use min(cb_remaining, cooldown_remaining) + 5s buffer
-        combined_estimate = min(cb_remaining, cooldown_remaining) + 5.0
-        max_wait = self.config.max_combined_wait_seconds
-
-        if combined_estimate > max_wait:
-            # Deadlock detected — force retry with best-available cookie
-            logger.warning(
-                f"Retry queue waited {combined_estimate:.0f}s for CB+cooldown "
-                f"— forcing retry with best-available cookie method "
-                f"(max_combined_wait={max_wait:.0f}s, "
-                f"cb_remaining={cb_remaining:.1f}s, "
-                f"cooldown_remaining={cooldown_remaining:.1f}s)"
-            )
-            self._forced_retry = True
-            return 0.0
-
-        # Wait for the shorter of the two blockers + buffer
-        wait_time = combined_estimate
-        logger.info(
-            f"Batch retry: CB and cookie cooldown both active — "
-            f"waiting {wait_time:.1f}s "
-            f"(min of CB {cb_remaining:.1f}s / cooldown {cooldown_remaining:.1f}s + 5s buffer)"
-        )
-        time.sleep(wait_time)
-        self._circuit_breaker_wait_time += min(cb_remaining, wait_time)
-        self._cookie_cooldown_wait_time += max(0.0, wait_time - cb_remaining)
-        self._forced_retry = False
-
-        return wait_time
+        """Wait for both circuit breaker and cookie cooldown. Delegates to processor."""
+        return self.processor._wait_combined()
 
     @property
     def is_enabled(self) -> bool:
@@ -396,10 +356,14 @@ class RetryQueue:
         if not self.config.enabled:
             return False
 
+        # Import here to avoid circular import (core.py imports retry_queue.py)
+        from .core import classify_error_severity
+
         # Check if already in queue
         if video_id in self.items:
-            # Update error message but don't re-add
+            # Update error message and severity but don't re-add
             self.items[video_id].error_message = error_message
+            self.items[video_id].severity = classify_error_severity(error_message)
             logger.debug(f"Retry queue: {video_id} already queued, updated error")
             return False
 
@@ -408,17 +372,22 @@ class RetryQueue:
             logger.debug(f"Retry queue: {video_id} already processed, skipping")
             return False
 
+        # Classify error severity for adaptive delay scaling
+        severity = classify_error_severity(error_message)
+
         self.items[video_id] = RetryItem(
             video_id=video_id,
             keyword=keyword,
             tier=tier,
             error_message=error_message,
-            retry_count=0
+            retry_count=0,
+            severity=severity
         )
         self._total_added += 1
+        self._stats.record_failure(video_id, error_message)
 
         logger.debug(
-            f"Retry queue: added {video_id} ({keyword}/{tier}) - "
+            f"Retry queue: added {video_id} ({keyword}/{tier}) severity={severity} - "
             f"queue size now {len(self.items)}"
         )
         return True
@@ -443,6 +412,7 @@ class RetryQueue:
             del self.items[video_id]
             self._completed_ids.add(video_id)
             self._total_retried += 1
+            self._stats.clear_failure(video_id)
             logger.debug(f"Retry queue: {video_id} succeeded, removed from queue")
 
     def mark_failed(self, video_id: str) -> None:
@@ -467,7 +437,7 @@ class RetryQueue:
         return self._forced_retry
 
     def start_retry_pass(self) -> int:
-        """Start a new retry pass.
+        """Start a new retry pass. Delegates to processor for execution logic.
 
         Increments the pass counter, checks circuit breaker state, checks cookie
         cooldowns, applies the delay, and logs the start. Should be called before
@@ -484,61 +454,7 @@ class RetryQueue:
         Returns:
             The new pass number (1-indexed).
         """
-        if not self.config.enabled or not self.items:
-            return 0
-
-        self.current_pass += 1
-
-        # Use combined wait strategy to avoid deadlock when both CB and
-        # cookie cooldown are active simultaneously
-        combined_wait = self._wait_combined()
-
-        # Calculate effective delay
-        effective_delay = self.config.delay_seconds
-
-        # Build wait info message
-        wait_parts = []
-        if combined_wait > 0:
-            cb_rem = self._get_cb_remaining()
-            cookie_rem = self._get_cookie_cooldown_remaining()
-            if cb_rem > 0 or self._circuit_breaker_wait_time > 0:
-                wait_parts.append(f"circuit breaker: {self._circuit_breaker_wait_time:.1f}s")
-            if cookie_rem > 0 or self._cookie_cooldown_wait_time > 0:
-                wait_parts.append(f"cookie cooldown: {self._cookie_cooldown_wait_time:.1f}s")
-            if not wait_parts:
-                wait_parts.append(f"combined: {combined_wait:.1f}s")
-
-        # Log at INFO level so users can see the retry happening
-        if self._forced_retry:
-            logger.info(
-                f"Batch retry pass {self.current_pass}/{self.config.max_passes}: "
-                f"{len(self.items)} videos queued. "
-                f"FORCED — skipping wait (CB+cooldown deadlock exceeded "
-                f"{self.config.max_combined_wait_seconds:.0f}s cap). "
-                f"Retrying with best-available cookie method..."
-            )
-        elif wait_parts:
-            logger.info(
-                f"Batch retry pass {self.current_pass}/{self.config.max_passes}: "
-                f"{len(self.items)} videos queued. "
-                f"Waited for {', '.join(wait_parts)}, "
-                f"additional delay: {effective_delay:.0f}s..."
-            )
-        else:
-            logger.info(
-                f"Batch retry pass {self.current_pass}/{self.config.max_passes}: "
-                f"{len(self.items)} videos queued. "
-                f"Waiting {effective_delay:.0f}s before retry..."
-            )
-
-        time.sleep(effective_delay)
-
-        logger.info(
-            f"Batch retry pass {self.current_pass}: "
-            f"starting retry of {len(self.items)} videos"
-        )
-
-        return self.current_pass
+        return self.processor.start_retry_pass()
 
     def finish_retry_pass(self) -> None:
         """Finish the current retry pass.
@@ -568,13 +484,14 @@ class RetryQueue:
         self.current_pass = 0
         self._total_added = 0
         self._total_retried = 0
-        self._circuit_breaker_wait_time = 0.0
-        self._cookie_cooldown_wait_time = 0.0
-        self._forced_retry = False
+        self.processor.clear()  # Clear processor state (wait times, forced_retry)
+        self._stats.reset()
         logger.debug("Retry queue: cleared for new session")
 
     def get_stats(self) -> dict:
         """Get retry queue statistics for reporting.
+
+        Delegates to RetryQueueStats.get_summary() after syncing current state.
 
         Returns:
             Dict with stats including:
@@ -591,24 +508,43 @@ class RetryQueue:
             - wait_for_cookie_cooldown: Whether cookie cooldown is respected
             - cookie_cooldown_wait_time: Total time spent waiting for cookie cooldown
         """
-        return {
-            'enabled': self.config.enabled,
-            'pending': len(self.items),
-            'completed': len(self._completed_ids),
-            'failed': len(self._failed_ids),
-            'current_pass': self.current_pass,
-            'max_passes': self.config.max_passes,
-            'delay_seconds': self.config.delay_seconds,
-            'total_added': self._total_added,
-            'total_retried': self._total_retried,
-            'respect_circuit_breaker': self.config.respect_circuit_breaker,
-            'circuit_breaker_wait_time': round(self._circuit_breaker_wait_time, 1),
-            'wait_for_cookie_cooldown': self.config.wait_for_cookie_cooldown,
-            'cookie_cooldown_wait_time': round(self._cookie_cooldown_wait_time, 1),
-            'max_combined_wait_seconds': self.config.max_combined_wait_seconds,
-            'forced_retry': self._forced_retry,
-            'budget_state': self._budget_state,
-        }
+        self._sync_stats()
+        return self._stats.get_summary()
+
+    def get_failure_reasons(self) -> Dict[str, str]:
+        """Get mapping of failed video IDs to their error messages.
+
+        Delegates to RetryQueueStats.get_failure_reasons().
+
+        Returns:
+            Dict mapping video_id to the last error message received.
+        """
+        self._sync_stats()
+        return self._stats.get_failure_reasons()
+
+    def get_retry_metrics(self) -> Dict:
+        """Calculate retry-specific metrics for analysis.
+
+        Delegates to RetryQueueStats.get_retry_metrics().
+
+        Returns:
+            Dict with metrics including success_rate, retry_efficiency, etc.
+        """
+        self._sync_stats()
+        return self._stats.get_retry_metrics()
+
+    def _sync_stats(self) -> None:
+        """Sync internal state to RetryQueueStats for accurate reporting."""
+        self._stats.pending = len(self.items)
+        self._stats.completed_ids = self._completed_ids.copy()
+        self._stats.failed_ids = self._failed_ids.copy()
+        self._stats.current_pass = self.current_pass
+        self._stats.total_added = self._total_added
+        self._stats.total_retried = self._total_retried
+        self._stats.circuit_breaker_wait_time = self._circuit_breaker_wait_time
+        self._stats.cookie_cooldown_wait_time = self._cookie_cooldown_wait_time
+        self._stats.forced_retry = self._forced_retry
+        self._stats.budget_state = self._budget_state
 
     def to_checkpoint_dict(self) -> dict:
         """Serialize state to dictionary for checkpoint persistence.
@@ -616,7 +552,7 @@ class RetryQueue:
         Returns:
             Dict that can be saved to checkpoint JSON.
         """
-        return {
+        checkpoint = {
             'items': [
                 {
                     'video_id': item.video_id,
@@ -632,9 +568,10 @@ class RetryQueue:
             'failed_ids': list(self._failed_ids),
             'total_added': self._total_added,
             'total_retried': self._total_retried,
-            'circuit_breaker_wait_time': self._circuit_breaker_wait_time,
-            'cookie_cooldown_wait_time': self._cookie_cooldown_wait_time,
         }
+        # Merge processor checkpoint data
+        checkpoint.update(self.processor.to_checkpoint_dict())
+        return checkpoint
 
     def from_checkpoint_dict(self, data: dict) -> None:
         """Restore state from checkpoint dictionary.
@@ -664,8 +601,9 @@ class RetryQueue:
         self._failed_ids = set(data.get('failed_ids', []))
         self._total_added = data.get('total_added', 0)
         self._total_retried = data.get('total_retried', 0)
-        self._circuit_breaker_wait_time = data.get('circuit_breaker_wait_time', 0.0)
-        self._cookie_cooldown_wait_time = data.get('cookie_cooldown_wait_time', 0.0)
+
+        # Restore processor state
+        self.processor.from_checkpoint_dict(data)
 
         if self.items:
             logger.debug(

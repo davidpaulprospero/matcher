@@ -111,6 +111,8 @@ from .sections import (
     BrollConfig,
     # Iterative matching
     IterativeMatchingConfig,
+    # Rate limiting
+    RateLimitConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,7 @@ class Config:
     broll: BrollConfig = field(default_factory=BrollConfig)
     healing: HealingConfig = field(default_factory=HealingConfig)
     iterative_matching: IterativeMatchingConfig = field(default_factory=IterativeMatchingConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
@@ -368,6 +371,7 @@ class Config:
             'api_keys': (APIKeysConfig, 'api_keys'),
             'healing': (HealingConfig, 'healing'),
             'iterative_matching': (IterativeMatchingConfig, 'iterative_matching'),
+            'rate_limit': (RateLimitConfig, 'rate_limit'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():

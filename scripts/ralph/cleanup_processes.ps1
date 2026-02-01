@@ -1,5 +1,8 @@
 # Cleanup stuck Ralph processes
 # Kill high-CPU claude processes (Ralph subprocesses)
+#
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
 Write-Host "Killing stuck claude processes..." -ForegroundColor Yellow
 
 $claudeTargets = @(16164, 14180, 13832, 13916, 49084)

@@ -1,5 +1,7 @@
-# Ralph Loop Watch Library
+# scripts/ralph/lib/watch.ps1
 # Reusable display functions for the watch dashboard
+#
+# Moved from watch-lib.ps1 to lib/watch.ps1 per convention
 
 # ============================================================================
 # QUEUE STATUS

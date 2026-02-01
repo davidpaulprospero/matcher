@@ -23,11 +23,41 @@ from src.downloader.escalation_manager import (
     is_escalation_trigger,
 )
 from src.downloader.types import EscalationState, EscalationTier
+from contextlib import contextmanager
 
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
+@contextmanager
+def patch_time_modules(time_func):
+    """Patch time.time() in all escalation-related modules.
+
+    Since US-35-009 extracted EscalationStrategy from EscalationManager,
+    we now need to patch time in three modules:
+    - escalation_manager.time
+    - escalation_strategy.time
+    - types.time
+
+    Args:
+        time_func: A callable that returns the mocked time value.
+            Can be a lambda, a function, or a MagicMock side_effect.
+    """
+    with patch("src.downloader.escalation_manager.time") as em_time, \
+         patch("src.downloader.escalation_strategy.time") as strat_time, \
+         patch("src.downloader.types.time") as types_time:
+
+        if callable(time_func):
+            em_time.time.side_effect = time_func
+            strat_time.time.side_effect = time_func
+            types_time.time.side_effect = time_func
+        else:
+            em_time.time.return_value = time_func
+            strat_time.time.return_value = time_func
+            types_time.time.return_value = time_func
+
+        yield (em_time, strat_time, types_time)
 
 @dataclass
 class FakeExtractorArgsConfig:
@@ -118,15 +148,8 @@ class TestTierProgression:
         # Now at Tier 2 - escalate() resets consecutive_403s,
         # so we need threshold more failures for Tier 3.
         # But cooldown may suppress - mock time to skip cooldown.
-        # Need to patch time in BOTH modules:
-        # - escalation_manager.time for _should_escalate()
-        # - types.time for EscalationState.escalate()
         far_future = time.time() + 1000
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.return_value = far_future
-            types_time.time.return_value = far_future
-
+        with patch_time_modules(far_future):
             manager.record_failure("kw", "HTTP Error 403")
             manager.record_failure("kw", "HTTP Error 403")
 
@@ -137,18 +160,14 @@ class TestTierProgression:
     def test_no_escalation_beyond_tier_3(self, manager):
         """Tier 3 is the maximum - further failures don't crash."""
         # Fast-track to Tier 3 by mocking time to bypass cooldown
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            call_count = [0]
-            base = 1000.0
+        call_count = [0]
+        base = 1000.0
 
-            def advancing_time():
-                call_count[0] += 1
-                return base + call_count[0] * 400  # always past cooldown
+        def advancing_time():
+            call_count[0] += 1
+            return base + call_count[0] * 400  # always past cooldown
 
-            em_time.time.side_effect = lambda: advancing_time()
-            types_time.time.side_effect = lambda: advancing_time()
-
+        with patch_time_modules(advancing_time):
             # Tier 1 -> 2
             manager.record_failure("kw", "403")
             manager.record_failure("kw", "403")
@@ -212,17 +231,13 @@ class TestEscalationArgs:
     @pytest.mark.fast
     def test_tier_3_includes_cookie_flag(self, manager):
         """Tier 3 includes all Tier 2 args plus rotate_cookies=True."""
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            counter = [0]
+        counter = [0]
 
-            def advancing():
-                counter[0] += 1
-                return 1000.0 + counter[0] * 400
+        def advancing():
+            counter[0] += 1
+            return 1000.0 + counter[0] * 400
 
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             # Tier 1 -> 2
             manager.record_failure("kw", "403")
             manager.record_failure("kw", "403")
@@ -304,13 +319,9 @@ class TestCooldown:
         manager.record_failure("kw", "403")
         assert manager.get_escalation_args("kw").tier == EscalationTier.EXTRACTOR_ARGS
 
-        # Mock time past cooldown (300s) in both modules
+        # Mock time past cooldown (300s)
         far_future = time.time() + 500
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.return_value = far_future
-            types_time.time.return_value = far_future
-
+        with patch_time_modules(far_future):
             manager.record_failure("kw", "403")
             manager.record_failure("kw", "403")
 
@@ -336,8 +347,8 @@ class TestCooldown:
         manager.record_failure("kw", "403")
         manager.record_failure("kw", "403")
 
-        with patch("src.downloader.escalation_manager.time") as mock_time:
-            mock_time.time.return_value = time.time() + 500
+        far_future = time.time() + 500
+        with patch_time_modules(far_future):
             remaining = manager.get_cooldown_remaining("kw")
             assert remaining == 0.0
 
@@ -358,10 +369,7 @@ class TestCooldown:
 
         # After 10s cooldown - SHOULD escalate
         far_future = time.time() + 20
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.return_value = far_future
-            types_time.time.return_value = far_future
+        with patch_time_modules(far_future):
             mgr.record_failure("kw", "403")
             mgr.record_failure("kw", "403")
 
@@ -829,8 +837,8 @@ class TestBudgetAwareEscalation:
         assert budget.rotations_used == 1
 
         # Advance past cooldown so second escalation can proceed
-        with patch("src.downloader.escalation_manager.time") as mock_time:
-            mock_time.time.return_value = time.time() + 400  # Past 300s cooldown
+        far_future = time.time() + 400  # Past 300s cooldown
+        with patch_time_modules(far_future):
             # Escalate Tier 2 -> Tier 3 (2 more failures)
             budget_manager.record_failure("kw", "HTTP Error 403")
             budget_manager.record_failure("kw", "HTTP Error 403")
@@ -871,8 +879,8 @@ class TestBudgetAwareEscalation:
         r = manager.get_escalation_args("kw")
         assert r.tier == EscalationTier.EXTRACTOR_ARGS
         # Advance past cooldown for second escalation
-        with patch("src.downloader.escalation_manager.time") as mock_time:
-            mock_time.time.return_value = time.time() + 400
+        far_future = time.time() + 400
+        with patch_time_modules(far_future):
             # Tier 2 -> 3
             manager.record_failure("kw", "HTTP Error 403")
             manager.record_failure("kw", "HTTP Error 403")
@@ -953,11 +961,7 @@ class TestSpeedTriggeredEscalation:
 
         # Advance past cooldown for second escalation
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             # 1-2 more signals: no escalation yet
             manager.record_slow_speed("kw", 0.05)
             manager.record_slow_speed("kw", 0.05)
@@ -977,11 +981,7 @@ class TestSpeedTriggeredEscalation:
             manager.record_slow_speed("kw", 0.05)
 
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             for _ in range(3):
                 manager.record_slow_speed("kw", 0.05)
 
@@ -1088,11 +1088,7 @@ class TestSpeedEscalationCooldown:
 
         # Advance past cooldown
         advancing = _advance_past_cooldown()
-        with patch("src.downloader.escalation_manager.time") as em_time, \
-             patch("src.downloader.types.time") as types_time:
-            em_time.time.side_effect = lambda: advancing()
-            types_time.time.side_effect = lambda: advancing()
-
+        with patch_time_modules(advancing):
             # Second escalation after cooldown: Tier 2 -> 3
             for _ in range(3):
                 manager.record_slow_speed("kw", 0.05)

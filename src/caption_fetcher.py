@@ -37,12 +37,32 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from .cache import BaseCache, CacheEntry
+# Import exceptions directly from module to avoid circular import via src.caption.__init__
+# (cache_enhanced.py imports CaptionResult from this file)
+from src.caption.exceptions import (
+    CaptionError,
+    CaptionFetchError,
+    CaptionParseWarning,
+    CaptionUnavailableError,
+    ConfigValidationError,
+    ErrorPatternAbortError,
+)
+from src.caption.enums import (
+    CaptionErrorCategory,
+    DEFAULT_RETRY_BUDGETS,
+    StreamState,
+)
+from src.caption.error_handling import categorize_caption_error
+from src.caption.retry_budget import BatchRetryBudget
 
 if TYPE_CHECKING:
     from .config import Config
     from .config.sections.download import CaptionFirstConfig
     from .downloader.impersonation import ImpersonationManager
     from .downloader.escalation_manager import EscalationManager
+    from .caption.rate_limiter import UnifiedCaptionRateLimiter
+    from .caption.circuit_breaker import CaptionCircuitBreaker
+    from .caption.retry_budget import CaptionRetryBudget
 
 logger = logging.getLogger(__name__)
 
@@ -314,275 +334,6 @@ def calculate_segment_metrics(
     )
 
 
-class CaptionError(Exception):
-    """Base exception for caption-related errors."""
-    pass
-
-
-class CaptionUnavailableError(CaptionError):
-    """Raised when captions are not available for a video.
-
-    This indicates the video genuinely has no captions (auto or manual),
-    as opposed to a temporary fetch failure.
-    """
-    def __init__(self, video_id: str, reason: str = ""):
-        self.video_id = video_id
-        self.reason = reason
-        message = f"No captions available for video {video_id}"
-        if reason:
-            message += f": {reason}"
-        super().__init__(message)
-
-
-class CaptionFetchError(CaptionError):
-    """Raised when caption fetch fails due to a temporary/network error.
-
-    This indicates a potentially retryable failure, not that captions
-    don't exist.
-    """
-    def __init__(self, video_id: str, reason: str = ""):
-        self.video_id = video_id
-        self.reason = reason
-        message = f"Failed to fetch captions for video {video_id}"
-        if reason:
-            message += f": {reason}"
-        super().__init__(message)
-
-
-class CaptionParseWarning(CaptionError):
-    """Non-fatal warning for caption parsing issues (US-005).
-
-    This indicates a segment could not be parsed but other segments
-    may still be usable. Use for graceful degradation with partial recovery.
-
-    Attributes:
-        video_id: YouTube video ID.
-        segment_index: Index of the problematic segment.
-        reason: Description of the parsing issue.
-    """
-    def __init__(self, video_id: str, segment_index: int, reason: str = ""):
-        self.video_id = video_id
-        self.segment_index = segment_index
-        self.reason = reason
-        message = f"Parse warning for video {video_id} segment {segment_index}"
-        if reason:
-            message += f": {reason}"
-        super().__init__(message)
-
-
-class ConfigValidationError(CaptionError):
-    """Raised when language configuration is invalid (US-005 Sprint 6).
-
-    This indicates a configuration error that should be fixed before
-    running the pipeline. Invalid configurations will cause silent failures
-    during fetch.
-
-    Attributes:
-        field: The config field with the issue (e.g., 'fallback_languages').
-        value: The invalid value.
-        reason: Description of why validation failed.
-        suggestion: Suggested fix for the issue.
-    """
-    def __init__(
-        self,
-        field: str,
-        value: Any,
-        reason: str = "",
-        suggestion: str = ""
-    ):
-        self.field = field
-        self.value = value
-        self.reason = reason
-        self.suggestion = suggestion
-        message = f"Invalid language configuration for '{field}': {value}"
-        if reason:
-            message += f" - {reason}"
-        if suggestion:
-            message += f". Suggestion: {suggestion}"
-        super().__init__(message)
-
-
-class ErrorPatternAbortError(CaptionError):
-    """Raised when batch fetch is aborted due to detected error pattern (US-007 Sprint 7).
-
-    This exception is raised when abort_on_error_pattern='abort' and a pattern
-    is detected (e.g., 30%+ of videos failing with the same error).
-
-    Attributes:
-        pattern_result: The ErrorPatternResult with detection details.
-        partial_results: Dict of results collected before abort.
-    """
-    def __init__(
-        self,
-        pattern_result: 'ErrorPatternResult',
-        partial_results: Optional[Dict[str, Any]] = None
-    ):
-        self.pattern_result = pattern_result
-        self.partial_results = partial_results or {}
-        message = str(pattern_result)
-        super().__init__(message)
-
-
-# Import Enum for CaptionErrorCategory
-from enum import Enum, auto
-
-
-class CaptionErrorCategory(Enum):
-    """Error categories for caption fetch failures (US-003 Sprint 7).
-
-    Different error types have different retry strategies:
-    - NETWORK: Transient network issues, should retry aggressively
-    - TIMEOUT: Request timeouts, may retry but with longer delays
-    - PARSE: Content parsing failed, unlikely to succeed on retry
-    - UNAVAILABLE: Video has no captions, should not retry
-    - RATE_LIMIT: API rate limit hit, should retry after delay
-
-    Each category has a configurable retry budget in CaptionFirstConfig.
-    The retry decision logged includes the category for debugging.
-
-    Example log output:
-        "NETWORK error, retry 2/3"
-        "PARSE error, no retry (budget: 1)"
-        "RATE_LIMIT error, retry 1/2 after 30s backoff"
-    """
-    NETWORK = auto()    # Network connectivity issues, DNS failures
-    TIMEOUT = auto()    # Request/connection timeouts
-    PARSE = auto()      # Caption content parsing failures
-    UNAVAILABLE = auto()  # No captions exist for the video
-    RATE_LIMIT = auto()   # API rate limiting (429, quota exceeded)
-
-
-def categorize_caption_error(error: Exception, reason: str = "") -> CaptionErrorCategory:
-    """Categorize an exception into a CaptionErrorCategory (US-003 Sprint 7).
-
-    Maps exception types and error message patterns to categories for
-    determining appropriate retry strategy.
-
-    Args:
-        error: The exception that occurred during caption fetch.
-        reason: Optional additional context string (e.g., from CaptionFetchError.reason).
-
-    Returns:
-        CaptionErrorCategory indicating the type of failure.
-
-    Examples:
-        >>> categorize_caption_error(CaptionUnavailableError("abc", "no subs"))
-        CaptionErrorCategory.UNAVAILABLE
-
-        >>> categorize_caption_error(TimeoutError())
-        CaptionErrorCategory.TIMEOUT
-
-        >>> e = CaptionFetchError("abc", "HTTP 429 Too Many Requests")
-        >>> categorize_caption_error(e, e.reason)
-        CaptionErrorCategory.RATE_LIMIT
-    """
-    # First check for specific exception types
-    if isinstance(error, CaptionUnavailableError):
-        return CaptionErrorCategory.UNAVAILABLE
-
-    if isinstance(error, (TimeoutError, )):
-        return CaptionErrorCategory.TIMEOUT
-
-    if isinstance(error, (json.JSONDecodeError, UnicodeDecodeError)):
-        return CaptionErrorCategory.PARSE
-
-    # Check reason string for patterns
-    reason_lower = reason.lower() if reason else ""
-    error_str = str(error).lower()
-    combined = f"{reason_lower} {error_str}"
-
-    # Rate limit patterns
-    rate_limit_patterns = [
-        "429", "too many requests", "rate limit", "quota exceeded",
-        "rate-limit", "throttle", "slow down"
-    ]
-    if any(p in combined for p in rate_limit_patterns):
-        return CaptionErrorCategory.RATE_LIMIT
-
-    # Timeout patterns
-    timeout_patterns = [
-        "timeout", "timed out", "deadline exceeded", "connection timed out"
-    ]
-    if any(p in combined for p in timeout_patterns):
-        return CaptionErrorCategory.TIMEOUT
-
-    # Parse error patterns
-    parse_patterns = [
-        "parse", "decode", "invalid json", "malformed", "syntax error",
-        "unexpected token", "invalid format", "corrupt"
-    ]
-    if any(p in combined for p in parse_patterns):
-        return CaptionErrorCategory.PARSE
-
-    # Unavailable patterns
-    unavailable_patterns = [
-        "not available", "unavailable", "no subtitles", "no captions",
-        "subtitles disabled", "captions disabled", "not found"
-    ]
-    if any(p in combined for p in unavailable_patterns):
-        return CaptionErrorCategory.UNAVAILABLE
-
-    # Network patterns (catch-all for connectivity issues)
-    network_patterns = [
-        "network", "connection", "dns", "resolve", "unreachable",
-        "refused", "reset", "broken pipe", "http error", "ssl",
-        "certificate", "socket", "eof"
-    ]
-    if any(p in combined for p in network_patterns):
-        return CaptionErrorCategory.NETWORK
-
-    # Default to NETWORK for unknown errors (most likely to benefit from retry)
-    return CaptionErrorCategory.NETWORK
-
-
-# Default retry budgets per error category (US-003 Sprint 7)
-# These can be overridden in CaptionFirstConfig.retry_budgets
-DEFAULT_RETRY_BUDGETS = {
-    CaptionErrorCategory.NETWORK: 3,      # Network errors retry aggressively
-    CaptionErrorCategory.TIMEOUT: 2,      # Timeouts get moderate retries
-    CaptionErrorCategory.PARSE: 1,        # Parse errors rarely succeed on retry
-    CaptionErrorCategory.UNAVAILABLE: 0,  # Never retry - video has no captions
-    CaptionErrorCategory.RATE_LIMIT: 2,   # Rate limits retry with backoff
-}
-
-
-class StreamState(Enum):
-    """Stream state classification for YouTube videos (US-007 Sprint 8).
-
-    Classifies videos into stream states to determine appropriate handling:
-    - LIVE: Currently streaming, captions being generated in real-time
-    - UPCOMING: Scheduled stream/premiere, will have captions when complete
-    - VOD: Regular video-on-demand (completed video with full captions)
-    - PREMIERE: Scheduled premiere (pre-recorded video with countdown)
-    - UNKNOWN: Could not determine state (metadata fetch failed)
-
-    Stream state affects caption handling:
-    - LIVE: Skip (captions incomplete/unavailable)
-    - UPCOMING: Based on config.handle_upcoming ('skip', 'queue', 'check_later')
-    - VOD: Normal caption fetch
-    - PREMIERE: Same as UPCOMING (will become VOD when complete)
-    - UNKNOWN: Assume VOD (default to normal behavior)
-
-    yt-dlp metadata fields used:
-    - is_live: True if currently streaming
-    - was_live: True if video was previously live
-    - live_status: 'is_live', 'is_upcoming', 'was_live', 'post_live', 'not_live'
-    - release_timestamp: Unix timestamp for scheduled premiere/stream
-
-    Example:
-        >>> state = classify_stream_state(metadata)
-        >>> if state == StreamState.LIVE:
-        ...     print("Skipping live stream")
-        >>> elif state == StreamState.UPCOMING:
-        ...     print(f"Queuing for later: scheduled {metadata.get('release_timestamp')}")
-    """
-    LIVE = auto()       # Currently streaming
-    UPCOMING = auto()   # Scheduled stream/premiere (not yet started)
-    VOD = auto()        # Video-on-demand (regular completed video)
-    PREMIERE = auto()   # Scheduled premiere (pre-recorded, with countdown)
-    UNKNOWN = auto()    # Could not determine state
-
-
 @dataclass
 class StreamStateResult:
     """Result of stream state classification (US-007 Sprint 8).
@@ -741,318 +492,6 @@ def classify_stream_state(
         return make_result(StreamState.VOD)
 
     return make_result(StreamState.UNKNOWN)
-
-
-@dataclass
-class BatchRetryBudget:
-    """Tracks cumulative errors across all videos in a batch (US-001 Sprint 8).
-
-    Per-category retry budgets (US-003 Sprint 7) work per-video, but don't adapt
-    based on batch-wide failure patterns. When 30% of videos fail with network
-    errors, retrying remaining videos at full budget wastes time.
-
-    This class tracks cumulative errors across the batch and reduces retry budgets
-    based on detected patterns:
-    - >30% network errors: reduce retry budget from 3 to 1
-    - >50% network errors: disable retries entirely
-
-    Thread Safety:
-        All mutation methods are protected by a Lock for concurrent access
-        during parallel caption fetching.
-
-    Attributes:
-        total_videos: Total videos in the batch.
-        processed_videos: Number of videos processed so far.
-        category_counts: Dict mapping CaptionErrorCategory -> count of failures.
-        original_budgets: Copy of per-category retry budgets at batch start.
-        reduced_budgets: Current (possibly reduced) per-category retry budgets.
-        budget_reductions: List of (threshold, category, old_budget, new_budget) events.
-
-    Example:
-        >>> budget = BatchRetryBudget(total_videos=100)
-        >>> budget.record_error(CaptionErrorCategory.NETWORK)
-        >>> # After 31 network errors in 100 videos:
-        >>> budget.budget_remaining(CaptionErrorCategory.NETWORK)
-        1  # Reduced from 3
-    """
-    total_videos: int = 0
-    processed_videos: int = 0
-    category_counts: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
-    original_budgets: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
-    reduced_budgets: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
-    budget_reductions: List[tuple] = field(default_factory=list)
-
-    # Threshold configuration
-    network_reduce_threshold: float = 0.30  # >30% network errors -> reduce retries
-    network_disable_threshold: float = 0.50  # >50% network errors -> disable retries
-
-    # Thread-safety lock (RLock for reentrant access from nested methods)
-    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
-
-    def __post_init__(self):
-        """Initialize budgets from defaults."""
-        if not self.original_budgets:
-            self.original_budgets = dict(DEFAULT_RETRY_BUDGETS)
-        if not self.reduced_budgets:
-            self.reduced_budgets = dict(self.original_budgets)
-
-    def record_success(self, video_id: str = "") -> None:
-        """Record a successful caption fetch.
-
-        Args:
-            video_id: Optional video ID for logging context.
-        """
-        with self._lock:
-            self.processed_videos += 1
-        logger.debug(f"BatchRetryBudget: success recorded for {video_id or 'unknown'}")
-
-    def record_error(self, category: CaptionErrorCategory, video_id: str = "") -> None:
-        """Record a failed caption fetch and update budgets if threshold crossed.
-
-        Args:
-            category: The error category (NETWORK, TIMEOUT, etc.).
-            video_id: Optional video ID for logging context.
-        """
-        with self._lock:
-            self.processed_videos += 1
-            self.category_counts[category] = self.category_counts.get(category, 0) + 1
-
-            # Check if we need to reduce budgets
-            self._check_thresholds_locked(category)
-
-        logger.debug(
-            f"BatchRetryBudget: {category.name} error recorded for {video_id or 'unknown'}, "
-            f"count={self.category_counts.get(category, 0)}/{self.processed_videos}"
-        )
-
-    def _check_thresholds_locked(self, category: CaptionErrorCategory) -> None:
-        """Check if error rate thresholds are crossed and reduce budgets.
-
-        Must be called while holding the lock.
-
-        Args:
-            category: The error category to check thresholds for.
-        """
-        if self.processed_videos == 0:
-            return
-
-        error_rate = self.category_counts.get(category, 0) / self.processed_videos
-
-        # Only apply threshold logic to NETWORK errors (most common transient issue)
-        if category == CaptionErrorCategory.NETWORK:
-            current_budget = self.reduced_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 3))
-            original_budget = self.original_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 3))
-
-            # >50% threshold: disable retries entirely
-            if error_rate > self.network_disable_threshold and current_budget > 0:
-                self.reduced_budgets[category] = 0
-                self.budget_reductions.append((
-                    error_rate,
-                    category,
-                    current_budget,
-                    0,
-                    f">50% network errors ({error_rate:.1%})"
-                ))
-                logger.warning(
-                    f"BatchRetryBudget: >50% network errors ({error_rate:.1%}), "
-                    f"disabling retries (was {current_budget})"
-                )
-
-            # >30% threshold: reduce to 1 retry (if not already at 0)
-            elif error_rate > self.network_reduce_threshold and current_budget > 1:
-                self.reduced_budgets[category] = 1
-                self.budget_reductions.append((
-                    error_rate,
-                    category,
-                    current_budget,
-                    1,
-                    f">30% network errors ({error_rate:.1%})"
-                ))
-                logger.warning(
-                    f"BatchRetryBudget: >30% network errors ({error_rate:.1%}), "
-                    f"reducing retries from {current_budget} to 1"
-                )
-
-    def budget_remaining(self, category: CaptionErrorCategory) -> int:
-        """Get the current retry budget for a category.
-
-        Returns the reduced budget if thresholds have been crossed,
-        otherwise returns the original budget.
-
-        Args:
-            category: The error category to get budget for.
-
-        Returns:
-            Number of retries allowed for this category.
-
-        Example:
-            >>> budget = BatchRetryBudget(total_videos=100)
-            >>> # Initially:
-            >>> budget.budget_remaining(CaptionErrorCategory.NETWORK)
-            3
-            >>> # After 35 network errors in 100 videos:
-            >>> budget.budget_remaining(CaptionErrorCategory.NETWORK)
-            1
-        """
-        with self._lock:
-            return self.reduced_budgets.get(
-                category,
-                self.original_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 0))
-            )
-
-    def get_error_rate(self, category: CaptionErrorCategory) -> float:
-        """Get the current error rate for a category.
-
-        Args:
-            category: The error category to get rate for.
-
-        Returns:
-            Error rate as a float between 0.0 and 1.0.
-        """
-        with self._lock:
-            if self.processed_videos == 0:
-                return 0.0
-            return self.category_counts.get(category, 0) / self.processed_videos
-
-    def get_total_retries_saved(self) -> int:
-        """Calculate total retries saved by budget reduction.
-
-        Estimates how many retry attempts were avoided by reducing budgets.
-
-        Returns:
-            Estimated retries saved across remaining videos.
-        """
-        with self._lock:
-            if not self.budget_reductions:
-                return 0
-
-            remaining_videos = max(0, self.total_videos - self.processed_videos)
-            total_saved = 0
-
-            # For each reduction, calculate retries saved
-            for error_rate, category, old_budget, new_budget, _ in self.budget_reductions:
-                # Estimate: if X% of videos had this error type, X% of remaining will too
-                expected_errors = int(remaining_videos * error_rate)
-                retries_per_video_saved = old_budget - new_budget
-                total_saved += expected_errors * retries_per_video_saved
-
-            return total_saved
-
-    def get_summary(self) -> Dict[str, Any]:
-        """Get a summary of batch retry budget state.
-
-        Returns:
-            Dict with budget tracking statistics suitable for CaptionMetrics.
-
-        Example:
-            >>> budget = BatchRetryBudget(total_videos=100)
-            >>> # After some processing...
-            >>> summary = budget.get_summary()
-            >>> print(summary)
-            {
-                'total_videos': 100,
-                'processed_videos': 50,
-                'error_rates': {'NETWORK': 0.35, 'TIMEOUT': 0.05},
-                'original_budgets': {'NETWORK': 3, ...},
-                'reduced_budgets': {'NETWORK': 1, ...},
-                'reductions_applied': 1,
-                'estimated_retries_saved': 45
-            }
-        """
-        with self._lock:
-            error_rates = {}
-            if self.processed_videos > 0:
-                for cat, count in self.category_counts.items():
-                    error_rates[cat.name] = round(count / self.processed_videos, 3)
-
-            return {
-                'total_videos': self.total_videos,
-                'processed_videos': self.processed_videos,
-                'error_rates': error_rates,
-                'original_budgets': {k.name: v for k, v in self.original_budgets.items()},
-                'reduced_budgets': {k.name: v for k, v in self.reduced_budgets.items()},
-                'reductions_applied': len(self.budget_reductions),
-                'estimated_retries_saved': self.get_total_retries_saved(),
-            }
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize budget state for checkpoint persistence.
-
-        Returns:
-            Dict with all budget state data.
-        """
-        with self._lock:
-            return {
-                'total_videos': self.total_videos,
-                'processed_videos': self.processed_videos,
-                'category_counts': {k.name: v for k, v in self.category_counts.items()},
-                'original_budgets': {k.name: v for k, v in self.original_budgets.items()},
-                'reduced_budgets': {k.name: v for k, v in self.reduced_budgets.items()},
-                'budget_reductions': [
-                    (rate, cat.name, old, new, reason)
-                    for rate, cat, old, new, reason in self.budget_reductions
-                ],
-            }
-
-    @classmethod
-    def from_dict(cls, data: Optional[Dict]) -> "BatchRetryBudget":
-        """Create budget from checkpoint data.
-
-        Args:
-            data: Checkpoint data dict (may be None for new batches).
-
-        Returns:
-            BatchRetryBudget with restored state.
-        """
-        if not data:
-            return cls()
-
-        budget = cls(
-            total_videos=data.get('total_videos', 0),
-            processed_videos=data.get('processed_videos', 0),
-        )
-
-        # Restore category counts
-        for name, count in data.get('category_counts', {}).items():
-            try:
-                cat = CaptionErrorCategory[name]
-                budget.category_counts[cat] = count
-            except KeyError:
-                logger.warning(f"Unknown error category in checkpoint: {name}")
-
-        # Restore budgets
-        for name, value in data.get('original_budgets', {}).items():
-            try:
-                cat = CaptionErrorCategory[name]
-                budget.original_budgets[cat] = value
-            except KeyError:
-                pass
-
-        for name, value in data.get('reduced_budgets', {}).items():
-            try:
-                cat = CaptionErrorCategory[name]
-                budget.reduced_budgets[cat] = value
-            except KeyError:
-                pass
-
-        # Restore reduction history
-        for rate, cat_name, old, new, reason in data.get('budget_reductions', []):
-            try:
-                cat = CaptionErrorCategory[cat_name]
-                budget.budget_reductions.append((rate, cat, old, new, reason))
-            except KeyError:
-                pass
-
-        return budget
-
-    def reset(self) -> None:
-        """Reset budget state for a new batch."""
-        with self._lock:
-            self.processed_videos = 0
-            self.category_counts.clear()
-            self.reduced_budgets = dict(self.original_budgets)
-            self.budget_reductions.clear()
-        logger.debug("BatchRetryBudget: reset for new batch")
 
 
 @dataclass
@@ -2821,6 +2260,7 @@ class CaptionFetcher:
         impersonation_manager: Optional['ImpersonationManager'] = None,
         escalation_manager: Optional['EscalationManager'] = None,
         cookie_args: Optional[List[str]] = None,
+        rate_limiter: Optional['UnifiedCaptionRateLimiter'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2830,11 +2270,14 @@ class CaptionFetcher:
             escalation_manager: Optional EscalationManager for 3-tier bypass orchestration.
             cookie_args: Optional pre-computed cookie arguments (e.g., from cookie rotator).
                          If provided, overrides config-based cookie resolution.
+            rate_limiter: Optional UnifiedCaptionRateLimiter for coordinated rate limiting
+                          with exponential backoff and jitter (US-33-003).
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
         self._cookie_args_override = cookie_args
+        self._rate_limiter = rate_limiter
         self._timeout = 60  # seconds
 
         # Retry settings from config (US-008)
@@ -3769,6 +3212,9 @@ class CaptionFetcher:
         skip_video_ids: Optional[set] = None,
         batch_checkpoint: Optional['CaptionBatchCheckpoint'] = None,
         checkpoint_save_interval: int = 10,
+        circuit_breaker: Optional['CaptionCircuitBreaker'] = None,
+        retry_budget: Optional['CaptionRetryBudget'] = None,
+        rate_limit_coordinator: Optional['GlobalRateLimitCoordinator'] = None,
     ) -> Dict[str, Union[CaptionResult, Dict[str, Any]]]:
         """Fetch captions for multiple videos in parallel using ThreadPoolExecutor.
 
@@ -3807,6 +3253,12 @@ class CaptionFetcher:
                 If provided, results are saved periodically and on abort.
             checkpoint_save_interval: Save checkpoint every N successful fetches.
                 Default: 10. Only used if batch_checkpoint is provided.
+            circuit_breaker: Optional CaptionCircuitBreaker for pausing on consecutive failures (US-33-009).
+                If provided, checks breaker state before each fetch and records success/failure.
+                When circuit trips, all workers pause until recovery.
+            retry_budget: Optional CaptionRetryBudget for tracking resource usage across batch (US-33-010).
+                If provided, tracks attempts/failures/backoff across all videos. When exhausted,
+                remaining videos are skipped with 'budget_exhausted' reason.
 
         Returns:
             Dict mapping video_id to either:
@@ -3942,9 +3394,67 @@ class CaptionFetcher:
             Adds elapsed_seconds to progress_callback details dict.
             Logs warning if video takes >80% of timeout threshold.
             US-008 Sprint 8: Tracks worker progress and includes worker stats in callback.
+            US-33-009: Checks circuit breaker before fetch and records success/failure.
             """
             import time
             start_time = time.perf_counter()
+
+            # US-33-009: Check circuit breaker before fetch (blocks if tripped)
+            if circuit_breaker and circuit_breaker.is_enabled:
+                circuit_breaker.check_and_wait()
+
+            # US-34-002: Acquire slot from global rate limit coordinator
+            slot_acquired = False
+            if rate_limit_coordinator and rate_limit_coordinator.is_enabled():
+                slot_acquired = rate_limit_coordinator.acquire_slot(
+                    'caption',
+                    timeout=30.0,
+                    block=True
+                )
+                if not slot_acquired:
+                    # Timeout acquiring slot - skip this video
+                    logger.warning(f"Rate limit slot timeout for {video_id}")
+                    skip_result = {
+                        'video_id': video_id,
+                        'skipped': True,
+                        'reason': 'rate_limit_timeout',
+                        'caption_quality': 'low',
+                    }
+                    if progress_callback:
+                        try:
+                            progress_callback(video_id, 'skipped', {
+                                'index': index + 1,
+                                'total': total_videos,
+                                'reason': 'rate_limit_timeout',
+                            })
+                        except Exception as e:
+                            logger.debug(f"Progress callback error: {e}")
+                    return video_id, skip_result
+
+            # US-33-010: Check retry budget before fetch
+            if retry_budget and retry_budget.budget_exhausted():
+                # Skip this video - budget exhausted
+                retry_budget.record_skipped(video_id)
+                skip_result = {
+                    'video_id': video_id,
+                    'skipped': True,
+                    'reason': 'budget_exhausted',
+                    'caption_quality': 'low',
+                }
+                if progress_callback:
+                    try:
+                        progress_callback(video_id, 'skipped', {
+                            'index': index + 1,
+                            'total': total_videos,
+                            'reason': 'budget_exhausted',
+                        })
+                    except Exception as e:
+                        logger.debug(f"Progress callback error: {e}")
+                return video_id, skip_result
+
+            # US-33-010: Record attempt before fetch
+            if retry_budget:
+                retry_budget.record_attempt(video_id)
 
             # US-008 Sprint 8: Track worker start
             worker_id = get_worker_id()
@@ -3967,6 +3477,7 @@ class CaptionFetcher:
             if metrics:
                 metrics.record_fetch_attempt(video_id)
 
+            # US-34-002: Use try/finally to ensure slot release on all code paths
             try:
                 result = self.fetch_captions_auto_language_with_retry(
                     video_id,
@@ -3999,6 +3510,14 @@ class CaptionFetcher:
                 # US-008 Sprint 8: Mark worker complete
                 worker_tracker.worker_complete(worker_id)
 
+                # US-33-009: Record success to circuit breaker
+                if circuit_breaker and circuit_breaker.is_enabled:
+                    circuit_breaker.record_success()
+
+                # US-33-010: Record success to retry budget
+                if retry_budget:
+                    retry_budget.record_success(video_id)
+
                 # Notify progress callback: success (with worker stats)
                 if progress_callback:
                     try:
@@ -4026,6 +3545,10 @@ class CaptionFetcher:
 
                 # US-008 Sprint 8: Mark worker complete (even on failure)
                 worker_tracker.worker_complete(worker_id)
+
+                # US-33-009: Record failure to circuit breaker
+                # Note: unavailable is not a network error, doesn't trip breaker
+                # (the video simply has no captions - not a retry-worthy failure)
 
                 error_result = {
                     'video_id': video_id,
@@ -4067,6 +3590,18 @@ class CaptionFetcher:
 
                 # US-008 Sprint 8: Mark worker complete (even on failure)
                 worker_tracker.worker_complete(worker_id)
+
+                # US-33-009: Record failure to circuit breaker (network/fetch errors do trip)
+                if circuit_breaker and circuit_breaker.is_enabled:
+                    tripped = circuit_breaker.record_failure()
+                    if tripped:
+                        logger.info(
+                            f"Caption circuit breaker tripped after {video_id} failure"
+                        )
+
+                # US-33-010: Record failure to retry budget
+                if retry_budget:
+                    retry_budget.record_failure(video_id)
 
                 error_result = {
                     'video_id': video_id,
@@ -4145,6 +3680,11 @@ class CaptionFetcher:
                         logger.debug(f"Progress callback error: {cb_err}")
 
                 return video_id, error_result
+
+            finally:
+                # US-34-002: Release slot after fetch completes (success or failure)
+                if slot_acquired and rate_limit_coordinator:
+                    rate_limit_coordinator.release_slot('caption')
 
         # US-007 Sprint 7: Track whether we've handled a pattern already
         pattern_handled = False
@@ -4376,6 +3916,10 @@ class CaptionFetcher:
             CaptionUnavailableError: If no captions exist for the video.
             CaptionFetchError: If fetch fails due to network/temporary error.
         """
+        # Pre-fetch rate limit delay (US-33-003)
+        if self._rate_limiter:
+            self._rate_limiter.wait_if_needed()
+
         # Validate video ID format
         if not self._is_valid_video_id(video_id):
             raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
@@ -4410,10 +3954,18 @@ class CaptionFetcher:
                         video_url, video_id, temp_path, lang, auto
                     )
                     if result and result.segments:
+                        # Record success for rate limiter (US-33-003)
+                        if self._rate_limiter:
+                            self._rate_limiter.record_success()
                         return result
                 except CaptionUnavailableError:
                     continue  # Try next format
                 except CaptionFetchError as e:
+                    # Check if this is a rate limit error (US-33-003)
+                    if self._rate_limiter:
+                        category = categorize_caption_error(e, getattr(e, 'reason', ''))
+                        if category == CaptionErrorCategory.RATE_LIMIT:
+                            self._rate_limiter.record_rate_limit(video_id)
                     last_error = e
                     continue
 
