@@ -110,7 +110,7 @@ testResults.xml
 tmpclaude-*
 MagicMock/
 test_collection_mode/
-videos/
+/videos/
 ~/
 
 # --- Ralph Loop ---
