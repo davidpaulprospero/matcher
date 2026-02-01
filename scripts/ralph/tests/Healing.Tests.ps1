@@ -1153,7 +1153,7 @@ Describe 'Invoke-PostIterationHealing' {
 
 Describe 'Self-healing config' {
     It 'ralph-config.json has selfHealing section with tiered settings' {
-        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ralph-config.json'
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
         $config = Get-Content $configPath -Raw | ConvertFrom-Json
 
         $config.selfHealing | Should -Not -BeNullOrEmpty

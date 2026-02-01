@@ -223,7 +223,7 @@ Describe "Test-ShouldExplore" -Tag "Unit", "Exploration" {
 
 Describe "Exploration Config Parsing" -Tag "Unit", "Exploration", "Config" {
     BeforeAll {
-        $script:ConfigFile = Join-Path $script:RalphDir "ralph\ralph-config.json"
+        $script:ConfigFile = Join-Path $script:RalphDir "config\ralph-config.json"
     }
 
     It "loads exploration config from ralph-config.json" {

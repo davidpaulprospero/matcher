@@ -46,7 +46,7 @@ param(
 $script:ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $script:RalphDir = Join-Path $script:ProjectRoot "scripts\ralph"
 $script:QueueFile = Join-Path $script:RalphDir "state\queue.json"
-$script:ConfigFile = Join-Path $script:RalphDir "ralph-config.json"
+$script:ConfigFile = Join-Path $script:RalphDir "config\ralph-config.json"
 
 # Load domain modules for shared state access
 $script:LibPath = Join-Path $script:RalphDir 'lib'
@@ -672,7 +672,7 @@ function Start-QueueMode {
     #>
 
     # Load focus areas from config
-    $configPath = Join-Path $PSScriptRoot "ralph-config.json"
+    $configPath = Join-Path $PSScriptRoot "config\ralph-config.json"
     $focusConfig = Read-JsonFile -Path $configPath
 
     $selected = [System.Collections.ArrayList]::new()
@@ -1192,12 +1192,81 @@ function Start-RalphWindows {
 }
 
 # ============================================================================
+# MAIN MENU
+# ============================================================================
+
+function Show-MainMenu {
+    <#
+    .SYNOPSIS
+        Shows the main menu for Ralph Loop entry
+    .RETURNS
+        "trueauto" for Ralph's Choice TrueAuto, "interview" for interview mode
+    #>
+    Write-Host ""
+    Write-Host "  [1] Ralph's Choice TrueAuto" -ForegroundColor Cyan
+    Write-Host "      " -NoNewline
+    Write-Host "Select focus areas, then run autonomously" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [2] Interview" -ForegroundColor Cyan
+    Write-Host "      " -NoNewline
+    Write-Host "Describe what you want to work on" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $choice = Read-Host "  "
+
+    switch -Regex ($choice) {
+        "^1" { return "trueauto" }
+        "^2" { return "interview" }
+        "^$" { return "trueauto" }  # Default to trueauto on Enter
+        default { return "interview" }
+    }
+}
+
+# ============================================================================
 # ENTRY POINT
 # ============================================================================
 
 # Entry point
 Write-RalphHeader
 Write-InterviewLog "Interview session started"
+
+# ============================================================================
+# MAIN MENU (Skip if -Mode, -FocusArea, -Queue, or -Resume provided)
+# ============================================================================
+
+# Show main menu if no direct parameters provided
+if (-not $Mode -and -not $FocusArea -and -not $FocusAreas -and -not $Resume -and -not $Queue) {
+    $menuChoice = Show-MainMenu
+    Write-InterviewLog "Main menu choice: $menuChoice"
+
+    if ($menuChoice -eq "trueauto") {
+        # Ralph's Choice TrueAuto - show focus area selection, then launch with TrueAuto
+        $selectedFocus = Show-CategorizedFocusAreaSelection
+
+        if ($selectedFocus) {
+            # User selected a specific area
+            Write-Host ""
+            Write-Host "  Launching Ralph's Choice TrueAuto with: $selectedFocus" -ForegroundColor Green
+            Write-InterviewLog "TrueAuto mode with focus area: $selectedFocus"
+
+            if (-not $NoLaunch) {
+                Start-RalphWindows -FocusArea $selectedFocus -SelectedMode "trueauto" -MaxHours $MaxHours
+            }
+            exit 0
+        } else {
+            # No area selected - use Ralph's Choice Auto (fully autonomous)
+            Write-Host ""
+            Write-Host "  Launching Ralph's Choice Auto (fully autonomous)" -ForegroundColor Magenta
+            Write-InterviewLog "Ralph's Choice Auto mode (no focus area)"
+
+            if (-not $NoLaunch) {
+                Start-RalphWindows -SelectedMode "ralphschoiceauto" -MaxHours $MaxHours
+            }
+            exit 0
+        }
+    }
+    # else: interview mode - continue to main interview flow below
+}
 
 # ============================================================================
 # DIRECT MODE HANDLING (Skip interview if -Mode or -FocusArea provided)
