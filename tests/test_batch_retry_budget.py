@@ -17,12 +17,10 @@ import threading
 from unittest.mock import MagicMock, patch
 from concurrent.futures import ThreadPoolExecutor
 
-from src.caption_fetcher import (
-    BatchRetryBudget,
-    CaptionErrorCategory,
-    CaptionMetrics,
-    DEFAULT_RETRY_BUDGETS,
-)
+# Import from extracted modules to ensure consistent enum identity
+from src.caption.retry_budget import BatchRetryBudget
+from src.caption.enums import CaptionErrorCategory, DEFAULT_RETRY_BUDGETS
+from src.caption_fetcher import CaptionMetrics
 
 
 class TestBatchRetryBudgetInit:
@@ -478,7 +476,7 @@ class TestBatchRetryBudgetLogging:
         """Test that warning is logged when reducing budget at 30% threshold."""
         budget = BatchRetryBudget(total_videos=100)
 
-        with patch('src.caption_fetcher.logger') as mock_logger:
+        with patch('src.caption.retry_budget.logger') as mock_logger:
             for i in range(6):
                 budget.record_success(f"video_{i}")
             for i in range(4):
@@ -494,7 +492,7 @@ class TestBatchRetryBudgetLogging:
         """Test that warning is logged when disabling retries at 50% threshold."""
         budget = BatchRetryBudget(total_videos=100)
 
-        with patch('src.caption_fetcher.logger') as mock_logger:
+        with patch('src.caption.retry_budget.logger') as mock_logger:
             for i in range(4):
                 budget.record_success(f"video_{i}")
             for i in range(6):
