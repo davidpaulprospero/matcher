@@ -55,10 +55,11 @@ class DownloadError(Exception):
 
 
 class EscalationTier(IntEnum):
-    """3-tier escalation levels for yt-dlp bypass."""
+    """4-tier escalation levels for yt-dlp bypass."""
     IMPERSONATE_ONLY = 1
     EXTRACTOR_ARGS = 2
     FULL_BYPASS = 3
+    VPN_ROTATION = 4
 
 
 @dataclass
@@ -80,7 +81,7 @@ class EscalationState:
 
     def escalate(self) -> None:
         """Advance to the next tier and reset the 403 counter."""
-        if self.current_tier < EscalationTier.FULL_BYPASS:
+        if self.current_tier < EscalationTier.VPN_ROTATION:
             self.current_tier = EscalationTier(self.current_tier + 1)
         now = time.time()
         self.last_escalation_time = now

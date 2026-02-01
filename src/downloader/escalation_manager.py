@@ -1,10 +1,11 @@
 """
-3-tier escalation manager for yt-dlp bypass orchestration.
+4-tier escalation manager for yt-dlp bypass orchestration.
 
-Manages per-keyword escalation state across three tiers:
+Manages per-keyword escalation state across four tiers:
   - Tier 1 (IMPERSONATE_ONLY): --impersonate only (delegated to ImpersonationManager)
   - Tier 2 (EXTRACTOR_ARGS): --impersonate + --extractor-args player_client
   - Tier 3 (FULL_BYPASS): Both + cookie rotation flag
+  - Tier 4 (VPN_ROTATION): All above + Mullvad VPN server rotation
 
 On consecutive 403/bot-detection errors, the manager escalates to the next tier.
 Escalation is sticky per-session: success resets the 403 counter but does not
@@ -158,6 +159,11 @@ try:
 except ImportError:  # pragma: no cover
     CircuitBreaker = None  # type: ignore[misc,assignment]
 
+try:
+    from .mullvad_vpn import MullvadVPN
+except ImportError:  # pragma: no cover
+    MullvadVPN = None  # type: ignore[misc,assignment]
+
 
 @dataclass
 class EscalationResult:
@@ -167,17 +173,25 @@ class EscalationResult:
         args: List of yt-dlp CLI arguments (--impersonate, --extractor-args, etc.)
         tier: The escalation tier used to generate these args.
         rotate_cookies: If True, caller should trigger cookie rotation (Tier 3).
+        rotate_vpn: If True, caller should trigger VPN server rotation (Tier 4).
     """
     args: List[str] = field(default_factory=list)
     tier: EscalationTier = EscalationTier.IMPERSONATE_ONLY
     rotate_cookies: bool = False
+    rotate_vpn: bool = False
 
 
 class EscalationManager:
-    """Orchestrates 3-tier yt-dlp bypass escalation per keyword.
+    """Orchestrates 4-tier yt-dlp bypass escalation per keyword.
 
     Per-keyword tracking ensures that one keyword hitting 403 errors does not
     affect the escalation state of other keywords.
+
+    Tier progression:
+        - Tier 1 (IMPERSONATE_ONLY): --impersonate only
+        - Tier 2 (EXTRACTOR_ARGS): --impersonate + --extractor-args player_client
+        - Tier 3 (FULL_BYPASS): Both + cookie rotation flag
+        - Tier 4 (VPN_ROTATION): All above + VPN server rotation
 
     Args:
         impersonation_manager: Provides Tier 1 --impersonate args.
@@ -188,6 +202,7 @@ class EscalationManager:
             - record_failure() calls budget.record_rotation() on tier advances
             - If budget is exhausted, skip intermediate tiers to max tier
             - get_escalation_args() calls budget.record_attempt()
+        mullvad_vpn: Optional MullvadVPN manager for Tier 4 VPN rotation.
     """
 
     def __init__(
@@ -196,6 +211,7 @@ class EscalationManager:
         extractor_args_config: Optional["ExtractorArgsConfig"] = None,
         budget: Optional["RateLimitBudget"] = None,
         strategy: Optional["EscalationStrategy"] = None,
+        mullvad_vpn: Optional["MullvadVPN"] = None,
     ):
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
@@ -203,6 +219,7 @@ class EscalationManager:
         # Create strategy if not provided (for backwards compatibility)
         self._strategy = strategy or EscalationStrategy(extractor_args_config)
         self._circuit_breaker: Optional["CircuitBreaker"] = None
+        self._mullvad_vpn: Optional["MullvadVPN"] = mullvad_vpn
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
@@ -241,6 +258,17 @@ class EscalationManager:
         """
         self._circuit_breaker = circuit_breaker
 
+    def set_mullvad_vpn(self, mullvad_vpn: "MullvadVPN") -> None:
+        """Link a MullvadVPN manager for Tier 4 VPN rotation.
+
+        When linked, escalation to Tier 4 will trigger VPN server rotation
+        for IP-based rate limit bypass.
+
+        Args:
+            mullvad_vpn: The MullvadVPN manager to use.
+        """
+        self._mullvad_vpn = mullvad_vpn
+
     @property
     def keyword_states(self) -> Dict[str, EscalationState]:
         """Read-only access to keyword states (for metrics/debugging)."""
@@ -257,6 +285,7 @@ class EscalationManager:
         Tier 1: --impersonate <target> only
         Tier 2: --impersonate <target> + --extractor-args "youtube:player_client=X,Y,Z"
         Tier 3: All of Tier 2 + rotate_cookies=True flag
+        Tier 4: All of Tier 3 + rotate_vpn=True flag
 
         Also records the attempt in the budget (if available) to track total
         download attempts across keywords.
@@ -265,7 +294,7 @@ class EscalationManager:
             keyword: The download keyword or video ID.
 
         Returns:
-            EscalationResult with args list, tier, and cookie rotation flag.
+            EscalationResult with args list, tier, cookie rotation, and VPN rotation flags.
         """
         # Track attempt in budget (outside lock - budget has its own thread safety)
         if self._budget is not None:
@@ -293,6 +322,7 @@ class EscalationManager:
                 args=list(args),
                 tier=tier,
                 rotate_cookies=False,
+                rotate_vpn=False,
             )
 
             # Tier 2+: add extractor-args
@@ -301,13 +331,18 @@ class EscalationManager:
                 if extractor_args:
                     result.args.extend(extractor_args)
 
-            # Tier 3: signal cookie rotation
+            # Tier 3+: signal cookie rotation
             if tier >= EscalationTier.FULL_BYPASS:
                 result.rotate_cookies = True
 
+            # Tier 4: signal VPN rotation (only if Mullvad is configured)
+            if tier >= EscalationTier.VPN_ROTATION and self._mullvad_vpn is not None:
+                result.rotate_vpn = True
+
             logger.debug(
                 f"Escalation args: keyword={keyword} tier={tier.name} "
-                f"args_count={len(result.args)} rotate_cookies={result.rotate_cookies}"
+                f"args_count={len(result.args)} rotate_cookies={result.rotate_cookies} "
+                f"rotate_vpn={result.rotate_vpn}"
             )
 
             return result
@@ -431,7 +466,12 @@ class EscalationManager:
 
                 if state.current_tier == EscalationTier.FULL_BYPASS:
                     logger.warning(
-                        f"Max escalation reached for keyword={keyword}, engaging full bypass"
+                        f"Tier 3 reached for keyword={keyword}, engaging full bypass with cookies"
+                    )
+                elif state.current_tier == EscalationTier.VPN_ROTATION:
+                    logger.warning(
+                        f"Max escalation (Tier 4) reached for keyword={keyword}, "
+                        f"engaging VPN rotation"
                     )
 
     def record_success(self, keyword: str) -> None:

@@ -82,10 +82,10 @@ class EscalationStrategy:
     def max_tier(self) -> EscalationTier:
         """Get the maximum escalation tier."""
         if self._config is None:
-            return EscalationTier.FULL_BYPASS
-        max_val = getattr(self._config, 'max_tier', 3)
-        # Clamp to valid range
-        max_val = max(1, min(max_val, 3))
+            return EscalationTier.VPN_ROTATION
+        max_val = getattr(self._config, 'max_tier', 4)
+        # Clamp to valid range (1-4)
+        max_val = max(1, min(max_val, 4))
         return EscalationTier(max_val)
 
     def get_next_tier(self, current_tier: EscalationTier) -> Optional[EscalationTier]:
@@ -101,7 +101,7 @@ class EscalationStrategy:
             return None
 
         next_value = current_tier.value + 1
-        if next_value > EscalationTier.FULL_BYPASS.value:
+        if next_value > EscalationTier.VPN_ROTATION.value:
             return None
 
         return EscalationTier(next_value)

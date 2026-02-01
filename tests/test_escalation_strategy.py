@@ -71,9 +71,20 @@ class TestLevelProgression:
         next_tier = strategy.get_next_tier(EscalationTier.EXTRACTOR_ARGS)
         assert next_tier == EscalationTier.FULL_BYPASS
 
-    def test_get_next_tier_from_tier_3_is_none(self, strategy):
-        """At FULL_BYPASS, there is no next tier."""
+    def test_get_next_tier_from_tier_3(self, strategy):
+        """At FULL_BYPASS with max_tier=3, there is no next tier (config-capped)."""
+        # Strategy uses config with max_tier=3, so FULL_BYPASS is max
         next_tier = strategy.get_next_tier(EscalationTier.FULL_BYPASS)
+        assert next_tier is None
+
+    def test_get_next_tier_from_tier_3_to_tier_4(self, strategy_no_config):
+        """At FULL_BYPASS with default max_tier, next is VPN_ROTATION."""
+        next_tier = strategy_no_config.get_next_tier(EscalationTier.FULL_BYPASS)
+        assert next_tier == EscalationTier.VPN_ROTATION
+
+    def test_get_next_tier_from_tier_4_is_none(self, strategy_no_config):
+        """At VPN_ROTATION (max tier), there is no next tier."""
+        next_tier = strategy_no_config.get_next_tier(EscalationTier.VPN_ROTATION)
         assert next_tier is None
 
     def test_is_at_max_tier_false_for_tier_1(self, strategy):
@@ -84,9 +95,18 @@ class TestLevelProgression:
         """Tier 2 is not at max."""
         assert strategy.is_at_max_tier(EscalationTier.EXTRACTOR_ARGS) is False
 
-    def test_is_at_max_tier_true_for_tier_3(self, strategy):
-        """Tier 3 is at max."""
+    def test_is_at_max_tier_true_for_tier_3_with_config(self, strategy):
+        """Tier 3 is at max when config sets max_tier=3."""
+        # Strategy uses config with max_tier=3
         assert strategy.is_at_max_tier(EscalationTier.FULL_BYPASS) is True
+
+    def test_is_at_max_tier_false_for_tier_3_default(self, strategy_no_config):
+        """Tier 3 is NOT at max with default config (max_tier=4)."""
+        assert strategy_no_config.is_at_max_tier(EscalationTier.FULL_BYPASS) is False
+
+    def test_is_at_max_tier_true_for_tier_4(self, strategy_no_config):
+        """Tier 4 (VPN_ROTATION) is at max."""
+        assert strategy_no_config.is_at_max_tier(EscalationTier.VPN_ROTATION) is True
 
     def test_max_tier_respects_config(self):
         """max_tier from config is respected."""
@@ -96,8 +116,8 @@ class TestLevelProgression:
         assert strat.is_at_max_tier(EscalationTier.EXTRACTOR_ARGS) is True
 
     def test_max_tier_default_without_config(self, strategy_no_config):
-        """Without config, max_tier defaults to FULL_BYPASS."""
-        assert strategy_no_config.max_tier == EscalationTier.FULL_BYPASS
+        """Without config, max_tier defaults to VPN_ROTATION (Tier 4)."""
+        assert strategy_no_config.max_tier == EscalationTier.VPN_ROTATION
 
 
 # ---------------------------------------------------------------------------
@@ -315,8 +335,8 @@ class TestDefaultConfiguration:
         assert strategy_no_config.cooldown_seconds == 300.0
 
     def test_default_max_tier(self, strategy_no_config):
-        """Default max tier is FULL_BYPASS."""
-        assert strategy_no_config.max_tier == EscalationTier.FULL_BYPASS
+        """Default max tier is VPN_ROTATION (Tier 4)."""
+        assert strategy_no_config.max_tier == EscalationTier.VPN_ROTATION
 
 
 # ---------------------------------------------------------------------------
