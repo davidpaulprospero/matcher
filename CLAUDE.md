@@ -203,12 +203,49 @@ healing:
 
 ### Bypass & Escalation (yt-dlp)
 
-3-tier system using curl_cffi TLS fingerprint spoofing:
+4-tier system using curl_cffi TLS fingerprint spoofing + VPN:
 - **Tier 1**: `--impersonate Chrome-136:Macos-15` (always on)
 - **Tier 2**: + `--extractor-args youtube:player_client=web_safari,tv_downgraded,web` (on 403)
 - **Tier 3**: + cookie rotation (on continued 403s)
+- **Tier 4**: + Mullvad VPN IP rotation (when cookies exhausted)
 
-Key classes: `ImpersonationManager`, `EscalationManager`, `CookieMethodFallback` in `src/downloader/`
+Key classes: `ImpersonationManager`, `EscalationManager`, `CookieMethodFallback`, `MullvadVPN` in `src/downloader/`
+
+### Mullvad VPN Integration (Tier 4)
+
+**Prerequisites:**
+```powershell
+# Install Mullvad VPN client (Windows)
+winget install Mullvad.Mullvad
+
+# Verify CLI is available
+mullvad status
+```
+
+**Configuration in config.yaml:**
+```yaml
+download:
+  mullvad:
+    enabled: true                          # Enable Tier 4 VPN rotation
+    preferred_countries: ['us', 'gb', 'de', 'nl']  # Server locations to rotate through
+    rotation_strategy: 'random'            # 'random', 'sequential', or 'nearest'
+    max_rotations_per_session: 5           # Limit VPN rotations per run
+    verification_timeout: 10               # Timeout for am.i.mullvad.net check
+    rotation_delay_seconds: 5              # Delay after rotation before retrying
+```
+
+**Behavior:**
+- VPN rotation triggers when cookie rotation is exhausted (Tier 3 fails)
+- After VPN rotation: circuit breaker resets, cookie/backoff budgets refresh
+- Verification via `am.i.mullvad.net/json` confirms Mullvad exit IP
+- Falls back to ping verification if API unreachable
+
+**Troubleshooting:**
+| Issue | Solution |
+|-------|----------|
+| `mullvad: command not found` | Add Mullvad to PATH or reinstall |
+| VPN rotation fails | Check `mullvad status`, ensure account is active |
+| Verification fails | Firewall may block am.i.mullvad.net; rotation still works |
 
 ## Testing
 
