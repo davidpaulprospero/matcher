@@ -136,6 +136,17 @@ class RateLimitBudget:
             self.keywords_rate_limited.append(keyword)
         logger.debug(f"Budget: VPN switch recorded (total: {self.vpn_switches_used})")
 
+    def record_vpn_rotation(self, keyword: str = None) -> None:
+        """Record a VPN rotation (alias for record_vpn_switch).
+
+        This method is an alias for record_vpn_switch() to match the
+        VPN_ROTATION tier naming in EscalationManager (Tier 4).
+
+        Args:
+            keyword: Keyword that triggered the rotation (optional for tracking)
+        """
+        self.record_vpn_switch(keyword)
+
     def record_attempt(self, keyword: str = None) -> None:
         """Record a download attempt for tracking total attempts across keywords.
 
@@ -201,6 +212,17 @@ class RateLimitBudget:
         if self.max_vpn_switches <= 0:
             return True  # Unlimited
         return self.vpn_switches_used < self.max_vpn_switches
+
+    def can_rotate_vpn(self) -> bool:
+        """Check if VPN rotation is available within budget (alias for can_switch_vpn).
+
+        This method is an alias for can_switch_vpn() to match the
+        VPN_ROTATION tier naming in EscalationManager (Tier 4).
+
+        Returns:
+            True if VPN rotations are unlimited or under limit
+        """
+        return self.can_switch_vpn()
 
     def can_backoff(self, additional_seconds: float = 0.0) -> bool:
         """Check if backoff time is available within budget.
@@ -415,3 +437,34 @@ class RateLimitBudget:
         self.successes = 0
         self.failures = 0
         logger.debug("Rate limit budget cleared")
+
+    def reset_on_ip_change(self) -> None:
+        """Reset rotation and backoff budgets after VPN IP change.
+
+        When the VPN rotates to a new IP address, rate limits from YouTube
+        are tied to the old IP. This method resets the budgets that benefit
+        from a fresh IP while preserving VPN rotation count (to track total
+        VPN rotations in the session).
+
+        Resets:
+            - rotations_used (cookie rotations)
+            - backoff_time_spent
+            - last_escalation_level (reset to 'none')
+
+        Preserves:
+            - vpn_switches_used (tracks total VPN rotations)
+            - keywords_rate_limited (historical tracking)
+            - successes/failures (session statistics)
+            - max_* limits (budget configuration)
+        """
+        old_rotations = self.rotations_used
+        old_backoff = self.backoff_time_spent
+
+        self.rotations_used = 0
+        self.backoff_time_spent = 0.0
+        self.last_escalation_level = "none"
+
+        logger.info(
+            f"Budget reset on IP change: rotations {old_rotations}→0, "
+            f"backoff {old_backoff:.1f}s→0s (VPN rotations: {self.vpn_switches_used})"
+        )
