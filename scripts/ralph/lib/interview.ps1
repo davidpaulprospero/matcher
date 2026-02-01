@@ -323,6 +323,7 @@ function Get-KeywordSuggestedAreas {
         "compile|compilation|topic|keyword" = @("compilation", "keyword")
         "refactor|god.?file|split|extract|large.?file|modular" = @("refactoring", "architecture")
         "rate.?limit|throttle|quota|too.?many|429" = @("rate-limiting", "caption")
+        "mullvad|vpn|ip.?rotat|geograph|server.?switch" = @("mullvad-vpn", "rate-limiting")
         "fetch|cache|async|concurrent" = @("speed", "architecture")
     }
 
