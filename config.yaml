@@ -1175,6 +1175,22 @@ download:
     verification_ip: "8.8.8.8"  # IP for ping fallback (Google DNS)
     # Alternatives: "1.1.1.1" (Cloudflare), "208.67.222.222" (OpenDNS)
 
+  # Mullvad VPN: Tier 4 escalation - IP rotation via Mullvad CLI
+  # Triggers when cookie rotation (Tier 3) is exhausted.
+  # Requires Mullvad VPN client: winget install Mullvad.Mullvad
+  # Verification uses am.i.mullvad.net API to confirm Mullvad exit IP.
+  mullvad:
+    enabled: false                        # Enable Mullvad VPN as Tier 4 (opt-in)
+    preferred_countries: ['us', 'gb', 'de', 'nl']  # Server locations to rotate through
+    rotation_strategy: 'random'           # 'random', 'sequential', or 'nearest'
+    max_rotations_per_session: 5          # Limit VPN rotations per run
+    verification_timeout: 10              # Timeout (seconds) for am.i.mullvad.net check
+    rotation_delay_seconds: 5             # Delay after rotation before retrying download
+    # VPN switch budget settings (inherited from base VPN)
+    max_vpn_switches: 10                  # Max VPN server switches per session
+    switch_delay_seconds: 5               # Delay between switches
+    min_switch_interval: 60               # Minimum seconds between VPN switches
+
   # Speed tracking: monitor download speeds for adaptive timeouts
   # Tracks actual download speeds and adjusts timeouts dynamically based on
   # network conditions. On slow networks, timeouts can be extended up to 2x.
