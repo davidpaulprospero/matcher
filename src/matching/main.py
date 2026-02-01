@@ -15,8 +15,8 @@ import logging
 
 from .tracking import TimelineVarietyTracker, GlobalClipTracker
 from .strategies import StrategyMatcher
+from .embedding_search import EmbeddingSearch
 from ..utils import SRTSegment, MatchResult, ProgressBar
-from ..embeddings import find_top_k_similar
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -178,6 +178,11 @@ def match_all_segments(
 
     logger.info(f"Starting matching loop with {len(video_segments)} video candidates...")
 
+    # Initialize embedding search with video segments and embeddings
+    embedding_search = EmbeddingSearch.from_matching_config(
+        mc, video_embeddings, video_segments, embedding_index
+    )
+
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Log first segment to confirm loop started
         if i == 0:
@@ -186,10 +191,8 @@ def match_all_segments(
         # Calculate current timeline position (relative to start)
         current_timeline_pos = vo_seg.start_time - timeline_start
 
-        # Stage 1: Get more candidates from embedding search for variety
-        num_embedding_candidates = max(mc.embedding_candidates, 20)
-        distances, indices = find_top_k_similar(vo_emb, video_embeddings, num_embedding_candidates, index=embedding_index)
-        all_candidates = [(video_segments[idx], distances[j]) for j, idx in enumerate(indices)]
+        # Stage 1: Get candidates from embedding search for variety
+        all_candidates = embedding_search.search(vo_emb)
 
         # Add pre-computed B-roll segments to candidates (they may not be in top embedding matches)
         # Uses pre-computed all_broll_segments list (computed once outside loop)
