@@ -53,6 +53,11 @@ venv.bak/
 .env.production.local
 .env.save
 
+# --- Auth/Credentials (CRITICAL) ---
+.matcher_drive_auth/
+gemini/
+.kilocode/
+
 # --- IDEs and Editors ---
 .vscode/
 .idea/
