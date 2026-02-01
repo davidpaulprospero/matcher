@@ -7,73 +7,77 @@ Autonomous development assistant based on the Ralph Loop technique.
 ## Quick Start
 
 ```powershell
-# Interactive launcher (recommended)
-.\scripts\ralph\sleep-thats-where-im-a-viking.bat
+# Interactive interview (recommended)
+.\scripts\ralph\interview.ps1
 
-# Or start directly
-.\scripts\ralph\ralph.ps1
+# Quick start with specific focus area
+.\scripts\ralph\interview.ps1 -FocusArea pipeline -Mode trueauto
+
+# Overnight mode with multiple areas
+.\scripts\ralph\interview.ps1 -Mode overnight -FocusAreas download,quality
+
+# Resume previous session
+.\scripts\ralph\interview.ps1 -Resume
+
+# Utility commands
+.\scripts\ralph\interview.ps1 -Status    # Check status
+.\scripts\ralph\interview.ps1 -Watch     # Open dashboard
+.\scripts\ralph\interview.ps1 -Stop      # Graceful stop
+.\scripts\ralph\interview.ps1 -Logs      # View logs
+.\scripts\ralph\interview.ps1 -Recovery  # Emergency recovery
+.\scripts\ralph\interview.ps1 -Morning   # Morning check-in
 ```
 
-## Entry Points
+## Entry Point
 
-| File | Purpose |
-|------|---------|
-| [`sleep-thats-where-im-a-viking.bat`](sleep-thats-where-im-a-viking.bat) | **Main launcher** - Interactive mode selection |
-| [`focus.bat`](focus.bat) | Quick focus on a single area (full auto) |
-| [`watch.bat`](watch.bat) | Monitor progress dashboard |
-| [`interview.ps1`](interview.ps1) | Guided interview mode |
+**`interview.ps1`** is the **ONLY entry point** for Ralph. All functionality has been consolidated here.
 
-### Launcher Shortcuts
+### Parameters
 
-```powershell
-# Overnight mode (TrueAuto + testing)
-.\scripts\ralph\sleep-thats-where-im-a-viking.bat overnight
+| Parameter | Description |
+|-----------|-------------|
+| `-Mode <mode>` | Execution mode (see below) |
+| `-FocusArea <area>` | Work on specific focus area directly |
+| `-FocusAreas <area1,area2>` | Multiple areas for overnight mode |
+| `-Resume` | Continue previous session |
+| `-NoLaunch` | Save queue but don't spawn windows |
+| `-MaxHours <hours>` | Max hours for overnight (default: 12) |
 
-# YOLO mode (TrueAuto, no specific area)
-.\scripts\ralph\sleep-thats-where-im-a-viking.bat yolo
+### Utility Flags
 
-# With specific mode and focus
-.\scripts\ralph\sleep-thats-where-im-a-viking.bat -Mode trueauto -FocusArea pipeline
-```
+| Flag | Action |
+|------|--------|
+| `-Status` | Show status and exit |
+| `-Watch` | Open watch dashboard and exit |
+| `-Stop` | Request graceful stop and exit |
+| `-Logs` | View recent logs and exit |
+| `-Recovery` | Emergency recovery menu |
+| `-Morning` | Morning check-in with commits |
+| `-Queue` | Skip work type, go to queue selection |
 
 ## Modes
 
-The launcher ([`launcher.ps1`](launcher.ps1)) provides these modes:
-
 | Mode | Description |
 |------|-------------|
-| **Standard** | Work through stories, pause on sprint complete |
-| **TrueAuto** | Continuous improvement, auto-generate new sprints |
-| **Resume** | Continue where you left off |
-| **Smart Queue** | Describe what you want, Ralph picks focus areas |
-| **Ralph's Choice** | Ralph decides focus areas (confirm each) |
-| **Ralph's Choice Auto** | Ralph decides (fully autonomous) |
-| **Status** | Quick status check |
-| **Morning** | Morning check-in with commits |
-| **Logs** | View logs and reports |
-| **Recovery** | Emergency stop and recovery |
-| **Watch Only** | Just the watch dashboard |
+| **standard** | Work through stories, pause on sprint complete |
+| **trueauto** | Continuous improvement, auto-generate new sprints |
+| **resume** | Continue where you left off |
+| **smartqueue** | Describe what you want, Ralph picks focus areas |
+| **ralphschoice** | Ralph decides focus areas (confirm each) |
+| **ralphschoiceauto** | Ralph decides (fully autonomous) |
+| **overnight** | Multi-focus rotation (12+ hours) |
 
-## Interview Mode
+## Interactive Interview Flow
 
-Give Ralph specific direction before he starts working.
+When running without parameters:
 
-```powershell
-# Start interview
-.\scripts\ralph\interview.ps1
-
-# Or via launcher, choose "Smart Queue"
-.\scripts\ralph\sleep-thats-where-im-a-viking.bat
-```
-
-### Interview Flow
-
-1. Ralph asks what kind of work (bug/feature/improvement/client)
+1. Ralph asks what kind of work (bug/feature/improvement/client/queue)
 2. You describe what you want
 3. Ralph asks follow-up questions if needed (area, client, priority)
 4. Ralph suggests 3-5 focus areas based on keywords
 5. You approve/modify the list
-6. Ralph spawns loop + watch windows and gets to work
+6. Choose execution mode
+7. Ralph spawns loop + watch windows and gets to work
 
 ### Focus Area Keywords
 
@@ -95,29 +99,10 @@ Interview mode detects keywords in your description and suggests relevant focus 
 ### Modifying Suggestions
 
 After Ralph suggests focus areas, you can:
-- `[A]` - Approve all and start
+- `[A]` - Approve all and continue to mode selection
 - `[1-5]` - Remove specific area by number
 - `[+area]` - Add an area (e.g., `+testing`)
 - `[R]` - Restart interview
-
-### After Completion
-
-When all focus areas are done, Ralph asks:
-- **[I]nterview** - Give more direction
-- **[T]rueAuto** - Continue improving on his own
-- **[S]top** - Check results later
-
-### Crash Recovery
-
-If interrupted, next interview start offers to resume:
-
-```
-Found interrupted session:
-  Context: bug: OTIO crashes on unicode
-  Progress: 2/4 focus areas complete
-
-  Resume this session? [Y]es / [N]ew interview
-```
 
 ## Focus Areas
 
@@ -156,51 +141,37 @@ Focus areas are organized into categories:
 
 | File | Purpose |
 |------|---------|
-| [`ralph-config.json`](ralph-config.json) | Focus areas, autonomy settings, test patterns |
-| [`clients.json`](clients.json) | Client profiles and preferences |
-| [`prd.json`](prd.json) | Product requirements (user stories) |
-| [`progress.txt`](progress.txt) | Iteration log |
-| [`queue.json`](queue.json) | Interview queue state |
-| [`metrics.csv`](metrics.csv) | Performance metrics and costs |
-| [`sprint_history.json`](sprint_history.json) | Archive of completed sprints |
-
-## ralph.ps1 Parameters
-
-```powershell
-.\scripts\ralph\ralph.ps1 [options]
-
-Options:
-  -Queue             Process focus areas from queue.json (interview mode)
-  -SkipPlanApproval  Skip plan approval prompts
-  -TrueAuto          Continuous improvement mode (no exit on sprint complete)
-  -Resume            Resume previous sprint instead of starting new
-  -FocusArea <area>  Override focus area for this session
-  -RalphsChoice      Ralph decides focus areas, user confirms each
-  -RalphsChoiceAuto  Ralph decides and continues autonomously
-  -Task <task>       Specific task description
-```
+| `config/ralph-config.json` | Focus areas, autonomy settings, test patterns |
+| `config/clients.json` | Client profiles and preferences |
+| `state/prd.json` | Product requirements (user stories) |
+| `state/queue.json` | Interview queue state |
+| `state/progress.txt` | Iteration log |
+| `state/metrics.csv` | Performance metrics and costs |
+| `state/sprint_history.json` | Archive of completed sprints |
 
 ## Domain Modules
 
-The main [`ralph.ps1`](ralph.ps1) loads these modules from [`lib/`](lib/):
+The main `ralph.ps1` (internal engine) loads these modules from `lib/`:
 
 | Module | Purpose |
 |--------|---------|
-| [`sprint.ps1`](lib/sprint.ps1) | PRD generation, sprint lifecycle, archive |
-| [`scoring.ps1`](lib/scoring.ps1) | Ralph's Choice algorithm, focus area scoring |
-| [`queue.ps1`](lib/queue.ps1) | Interview queue processing |
-| [`metrics.ps1`](lib/metrics.ps1) | CSV metrics, iteration tracking |
-| [`quality.ps1`](lib/quality.ps1) | Quality gates, test baselines |
-| [`prompts.ps1`](lib/prompts.ps1) | Claude prompt building |
-| [`healing.ps1`](lib/healing.ps1) | Self-healing and error recovery |
-| [`heartbeat.ps1`](lib/heartbeat.ps1) | Health monitoring |
-| [`claude.ps1`](lib/claude.ps1) | Claude API interaction |
-| [`display.ps1`](lib/display.ps1) | Console output formatting |
-| [`loops.ps1`](lib/loops.ps1) | Main execution loops |
+| `sprint.ps1` | PRD generation, sprint lifecycle, archive |
+| `scoring.ps1` | Ralph's Choice algorithm, focus area scoring |
+| `queue.ps1` | Interview queue processing |
+| `metrics.ps1` | CSV metrics, iteration tracking |
+| `quality.ps1` | Quality gates, test baselines |
+| `prompts.ps1` | Claude prompt building |
+| `healing.ps1` | Self-healing and error recovery |
+| `heartbeat.ps1` | Health monitoring |
+| `claude.ps1` | Claude API interaction |
+| `display.ps1` | Console output formatting |
+| `loops.ps1` | Main execution loops |
+| `interview.ps1` | Context improvement, LLM suggestions |
+| `paths.ps1` | Centralized path definitions |
 
 ## Logs
 
-Session logs are stored in `scripts/ralph/logs/YYYY-MM-DD_HHMMSS/`:
+Session logs are stored in `logs/YYYY-MM-DD_HHMMSS/`:
 - Claude conversations
 - Iteration summaries
 - Error traces
@@ -210,11 +181,11 @@ Session logs are stored in `scripts/ralph/logs/YYYY-MM-DD_HHMMSS/`:
 
 ```
 scripts/ralph/
-├── ralph.ps1              # Main orchestrator (~800 lines)
-├── launcher.ps1           # Interactive mode launcher
-├── interview.ps1          # Guided interview mode
-├── watch.ps1 / watch.bat  # Progress dashboard
+├── interview.ps1          # UNIFIED ENTRY POINT (use this!)
+├── ralph.ps1              # Internal execution engine (~900 lines)
+├── watch.ps1              # Progress dashboard
 ├── status.ps1             # Quick status checks
+├── graceful-stop.ps1      # Graceful stop management
 ├── lib/                   # Domain modules
 │   ├── sprint.ps1
 │   ├── scoring.ps1
@@ -226,11 +197,33 @@ scripts/ralph/
 │   ├── heartbeat.ps1
 │   ├── claude.ps1
 │   ├── display.ps1
-│   └── loops.ps1
-├── *.json                 # Config and state files
-├── *.csv                  # Metrics
-└── logs/                  # Session logs
+│   ├── loops.ps1
+│   ├── interview.ps1
+│   ├── learning.ps1
+│   ├── paths.ps1
+│   └── reporting.ps1
+├── config/                # Configuration files
+├── state/                 # Runtime state files
+├── logs/                  # Session logs
+└── tests/                 # Pester tests
 ```
+
+## Script Organization
+
+**Convention**: Shared functions live in `lib/`, standalone scripts use them but don't define shared functions.
+
+| Location | Purpose | Rule |
+|----------|---------|------|
+| `lib/*.ps1` | Shared functions (sourced by ralph.ps1) | Define functions called by multiple scripts |
+| `*.ps1` (root) | Standalone entry points | Use lib functions, don't define shared ones |
+
+Standalone scripts should have this header:
+```powershell
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
+```
+
+This convention is enforced by `tests/RalphStructure.Tests.ps1`.
 
 ## Ralph's Choice Algorithm
 
@@ -241,3 +234,10 @@ When using Ralph's Choice modes, Ralph scores focus areas based on:
 - **Category Balance** - Distribution across categories
 
 Ralph presents the highest-scoring area for confirmation (or proceeds autonomously in Auto mode).
+
+## Testing
+
+```powershell
+# Run all Ralph tests
+Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
+```
