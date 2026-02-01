@@ -112,12 +112,25 @@ class EntityVideo:
 
 
 @dataclass
+class VideoSearchResult:
+    """Search result for a video (before download)"""
+    video_id: str
+    url: str = ""
+    title: str = ""
+    channel: str = ""
+    duration: float = 0.0
+    duration_tier: str = ""
+    keyword: str = ""
+
+
+@dataclass
 class PipelineState:
     """
     Central state object for the video matching pipeline.
 
     All pipeline stages read from and write to this object.
-    This replaces the scattered instance attributes in the Pipeline class.
+    Simplified 7-stage pipeline: ANALYZE → VIDEO_SEARCH → CAPTION → MATCH →
+    ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
     """
 
     # === INPUT STATE ===
@@ -127,52 +140,32 @@ class PipelineState:
     topic_context: str = ""
     extracted_entities: List[Dict[str, Any]] = field(default_factory=list)
 
-    # === DOWNLOAD STATE ===
-    downloaded_videos: List[DownloadedVideo] = field(default_factory=list)
-    downloaded_audio: List[AudioDownload] = field(default_factory=list)
-    failed_keywords: List[str] = field(default_factory=list)
-    global_cache_videos: List[Dict[str, Any]] = field(default_factory=list)
-    remix_files: List[str] = field(default_factory=list)  # Video paths from REMIX stage
-
-    # === ENTITY MEDIA STATE ===
-    entity_images: Dict[str, EntityImage] = field(default_factory=dict)
-    entity_videos: Dict[str, EntityVideo] = field(default_factory=dict)
+    # === VIDEO SEARCH STATE (replaces DOWNLOAD) ===
+    video_ids: List[str] = field(default_factory=list)  # YouTube video IDs from search
+    video_search_results: List[VideoSearchResult] = field(default_factory=list)  # Full search metadata
+    search_failed_keywords: List[str] = field(default_factory=list)  # Keywords with no results
 
     # === CAPTION STATE ===
     caption_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # video_id -> caption data
-    pending_streams: List[Dict[str, Any]] = field(default_factory=list)  # US-007 Sprint 8: queued upcoming streams
-
-    # === TRANSCRIPTION STATE ===
-    transcripts: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
-    embeddings: List[Any] = field(default_factory=list)  # numpy arrays
-    text_metadata: List[Dict[str, Any]] = field(default_factory=list)
-    embedding_index: Any = None  # FAISS index
-
-    # === SCENE DETECTION STATE ===
-    scene_data: Dict[str, Any] = field(default_factory=dict)  # video_name -> VideoSceneData
 
     # === MATCHING STATE ===
     matches: List[Match] = field(default_factory=list)
     alternatives: Dict[int, List[Match]] = field(default_factory=dict)  # segment_idx -> alt matches
 
-    # === B-ROLL STATE ===
-    broll_downloads: List[Dict[str, Any]] = field(default_factory=list)  # B-roll specific downloads
-    broll_matches: List[Dict[str, Any]] = field(default_factory=list)  # Silent scene matches
+    # === DOWNLOAD STATE (for segment downloads only) ===
+    downloaded_segments: List[DownloadedVideo] = field(default_factory=list)  # Only matched segments
 
     # === OUTPUT STATE ===
     output_files: List[Path] = field(default_factory=list)
     otio_files: List[Path] = field(default_factory=list)
-
-    # === LOCATION STATE ===
-    location_chapters: List[Dict[str, Any]] = field(default_factory=list)
 
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
     stage_timings: Dict[str, float] = field(default_factory=dict)
 
     def get_video_count(self) -> int:
-        """Get total number of downloaded videos"""
-        return len(self.downloaded_videos)
+        """Get total number of video IDs from search"""
+        return len(self.video_ids)
 
     def get_match_count(self) -> int:
         """Get number of matched segments"""
@@ -182,11 +175,11 @@ class PipelineState:
         """Get number of voiceover segments"""
         return len(self.voiceover_segments)
 
-    def clear_downloads(self):
-        """Clear download state for fresh start"""
-        self.downloaded_videos = []
-        self.downloaded_audio = []
-        self.failed_keywords = []
+    def clear_search(self):
+        """Clear video search state for fresh start"""
+        self.video_ids = []
+        self.video_search_results = []
+        self.search_failed_keywords = []
 
     def clear_matches(self):
         """Clear matching state for re-matching"""
@@ -200,7 +193,7 @@ class PipelineState:
             'keywords': self.keywords,
             'topic_context': self.topic_context,
             'segment_count': len(self.voiceover_segments),
-            'video_count': len(self.downloaded_videos),
+            'video_count': len(self.video_ids),
             'match_count': len(self.matches),
             'stage_timings': self.stage_timings,
         }
@@ -213,13 +206,14 @@ class PipelineState:
         Used for gradual migration - allows existing code to work
         while we transition to the new architecture.
         """
+        import re
         state = cls()
 
         # Copy basic state
         state.keywords = getattr(pipeline, 'keywords', [])
         state.topic_context = getattr(pipeline, 'topic_context', '')
         state.extracted_entities = getattr(pipeline, 'extracted_entities', [])
-        state.failed_keywords = getattr(pipeline, 'failed_keywords', [])
+        state.search_failed_keywords = getattr(pipeline, 'failed_keywords', [])
         state.face_preference = getattr(pipeline, 'face_preference', 'neutral')
         state.stage_timings = getattr(pipeline, 'stage_timings', {})
 
@@ -235,27 +229,18 @@ class PipelineState:
             else:
                 state.voiceover_segments.append(seg)
 
-        # Copy downloaded videos (convert dicts to DownloadedVideo)
+        # Migrate downloaded_videos to video_ids (extract video IDs from URLs)
         for vid in getattr(pipeline, 'downloaded_videos', []):
-            if isinstance(vid, dict):
-                state.downloaded_videos.append(DownloadedVideo(
-                    file=vid.get('file', vid.get('path', '')),
-                    url=vid.get('url', ''),
-                    title=vid.get('title', ''),
-                    channel=vid.get('channel', ''),
-                    duration=vid.get('duration', 0.0),
-                    duration_tier=vid.get('duration_tier', vid.get('tier', '')),
-                    keyword=vid.get('keyword', ''),
-                    source=vid.get('source', 'download'),
-                ))
-            else:
-                state.downloaded_videos.append(vid)
+            url = vid.get('url', '') if isinstance(vid, dict) else getattr(vid, 'url', '')
+            if url and ('youtube.com' in url or 'youtu.be' in url):
+                match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
+                if match:
+                    video_id = match.group(1)
+                    if video_id not in state.video_ids:
+                        state.video_ids.append(video_id)
 
-        # Copy transcription state
-        state.transcripts = getattr(pipeline, 'transcripts', {})
-        state.embeddings = getattr(pipeline, 'embeddings', [])
-        state.text_metadata = getattr(pipeline, 'text_metadata', [])
-        state.embedding_index = getattr(pipeline, 'embedding_index', None)
+        # Copy caption results
+        state.caption_results = getattr(pipeline, 'caption_results', {})
 
         # Copy matches (convert dicts to Match)
         for m in getattr(pipeline, 'matches', []):
@@ -271,9 +256,5 @@ class PipelineState:
                 ))
             else:
                 state.matches.append(m)
-
-        # Copy entity media
-        state.entity_images = getattr(pipeline, 'entity_images', {})
-        state.entity_videos = getattr(pipeline, 'entity_videos', {})
 
         return state

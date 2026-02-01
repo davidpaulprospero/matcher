@@ -85,11 +85,13 @@ class Stage(ABC):
     """
     Abstract base class for pipeline stages.
 
-    Each stage represents a discrete step in the video matching pipeline:
+    Simplified 7-stage pipeline:
     - ANALYZE: Extract keywords from voiceover
-    - DOWNLOAD: Download video footage
-    - TRANSCRIBE: Transcribe videos and compute embeddings
+    - VIDEO_SEARCH: Search YouTube for videos (no download)
+    - CAPTION: Fetch YouTube captions
     - MATCH: Match voiceover segments to video clips
+    - ITERATIVE_MATCH: Fill gaps with iterative search
+    - DOWNLOAD_SEGMENTS: Download matched video segments
     - OUTPUT: Generate OTIO timeline
 
     Stages are:

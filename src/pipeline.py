@@ -258,18 +258,21 @@ class PipelineOrchestrator:
 def create_default_pipeline(
     config: 'Config',
     project_dir: Path,
-    audio_first_mode: bool = False
+    audio_first_mode: bool = False  # Deprecated: now always uses caption-first
 ) -> PipelineOrchestrator:
     """
-    Create a pipeline with the default stage order.
+    Create a pipeline with the simplified 7-stage order.
 
     This is a factory function that creates a fully configured pipeline.
     Stages are imported lazily to avoid circular imports.
 
+    Simplified 7-stage pipeline:
+    ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+
     Args:
         config: Configuration object
         project_dir: Project directory path
-        audio_first_mode: If True, uses audio-first download pipeline
+        audio_first_mode: Deprecated, ignored (caption-first is now default)
 
     Returns:
         Configured PipelineOrchestrator
@@ -278,40 +281,21 @@ def create_default_pipeline(
 
     # Import stages lazily to avoid circular imports
     from .stages.analyze import AnalyzeStage
-    from .stages.entity_images import EntityImagesStage
-    from .stages.entity_videos import EntityVideosStage
-    from .stages.download import DownloadStage, DownloadVideoSegmentsStage
-    from .stages.stock import StockVideoStage
-    from .stages.broll_download import BrollDownloadStage
-    from .stages.remix import RemixStage
+    from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
-    from .stages.transcribe import TranscribeStage
-    from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
-    from .stages.broll_match import BrollMatchStage
     from .stages.iterative_match import IterativeMatchStage
+    from .stages.download_segments import DownloadVideoSegmentsStage
     from .stages.output import OutputStage
 
-    # Add stages in STAGE_ORDER
-    pipeline.add_stage(AnalyzeStage())
-    pipeline.add_stage(EntityImagesStage())
-    pipeline.add_stage(EntityVideosStage())
-    pipeline.add_stage(DownloadStage())
-    pipeline.add_stage(StockVideoStage())
-    pipeline.add_stage(BrollDownloadStage())  # B-roll specific downloads
-    pipeline.add_stage(RemixStage())
-    pipeline.add_stage(CaptionStage())  # Fetch YouTube captions before transcription
-    pipeline.add_stage(TranscribeStage())
-    pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
-    pipeline.add_stage(MatchStage())
-    pipeline.add_stage(BrollMatchStage())  # Match silent scenes for V8 track
-    pipeline.add_stage(IterativeMatchStage())  # Multi-pass gap filling
-
-    # Audio-first mode adds video segment download after matching
-    if audio_first_mode:
-        pipeline.add_stage(DownloadVideoSegmentsStage())
-
-    pipeline.add_stage(OutputStage())
+    # Add stages in simplified 7-stage order
+    pipeline.add_stage(AnalyzeStage())           # Stage 1: Extract keywords from voiceover
+    pipeline.add_stage(VideoSearchStage())       # Stage 2: Search YouTube (no download)
+    pipeline.add_stage(CaptionStage())           # Stage 3: Fetch YouTube captions
+    pipeline.add_stage(MatchStage())             # Stage 4: Match voiceover to captions
+    pipeline.add_stage(IterativeMatchStage())    # Stage 5: Fill gaps with iterative search
+    pipeline.add_stage(DownloadVideoSegmentsStage())  # Stage 6: Download matched segments
+    pipeline.add_stage(OutputStage())            # Stage 7: Generate OTIO/EDL/XML
 
     return pipeline
 
@@ -324,7 +308,10 @@ def create_match_only_pipeline(
     Create a pipeline that only runs matching and output stages.
 
     Used when user wants to re-run matching with different config
-    without re-downloading or transcribing.
+    without re-searching or fetching captions.
+
+    In simplified pipeline: skips ANALYZE, VIDEO_SEARCH, CAPTION
+    and runs: MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
 
     Args:
         config: Configuration object
@@ -336,36 +323,22 @@ def create_match_only_pipeline(
     pipeline = PipelineOrchestrator(config, project_dir)
 
     from .stages.analyze import AnalyzeStage
-    from .stages.entity_images import EntityImagesStage
-    from .stages.entity_videos import EntityVideosStage
-    from .stages.download import DownloadStage
-    from .stages.stock import StockVideoStage
-    from .stages.broll_download import BrollDownloadStage
-    from .stages.remix import RemixStage
+    from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
-    from .stages.transcribe import TranscribeStage
-    from .stages.scene_detection import SceneDetectionStage
     from .stages.match import MatchStage
-    from .stages.broll_match import BrollMatchStage
     from .stages.iterative_match import IterativeMatchStage
+    from .stages.download_segments import DownloadVideoSegmentsStage
     from .stages.output import OutputStage
 
     # Add prerequisite stages for restoration only (will be skipped via checkpoint)
     pipeline.add_stage(AnalyzeStage())
-    pipeline.add_stage(EntityImagesStage())  # For V9 track
-    pipeline.add_stage(EntityVideosStage())  # For V10 track
-    pipeline.add_stage(DownloadStage())
-    pipeline.add_stage(StockVideoStage())    # For general B-roll
-    pipeline.add_stage(BrollDownloadStage()) # B-roll specific downloads
-    pipeline.add_stage(RemixStage())         # Filter videos by relevance
-    pipeline.add_stage(CaptionStage())       # Fetch YouTube captions
-    pipeline.add_stage(TranscribeStage())
-    pipeline.add_stage(SceneDetectionStage())  # Scene detection with B-roll marking
+    pipeline.add_stage(VideoSearchStage())
+    pipeline.add_stage(CaptionStage())
 
     # Add stages to actually run
     pipeline.add_stage(MatchStage())
-    pipeline.add_stage(BrollMatchStage())    # Match silent scenes for V8 track
-    pipeline.add_stage(IterativeMatchStage())  # Multi-pass gap filling
+    pipeline.add_stage(IterativeMatchStage())
+    pipeline.add_stage(DownloadVideoSegmentsStage())
     pipeline.add_stage(OutputStage())
 
     return pipeline

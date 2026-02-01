@@ -439,20 +439,49 @@ class TestPipelineFactories:
 
     @pytest.mark.fast
     def test_create_default_pipeline(self, temp_dir):
-        """Test creating default pipeline."""
+        """Test creating default pipeline (7-stage: v4.0)."""
         config = Config()
 
         pipeline = create_default_pipeline(config, temp_dir, audio_first_mode=False)
 
         assert isinstance(pipeline, PipelineOrchestrator)
-        assert len(pipeline.stages) > 0
-        # Should have standard stages: ANALYZE, DOWNLOAD, TRANSCRIBE, MATCH, OUTPUT
+        assert len(pipeline.stages) == 7
+        # Should have 7 stages: ANALYZE, VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH, DOWNLOAD_SEGMENTS, OUTPUT
         stage_names = [s.name for s in pipeline.stages]
         assert "ANALYZE" in stage_names
-        assert "DOWNLOAD" in stage_names
-        assert "TRANSCRIBE" in stage_names
+        assert "VIDEO_SEARCH" in stage_names
+        assert "CAPTION" in stage_names
         assert "MATCH" in stage_names
+        assert "ITERATIVE_MATCH" in stage_names
+        assert "DOWNLOAD_SEGMENTS" in stage_names
         assert "OUTPUT" in stage_names
+
+    @pytest.mark.fast
+    def test_create_default_pipeline_stage_order(self, temp_dir):
+        """Test that pipeline stages are in correct order (7-stage: v4.0)."""
+        config = Config()
+        pipeline = create_default_pipeline(config, temp_dir, audio_first_mode=False)
+        stage_names = [s.name for s in pipeline.stages]
+
+        # Verify exact order of all 7 stages
+        expected_order = [
+            "ANALYZE",
+            "VIDEO_SEARCH",
+            "CAPTION",
+            "MATCH",
+            "ITERATIVE_MATCH",
+            "DOWNLOAD_SEGMENTS",
+            "OUTPUT"
+        ]
+        assert stage_names == expected_order, f"Stage order mismatch: {stage_names} != {expected_order}"
+
+        # Verify critical dependencies: VIDEO_SEARCH must come before CAPTION
+        assert stage_names.index("VIDEO_SEARCH") < stage_names.index("CAPTION"), \
+            "VIDEO_SEARCH must run before CAPTION (captions need video IDs)"
+
+        # Verify MATCH comes after CAPTION
+        assert stage_names.index("CAPTION") < stage_names.index("MATCH"), \
+            "CAPTION must run before MATCH (matching needs caption data)"
 
     @pytest.mark.fast
     def test_create_default_pipeline_audio_first(self, temp_dir):
@@ -473,7 +502,7 @@ class TestPipelineFactories:
 
     @pytest.mark.fast
     def test_create_match_only_pipeline(self, temp_dir):
-        """Test creating match-only pipeline."""
+        """Test creating match-only pipeline (7-stage: v4.0)."""
         config = Config()
 
         pipeline = create_match_only_pipeline(config, temp_dir)
@@ -481,17 +510,17 @@ class TestPipelineFactories:
         assert isinstance(pipeline, PipelineOrchestrator)
         stage_names = [s.name for s in pipeline.stages]
 
-        # Should have prerequisite stages for restoration
+        # Should have prerequisite stages for restoration (7-stage pipeline)
         assert "ANALYZE" in stage_names
-        assert "DOWNLOAD" in stage_names
-        assert "TRANSCRIBE" in stage_names
+        assert "VIDEO_SEARCH" in stage_names
+        assert "CAPTION" in stage_names
 
         # Should have MATCH and OUTPUT for actual execution
         assert "MATCH" in stage_names
         assert "OUTPUT" in stage_names
 
-        # Should NOT have DOWNLOAD_SEGMENTS (audio-first only)
-        assert "DOWNLOAD_SEGMENTS" not in stage_names
+        # Should have all 7 stages in match-only mode for proper restoration
+        assert "DOWNLOAD_SEGMENTS" in stage_names
 
 
 class TestPipelineCheckpointSaving:
