@@ -63,31 +63,31 @@ def test_checkpoint_manager():
         # Test 4: should_skip_stage
         print("\n  [4] Testing should_skip_stage...")
         assert cm2.should_skip_stage("ANALYZE") == True, "ANALYZE should be skipped"
-        assert cm2.should_skip_stage("DOWNLOAD") == False, "DOWNLOAD should not be skipped"
+        assert cm2.should_skip_stage("VIDEO_SEARCH") == False, "VIDEO_SEARCH should not be skipped"
         print("      ✓ Stage skip logic works")
-        
+
         # Test 5: Validate checkpoint
         print("\n  [5] Validating checkpoint...")
         validation = cm2.validate()
         assert validation['valid'] == True
-        assert validation['resume_from'] == "ENTITY_IMAGES"
+        assert validation['resume_from'] == "VIDEO_SEARCH"
         assert "ANALYZE" in validation['completed_stages']
         print(f"      ✓ Valid checkpoint, resume from: {validation['resume_from']}")
-        
-        # Test 6: Save more stages
+
+        # Test 6: Save more stages (7-stage pipeline)
         print("\n  [6] Saving multiple stages...")
-        for stage in ["ENTITY_IMAGES", "ENTITY_VIDEOS", "DOWNLOAD"]:
+        for stage in ["VIDEO_SEARCH", "CAPTION", "MATCH"]:
             cm2.save(stage, {'count': 10})
-        
-        assert cm2.data.last_completed_stage == "DOWNLOAD"
-        assert cm2.should_skip_stage("DOWNLOAD") == True
-        assert cm2.should_skip_stage("REMIX") == False
+
+        assert cm2.data.last_completed_stage == "MATCH"
+        assert cm2.should_skip_stage("MATCH") == True
+        assert cm2.should_skip_stage("ITERATIVE_MATCH") == False
         print(f"      ✓ Last stage: {cm2.data.last_completed_stage}")
         
         # Test 7: Get summary
         print("\n  [7] Getting summary...")
         summary = cm2.get_summary()
-        assert "DOWNLOAD" in summary
+        assert "MATCH" in summary
         print(f"      ✓ Summary:\n{summary}")
         
         # Test 8: Clear checkpoint
@@ -185,21 +185,25 @@ def test_keyword_manager():
 
 @pytest.mark.fast
 def test_stage_order():
-    """Test stage ordering logic"""
+    """Test stage ordering logic for 7-stage caption-first pipeline"""
     print("\n" + "=" * 60)
-    print("  TEST: Stage Order Logic")
+    print("  TEST: Stage Order Logic (7-stage pipeline)")
     print("=" * 60)
-    
+
     print(f"\n  Stage order: {STAGE_ORDER}")
-    
-    # Test stage indices
-    assert STAGE_ORDER.index("ANALYZE") < STAGE_ORDER.index("DOWNLOAD")
-    assert STAGE_ORDER.index("DOWNLOAD") < STAGE_ORDER.index("TRANSCRIBE")
-    assert STAGE_ORDER.index("TRANSCRIBE") < STAGE_ORDER.index("MATCH")
-    assert STAGE_ORDER.index("MATCH") < STAGE_ORDER.index("OUTPUT")
-    
-    print("  ✓ Stage order is correct")
-    
+
+    # Test 7-stage pipeline order:
+    # ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    assert len(STAGE_ORDER) == 7, f"Expected 7 stages, got {len(STAGE_ORDER)}"
+    assert STAGE_ORDER.index("ANALYZE") < STAGE_ORDER.index("VIDEO_SEARCH")
+    assert STAGE_ORDER.index("VIDEO_SEARCH") < STAGE_ORDER.index("CAPTION")
+    assert STAGE_ORDER.index("CAPTION") < STAGE_ORDER.index("MATCH")
+    assert STAGE_ORDER.index("MATCH") < STAGE_ORDER.index("ITERATIVE_MATCH")
+    assert STAGE_ORDER.index("ITERATIVE_MATCH") < STAGE_ORDER.index("DOWNLOAD_SEGMENTS")
+    assert STAGE_ORDER.index("DOWNLOAD_SEGMENTS") < STAGE_ORDER.index("OUTPUT")
+
+    print("  ✓ Stage order is correct (7 stages)")
+
     print("\n  ✅ Stage order tests PASSED")
 
 
@@ -216,7 +220,7 @@ def test_format_prompts():
         # Test resume prompt
         print("\n  [1] Testing resume prompt...")
         cm = CheckpointManager(tmpdir)
-        cm.save("DOWNLOAD", {'video_count': 5})
+        cm.save("MATCH", {'match_count': 5})
         
         prompt = format_resume_prompt(cm)
         assert "CHECKPOINT FOUND" in prompt

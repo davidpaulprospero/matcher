@@ -2,17 +2,22 @@
 Command-line argument parsing for the matcher pipeline.
 
 Extracted from main.py (Jan 2026).
+Updated Feb 2026: Simplified 7-stage pipeline with caption-first default.
 """
 
 import argparse
+import warnings
 
 
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="Voiceover-to-Footage Matching Pipeline v3.0",
+        description="Voiceover-to-Footage Matching Pipeline v4.0 (Caption-First)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Pipeline Stages (7-stage caption-first):
+    ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+
 Examples:
     python main.py --voiceover script.srt
     python main.py --voiceover script.srt --keywords 30
@@ -30,7 +35,8 @@ Examples:
     python main.py --list-keywords             # List all saved presets
 
     # Other options
-    python main.py --match-only                # Skip download, match existing
+    python main.py --match-only                # Re-run matching only
+    python main.py --output-only               # Regenerate OTIO only (needs checkpoint)
     python main.py --config custom_config.yaml # Use custom config
         """
     )
@@ -156,12 +162,12 @@ Examples:
              '(e.g., caption_metrics.json). Writes to project directory by default.'
     )
 
-    # Caption-first mode flags
+    # Caption-first mode flags (caption-first is now default in v4.0)
     parser.add_argument(
         '--caption-first',
         action='store_true',
-        help='Enable caption-first mode: fetch YouTube captions before video download. '
-             'Faster matching with lower bandwidth. Falls back to Whisper if unavailable.'
+        help='DEPRECATED: Caption-first is now the default behavior. '
+             'This flag is kept for backward compatibility but has no effect.'
     )
 
     parser.add_argument(
@@ -175,8 +181,8 @@ Examples:
     parser.add_argument(
         '--no-caption-fallback',
         action='store_true',
-        help='Disable transcription fallback when captions are unavailable. '
-             'Videos without captions will be skipped instead of transcribed.'
+        help='DEPRECATED: Transcription fallback has been removed in v4.0. '
+             'Videos without captions are skipped. This flag has no effect.'
     )
 
     # Caption validation CLI (US-005 Sprint 7)

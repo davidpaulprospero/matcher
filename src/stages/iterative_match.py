@@ -1,8 +1,8 @@
 """
 Iterative Match Stage - Multi-Pass Gap Filling
 
-Stage runs after BROLL_MATCH to achieve 90%+ confidence across all segments
-while enforcing a 5-minute source spacing rule.
+Stage 5 of the simplified 7-stage pipeline. Runs after MATCH to achieve
+90%+ confidence across all segments while enforcing source spacing rules.
 
 Features:
 - Identifies gaps (low confidence or source spacing violation)
@@ -11,8 +11,6 @@ Features:
 - Progressive query refinement on subsequent passes
 - Gap pattern analysis for smarter search
 - Query learning database for cross-project improvement
-
-Created during IterativeMatchStage implementation (Jan 2026).
 """
 
 from __future__ import annotations
@@ -972,18 +970,23 @@ class IterativeMatchStage(Stage):
         # Get existing video IDs to avoid duplicates
         existing_ids: Set[str] = set()
 
-        # From downloaded videos
-        for vid in state.downloaded_videos:
-            vid_file = vid.file if hasattr(vid, 'file') else vid.get('file', '')
-            vid_id = self._extract_video_id_from_path(vid_file)
-            if vid_id:
-                existing_ids.add(vid_id)
+        # From state.video_ids (simplified pipeline)
+        if hasattr(state, 'video_ids') and state.video_ids:
+            existing_ids.update(state.video_ids)
 
         # From text_metadata (caption-first mode)
         for meta in (state.text_metadata or []):
             if isinstance(meta, dict):
                 vid_path = meta.get('video_path', '')
                 vid_id = self._extract_video_id_from_path(vid_path)
+                if vid_id:
+                    existing_ids.add(vid_id)
+
+        # Backward compatibility: check legacy downloaded_videos
+        if hasattr(state, 'downloaded_videos'):
+            for vid in state.downloaded_videos:
+                vid_file = vid.file if hasattr(vid, 'file') else vid.get('file', '')
+                vid_id = self._extract_video_id_from_path(vid_file)
                 if vid_id:
                     existing_ids.add(vid_id)
 

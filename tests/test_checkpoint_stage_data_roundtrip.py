@@ -2,11 +2,14 @@
 Tests for checkpoint stage data round-trip (US-006, Sprint 15).
 
 Covers:
-- AC1: save/load round-trip preserves stage data for all 14 stage types
+- AC1: save/load round-trip preserves stage data for all 7 stage types
 - AC2: get_stage_data() returns empty dict for stages not yet completed
 - AC3: should_skip_stage() correctly skips completed stages during resume
 - AC4: config_hash mismatch detection via validate()
 - AC5: voiceover_hash comparison detects voiceover file changes
+
+Uses the 7-stage pipeline structure (v4.0):
+ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
 """
 
 import json
@@ -21,29 +24,22 @@ from src.checkpoint import CheckpointManager, CheckpointData, STAGE_ORDER
 
 
 class TestSaveLoadRoundTrip:
-    """AC1: save/load round-trip preserves stage data for all 14 stage types."""
+    """AC1: save/load round-trip preserves stage data for all 7 stage types."""
 
-    # Sample data for each stage (lowercase keys matching CheckpointData fields)
+    # Sample data for each stage (7-stage pipeline, lowercase keys matching CheckpointData fields)
     STAGE_DATA = {
         "ANALYZE": {"keywords": ["travel", "nature"], "segment_count": 20, "topic": "wildlife"},
-        "ENTITY_IMAGES": {"images": ["img1.jpg", "img2.jpg"], "sources": ["google", "bing"]},
-        "ENTITY_VIDEOS": {"videos": ["stock1.mp4"], "api_calls": 5},
-        "DOWNLOAD": {"video_paths": ["/v/vid1.mp4", "/v/vid2.mp4"], "count": 2},
-        "STOCK": {"stock_videos": ["pexels_1.mp4"], "source": "pexels"},
-        "BROLL_DOWNLOAD": {"broll_paths": ["/v/broll1.mp4"], "keyword_suffixes": ["aerial"]},
-        "REMIX": {"filtered_count": 15, "removed": ["irrelevant.mp4"]},
+        "VIDEO_SEARCH": {"video_ids": ["vid1", "vid2"], "count": 2},
         "CAPTION": {"caption_count": 8, "languages": ["en", "es"]},
-        "TRANSCRIBE": {"transcribed_count": 10, "embedding_count": 10},
-        "SCENE_DETECTION": {"scenes": 42, "broll_flagged": 5},
         "MATCH": {"match_count": 18, "avg_confidence": 0.85, "matches": [{"id": 1}]},
-        "BROLL_MATCH": {"broll_matches": 5, "strategies": ["embedding", "keyword"]},
+        "ITERATIVE_MATCH": {"passes": 2, "gaps_filled": 5},
         "DOWNLOAD_SEGMENTS": {"segments_downloaded": 18, "total_size_mb": 450.5},
         "OUTPUT": {"otio_path": "/output/timeline.otio", "edl_path": "/output/timeline.edl"},
     }
 
     @pytest.mark.fast
-    def test_round_trip_all_14_stages(self, tmp_path):
-        """Save data for all 14 stages sequentially, load, verify each stage dict matches."""
+    def test_round_trip_all_7_stages(self, tmp_path):
+        """Save data for all 7 stages sequentially, load, verify each stage dict matches."""
         manager = CheckpointManager(tmp_path, config_hash="test_hash")
 
         # Save each stage with its data
@@ -121,15 +117,15 @@ class TestSaveLoadRoundTrip:
     def test_round_trip_empty_stage_data(self, tmp_path):
         """Verify saving with None/empty stage_data preserves empty dict."""
         manager = CheckpointManager(tmp_path)
-        manager.save("DOWNLOAD", None)  # No stage data
+        manager.save("VIDEO_SEARCH", None)  # No stage data
 
         manager2 = CheckpointManager(tmp_path)
         loaded = manager2.load()
 
         assert loaded is not None
-        assert loaded.last_completed_stage == "DOWNLOAD"
+        assert loaded.last_completed_stage == "VIDEO_SEARCH"
         # Empty dict is the default for unset stage data
-        assert loaded.download == {}
+        assert loaded.video_search == {}
 
     @pytest.mark.fast
     def test_round_trip_overwrite_stage_data(self, tmp_path):
@@ -161,8 +157,8 @@ class TestGetStageData:
         manager = CheckpointManager(tmp_path)
         manager.save("ANALYZE", {"keywords": ["test"]})
 
-        # DOWNLOAD was never saved
-        result = manager.get_stage_data("DOWNLOAD")
+        # VIDEO_SEARCH was never saved
+        result = manager.get_stage_data("VIDEO_SEARCH")
         assert result == {}
 
     @pytest.mark.fast
@@ -189,15 +185,15 @@ class TestGetStageData:
     def test_returns_empty_dict_for_future_stages(self, tmp_path):
         """Verify all stages after last_completed return empty dicts."""
         manager = CheckpointManager(tmp_path)
-        manager.save("DOWNLOAD", {"video_paths": ["/v/vid1.mp4"]})
+        manager.save("VIDEO_SEARCH", {"video_ids": ["vid1"]})
 
-        # All stages after DOWNLOAD should return empty
-        for stage in ["TRANSCRIBE", "MATCH", "OUTPUT"]:
+        # All stages after VIDEO_SEARCH should return empty
+        for stage in ["CAPTION", "MATCH", "OUTPUT"]:
             result = manager.get_stage_data(stage)
             assert result == {}, f"Expected empty dict for {stage}, got {result}"
 
     @pytest.mark.fast
-    def test_all_14_stages_return_empty_when_no_data(self, tmp_path):
+    def test_all_7_stages_return_empty_when_no_data(self, tmp_path):
         """Verify every stage in STAGE_ORDER returns empty dict on fresh manager."""
         manager = CheckpointManager(tmp_path)
         for stage in STAGE_ORDER:
@@ -212,18 +208,18 @@ class TestShouldSkipStage:
     def test_skips_stages_before_last_completed(self, tmp_path):
         """Verify returns False for stages before last_completed_stage, True for stages after."""
         manager = CheckpointManager(tmp_path)
-        # Set last completed to DOWNLOAD (index 3 in STAGE_ORDER)
-        manager.save("DOWNLOAD", {"count": 5})
+        # Set last completed to VIDEO_SEARCH (index 1 in STAGE_ORDER)
+        manager.save("VIDEO_SEARCH", {"count": 5})
 
-        download_idx = STAGE_ORDER.index("DOWNLOAD")
+        vs_idx = STAGE_ORDER.index("VIDEO_SEARCH")
 
-        # Stages up to and including DOWNLOAD should be skipped
-        for stage in STAGE_ORDER[:download_idx + 1]:
+        # Stages up to and including VIDEO_SEARCH should be skipped
+        for stage in STAGE_ORDER[:vs_idx + 1]:
             assert manager.should_skip_stage(stage) is True, \
                 f"Expected should_skip_stage('{stage}') to be True (completed)"
 
-        # Stages after DOWNLOAD should NOT be skipped
-        for stage in STAGE_ORDER[download_idx + 1:]:
+        # Stages after VIDEO_SEARCH should NOT be skipped
+        for stage in STAGE_ORDER[vs_idx + 1:]:
             assert manager.should_skip_stage(stage) is False, \
                 f"Expected should_skip_stage('{stage}') to be False (not yet completed)"
 
@@ -260,20 +256,20 @@ class TestShouldSkipStage:
 
     @pytest.mark.fast
     def test_mid_pipeline_resume(self, tmp_path):
-        """Verify correct split for mid-pipeline resume from TRANSCRIBE."""
+        """Verify correct split for mid-pipeline resume from CAPTION."""
         manager = CheckpointManager(tmp_path)
-        manager.save("TRANSCRIBE", {"transcribed_count": 10})
+        manager.save("CAPTION", {"caption_count": 10})
 
-        transcribe_idx = STAGE_ORDER.index("TRANSCRIBE")
+        caption_idx = STAGE_ORDER.index("CAPTION")
 
         # Count skipped and non-skipped
         skipped = [s for s in STAGE_ORDER if manager.should_skip_stage(s)]
         to_run = [s for s in STAGE_ORDER if not manager.should_skip_stage(s)]
 
-        assert len(skipped) == transcribe_idx + 1
-        assert len(to_run) == len(STAGE_ORDER) - transcribe_idx - 1
-        assert "TRANSCRIBE" in skipped
-        assert "SCENE_DETECTION" in to_run  # Next stage after TRANSCRIBE
+        assert len(skipped) == caption_idx + 1
+        assert len(to_run) == len(STAGE_ORDER) - caption_idx - 1
+        assert "CAPTION" in skipped
+        assert "MATCH" in to_run  # Next stage after CAPTION
 
     @pytest.mark.fast
     def test_unknown_stage_returns_false(self, tmp_path):
@@ -292,7 +288,7 @@ class TestConfigHashMismatch:
         """Verify validate() warns when checkpoint config_hash differs from current."""
         # Save checkpoint with one config hash
         manager = CheckpointManager(tmp_path, config_hash="original_hash")
-        manager.save("DOWNLOAD", {"count": 5})
+        manager.save("VIDEO_SEARCH", {"count": 5})
 
         # Load with a different config hash (simulating config change between runs)
         manager2 = CheckpointManager(tmp_path, config_hash="changed_hash")
@@ -308,7 +304,7 @@ class TestConfigHashMismatch:
     def test_validate_no_warning_when_config_hash_matches(self, tmp_path):
         """Verify no warning when config hash matches between save and load."""
         manager = CheckpointManager(tmp_path, config_hash="same_hash")
-        manager.save("DOWNLOAD", {"count": 5})
+        manager.save("VIDEO_SEARCH", {"count": 5})
 
         manager2 = CheckpointManager(tmp_path, config_hash="same_hash")
         manager2.load()

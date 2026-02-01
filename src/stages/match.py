@@ -1,11 +1,10 @@
 """
 Match Stage - Voiceover to Video Matching
 
-Stage 4 of the video matching pipeline:
+Stage 4 of the simplified 7-stage pipeline:
 - Matches voiceover segments to video clips
-- Uses embedding similarity and LLM reranking
+- Uses caption text similarity and LLM reranking
 - Supports delta matching for incremental updates
-- Handles chapter and location-aware matching
 """
 
 from __future__ import annotations
@@ -31,11 +30,12 @@ class MatchStage(Stage):
     """
     Matches voiceover segments to video clips.
 
+    In the simplified 7-stage pipeline, receives caption data from CAPTION stage.
+
     Inputs:
         - state.voiceover_segments: List of VoiceoverSegment
-        - state.embeddings: Video embeddings
-        - state.text_metadata: Video segment metadata
-        - state.embedding_index: FAISS index
+        - state.caption_results: Dict of video_id -> caption data (from CAPTION stage)
+        - (Optional) state.embeddings, state.text_metadata: For embedding-based matching
 
     Outputs:
         - state.matches: List of Match objects
@@ -68,9 +68,11 @@ class MatchStage(Stage):
                 warnings.append("No voiceover segments")
                 return StageResult.ok({'matches': []}, warnings)
 
-            if not state.text_metadata or is_embeddings_empty(state.embeddings):
+            # In simplified pipeline, text_metadata comes from CAPTION stage
+            # Embeddings are optional for caption-first matching
+            if not state.text_metadata:
                 print("  ! No video data to match against")
-                warnings.append("No video embeddings")
+                warnings.append("No video text metadata (run CAPTION stage)")
                 return StageResult.ok({'matches': []}, warnings)
 
             # Print settings
@@ -306,29 +308,15 @@ class MatchStage(Stage):
 
         Returns specific missing field names and suggestions for which stage to run.
         """
-        missing_fields = []
-
         if not state.voiceover_segments:
-            missing_fields.append("voiceover_segments")
+            return "Missing voiceover_segments. Suggestion: run ANALYZE stage first"
 
-        if is_embeddings_empty(state.embeddings):
-            missing_fields.append("embeddings")
+        # In simplified pipeline, text_metadata is populated by CAPTION stage
+        # Embeddings are optional (caption-first uses text matching)
+        has_text_data = bool(state.text_metadata) or bool(getattr(state, 'caption_results', None))
 
-        if not state.text_metadata:
-            missing_fields.append("text_metadata")
-
-        if missing_fields:
-            fields_str = ", ".join(missing_fields)
-            suggestions = []
-
-            if "voiceover_segments" in missing_fields:
-                suggestions.append("run ANALYZE stage first to extract voiceover segments")
-
-            if "embeddings" in missing_fields or "text_metadata" in missing_fields:
-                suggestions.append("run TRANSCRIBE stage first to generate video embeddings and metadata")
-
-            suggestion_str = "; ".join(suggestions) if suggestions else "check pipeline configuration"
-            return f"Missing required fields: {fields_str}. Suggestion: {suggestion_str}"
+        if not has_text_data:
+            return "Missing text_metadata or caption_results. Suggestion: run CAPTION stage first"
 
         return None
 

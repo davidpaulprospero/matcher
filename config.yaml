@@ -1,10 +1,13 @@
 # =============================================================================
-# MATCHER-ALT CONFIGURATION v3.0
+# MATCHER-ALT CONFIGURATION v4.0
 # =============================================================================
 #
 # Chain-of-thought: Centralized config for media matching pipeline
 # Reasoning: Single source of truth reduces maintenance and improves consistency
 # Decision: 2-space indentation with max 5-level nesting for LLM readability
+#
+# Pipeline: 7-stage caption-first flow
+#   ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
 #
 # Usage:
 #   from src.config import load_config, get_config
@@ -19,8 +22,8 @@
 # -----------------------------------------------------------------------------
 project:
   name: matcher-alt
-  version: 3.0.0
-  description: AI-powered voiceover-to-footage matching pipeline
+  version: 4.0.0
+  description: AI-powered voiceover-to-footage matching pipeline (caption-first)
 
 project_dir: "."
 
@@ -73,8 +76,31 @@ rate_limit:
   max_backoff_seconds: 60.0
 
 # -----------------------------------------------------------------------------
-# TRANSCRIPTION (faster-whisper)
+# VIDEO SEARCH (YouTube Search without Download)
 # -----------------------------------------------------------------------------
+# Chain-of-thought: Caption-first flow searches YouTube for video IDs only
+# Reasoning: No download needed until after matching - saves bandwidth
+# Decision: Search more videos than needed, filter by duration/title
+#
+# Stage: VIDEO_SEARCH (stage 2 of 7-stage pipeline)
+# Output: state.video_ids, state.video_search_results
+
+video_search:
+  results_per_keyword: 20         # YouTube results per keyword (search pool)
+  max_total_results: 200          # Cap on total video IDs collected
+  search_timeout: 30              # Seconds before keyword timeout
+  apply_duration_filter: true     # Filter by duration_tiers config
+  apply_title_blacklist: true     # Filter by download.title_blacklist
+  apply_llm_title_filter: true    # Use LLM to filter irrelevant titles (see download.llm_title_filter)
+  deduplicate_across_keywords: true  # Remove duplicate video IDs from different keywords
+
+# -----------------------------------------------------------------------------
+# TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0
+# -----------------------------------------------------------------------------
+# NOTE: Transcription is no longer used in the simplified 7-stage pipeline.
+# Caption-first mode uses YouTube captions instead of Whisper transcription.
+# This section is kept for backward compatibility with older projects.
+#
 # Chain-of-thought: GPU acceleration critical for performance
 # Reasoning: Parallel audio extraction (CPU) + sequential GPU transcription
 # Decision: max_workers=4 balances CPU parallelism with memory usage
@@ -217,8 +243,12 @@ vision:
   estimated_cost_per_call: 0.001
 
 # -----------------------------------------------------------------------------
-# SCENE DETECTION (PySceneDetect)
+# SCENE DETECTION (PySceneDetect) - DEPRECATED in v4.0
 # -----------------------------------------------------------------------------
+# NOTE: Scene detection is no longer used in the simplified 7-stage pipeline.
+# Matching now uses captions directly without scene-level granularity.
+# This section is kept for backward compatibility with older projects.
+#
 # Chain-of-thought: Scene boundaries enable granular clip selection
 # Reasoning: Presets balance speed vs accuracy for different use cases
 # Decision: "balanced" default, "fast" for preview, "accurate" for final
@@ -497,8 +527,12 @@ negative_matching:
     - "Avoid matching unrelated b-roll to specific statements"
 
 # -----------------------------------------------------------------------------
-# ZERO-DOWNLOAD KEYWORD REMIX
+# ZERO-DOWNLOAD KEYWORD REMIX - DEPRECATED in v4.0
 # -----------------------------------------------------------------------------
+# NOTE: The REMIX stage is no longer used in the simplified 7-stage pipeline.
+# Video filtering now happens during VIDEO_SEARCH stage using title blacklist
+# and LLM title filter. This section is kept for backward compatibility.
+#
 # Enables filtering/remixing of downloaded videos based on keyword relevance
 # before transcription, without additional downloads.
 # Triggered after initial batch downloads complete.
@@ -713,8 +747,12 @@ llm:
   # See CLAUDE.md Rule 9 for usage examples
 
 # -----------------------------------------------------------------------------
-# ENHANCED FEATURES
+# ENHANCED FEATURES - DEPRECATED in v4.0
 # -----------------------------------------------------------------------------
+# NOTE: The STOCK stage is no longer used in the simplified 7-stage pipeline.
+# Stock footage is now handled through iterative matching if needed.
+# This section is kept for backward compatibility with older projects.
+#
 # Chain-of-thought: 90% confidence ensures quality output
 # Reasoning: Better to flag gaps than use poor matches
 # Decision: Enable keyword remix for automatic improvement
@@ -1614,8 +1652,12 @@ healing:
     max_failures: 3
 
 # -----------------------------------------------------------------------------
-# B-ROLL DOWNLOAD AND MATCHING
+# B-ROLL DOWNLOAD AND MATCHING - DEPRECATED in v4.0
 # -----------------------------------------------------------------------------
+# NOTE: The BROLL_DOWNLOAD and BROLL_MATCH stages are no longer used in the
+# simplified 7-stage pipeline. B-roll handling now relies on caption quality
+# scoring in the MATCH stage. This section is kept for backward compatibility.
+#
 # Two new stages for improved B-roll handling:
 # 1. BrollDownloadStage: Downloads videos specifically searched as B-roll
 # 2. BrollMatchStage: Matches silent scenes to voiceover for V8 track

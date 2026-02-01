@@ -21,23 +21,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Stage order for resume logic
+# Stage order for resume logic (7-stage simplified pipeline)
 STAGE_ORDER = [
     "ANALYZE",
-    "ENTITY_IMAGES",
-    "ENTITY_VIDEOS",
-    "DOWNLOAD",
-    "STOCK",
-    "BROLL_DOWNLOAD",
-    "REMIX",
-    "CAPTION",
-    "TRANSCRIBE",
-    "SCENE_DETECTION",
+    "VIDEO_SEARCH",  # Search for videos without downloading
+    "CAPTION",       # Fetch YouTube captions for video IDs
     "MATCH",
-    "BROLL_MATCH",
     "ITERATIVE_MATCH",  # Multi-pass gap filling after initial match
     "DOWNLOAD_SEGMENTS",
     "OUTPUT"
+]
+
+# Legacy stage names for checkpoint migration
+LEGACY_STAGES = [
+    "DOWNLOAD", "STOCK", "BROLL_DOWNLOAD", "REMIX",
+    "TRANSCRIBE", "SCENE_DETECTION", "BROLL_MATCH"
 ]
 
 
@@ -63,27 +61,19 @@ class SavedKeywords:
 @dataclass
 class CheckpointData:
     """Data saved at each checkpoint"""
-    version: str = "1.0"
+    version: str = "2.0"  # Bumped for simplified pipeline
     created_at: str = ""
     updated_at: str = ""
     last_completed_stage: str = ""
     config_hash: str = ""
     voiceover_path: str = ""
     voiceover_hash: str = ""
-    
-    # Stage outputs
+
+    # Stage outputs (7-stage simplified pipeline)
     analyze: Dict[str, Any] = field(default_factory=dict)
-    entity_images: Dict[str, Any] = field(default_factory=dict)
-    entity_videos: Dict[str, Any] = field(default_factory=dict)
-    download: Dict[str, Any] = field(default_factory=dict)
-    stock: Dict[str, Any] = field(default_factory=dict)
-    broll_download: Dict[str, Any] = field(default_factory=dict)
-    remix: Dict[str, Any] = field(default_factory=dict)
+    video_search: Dict[str, Any] = field(default_factory=dict)  # NEW: search results without download
     caption: Dict[str, Any] = field(default_factory=dict)
-    transcribe: Dict[str, Any] = field(default_factory=dict)
-    scene_detection: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
-    broll_match: Dict[str, Any] = field(default_factory=dict)
     iterative_match: Dict[str, Any] = field(default_factory=dict)
     download_segments: Dict[str, Any] = field(default_factory=dict)
 
@@ -236,58 +226,93 @@ class CheckpointManager:
 
         Handles version upgrades transparently, including:
         - Version 0.9 -> 1.0: Uppercase stage keys to lowercase
-        - Missing 'stock' field addition
+        - Version 1.0 -> 2.0: 13-stage to 7-stage simplified pipeline
         """
-        # Check for version field
         version = data.get('version', '0.9')
 
-        if version == '0.9' or version != '1.0':
-            logger.info(f"Migrating checkpoint from v{version} to v1.0")
+        # Map old stages to new (for v0.9/v1.0 -> v2.0 migration)
+        # DOWNLOAD stage data becomes video_search (search results can be preserved)
+        # Other removed stages are dropped
+        legacy_stage_mapping = {
+            'DOWNLOAD': 'video_search',  # Closest equivalent
+            'download': 'video_search',
+        }
 
-            # Map old stage keys (uppercase) to new (lowercase)
-            stage_mapping = {
-                'ANALYZE': 'analyze',
-                'ENTITY_IMAGES': 'entity_images',
-                'ENTITY_VIDEOS': 'entity_videos',
-                'DOWNLOAD': 'download',
-                'STOCK': 'stock',
-                'REMIX': 'remix',
-                'TRANSCRIBE': 'transcribe',
-                'MATCH': 'match',
-                'OUTPUT': 'output'
-            }
+        # Map for last_completed_stage migration
+        stage_remap = {
+            'DOWNLOAD': 'VIDEO_SEARCH',
+            'STOCK': 'VIDEO_SEARCH',
+            'BROLL_DOWNLOAD': 'VIDEO_SEARCH',
+            'REMIX': 'CAPTION',
+            'TRANSCRIBE': 'CAPTION',
+            'SCENE_DETECTION': 'MATCH',
+            'BROLL_MATCH': 'MATCH',
+        }
+
+        if version in ('0.9', '1.0'):
+            logger.info(f"Migrating checkpoint from v{version} to v2.0 (simplified pipeline)")
 
             # Build new CheckpointData
             migrated_data = {
-                'version': '1.0',
+                'version': '2.0',
                 'created_at': data.get('created_at', datetime.now().isoformat()),
                 'updated_at': data.get('updated_at', datetime.now().isoformat()),
-                'last_completed_stage': data.get('last_completed_stage', ''),
                 'config_hash': data.get('config_hash', ''),
                 'voiceover_path': data.get('voiceover_path', ''),
                 'voiceover_hash': data.get('voiceover_hash', '')
             }
 
-            # Copy stage data with key mapping
-            for old_key, new_key in stage_mapping.items():
-                # Check both old format (uppercase) and new format (lowercase)
-                stage_data = data.get(old_key) or data.get(new_key) or {}
-                migrated_data[new_key] = stage_data
+            # Migrate last_completed_stage
+            old_stage = data.get('last_completed_stage', '')
+            if old_stage in stage_remap:
+                migrated_data['last_completed_stage'] = stage_remap[old_stage]
+                logger.info(f"Remapped stage {old_stage} -> {stage_remap[old_stage]}")
+            elif old_stage in STAGE_ORDER:
+                migrated_data['last_completed_stage'] = old_stage
+            else:
+                # Unknown stage, reset to beginning
+                migrated_data['last_completed_stage'] = ''
+                if old_stage:
+                    logger.warning(f"Unknown stage '{old_stage}' in old checkpoint, resetting")
+
+            # Copy existing stage data for stages that still exist
+            for stage_key in ['analyze', 'caption', 'match', 'iterative_match', 'download_segments']:
+                stage_data = data.get(stage_key.upper()) or data.get(stage_key) or {}
+                migrated_data[stage_key] = stage_data
+
+            # Migrate DOWNLOAD -> video_search (extract video IDs from downloaded_videos)
+            download_data = data.get('DOWNLOAD') or data.get('download') or {}
+            if download_data:
+                video_ids = []
+                # Extract video IDs from old downloaded_videos list
+                for vid in download_data.get('downloaded_videos', []):
+                    if isinstance(vid, dict):
+                        # Try to extract video ID from URL
+                        url = vid.get('url', '')
+                        if 'youtube.com' in url or 'youtu.be' in url:
+                            import re
+                            match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
+                            if match:
+                                video_ids.append(match.group(1))
+                migrated_data['video_search'] = {
+                    'video_ids': video_ids,
+                    'migrated_from_download': True,
+                }
 
             # Convert to CheckpointData
             migrated = CheckpointData.from_dict(migrated_data)
 
-            # Save migrated checkpoint immediately
+            # Save migrated checkpoint
             try:
                 self.data = migrated
                 self._atomic_save()
-                logger.info("Migrated checkpoint saved successfully")
+                logger.info("Migrated checkpoint to v2.0 saved successfully")
             except Exception as e:
                 logger.warning(f"Could not save migrated checkpoint: {e}")
 
             return migrated
 
-        # Already v1.0 - just convert to CheckpointData
+        # Already v2.0 - just convert to CheckpointData
         return CheckpointData.from_dict(data)
 
     def _validate_checkpoint_data(self, data: CheckpointData) -> bool:
@@ -524,17 +549,12 @@ class CheckpointManager:
                     f"Unknown stage '{self.data.last_completed_stage}' in checkpoint"
                 )
         
-        # Verify downloaded files still exist
-        if self.data.download and 'video_paths' in self.data.download:
-            missing = []
-            for vp in self.data.download['video_paths']:
-                if not Path(vp).exists():
-                    missing.append(vp)
-            if missing:
-                result['warnings'].append(
-                    f"{len(missing)} downloaded videos are missing from disk"
-                )
-        
+        # Check video search results
+        if self.data.video_search and 'video_ids' in self.data.video_search:
+            vid_count = len(self.data.video_search['video_ids'])
+            if vid_count == 0:
+                result['warnings'].append("No video IDs found in search results")
+
         return result
     
     def get_stage_data(self, stage: str) -> Dict[str, Any]:
@@ -580,21 +600,20 @@ class CheckpointManager:
             kw_count = len(self.data.analyze.get('keywords', []))
             seg_count = self.data.analyze.get('segment_count', 0)
             lines.append(f"  • ANALYZE: {kw_count} keywords, {seg_count} segments")
-        
-        if self.data.download:
-            vid_count = len(self.data.download.get('video_paths', []))
-            lines.append(f"  • DOWNLOAD: {vid_count} videos")
-        
-        if self.data.transcribe:
-            trans_count = self.data.transcribe.get('transcribed_count', 0)
-            embed_count = self.data.transcribe.get('embedding_count', 0)
-            lines.append(f"  • TRANSCRIBE: {trans_count} transcribed, {embed_count} embeddings")
-        
+
+        if self.data.video_search:
+            vid_count = len(self.data.video_search.get('video_ids', []))
+            lines.append(f"  • VIDEO_SEARCH: {vid_count} videos found")
+
+        if self.data.caption:
+            caption_count = self.data.caption.get('caption_count', 0)
+            lines.append(f"  • CAPTION: {caption_count} captions fetched")
+
         if self.data.match:
             match_count = self.data.match.get('match_count', 0)
             avg_conf = self.data.match.get('avg_confidence', 0)
             lines.append(f"  • MATCH: {match_count} matches, {avg_conf:.1%} avg confidence")
-        
+
         return "\n".join(lines)
 
 

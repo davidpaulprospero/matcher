@@ -204,12 +204,12 @@ class TestCustomObjectSerialization:
         manager = CheckpointManager(tmp_path)
 
         stage_data = {"video_path": Path("/videos/test.mp4")}
-        manager.save("DOWNLOAD", stage_data)
+        manager.save("VIDEO_SEARCH", stage_data)
 
         manager2 = CheckpointManager(tmp_path)
         manager2.load()
 
-        result = manager2.get_stage_data("DOWNLOAD")
+        result = manager2.get_stage_data("VIDEO_SEARCH")
         assert result["video_path"] == str(Path("/videos/test.mp4"))
 
 

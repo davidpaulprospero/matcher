@@ -110,36 +110,34 @@ class TestCheckpointDataDataclass:
         """Test creating with defaults."""
         checkpoint = CheckpointData()
 
-        assert checkpoint.version == "1.0"
+        assert checkpoint.version == "2.0"
         assert checkpoint.last_completed_stage == ""
         assert checkpoint.analyze == {}
-        assert checkpoint.download == {}
+        assert checkpoint.video_search == {}
 
     @pytest.mark.fast
     def test_create_with_stage_data(self):
         """Test creating with stage data."""
         checkpoint = CheckpointData(
-            last_completed_stage="DOWNLOAD",
-            download={"videos_count": 50, "duration": 3600}
+            last_completed_stage="VIDEO_SEARCH",
+            video_search={"video_ids": ["abc123"], "count": 50}
         )
 
-        assert checkpoint.last_completed_stage == "DOWNLOAD"
-        assert checkpoint.download["videos_count"] == 50
+        assert checkpoint.last_completed_stage == "VIDEO_SEARCH"
+        assert checkpoint.video_search["count"] == 50
 
     @pytest.mark.fast
     def test_all_stage_fields_exist(self):
-        """Test all expected stage fields are present."""
+        """Test all expected stage fields are present (7-stage pipeline)."""
         checkpoint = CheckpointData()
 
-        # Verify all stage storage fields
+        # Verify all 7-stage storage fields
         assert hasattr(checkpoint, "analyze")
-        assert hasattr(checkpoint, "entity_images")
-        assert hasattr(checkpoint, "entity_videos")
-        assert hasattr(checkpoint, "download")
-        assert hasattr(checkpoint, "stock")
-        assert hasattr(checkpoint, "remix")
-        assert hasattr(checkpoint, "transcribe")
+        assert hasattr(checkpoint, "video_search")
+        assert hasattr(checkpoint, "caption")
         assert hasattr(checkpoint, "match")
+        assert hasattr(checkpoint, "iterative_match")
+        assert hasattr(checkpoint, "download_segments")
 
     @pytest.mark.fast
     def test_to_dict_includes_all_fields(self):
@@ -160,15 +158,15 @@ class TestCheckpointDataDataclass:
     def test_from_dict_with_partial_data(self):
         """Test from_dict handles partial data."""
         data = {
-            "version": "1.0",
-            "last_completed_stage": "TRANSCRIBE",
+            "version": "2.0",
+            "last_completed_stage": "CAPTION",
             "unknown_field": "should be ignored"
         }
 
         checkpoint = CheckpointData.from_dict(data)
 
-        assert checkpoint.version == "1.0"
-        assert checkpoint.last_completed_stage == "TRANSCRIBE"
+        assert checkpoint.version == "2.0"
+        assert checkpoint.last_completed_stage == "CAPTION"
         # Unknown fields should be ignored
         assert not hasattr(checkpoint, "unknown_field")
 
@@ -208,7 +206,7 @@ class TestCheckpointManagerInit:
         """Test exists() returns True when checkpoint exists."""
         # Create checkpoint file
         checkpoint_file = tmp_path / "checkpoint.json"
-        checkpoint_file.write_text('{"version": "1.0"}')
+        checkpoint_file.write_text('{"version": "2.0"}')
 
         manager = CheckpointManager(project_dir=tmp_path)
 
@@ -216,7 +214,7 @@ class TestCheckpointManagerInit:
 
 
 class TestStageOrder:
-    """Test STAGE_ORDER constant."""
+    """Test STAGE_ORDER constant for 7-stage pipeline."""
 
     @pytest.mark.fast
     def test_stage_order_exists(self):
@@ -226,23 +224,23 @@ class TestStageOrder:
 
     @pytest.mark.fast
     def test_stage_order_has_expected_stages(self):
-        """Test STAGE_ORDER contains expected stages."""
-        expected_stages = ["ANALYZE", "DOWNLOAD", "TRANSCRIBE", "MATCH", "OUTPUT"]
+        """Test STAGE_ORDER contains expected 7 stages."""
+        expected_stages = ["ANALYZE", "VIDEO_SEARCH", "CAPTION", "MATCH", "ITERATIVE_MATCH", "DOWNLOAD_SEGMENTS", "OUTPUT"]
 
         for stage in expected_stages:
             assert stage in STAGE_ORDER
 
     @pytest.mark.fast
     def test_stage_order_is_sequential(self):
-        """Test stages are in correct order."""
-        # ANALYZE should come before DOWNLOAD
-        assert STAGE_ORDER.index("ANALYZE") < STAGE_ORDER.index("DOWNLOAD")
+        """Test stages are in correct order (7-stage pipeline)."""
+        # ANALYZE should come before VIDEO_SEARCH
+        assert STAGE_ORDER.index("ANALYZE") < STAGE_ORDER.index("VIDEO_SEARCH")
 
-        # DOWNLOAD should come before TRANSCRIBE
-        assert STAGE_ORDER.index("DOWNLOAD") < STAGE_ORDER.index("TRANSCRIBE")
+        # VIDEO_SEARCH should come before CAPTION
+        assert STAGE_ORDER.index("VIDEO_SEARCH") < STAGE_ORDER.index("CAPTION")
 
-        # TRANSCRIBE should come before MATCH
-        assert STAGE_ORDER.index("TRANSCRIBE") < STAGE_ORDER.index("MATCH")
+        # CAPTION should come before MATCH
+        assert STAGE_ORDER.index("CAPTION") < STAGE_ORDER.index("MATCH")
 
         # MATCH should come before OUTPUT
         assert STAGE_ORDER.index("MATCH") < STAGE_ORDER.index("OUTPUT")
@@ -322,15 +320,15 @@ class TestCheckpointValidation:
     def test_checkpoint_with_valid_stage(self):
         """Test checkpoint with valid stage name."""
         checkpoint = CheckpointData(
-            last_completed_stage="DOWNLOAD"
+            last_completed_stage="MATCH"
         )
 
         assert checkpoint.last_completed_stage in STAGE_ORDER
 
     @pytest.mark.fast
     def test_checkpoint_stage_progression(self):
-        """Test stages progress in order."""
-        stages = ["ANALYZE", "DOWNLOAD", "TRANSCRIBE"]
+        """Test stages progress in order (7-stage pipeline)."""
+        stages = ["ANALYZE", "VIDEO_SEARCH", "CAPTION"]
 
         for i, stage in enumerate(stages):
             checkpoint = CheckpointData(last_completed_stage=stage)

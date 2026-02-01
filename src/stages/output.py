@@ -1,7 +1,7 @@
 """
 Output Stage - Timeline and Report Generation
 
-Stage 5 of the video matching pipeline:
+Stage 7 of the simplified 7-stage pipeline:
 - Generates OTIO timeline (split or single)
 - Creates segment map for post-edit analysis
 - Generates EDL export
@@ -277,7 +277,7 @@ class OutputStage(Stage):
         warnings = []
 
         try:
-            print(f"\n  --- Stage 5: GENERATE OUTPUT ---")
+            print(f"\n  --- Stage 7: GENERATE OUTPUT ---")
 
             # Generate timestamp for this run's outputs
             run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

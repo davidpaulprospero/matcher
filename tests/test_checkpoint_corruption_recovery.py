@@ -34,15 +34,15 @@ class TestBackupFallbackOnCorruption:
         # Create valid backup with known state
         backup = tmp_path / "checkpoint.backup.json"
         backup_state = {
-            "version": "1.0",
+            "version": "2.0",
             "created_at": "2026-01-15T10:30:00",
             "updated_at": "2026-01-15T12:00:00",
-            "last_completed_stage": "DOWNLOAD",
+            "last_completed_stage": "VIDEO_SEARCH",
             "config_hash": "abc123",
             "voiceover_path": "/project/script.srt",
             "voiceover_hash": "deadbeef",
             "analyze": {"keywords": ["travel", "adventure"], "segment_count": 12},
-            "download": {"video_paths": ["/v/vid1.mp4", "/v/vid2.mp4"]},
+            "video_search": {"video_ids": ["vid1", "vid2"]},
         }
         backup.write_text(json.dumps(backup_state))
 
@@ -50,13 +50,13 @@ class TestBackupFallbackOnCorruption:
         result = manager.load()
 
         assert result is not None
-        assert result.last_completed_stage == "DOWNLOAD"
+        assert result.last_completed_stage == "VIDEO_SEARCH"
         assert result.config_hash == "abc123"
         assert result.voiceover_path == "/project/script.srt"
         assert result.voiceover_hash == "deadbeef"
         assert result.analyze["keywords"] == ["travel", "adventure"]
         assert result.analyze["segment_count"] == 12
-        assert result.download["video_paths"] == ["/v/vid1.mp4", "/v/vid2.mp4"]
+        assert result.video_search["video_ids"] == ["vid1", "vid2"]
 
     @pytest.mark.fast
     def test_backup_fallback_restores_primary_file(self, tmp_path):
@@ -66,10 +66,10 @@ class TestBackupFallbackOnCorruption:
 
         backup = tmp_path / "checkpoint.backup.json"
         backup_data = {
-            "version": "1.0",
+            "version": "2.0",
             "created_at": "2026-01-15T10:00:00",
             "updated_at": "2026-01-15T10:00:00",
-            "last_completed_stage": "TRANSCRIBE",
+            "last_completed_stage": "CAPTION",
         }
         backup.write_text(json.dumps(backup_data))
 
@@ -77,10 +77,10 @@ class TestBackupFallbackOnCorruption:
         result = manager.load()
 
         assert result is not None
-        assert result.last_completed_stage == "TRANSCRIBE"
+        assert result.last_completed_stage == "CAPTION"
         # Primary should now be restored from backup
         restored = json.loads(primary.read_text())
-        assert restored["last_completed_stage"] == "TRANSCRIBE"
+        assert restored["last_completed_stage"] == "CAPTION"
 
     @pytest.mark.fast
     def test_backup_fallback_with_empty_primary(self, tmp_path):
@@ -90,7 +90,7 @@ class TestBackupFallbackOnCorruption:
 
         backup = tmp_path / "checkpoint.backup.json"
         backup_data = {
-            "version": "1.0",
+            "version": "2.0",
             "created_at": "2026-01-15T08:00:00",
             "updated_at": "2026-01-15T08:00:00",
             "last_completed_stage": "ANALYZE",
@@ -110,11 +110,11 @@ class TestBackupFallbackOnCorruption:
         """Verify backup fallback works when primary is truncated JSON."""
         primary = tmp_path / "checkpoint.json"
         # Truncated JSON - common corruption from interrupted writes
-        primary.write_text('{"version": "1.0", "last_completed_stage": "MAT')
+        primary.write_text('{"version": "2.0", "last_completed_stage": "MAT')
 
         backup = tmp_path / "checkpoint.backup.json"
         backup_data = {
-            "version": "1.0",
+            "version": "2.0",
             "created_at": "2026-01-15T09:00:00",
             "updated_at": "2026-01-15T09:00:00",
             "last_completed_stage": "MATCH",
@@ -218,8 +218,8 @@ class TestSaveCreatesBackup:
         first_state = json.loads((tmp_path / "checkpoint.json").read_text())
         assert first_state["last_completed_stage"] == "ANALYZE"
 
-        # Second save: DOWNLOAD stage
-        manager.save("DOWNLOAD", {"video_paths": ["/v/a.mp4"]})
+        # Second save: VIDEO_SEARCH stage
+        manager.save("VIDEO_SEARCH", {"video_ids": ["vid1"]})
 
         # Backup should contain the FIRST save's state (ANALYZE)
         assert (tmp_path / "checkpoint.backup.json").exists()
@@ -227,9 +227,9 @@ class TestSaveCreatesBackup:
         assert backup_data["last_completed_stage"] == "ANALYZE"
         assert backup_data["analyze"]["keywords"] == ["python", "coding"]
 
-        # Current checkpoint should have DOWNLOAD
+        # Current checkpoint should have VIDEO_SEARCH
         current_data = json.loads((tmp_path / "checkpoint.json").read_text())
-        assert current_data["last_completed_stage"] == "DOWNLOAD"
+        assert current_data["last_completed_stage"] == "VIDEO_SEARCH"
 
     @pytest.mark.fast
     def test_backup_updates_on_each_save(self, tmp_path):
@@ -238,16 +238,16 @@ class TestSaveCreatesBackup:
 
         # Save three stages sequentially
         manager.save("ANALYZE", {"keywords": ["a"]})
-        manager.save("DOWNLOAD", {"count": 10})
-        manager.save("TRANSCRIBE", {"transcribed": 5})
+        manager.save("VIDEO_SEARCH", {"count": 10})
+        manager.save("CAPTION", {"fetched": 5})
 
-        # Backup should contain the state from BEFORE the last save (DOWNLOAD stage)
+        # Backup should contain the state from BEFORE the last save (VIDEO_SEARCH stage)
         backup_data = json.loads((tmp_path / "checkpoint.backup.json").read_text())
-        assert backup_data["last_completed_stage"] == "DOWNLOAD"
+        assert backup_data["last_completed_stage"] == "VIDEO_SEARCH"
 
-        # Current should be TRANSCRIBE
+        # Current should be CAPTION
         current = json.loads((tmp_path / "checkpoint.json").read_text())
-        assert current["last_completed_stage"] == "TRANSCRIBE"
+        assert current["last_completed_stage"] == "CAPTION"
 
     @pytest.mark.fast
     def test_first_save_no_backup(self, tmp_path):
@@ -265,7 +265,7 @@ class TestSaveCreatesBackup:
         manager.save("ANALYZE", {"keywords": ["test"]})
 
         # Now call save_intermediate, which should back up the current state
-        manager.save_intermediate("DOWNLOAD", {"progress": 50})
+        manager.save_intermediate("VIDEO_SEARCH", {"progress": 50})
 
         assert (tmp_path / "checkpoint.backup.json").exists()
         backup_data = json.loads((tmp_path / "checkpoint.backup.json").read_text())
@@ -394,16 +394,16 @@ class TestNonSerializableStageData:
         """Verify Path objects are converted via default=str, no crash."""
         manager = CheckpointManager(tmp_path)
         stage_data = {
-            "video_paths": [Path("/videos/vid1.mp4"), Path("/videos/vid2.mp4")],
+            "video_ids": ["vid1", "vid2"],
             "output_dir": Path("/output/project"),
         }
 
         # Should NOT raise
-        manager.save("DOWNLOAD", stage_data)
+        manager.save("VIDEO_SEARCH", stage_data)
 
         saved = json.loads(manager.checkpoint_path.read_text())
         # Path objects should be serialized as strings
-        assert "vid1.mp4" in saved["download"]["video_paths"][0]
+        assert "vid1" in saved["video_search"]["video_ids"][0]
 
     @pytest.mark.fast
     def test_save_with_set_in_stage_data(self, tmp_path):
@@ -429,7 +429,7 @@ class TestNonSerializableStageData:
         }
 
         # Should NOT raise
-        manager.save("DOWNLOAD", stage_data)
+        manager.save("VIDEO_SEARCH", stage_data)
 
         assert manager.checkpoint_path.exists()
 

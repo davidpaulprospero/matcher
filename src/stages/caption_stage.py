@@ -33,16 +33,15 @@ class CaptionStage(Stage):
     """
     Fetches YouTube captions for video candidates.
 
+    In the simplified 7-stage pipeline, this stage receives video IDs from
+    the VIDEO_SEARCH stage (not downloaded files).
+
     Inputs:
-        - state.downloaded_videos: List of DownloadedVideo (for video IDs)
-        - state.downloaded_audio: List of AudioDownload (for video IDs in audio-first mode)
+        - state.video_ids: List of YouTube video IDs from VIDEO_SEARCH stage
 
     Outputs:
-        - state.text_metadata: Updated with caption data for matching
-        - state.caption_results: Dict mapping video_id to caption data (for checkpoint)
-
-    When caption-first mode is enabled, this stage fetches captions from YouTube
-    before the TRANSCRIBE stage, enabling matching without downloading video content.
+        - state.caption_results: Dict mapping video_id to caption data
+        - (For backward compatibility, also updates state.text_metadata)
 
     Language Configuration Validation (US-005 Sprint 6):
         At initialization, validates that configured language codes are valid
@@ -824,9 +823,13 @@ class CaptionStage(Stage):
         config: 'Config'
     ) -> Optional[str]:
         """Validate inputs before running."""
-        # Need either downloaded videos or audio files (which have video IDs)
-        has_videos = len(state.downloaded_videos) > 0
-        has_audio = len(state.downloaded_audio) > 0
+        # In simplified pipeline, check for video_ids from VIDEO_SEARCH stage
+        if hasattr(state, 'video_ids') and state.video_ids:
+            return None
+
+        # Backward compatibility: check legacy fields
+        has_videos = hasattr(state, 'downloaded_videos') and len(state.downloaded_videos) > 0
+        has_audio = hasattr(state, 'downloaded_audio') and len(state.downloaded_audio) > 0
 
         if not has_videos and not has_audio:
             return "No video candidates available for caption fetch"
@@ -840,25 +843,34 @@ class CaptionStage(Stage):
         state: 'PipelineState',
         config: 'Config'
     ) -> List[str]:
-        """Extract video IDs from downloaded videos/audio.
+        """Get video IDs for caption fetching.
 
-        Returns unique video IDs from state.downloaded_videos or
-        state.downloaded_audio (in audio-first mode).
+        In the simplified 7-stage pipeline, video IDs come directly from
+        state.video_ids (populated by VIDEO_SEARCH stage).
+
+        For backward compatibility, also checks legacy downloaded_videos
+        and downloaded_audio fields.
         """
+        # Primary: use video_ids from VIDEO_SEARCH stage
+        if hasattr(state, 'video_ids') and state.video_ids:
+            return list(state.video_ids)
+
+        # Fallback: extract from legacy fields (backward compatibility)
         video_ids = set()
 
-        # Check audio-first mode downloads
-        for audio in state.downloaded_audio:
-            video_id = getattr(audio, 'video_id', None)
-            if video_id and len(video_id) == 11:
-                video_ids.add(video_id)
+        # Check legacy audio-first mode downloads
+        if hasattr(state, 'downloaded_audio'):
+            for audio in state.downloaded_audio:
+                video_id = getattr(audio, 'video_id', None)
+                if video_id and len(video_id) == 11:
+                    video_ids.add(video_id)
 
-        # Check downloaded videos
-        for video in state.downloaded_videos:
-            # Try to extract video ID from file path or direct attribute
-            video_id = self._extract_video_id(video)
-            if video_id and len(video_id) == 11:
-                video_ids.add(video_id)
+        # Check legacy downloaded videos
+        if hasattr(state, 'downloaded_videos'):
+            for video in state.downloaded_videos:
+                video_id = self._extract_video_id(video)
+                if video_id and len(video_id) == 11:
+                    video_ids.add(video_id)
 
         return list(video_ids)
 
@@ -869,26 +881,37 @@ class CaptionStage(Stage):
     ) -> Dict[str, float]:
         """Get video ID to duration mapping for coverage calculation (US-004).
 
-        Extracts durations from downloaded_videos and downloaded_audio.
+        In the simplified pipeline, durations come from video_search_results.
+        For backward compatibility, also checks legacy downloaded_videos/audio.
 
         Returns:
             Dict mapping video_id to duration in seconds.
         """
         durations = {}
 
-        # From downloaded audio (audio-first mode)
-        for audio in state.downloaded_audio:
-            video_id = getattr(audio, 'video_id', None)
-            duration = getattr(audio, 'duration', 0.0)
-            if video_id and len(video_id) == 11 and duration > 0:
-                durations[video_id] = duration
+        # Primary: from video_search_results (simplified pipeline)
+        if hasattr(state, 'video_search_results'):
+            for result in state.video_search_results:
+                video_id = getattr(result, 'video_id', None)
+                duration = getattr(result, 'duration', 0.0)
+                if video_id and len(video_id) == 11 and duration > 0:
+                    durations[video_id] = duration
 
-        # From downloaded videos
-        for video in state.downloaded_videos:
-            video_id = self._extract_video_id(video)
-            duration = getattr(video, 'duration', 0.0)
-            if video_id and len(video_id) == 11 and duration > 0:
-                durations[video_id] = duration
+        # Fallback: from legacy downloaded_audio
+        if hasattr(state, 'downloaded_audio'):
+            for audio in state.downloaded_audio:
+                video_id = getattr(audio, 'video_id', None)
+                duration = getattr(audio, 'duration', 0.0)
+                if video_id and len(video_id) == 11 and duration > 0:
+                    durations[video_id] = duration
+
+        # Fallback: from legacy downloaded_videos
+        if hasattr(state, 'downloaded_videos'):
+            for video in state.downloaded_videos:
+                video_id = self._extract_video_id(video)
+                duration = getattr(video, 'duration', 0.0)
+                if video_id and len(video_id) == 11 and duration > 0:
+                    durations[video_id] = duration
 
         return durations
 
