@@ -1,127 +1,87 @@
-﻿{
-    "focusAreas":  [
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "refactoring"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "rate-limiting"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "caption"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "download"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "testing"
-                       }
-                   ],
-    "sessionId":  "12048bef",
-    "createdAt":  "2026-02-01 10:43:14",
-    "interviewContext":  "improvement: Context: caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests\n\nImproved Specifications:\r\nGod File Refactoring:\r\n- Split large files in src/ that exceed 400 lines\r\n- Target files:   * src\\matching\\llm_providers.py   * src\\downloader\\title_filter.py   * src\\downloader\\retry_queue.py   * src\\matching\\main.py   * src\\matching\\tiered_matcher.py\r\n- Extract shared utilities into focused modules\r\n- Apply Single Responsibility Principle to classes handling \u003e3 concerns\n\r\nRate Limiting Infrastructure:\r\n- Implement bulletproof rate limiting for all yt-dlp/YouTube operations\r\n- Add exponential backoff with jitter for 429/quota errors\r\n- Existing patterns to integrate: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py\r\n- Do NOT reduce download quantities - implement smarter throttling instead\r\n- Add configurable rate limits to relevant config sections\n\r\nCaption Rate Limiting:\r\n- Add rate limiting/backoff to caption fetching in src/stages/caption_stage.py\r\n- Handle YouTube API 429 errors gracefully with exponential backoff\r\n- Integrate with existing CaptionTimeoutManager pattern (if exists)\r\n- Add configurable rate limits to src/config/sections/caption.py\r\n- Relevant files: src/caption_fetcher.py, src/caption_fetcher_cache.py, src/caption_timeout_manager.py, src/stages/caption_stage.py\n\r\nTesting Requirements:\r\n- Current test count: ~356 test files\r\n- Source modules to cover: agents, cache, caption, chapter_detection, chapter_detector, cleanup, cli, compilation, config, downloader, feedback, iterative_match, keyword_extractor, llm_client, matching, media_sources, otio, pot_utils, research, stages, transcription, __pycache__\r\n- Focus on edge cases, error handling, and integration tests\r\n- Use pytest with markers (fast, integration, requires_api)\r\n- Achieve meaningful coverage, not just line coverage\n\nCodebase Analysis:\n- Large files detected: 10 files over 400 lines\n- Existing patterns to integrate with: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py",
-    "interviewDetails":  {
-                             "details":  "Context: caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests\n\nImproved Specifications:\r\nGod File Refactoring:\r\n- Split large files in src/ that exceed 400 lines\r\n- Target files:   * src\\matching\\llm_providers.py   * src\\downloader\\title_filter.py   * src\\downloader\\retry_queue.py   * src\\matching\\main.py   * src\\matching\\tiered_matcher.py\r\n- Extract shared utilities into focused modules\r\n- Apply Single Responsibility Principle to classes handling \u003e3 concerns\n\r\nRate Limiting Infrastructure:\r\n- Implement bulletproof rate limiting for all yt-dlp/YouTube operations\r\n- Add exponential backoff with jitter for 429/quota errors\r\n- Existing patterns to integrate: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py\r\n- Do NOT reduce download quantities - implement smarter throttling instead\r\n- Add configurable rate limits to relevant config sections\n\r\nCaption Rate Limiting:\r\n- Add rate limiting/backoff to caption fetching in src/stages/caption_stage.py\r\n- Handle YouTube API 429 errors gracefully with exponential backoff\r\n- Integrate with existing CaptionTimeoutManager pattern (if exists)\r\n- Add configurable rate limits to src/config/sections/caption.py\r\n- Relevant files: src/caption_fetcher.py, src/caption_fetcher_cache.py, src/caption_timeout_manager.py, src/stages/caption_stage.py\n\r\nTesting Requirements:\r\n- Current test count: ~356 test files\r\n- Source modules to cover: agents, cache, caption, chapter_detection, chapter_detector, cleanup, cli, compilation, config, downloader, feedback, iterative_match, keyword_extractor, llm_client, matching, media_sources, otio, pot_utils, research, stages, transcription, __pycache__\r\n- Focus on edge cases, error handling, and integration tests\r\n- Use pytest with markers (fast, integration, requires_api)\r\n- Achieve meaningful coverage, not just line coverage\n\nCodebase Analysis:\n- Large files detected: 10 files over 400 lines\n- Existing patterns to integrate with: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py",
-                             "workType":  "improvement",
-                             "timestamp":  "2026-02-01T10:43:10",
-                             "client":  "",
-                             "priority":  "normal",
-                             "improvedContext":  {
-                                                     "detectedAreas":  [
-                                                                           "refactoring",
-                                                                           "rate-limiting",
-                                                                           "caption",
-                                                                           "download",
-                                                                           "testing"
-                                                                       ],
-                                                     "improvedContext":  "Context: caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests\n\nImproved Specifications:\r\nGod File Refactoring:\r\n- Split large files in src/ that exceed 400 lines\r\n- Target files:   * src\\matching\\llm_providers.py   * src\\downloader\\title_filter.py   * src\\downloader\\retry_queue.py   * src\\matching\\main.py   * src\\matching\\tiered_matcher.py\r\n- Extract shared utilities into focused modules\r\n- Apply Single Responsibility Principle to classes handling \u003e3 concerns\n\r\nRate Limiting Infrastructure:\r\n- Implement bulletproof rate limiting for all yt-dlp/YouTube operations\r\n- Add exponential backoff with jitter for 429/quota errors\r\n- Existing patterns to integrate: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py\r\n- Do NOT reduce download quantities - implement smarter throttling instead\r\n- Add configurable rate limits to relevant config sections\n\r\nCaption Rate Limiting:\r\n- Add rate limiting/backoff to caption fetching in src/stages/caption_stage.py\r\n- Handle YouTube API 429 errors gracefully with exponential backoff\r\n- Integrate with existing CaptionTimeoutManager pattern (if exists)\r\n- Add configurable rate limits to src/config/sections/caption.py\r\n- Relevant files: src/caption_fetcher.py, src/caption_fetcher_cache.py, src/caption_timeout_manager.py, src/stages/caption_stage.py\n\r\nTesting Requirements:\r\n- Current test count: ~356 test files\r\n- Source modules to cover: agents, cache, caption, chapter_detection, chapter_detector, cleanup, cli, compilation, config, downloader, feedback, iterative_match, keyword_extractor, llm_client, matching, media_sources, otio, pot_utils, research, stages, transcription, __pycache__\r\n- Focus on edge cases, error handling, and integration tests\r\n- Use pytest with markers (fast, integration, requires_api)\r\n- Achieve meaningful coverage, not just line coverage\n\nCodebase Analysis:\n- Large files detected: 10 files over 400 lines\n- Existing patterns to integrate with: src/downloader/rate_limit_budget.py, src/downloader/cookie_rotator.py, src/caption_fetcher.py, src/caption_timeout_manager.py",
-                                                     "rawInput":  "caption fetching is getting rate limited, have a bullet proof ratelimiting measure for anything that is related to ytdlp downloading - do not lessen the amounts of downloadables - also, refactor god files and make lots and lots of tests",
-                                                     "codebaseFindings":  {
-                                                                              "configOptions":  [
-
-                                                                                                ],
-                                                                              "largeFiles":  [
-                                                                                                 {
-                                                                                                     "lines":  850,
-                                                                                                     "path":  "src\\matching\\llm_providers.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  418,
-                                                                                                     "path":  "src\\downloader\\title_filter.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  551,
-                                                                                                     "path":  "src\\downloader\\retry_queue.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  563,
-                                                                                                     "path":  "src\\matching\\main.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  1113,
-                                                                                                     "path":  "src\\matching\\tiered_matcher.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  625,
-                                                                                                     "path":  "src\\matching\\strategies.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  1204,
-                                                                                                     "path":  "src\\matching\\scoring.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  838,
-                                                                                                     "path":  "src\\config\\sections\\download.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  706,
-                                                                                                     "path":  "src\\config\\base.py"
-                                                                                                 },
-                                                                                                 {
-                                                                                                     "lines":  470,
-                                                                                                     "path":  "src\\cli\\cache_commands.py"
-                                                                                                 }
-                                                                                             ],
-                                                                              "existingPatterns":  [
-                                                                                                       "src/downloader/rate_limit_budget.py",
-                                                                                                       "src/downloader/cookie_rotator.py",
-                                                                                                       "src/caption_fetcher.py",
-                                                                                                       "src/caption_timeout_manager.py"
-                                                                                                   ],
-                                                                              "relevantCode":  [
-                                                                                                   "src/caption_fetcher.py",
-                                                                                                   "src/caption_fetcher_cache.py",
-                                                                                                   "src/caption_timeout_manager.py",
-                                                                                                   "src/stages/caption_stage.py",
-                                                                                                   "src/downloader/core.py",
-                                                                                                   "src/downloader/rate_limit_budget.py",
-                                                                                                   "src/downloader/impersonation.py"
-                                                                                               ]
-                                                                          }
-                                                 },
-                             "area":  ""
-                         },
-    "session":  {
-                    "currentSprintNumber":  0,
-                    "currentStoryId":  "",
-                    "mode":  "Standard",
-                    "sessionId":  "2026-02-02_002946",
-                    "currentFocusArea":  "",
-                    "lastActivityAt":  "2026-02-02T00:29:47",
-                    "iterationCount":  0
-                }
+{
+    "focusAreas": [
+        {
+            "completedAt": null,
+            "startedAt": "2026-02-02T04:00:00",
+            "completed": false,
+            "id": "pipeline"
+        },
+        {
+            "completedAt": null,
+            "startedAt": null,
+            "completed": false,
+            "id": "refactoring"
+        },
+        {
+            "completedAt": null,
+            "startedAt": null,
+            "completed": false,
+            "id": "rate-limiting"
+        },
+        {
+            "completedAt": null,
+            "startedAt": null,
+            "completed": false,
+            "id": "caption"
+        },
+        {
+            "completedAt": null,
+            "startedAt": null,
+            "completed": false,
+            "id": "download"
+        },
+        {
+            "completedAt": null,
+            "startedAt": null,
+            "completed": false,
+            "id": "testing"
+        }
+    ],
+    "sessionId": "12048bef",
+    "createdAt": "2026-02-01 10:43:14",
+    "interviewContext": "improvement: Context: mullvad implementation/activation on the default pipeline, more downloading improvements, documentation\n\nSprint 34 Pipeline Focus:\n- Pipeline event hooks and stage lifecycle callbacks\n- Stage metrics aggregation in pipeline summary\n- DownloadSegmentsStage improvements (retry queue integration)\n- VideoSearchStage and IterativeMatchStage unit tests\n- Documentation updates (4-tier escalation system in README)\n- Checkpoint staleness warnings\n- Parallel stage support consideration\n- Dry-run mode for pipeline preview",
+    "interviewDetails": {
+        "details": "Sprint 34 continues pipeline improvements after Mullvad VPN integration (Sprint 33). Focus areas: (1) Enhanced download resilience with retry queue integration in DownloadSegmentsStage, (2) Pipeline telemetry and observability with stage metrics, (3) Documentation updates reflecting the 4-tier escalation system, (4) Test coverage for edge cases in VideoSearchStage and IterativeMatchStage.",
+        "workType": "improvement",
+        "timestamp": "2026-02-02T04:00:00",
+        "client": "",
+        "priority": "normal",
+        "improvedContext": {
+            "detectedAreas": [
+                "pipeline",
+                "documentation",
+                "testing"
+            ],
+            "improvedContext": "Sprint 34 Pipeline Focus: event hooks, metrics aggregation, DownloadSegmentsStage retry queue integration, stage unit tests, checkpoint staleness warnings, README documentation for 4-tier escalation",
+            "rawInput": "mullvad implementation/activation on the default pipeline, more downloading improvements, documentation",
+            "codebaseFindings": {
+                "configOptions": [],
+                "largeFiles": [],
+                "existingPatterns": [
+                    "src/pipeline.py",
+                    "src/stages/download_segments.py",
+                    "src/downloader/retry_queue.py",
+                    "src/checkpoint.py"
+                ],
+                "relevantCode": [
+                    "src/pipeline.py",
+                    "src/stages/download_segments.py",
+                    "src/stages/video_search.py",
+                    "src/stages/iterative_match.py",
+                    "src/checkpoint.py",
+                    "src/agents/runner.py"
+                ]
+            }
+        },
+        "area": "pipeline"
+    },
+    "session": {
+        "currentSprintNumber": 34,
+        "currentStoryId": "US-2-001",
+        "mode": "Standard",
+        "sessionId": "2026-02-02_040000",
+        "currentFocusArea": "pipeline",
+        "lastActivityAt": "2026-02-02T04:00:00",
+        "iterationCount": 0
+    }
 }
