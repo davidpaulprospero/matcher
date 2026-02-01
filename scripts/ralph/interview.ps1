@@ -1,9 +1,45 @@
-# Ralph Interview Mode
-# Usage: .\scripts\ralph\interview.ps1 [-Resume] [-NoLaunch]
+# Ralph Loop - Unified Entry Point
+# Usage: .\scripts\ralph\interview.ps1 [options]
+#
+# This is the ONLY entry point for Ralph. All other launchers have been removed.
+#
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
+#
+# Modes:
+#   (default)          Interactive interview flow
+#   -Mode <mode>       Skip interview, use specified mode
+#   -FocusArea <area>  Skip interview, work on specific area
+#   -Status            Quick status check and exit
+#   -Watch             Open watch dashboard and exit
+#   -Stop              Request graceful stop and exit
+#   -Logs              View logs and exit
+#   -Recovery          Emergency recovery menu
+#   -Morning           Morning check-in with commits
 
 param(
     [switch]$Resume,
-    [switch]$NoLaunch  # Skip launching Ralph/Watch windows (used when called from Ralph)
+    [switch]$NoLaunch,      # Skip launching Ralph/Watch windows (used when called from Ralph)
+
+    # Mode selection (skips interview if provided)
+    [ValidateSet("standard", "trueauto", "ralphschoice", "ralphschoiceauto", "overnight", "smartqueue")]
+    [string]$Mode,
+
+    # Direct focus area (skips interview if provided)
+    [string]$FocusArea,
+    [string[]]$FocusAreas,  # Multiple areas for overnight mode
+
+    # Utility commands (execute and exit)
+    [switch]$Status,
+    [switch]$Watch,
+    [switch]$Stop,
+    [switch]$Logs,
+    [switch]$Recovery,
+    [switch]$Morning,
+    [switch]$Queue,         # Skip work type, go directly to queue mode
+
+    # Overnight options
+    [int]$MaxHours = 12
 )
 
 # Set up paths
@@ -17,10 +53,364 @@ $script:LibPath = Join-Path $script:RalphDir 'lib'
 if (Test-Path $script:LibPath) {
     . "$script:LibPath\sprint.ps1"   # Read-JsonFile, Save-StateFile
     . "$script:LibPath\queue.ps1"    # Get-Queue, Save-Queue
+    . "$script:LibPath\interview.ps1" # Improve-InterviewContext, Get-SuggestedAreas
 }
 
 # Load config if it exists
 $config = Read-JsonFile -Path $script:ConfigFile
+
+# Also load paths module if available (for state directory paths)
+$pathsModule = Join-Path $script:LibPath "paths.ps1"
+if (Test-Path $pathsModule) {
+    . $pathsModule
+    Initialize-RalphPaths -RalphDir $script:RalphDir | Out-Null
+}
+
+# ============================================================================
+# UTILITY COMMAND HANDLERS (Execute and Exit)
+# ============================================================================
+# These commands are executed immediately and exit - no interview flow
+
+if ($Status) {
+    $statusScript = Join-Path $script:RalphDir "status.ps1"
+    if (Test-Path $statusScript) {
+        & $statusScript
+    } else {
+        Write-Host "  status.ps1 not found" -ForegroundColor Yellow
+    }
+    exit 0
+}
+
+if ($Watch) {
+    Write-Host ""
+    Write-Host "  Starting Watch Dashboard..." -ForegroundColor Green
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$script:ProjectRoot'; .\scripts\ralph\watch.ps1"
+    exit 0
+}
+
+if ($Stop) {
+    $gracefulStopScript = Join-Path $script:RalphDir "graceful-stop.ps1"
+    if (Test-Path $gracefulStopScript) {
+        & $gracefulStopScript
+    } else {
+        # Inline fallback
+        $signalFile = Join-Path $script:RalphDir "graceful_stop.signal"
+        @{ requestedAt = (Get-Date).ToString("o"); reason = "User requested via interview.ps1 -Stop" } |
+            ConvertTo-Json | Set-Content $signalFile -Encoding UTF8
+        Write-Host "  Graceful stop requested - Ralph will stop after current sprint" -ForegroundColor Cyan
+    }
+    exit 0
+}
+
+# ============================================================================
+# MODE SELECTION UI
+# ============================================================================
+
+function Show-ModeSelection {
+    <#
+    .SYNOPSIS
+        Interactive mode selection menu (from launcher.ps1)
+    .RETURNS
+        Mode string: standard, trueauto, ralphschoice, ralphschoiceauto, overnight
+    #>
+    Write-Host ""
+    Write-Host "  Select execution mode:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "    [1] Standard        Work through stories, pause on sprint complete" -ForegroundColor White
+    Write-Host "    [2] TrueAuto        Continuous improvement, auto-generate new sprints" -ForegroundColor White
+    Write-Host "    [3] Resume          Continue where you left off" -ForegroundColor White
+    Write-Host ""
+    Write-Host "    [A] Ralph's Choice      Ralph decides focus areas (confirm each)" -ForegroundColor Magenta
+    Write-Host "    [Z] Ralph's Choice Auto Ralph decides (fully autonomous)" -ForegroundColor Magenta
+    Write-Host "    [O] Overnight           Multi-focus rotation (12+ hours)" -ForegroundColor Magenta
+    Write-Host ""
+
+    $selection = Read-Host "  Enter mode (1-3, A, Z, O)"
+
+    switch -Regex ($selection) {
+        "^1$" { return "standard" }
+        "^2$" { return "trueauto" }
+        "^3$" { return "resume" }
+        "^[Aa]$" { return "ralphschoice" }
+        "^[Zz]$" { return "ralphschoiceauto" }
+        "^[Oo]$" { return "overnight" }
+        default { return "standard" }
+    }
+}
+
+function Get-EmojiForCategory {
+    param([string]$CategoryId)
+
+    $emojiMap = @{
+        "core"         = "[C]"
+        "acquisition"  = "[A]"
+        "processing"   = "[P]"
+        "output"       = "[O]"
+        "intelligence" = "[I]"
+        "meta"         = "[M]"
+    }
+
+    $emoji = $emojiMap[$CategoryId]
+    if ($emoji) { return $emoji }
+    return "[?]"
+}
+
+function Show-CategorizedFocusAreaSelection {
+    <#
+    .SYNOPSIS
+        Shows focus areas organized by category (from launcher.ps1)
+    .RETURNS
+        Selected focus area ID, or $null for default
+    #>
+    if (-not $config -or -not $config.focusAreas) {
+        Write-Host "  ERROR: Could not load focus areas from config" -ForegroundColor Red
+        return $null
+    }
+
+    Write-Host ""
+    Write-Host "  FOCUS AREA SELECTION" -ForegroundColor Yellow
+
+    $areaList = @()
+    $categoryOrder = if ($config.categoryOrder) { $config.categoryOrder } else { @("core", "acquisition", "processing", "output", "intelligence", "meta") }
+
+    foreach ($catId in $categoryOrder) {
+        $category = $config.focusAreaCategories.$catId
+        if (-not $category) { continue }
+
+        Write-Host ""
+        $prefix = Get-EmojiForCategory -CategoryId $catId
+        Write-Host "  $prefix $($category.name.ToUpper())" -ForegroundColor Cyan
+
+        $categoryAreas = $config.focusAreas | Where-Object { $_.category -eq $catId }
+        foreach ($area in $categoryAreas) {
+            $areaList += $area.id
+            $num = "[$($areaList.Count)]".PadRight(5)
+            $id = $area.id.PadRight(20)
+            Write-Host "    $num $id $($area.description)" -ForegroundColor White
+        }
+    }
+
+    Write-Host ""
+    $selection = Read-Host "  Enter focus area (1-$($areaList.Count)), or press Enter for Ralph's Choice"
+
+    if ([string]::IsNullOrWhiteSpace($selection)) {
+        return $null
+    }
+
+    $index = 0
+    if ([int]::TryParse($selection, [ref]$index)) {
+        $index--
+        if ($index -ge 0 -and $index -lt $areaList.Count) {
+            return $areaList[$index]
+        }
+    }
+    Write-Host "  Invalid selection: $selection" -ForegroundColor Yellow
+    return $null
+}
+
+# ============================================================================
+# UTILITY MENUS (Logs, Recovery, Morning)
+# ============================================================================
+
+function Show-LogViewer {
+    <#
+    .SYNOPSIS
+        Display recent logs and session reports (from launcher.ps1)
+    #>
+    Write-Host ""
+    Write-Host "  =====================================================" -ForegroundColor Red
+    Write-Host "     `"It tastes like burning!`" - Ralph" -ForegroundColor Red
+    Write-Host "     Log Viewer" -ForegroundColor Red
+    Write-Host "  =====================================================" -ForegroundColor Red
+    Write-Host ""
+
+    $logsDir = Join-Path $script:RalphDir "logs"
+
+    if (-not (Test-Path $logsDir)) {
+        Write-Host "  No logs directory found." -ForegroundColor Yellow
+        Read-Host "`n  Press Enter to continue"
+        return
+    }
+
+    $sessions = Get-ChildItem $logsDir -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+
+    if ($sessions.Count -eq 0) {
+        Write-Host "  No log sessions found." -ForegroundColor Yellow
+        Read-Host "`n  Press Enter to continue"
+        return
+    }
+
+    $latestSession = $sessions[0]
+    Write-Host "  Latest session: $($latestSession.Name)" -ForegroundColor White
+    Write-Host ""
+
+    $reportPath = Join-Path $latestSession.FullName "REPORT.md"
+    if (Test-Path $reportPath) {
+        Write-Host "  === REPORT.md ===" -ForegroundColor Cyan
+        Get-Content $reportPath | Select-Object -First 50
+        if ((Get-Content $reportPath).Count -gt 50) {
+            Write-Host "  ... (truncated)" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  No REPORT.md found in this session." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Files in session:" -ForegroundColor White
+        Get-ChildItem $latestSession.FullName | ForEach-Object {
+            Write-Host "    - $($_.Name)" -ForegroundColor DarkGray
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Other sessions:" -ForegroundColor Yellow
+    $sessions | Select-Object -Skip 1 -First 5 | ForEach-Object {
+        Write-Host "    - $($_.Name)" -ForegroundColor DarkGray
+    }
+
+    Read-Host "`n  Press Enter to continue"
+}
+
+function Show-EmergencyRecovery {
+    <#
+    .SYNOPSIS
+        Emergency recovery menu with git status and graceful stop options (from launcher.ps1)
+    #>
+    Write-Host ""
+    Write-Host "  =====================================================" -ForegroundColor Magenta
+    Write-Host "     `"I bent my Wookie!`" - Ralph" -ForegroundColor Magenta
+    Write-Host "     Emergency Recovery" -ForegroundColor Magenta
+    Write-Host "  =====================================================" -ForegroundColor Magenta
+    Write-Host ""
+
+    Set-Location $script:ProjectRoot
+
+    Write-Host "  Recent commits (rollback targets):" -ForegroundColor Yellow
+    git log --oneline -10 2>$null
+
+    Write-Host ""
+    Write-Host "  Uncommitted changes:" -ForegroundColor Yellow
+    git status --short 2>$null
+
+    Write-Host ""
+    Write-Host "  Current branch:" -ForegroundColor Yellow
+    git branch --show-current 2>$null
+
+    Write-Host ""
+    Write-Host "  Recovery commands:" -ForegroundColor Cyan
+    Write-Host "    git revert HEAD             - Undo last commit (safe)" -ForegroundColor White
+    Write-Host "    git reset --soft HEAD~1     - Undo commit, keep changes" -ForegroundColor White
+    Write-Host "    git stash                   - Stash uncommitted changes" -ForegroundColor White
+    Write-Host "    git checkout -- .           - Discard all changes (DANGER)" -ForegroundColor Red
+
+    Write-Host ""
+    Write-Host "  Ralph files:" -ForegroundColor Cyan
+    Write-Host "    prd.json      - Current sprint definition" -ForegroundColor White
+    Write-Host "    queue.json    - Focus area queue" -ForegroundColor White
+    Write-Host "    progress.txt  - Progress tracking" -ForegroundColor White
+
+    $signalFile = Join-Path $script:RalphDir "graceful_stop.signal"
+    $hasSignal = Test-Path $signalFile
+
+    Write-Host ""
+    Write-Host "  =====================================================" -ForegroundColor Cyan
+    Write-Host "  Graceful Stop Options:" -ForegroundColor Cyan
+    Write-Host "  =====================================================" -ForegroundColor Cyan
+    if ($hasSignal) {
+        Write-Host "    [G] Cancel graceful stop (currently PENDING)" -ForegroundColor Yellow
+    } else {
+        Write-Host "    [G] Request graceful stop (safe stop after sprint)" -ForegroundColor White
+    }
+    Write-Host "    [Enter] Return to menu" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $choice = Read-Host "  Selection"
+
+    if ($choice -eq "G" -or $choice -eq "g") {
+        $gracefulStopScript = Join-Path $script:RalphDir "graceful-stop.ps1"
+        if (Test-Path $gracefulStopScript) {
+            if ($hasSignal) {
+                & $gracefulStopScript -Cancel
+            } else {
+                & $gracefulStopScript
+            }
+        } else {
+            if ($hasSignal) {
+                Remove-Item $signalFile -Force -ErrorAction SilentlyContinue
+                Write-Host "  Graceful stop cancelled" -ForegroundColor Green
+            } else {
+                @{ requestedAt = (Get-Date).ToString("o"); reason = "User requested via recovery menu" } |
+                    ConvertTo-Json | Set-Content $signalFile -Encoding UTF8
+                Write-Host "  Graceful stop requested - Ralph will stop after current sprint" -ForegroundColor Cyan
+            }
+        }
+        Read-Host "`n  Press Enter to continue"
+    }
+}
+
+function Show-MorningCheckin {
+    <#
+    .SYNOPSIS
+        Morning check-in with status and recent commits (from launcher.ps1)
+    #>
+    Write-Host ""
+    Write-Host "  =====================================================" -ForegroundColor Cyan
+    Write-Host "     `"I'm learnding!`" - Ralph" -ForegroundColor Cyan
+    Write-Host "     Morning Check-in" -ForegroundColor Cyan
+    Write-Host "  =====================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Show status
+    $statusScript = Join-Path $script:RalphDir "status.ps1"
+    if (Test-Path $statusScript) {
+        & $statusScript
+    }
+
+    Write-Host ""
+    Write-Host "  Recent commits:" -ForegroundColor Yellow
+    Set-Location $script:ProjectRoot
+    git log --oneline -8 2>$null
+
+    Write-Host ""
+    $next = Read-Host "  [1] Standard  [2] TrueAuto  [3] Resume  [Enter] Exit"
+    switch ($next) {
+        "1" {
+            $focus = Show-CategorizedFocusAreaSelection
+            return @{ mode = "standard"; focusArea = $focus }
+        }
+        "2" {
+            $focus = Show-CategorizedFocusAreaSelection
+            return @{ mode = "trueauto"; focusArea = $focus }
+        }
+        "3" {
+            return @{ mode = "resume"; focusArea = $null }
+        }
+        default {
+            return $null
+        }
+    }
+}
+
+# Handle -Logs, -Recovery, -Morning as utility commands
+if ($Logs) {
+    Show-LogViewer
+    exit 0
+}
+
+if ($Recovery) {
+    Show-EmergencyRecovery
+    exit 0
+}
+
+if ($Morning) {
+    $result = Show-MorningCheckin
+    if ($result) {
+        # Continue to Ralph spawn with selected mode
+        $Mode = $result.mode
+        $FocusArea = $result.focusArea
+        # Fall through to main flow
+    } else {
+        exit 0
+    }
+}
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -83,118 +473,9 @@ function Write-RalphHeader {
     Write-Host ""
 }
 
-function Get-ExistingContext {
-    <#
-    .SYNOPSIS
-        Checks if there's resumable interview context in queue.json
-    .DESCRIPTION
-        Returns a hashtable with:
-        - HasContext: $true if resumable context exists
-        - Context: The interview context string
-        - FocusAreas: Array of focus area objects
-        - Completed: Number of completed focus areas
-        - Total: Total number of focus areas
-    #>
-
-    $queue = Get-Queue
-    if (-not $queue) {
-        return @{ HasContext = $false }
-    }
-
-    try {
-        # Check for interviewContext
-        if (-not $queue.interviewContext) {
-            return @{ HasContext = $false }
-        }
-
-        # Check for focusAreas with incomplete items
-        if (-not $queue.focusAreas -or $queue.focusAreas.Count -eq 0) {
-            return @{ HasContext = $false }
-        }
-
-        # Count completed vs incomplete focus areas
-        $completed = 0
-        $incomplete = 0
-
-        foreach ($area in $queue.focusAreas) {
-            if ($area.completed -eq $true) {
-                $completed++
-            } else {
-                $incomplete++
-            }
-        }
-
-        # Only return context if there are incomplete items
-        if ($incomplete -eq 0) {
-            return @{ HasContext = $false }
-        }
-
-        return @{
-            HasContext = $true
-            Context = $queue.interviewContext
-            FocusAreas = $queue.focusAreas
-            Completed = $completed
-            Total = $queue.focusAreas.Count
-        }
-    }
-    catch {
-        # If we can't parse the file, no resumable context
-        return @{ HasContext = $false }
-    }
-}
-
-function Show-ResumePrompt {
-    <#
-    .SYNOPSIS
-        Displays resume prompt for interrupted interview sessions
-    .PARAMETER ExistingContext
-        The context hashtable from Get-ExistingContext
-    .RETURNS
-        $true if user wants to resume, $false for new interview
-    #>
-    param(
-        [Parameter(Mandatory=$true)]
-        [hashtable]$ExistingContext
-    )
-
-    Write-Host "  Found interrupted session:" -ForegroundColor Yellow
-    Write-Host ""
-
-    # Display context (truncate if too long)
-    $contextText = $ExistingContext.Context
-    if ($contextText.Length -gt 200) {
-        $contextText = $contextText.Substring(0, 197) + "..."
-    }
-    Write-Host "  Context: $contextText" -ForegroundColor Gray
-    Write-Host ""
-
-    # Show progress
-    $completed = $ExistingContext.Completed
-    $total = $ExistingContext.Total
-    Write-Host "  Progress: $completed/$total focus areas complete" -ForegroundColor Cyan
-    Write-Host ""
-
-    # List remaining focus areas
-    $remaining = $ExistingContext.FocusAreas | Where-Object { -not $_.completed }
-    if ($remaining.Count -gt 0) {
-        Write-Host "  Remaining focus areas:" -ForegroundColor White
-        foreach ($area in $remaining) {
-            $areaName = if ($area.name) { $area.name } else { $area.area }
-            Write-Host "    - $areaName" -ForegroundColor Gray
-        }
-        Write-Host ""
-    }
-
-    # Prompt user
-    Write-Host "  Resume this session? [Y]es / [N]ew interview" -ForegroundColor Yellow -NoNewline
-    $response = Read-Host " "
-
-    $result = ($response -match "^[Yy]")
-    Write-InterviewLog "Resume prompt shown - Context: $($ExistingContext.Context)"
-    Write-InterviewLog "User chose to resume: $result"
-
-    return $result
-}
+# Get-ExistingContext and Show-ResumePrompt have been moved to lib/queue.ps1
+# as Test-ExistingQueue, Get-QueueSummary, and Show-QueueContinuationPrompt
+# for shared use across launcher.ps1 and interview.ps1
 
 # ============================================================================
 # QUESTION FUNCTIONS
@@ -918,31 +1199,92 @@ function Save-InterviewQueue {
 function Start-RalphWindows {
     <#
     .SYNOPSIS
-        Spawns Ralph loop and watch windows
+        Spawns Ralph loop and watch windows with mode support
     .PARAMETER FocusAreas
         Array of focus areas (for display purposes)
+    .PARAMETER SelectedMode
+        Execution mode: standard, trueauto, ralphschoice, ralphschoiceauto, overnight, resume
+    .PARAMETER FocusArea
+        Single focus area for direct mode (not queue mode)
+    .PARAMETER MaxHours
+        Max hours for overnight mode (default: 12)
     #>
     param(
-        [Parameter(Mandatory=$true)]
-        $FocusAreas
+        $FocusAreas = @(),
+        [string]$SelectedMode = "standard",
+        [string]$FocusArea = "",
+        [int]$MaxHours = 12
     )
 
     Write-Host ""
     Write-Host "  Launching Ralph..." -ForegroundColor Cyan
-    Write-InterviewLog "Spawning Ralph windows for areas: $($FocusAreas -join ', ')"
+
+    # Escape path for safe interpolation
+    $escapedPath = $script:ProjectRoot -replace "'", "''"
+
+    # Build Ralph arguments based on mode
+    $ralphArgs = @()
+
+    switch ($SelectedMode) {
+        "standard" {
+            # Queue mode uses -Queue flag
+            if ($FocusAreas.Count -gt 0) {
+                $ralphArgs += "-Queue"
+                $ralphArgs += "-SkipPlanApproval"
+            } elseif ($FocusArea) {
+                $ralphArgs += "-FocusArea"
+                $ralphArgs += $FocusArea
+            }
+        }
+        "trueauto" {
+            $ralphArgs += "-TrueAuto"
+            $ralphArgs += "-SkipPlanApproval"
+            if ($FocusAreas.Count -gt 0) {
+                $ralphArgs += "-Queue"
+            } elseif ($FocusArea) {
+                $ralphArgs += "-FocusArea"
+                $ralphArgs += $FocusArea
+            }
+        }
+        "resume" {
+            $ralphArgs += "-Resume"
+        }
+        "ralphschoice" {
+            $ralphArgs += "-RalphsChoice"
+        }
+        "ralphschoiceauto" {
+            $ralphArgs += "-RalphsChoiceAuto"
+        }
+        "overnight" {
+            $ralphArgs += "-Overnight"
+            $ralphArgs += "-MaxHours"
+            $ralphArgs += $MaxHours
+            if ($FocusAreas.Count -gt 0) {
+                $ralphArgs += "-Queue"
+            }
+        }
+    }
+
+    $argString = $ralphArgs -join ' '
+    $displayMode = if ($SelectedMode) { $SelectedMode } else { "queue" }
+    $displayAreas = if ($FocusAreas.Count -gt 0) { $FocusAreas -join ', ' } elseif ($FocusArea) { $FocusArea } else { "Ralph's Choice" }
+
+    Write-InterviewLog "Spawning Ralph - Mode: $displayMode, Areas: $displayAreas, Args: $argString"
+
+    # Spawn Watch in new window first
+    $watchCmd = "Set-Location '$escapedPath'; .\scripts\ralph\watch.ps1"
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$watchCmd}"
+
+    Start-Sleep -Milliseconds 500
 
     # Spawn Ralph loop in new window
-    $ralphCmd = "Set-Location '$script:ProjectRoot'; .\scripts\ralph\ralph.ps1 -Queue -SkipPlanApproval"
+    $ralphCmd = "Set-Location '$escapedPath'; .\scripts\ralph\ralph.ps1 $argString"
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$ralphCmd}"
-
-    Start-Sleep -Seconds 2
-
-    # Spawn Watch in new window
-    $watchCmd = "Set-Location '$script:ProjectRoot'; .\scripts\ralph\watch.ps1"
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$watchCmd}"
 
     Write-Host ""
     Write-Host "  Ralph loop and watch windows launched!" -ForegroundColor Green
+    Write-Host "    Mode: $displayMode" -ForegroundColor DarkGray
+    Write-Host "    Areas: $displayAreas" -ForegroundColor DarkGray
     Write-Host "  You can close this window now." -ForegroundColor Gray
     Write-InterviewLog "Ralph loop and watch windows launched successfully"
 }
@@ -955,23 +1297,153 @@ function Start-RalphWindows {
 Write-RalphHeader
 Write-InterviewLog "Interview session started"
 
-# Check for existing session to resume
-$existing = Get-ExistingContext
-if ($existing.HasContext -and -not $Resume) {
-    $shouldResume = Show-ResumePrompt -ExistingContext $existing
-    if ($shouldResume) {
-        Write-Host "  Resuming previous session..." -ForegroundColor Green
-        $script:ResumeMode = $true
-        $script:FocusAreas = $existing.FocusAreas | Where-Object { -not $_.completed }
-    } else {
-        Write-Host "  Starting new interview..." -ForegroundColor Cyan
-        $script:ResumeMode = $false
+# ============================================================================
+# DIRECT MODE HANDLING (Skip interview if -Mode or -FocusArea provided)
+# ============================================================================
+
+# Track selected mode for later use
+$script:SelectedMode = $Mode
+
+# Direct focus area mode - skip interview entirely
+if ($FocusArea) {
+    # Validate focus area exists
+    if (-not (Test-FocusAreaExists -AreaId $FocusArea)) {
+        Write-Host "  Warning: '$FocusArea' may not be a known focus area" -ForegroundColor Yellow
+        if ($config -and $config.focusAreas) {
+            $knownAreas = $config.focusAreas | ForEach-Object { $_.id }
+            Write-Host "  Known areas: $($knownAreas -join ', ')" -ForegroundColor DarkGray
+        }
     }
-} elseif ($Resume -and $existing.HasContext) {
+
+    Write-Host "  Direct focus area mode: $FocusArea" -ForegroundColor Cyan
+
+    # Show mode selection if not provided
+    if (-not $script:SelectedMode) {
+        $script:SelectedMode = Show-ModeSelection
+    }
+
+    Write-InterviewLog "Direct focus area: $FocusArea, Mode: $script:SelectedMode"
+
+    if (-not $NoLaunch) {
+        Start-RalphWindows -FocusArea $FocusArea -SelectedMode $script:SelectedMode -MaxHours $MaxHours
+    } else {
+        Write-Host "  Configuration ready. Returning to caller..." -ForegroundColor Green
+    }
+    exit 0
+}
+
+# Multiple focus areas mode (e.g., overnight with specific areas)
+if ($FocusAreas -and $FocusAreas.Count -gt 0) {
+    Write-Host "  Multiple focus areas mode: $($FocusAreas -join ', ')" -ForegroundColor Cyan
+
+    # Default to overnight if multiple areas
+    if (-not $script:SelectedMode) {
+        $script:SelectedMode = "overnight"
+    }
+
+    # Create queue with focus areas
+    $context = @{
+        workType  = "queue"
+        details   = "Direct CLI invocation with focus areas: $($FocusAreas -join ', ')"
+        area      = ""
+        client    = ""
+        priority  = "normal"
+        timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+    }
+
+    Save-InterviewQueue -Context $context -FocusAreas $FocusAreas | Out-Null
+    Write-InterviewLog "Direct focus areas: $($FocusAreas -join ', '), Mode: $script:SelectedMode"
+
+    if (-not $NoLaunch) {
+        Start-RalphWindows -FocusAreas $FocusAreas -SelectedMode $script:SelectedMode -MaxHours $MaxHours
+    } else {
+        Write-Host "  Queue saved. Returning to caller..." -ForegroundColor Green
+    }
+    exit 0
+}
+
+# Direct mode without focus area - show focus area selection, then launch
+if ($Mode -and $Mode -notin @("resume", "ralphschoice", "ralphschoiceauto")) {
+    Write-Host "  Mode: $Mode (direct)" -ForegroundColor Cyan
+
+    if ($Mode -eq "smartqueue") {
+        # Smart queue mode - use Claude to pick focus areas
+        Write-Host ""
+        Write-Host "  Describe what you want to work on (2-3 sentences):" -ForegroundColor Yellow
+        $userInput = Read-Host "  >"
+
+        if (-not [string]::IsNullOrWhiteSpace($userInput)) {
+            # Try to use lib/interview.ps1's Get-SuggestedAreas
+            $suggested = Get-SuggestedAreas -Problem $userInput -NoLLM:$false
+            if ($suggested -and $suggested.Count -gt 0) {
+                Write-Host ""
+                Write-Host "  Suggested focus areas:" -ForegroundColor Cyan
+                $suggested | ForEach-Object { Write-Host "    - $_" -ForegroundColor White }
+
+                $context = @{
+                    workType  = "smartqueue"
+                    details   = $userInput
+                    area      = ""
+                    client    = ""
+                    priority  = "normal"
+                    timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+                }
+                Save-InterviewQueue -Context $context -FocusAreas $suggested | Out-Null
+            }
+        }
+        $script:SelectedMode = "standard"
+    } else {
+        # Show focus area selection
+        $selectedFocus = Show-CategorizedFocusAreaSelection
+        if ($selectedFocus) {
+            if (-not $NoLaunch) {
+                Start-RalphWindows -FocusArea $selectedFocus -SelectedMode $Mode -MaxHours $MaxHours
+            }
+            exit 0
+        }
+    }
+}
+
+# Modes that don't need focus area selection
+if ($Mode -in @("resume", "ralphschoice", "ralphschoiceauto")) {
+    Write-Host "  Mode: $Mode" -ForegroundColor Cyan
+    Write-InterviewLog "Direct mode: $Mode"
+
+    if (-not $NoLaunch) {
+        Start-RalphWindows -SelectedMode $Mode -MaxHours $MaxHours
+    }
+    exit 0
+}
+
+# ============================================================================
+# QUEUE CONTINUATION CHECK (Interactive mode only)
+# ============================================================================
+
+$queueInfo = Test-ExistingQueue
+if ($queueInfo.exists -and $queueInfo.incompleteCount -gt 0 -and -not $Resume) {
+    $queueChoice = Show-QueueContinuationPrompt -QueueInfo $queueInfo
+
+    switch ($queueChoice) {
+        "continue" {
+            Write-Host "  Resuming previous session..." -ForegroundColor Green
+            $script:ResumeMode = $true
+            $script:FocusAreas = $queueInfo.queue.focusAreas | Where-Object { -not $_.completed }
+        }
+        "new" {
+            Write-Host "  Starting new interview..." -ForegroundColor Cyan
+            Clear-QueueForFresh
+            $script:ResumeMode = $false
+        }
+        "cancel" {
+            Write-Host "  Exiting." -ForegroundColor DarkGray
+            exit 0
+        }
+    }
+} elseif ($Resume -and $queueInfo.exists -and $queueInfo.incompleteCount -gt 0) {
     # -Resume flag was passed explicitly
     Write-Host "  Resuming previous session (via -Resume flag)..." -ForegroundColor Green
     $script:ResumeMode = $true
-    $script:FocusAreas = $existing.FocusAreas | Where-Object { -not $_.completed }
+    $script:FocusAreas = $queueInfo.queue.focusAreas | Where-Object { -not $_.completed }
 } else {
     # No existing context or starting fresh
     $script:ResumeMode = $false
@@ -1022,6 +1494,16 @@ if (-not $script:ResumeMode) {
         }
         Write-InterviewLog "Queue description: $queueDescription"
 
+        # ---- CONTEXT IMPROVEMENT: Scan codebase and improve vague input ----
+        $improved = Improve-InterviewContext -RawInput $queueDescription -FocusAreas $selectedAreas
+        if ($improved.improvedContext -ne $queueDescription) {
+            $confirmResult = Show-ImprovedContext -ImprovedResult $improved
+            if ($confirmResult.approved) {
+                $queueDescription = $confirmResult.context
+                Write-InterviewLog "Context improved: $queueDescription"
+            }
+        }
+
         # Create context for queue mode with actual work description
         $interviewContext = @{
             workType  = "queue"
@@ -1030,6 +1512,7 @@ if (-not $script:ResumeMode) {
             client    = ""
             priority  = "normal"
             timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+            improvedContext = $improved  # Preserve analysis for PRD generation
         }
     } else {
         # Normal interview flow - continue with remaining questions
@@ -1047,8 +1530,20 @@ if (-not $script:ResumeMode) {
         $interviewContext.details = Ask-Details -WorkType $workType
         Write-InterviewLog "Details provided: $($interviewContext.details)"
 
-        # ---- DYNAMIC: Area (if vague description) ----
-        if ($interviewContext.details.Length -lt 20) {
+        # ---- CONTEXT IMPROVEMENT: Scan codebase and improve vague input ----
+        $improved = Improve-InterviewContext -RawInput $interviewContext.details
+        if ($improved.improvedContext -ne $interviewContext.details) {
+            $confirmResult = Show-ImprovedContext -ImprovedResult $improved
+            if ($confirmResult.approved) {
+                $interviewContext.details = $confirmResult.context
+                $interviewContext.improvedContext = $improved  # Preserve analysis for PRD
+                Write-InterviewLog "Context improved: $($interviewContext.details)"
+            }
+        }
+
+        # ---- DYNAMIC: Area (if vague description AND no areas detected) ----
+        $autoDetectedAreas = if ($improved.detectedAreas) { $improved.detectedAreas } else { @() }
+        if ($interviewContext.details.Length -lt 20 -and $autoDetectedAreas.Count -eq 0) {
             $interviewContext.area = Ask-Area -WorkType $workType -Details $interviewContext.details
             Write-InterviewLog "Area specified: $($interviewContext.area)"
         }
@@ -1071,10 +1566,15 @@ if (-not $script:ResumeMode) {
         Write-Host "  Got it. Let me suggest some focus areas..." -ForegroundColor Green
         Write-Host ""
 
-        # Get suggested focus areas based on interview context
-        # Use Ralph's Choice scoring when user didn't specify an area
-        $useRalphsChoice = [string]::IsNullOrWhiteSpace($interviewContext.area)
-        $suggestions = Get-SuggestedFocusAreas -Context $interviewContext -UseRalphsChoice:$useRalphsChoice
+        # Get suggested focus areas - prioritize auto-detected from codebase scan
+        if ($autoDetectedAreas.Count -gt 0) {
+            Write-Host "  Using areas detected from codebase analysis..." -ForegroundColor Magenta
+            $suggestions = $autoDetectedAreas
+        } else {
+            # Fall back to keyword matching or Ralph's Choice
+            $useRalphsChoice = [string]::IsNullOrWhiteSpace($interviewContext.area)
+            $suggestions = Get-SuggestedFocusAreas -Context $interviewContext -UseRalphsChoice:$useRalphsChoice
+        }
 
         # Let user approve/modify the suggestions
         $approvedAreas = Get-ApprovedAreas -Suggestions $suggestions
@@ -1092,9 +1592,18 @@ if (-not $script:ResumeMode) {
     # Save the queue
     $queue = Save-InterviewQueue -Context $interviewContext -FocusAreas $approvedAreas
 
+    # Ask for execution mode (unless already provided via parameter)
+    if (-not $script:SelectedMode) {
+        Write-Host ""
+        Write-Host "  Focus areas confirmed: $($approvedAreas -join ', ')" -ForegroundColor Green
+        $script:SelectedMode = Show-ModeSelection
+    }
+
+    Write-InterviewLog "Mode selected: $script:SelectedMode"
+
     # Launch Ralph windows (unless -NoLaunch was specified)
     if (-not $NoLaunch) {
-        Start-RalphWindows -FocusAreas $approvedAreas
+        Start-RalphWindows -FocusAreas $approvedAreas -SelectedMode $script:SelectedMode -MaxHours $MaxHours
     } else {
         Write-Host ""
         Write-Host "  Queue saved. Returning to caller..." -ForegroundColor Green
@@ -1113,8 +1622,15 @@ if (-not $script:ResumeMode) {
         Write-Host "    - $area" -ForegroundColor Gray
     }
 
+    # Ask for execution mode for resume
+    if (-not $script:SelectedMode) {
+        $script:SelectedMode = Show-ModeSelection
+    }
+
+    Write-InterviewLog "Resume mode selected: $script:SelectedMode"
+
     if (-not $NoLaunch) {
-        Start-RalphWindows -FocusAreas $remainingAreas
+        Start-RalphWindows -FocusAreas $remainingAreas -SelectedMode $script:SelectedMode -MaxHours $MaxHours
     } else {
         Write-Host ""
         Write-Host "  Queue ready. Returning to caller..." -ForegroundColor Green

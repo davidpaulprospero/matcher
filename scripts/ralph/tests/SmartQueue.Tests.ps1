@@ -14,7 +14,8 @@
 BeforeAll {
     # Get paths - PSScriptRoot is scripts/ralph/tests
     $script:RalphDir = Split-Path -Parent $PSScriptRoot  # scripts/ralph
-    $script:LauncherScript = Join-Path $script:RalphDir "launcher.ps1"
+    $script:InterviewScript = Join-Path $script:RalphDir "interview.ps1"
+    $script:LibInterviewScript = Join-Path $script:RalphDir "lib\interview.ps1"
     $script:TestDataDir = Join-Path $PSScriptRoot "testdata\smartqueue"
     $script:QueueFile = Join-Path $script:TestDataDir "queue.json"
 
@@ -23,9 +24,23 @@ BeforeAll {
         New-Item -ItemType Directory -Path $script:TestDataDir -Force | Out-Null
     }
 
-    # Source functions from launcher.ps1
-    if (Test-Path $script:LauncherScript) {
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LauncherScript, [ref]$null, [ref]$null)
+    # Source functions from interview.ps1 (main entry point)
+    if (Test-Path $script:InterviewScript) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:InterviewScript, [ref]$null, [ref]$null)
+        $functions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+
+        foreach ($func in $functions) {
+            $funcDef = $func.Extent.Text
+            $globalFuncDef = $funcDef -replace '^function\s+([A-Za-z0-9_-]+)', 'function global:$1'
+            try {
+                Invoke-Expression $globalFuncDef
+            } catch {}
+        }
+    }
+
+    # Also source functions from lib/interview.ps1 (shared functions)
+    if (Test-Path $script:LibInterviewScript) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LibInterviewScript, [ref]$null, [ref]$null)
         $functions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
 
         foreach ($func in $functions) {

@@ -1,7 +1,19 @@
-# Ralph Loop - Main Execution Script
-# Usage: .\scripts\ralph\ralph.ps1 [-Queue] [-SkipPlanApproval] [-TrueAuto] [-Resume] [-FocusArea <area>]
+# Ralph Loop - Main Execution Engine (INTERNAL USE ONLY)
+# =====================================================================
+# DO NOT CALL THIS SCRIPT DIRECTLY - Use interview.ps1 instead!
 #
-# Modes:
+# This is the core execution engine that processes sprints and stories.
+# It is spawned by interview.ps1 with the appropriate parameters.
+#
+# User entry point: .\scripts\ralph\interview.ps1
+# =====================================================================
+#
+# Usage (internal): .\ralph.ps1 [-Queue] [-TrueAuto] [-Resume] [-FocusArea <area>]
+#
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
+#
+# Modes (set by interview.ps1):
 #   -Queue             Process focus areas from queue.json (interview mode)
 #   -SkipPlanApproval  Skip plan approval prompts
 #   -TrueAuto          Continuous improvement mode (no exit on sprint complete)
@@ -9,6 +21,8 @@
 #   -FocusArea <area>  Override focus area for this session
 #   -RalphsChoice      Ralph decides focus areas, user confirms each decision
 #   -RalphsChoiceAuto  Ralph decides and continues autonomously
+#   -Overnight         Adaptive multi-focus overnight mode with area rotation
+#   -MaxHours <hours>  Max hours for overnight mode (default: 12)
 
 param(
     [switch]$Queue,
@@ -17,7 +31,10 @@ param(
     [switch]$Resume,
     [switch]$RalphsChoice,
     [switch]$RalphsChoiceAuto,
+    [switch]$Overnight,
+    [int]$MaxHours = 12,
     [string]$FocusArea = "",
+    [string[]]$FocusAreas = @(),
     [string]$Task = ""
 )
 
@@ -27,18 +44,28 @@ param(
 
 $script:ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $script:RalphDir = Join-Path $script:ProjectRoot "scripts\ralph"
-$script:QueueFile = Join-Path $script:RalphDir "queue.json"
-$script:ConfigFile = Join-Path $script:RalphDir "ralph-config.json"
-$script:PrdFile = Join-Path $script:RalphDir "prd.json"
-$script:ProgressFile = Join-Path $script:RalphDir "progress.txt"
-$script:MetricsFile = Join-Path $script:RalphDir "metrics.csv"
-$script:PromptFile = Join-Path $script:RalphDir "prompt.md"
-$script:LogDir = Join-Path $script:RalphDir "logs"
-$script:ArchiveDir = Join-Path $script:RalphDir "archive"
-$script:SprintHistoryFile = Join-Path $script:RalphDir "sprint_history.json"
-$script:ExplorationContextFile = Join-Path $script:RalphDir "exploration_context.md"
-$script:HealingLogFile = Join-Path $script:RalphDir "healing_log.jsonl"
-$script:HealingStateFile = Join-Path $script:RalphDir "healing_state.json"
+
+# Load paths module first (provides centralized path definitions)
+$script:LibPath = Join-Path $PSScriptRoot 'lib'
+. "$script:LibPath\paths.ps1"
+
+# Initialize paths and get references (creates directories if needed)
+$paths = Initialize-RalphPaths -RalphDir $script:RalphDir
+
+# Set legacy path variables for backward compatibility
+# These will be gradually replaced with Resolve-RalphPath calls
+$script:QueueFile = Resolve-RalphPath -PathKey 'QueueFile'
+$script:ConfigFile = Resolve-RalphPath -PathKey 'ConfigFile'
+$script:PrdFile = Resolve-RalphPath -PathKey 'PrdFile'
+$script:ProgressFile = Resolve-RalphPath -PathKey 'ProgressFile'
+$script:MetricsFile = Resolve-RalphPath -PathKey 'MetricsFile'
+$script:PromptFile = Resolve-RalphPath -PathKey 'PromptFile'
+$script:LogDir = $script:Paths.LogsDir
+$script:ArchiveDir = $script:Paths.ArchiveDir
+$script:SprintHistoryFile = Resolve-RalphPath -PathKey 'SprintHistoryFile'
+$script:ExplorationContextFile = Resolve-RalphPath -PathKey 'ExplorationContextFile'
+$script:HealingLogFile = Resolve-RalphPath -PathKey 'HealingLogFile'
+$script:HealingStateFile = Resolve-RalphPath -PathKey 'HealingStateFile'
 
 # Mutable session state (consolidated hashtable)
 $script:State = @{
@@ -75,8 +102,7 @@ if (-not (Test-Path $script:ArchiveDir)) {
     New-Item -ItemType Directory -Path $script:ArchiveDir -Force | Out-Null
 }
 
-# Load domain modules
-$script:LibPath = Join-Path $PSScriptRoot 'lib'
+# Load domain modules (paths.ps1 already loaded above)
 . "$script:LibPath\sprint.ps1"
 . "$script:LibPath\scoring.ps1"
 . "$script:LibPath\queue.ps1"
@@ -88,12 +114,70 @@ $script:LibPath = Join-Path $PSScriptRoot 'lib'
 . "$script:LibPath\display.ps1"
 . "$script:LibPath\loops.ps1"
 . "$script:LibPath\heartbeat.ps1"
+. "$script:LibPath\interview.ps1"
+. "$script:LibPath\learning.ps1"
+. "$script:LibPath\reporting.ps1"
 
 # ============================================================================
 # CONFIG LOADING
 # ============================================================================
 
 $script:Config = Get-RalphConfig
+
+# ============================================================================
+# CRASH RECOVERY TRAP
+# ============================================================================
+
+# Register crash handler to save state before exit
+$script:CrashHandlerRegistered = $false
+
+trap {
+    Write-Host ""
+    Write-Host "  *** UNEXPECTED ERROR ***" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+
+    # Save crash state for recovery
+    try {
+        $crashInfo = @{
+            crashTime = (Get-Date).ToString("o")
+            sessionId = $script:State.SessionId
+            lastSprint = $script:State.CurrentSprintNumber
+            lastStory = $script:State.CurrentStoryId
+            lastFocusArea = $script:State.CurrentFocusArea
+            nextStory = ""
+            error = $_.Exception.Message
+            stackTrace = $_.ScriptStackTrace
+            iterationCount = $script:State.IterationCount
+            mode = $script:State.CurrentMode
+        }
+
+        # Try to get next story
+        try {
+            $status = Get-SprintStatus
+            if ($status -and $status.nextStory) {
+                $crashInfo.nextStory = $status.nextStory.id
+            }
+        }
+        catch {}
+
+        $crashFile = Join-Path $script:RalphDir "crash_recovery.json"
+        $crashInfo | ConvertTo-Json -Depth 5 | Set-Content $crashFile -Encoding UTF8
+
+        Write-Host "  Crash state saved. Run with -Resume to continue." -ForegroundColor Yellow
+    }
+    catch {
+        Write-Host "  Warning: Could not save crash state" -ForegroundColor Yellow
+    }
+
+    # Attempt partial report
+    try {
+        Generate-PartialReport -Emergency
+    }
+    catch {}
+
+    break
+}
 
 # ============================================================================
 # CLAUDE PROCESS EXECUTION
@@ -147,6 +231,9 @@ function Invoke-ClaudeProcess {
     $script:State.IterationCount++
     $iterationStart = Get-Date
 
+    # Save crash recovery state before each iteration
+    Save-CrashRecoveryState
+
     Write-IterationBanner -Iteration $script:State.IterationCount -FocusArea $focusAreaId -StoryId $storyId
 
     # Get Claude path
@@ -184,13 +271,20 @@ function Invoke-ClaudeProcess {
         # Write prompt to file
         $Prompt | Out-File -FilePath $promptFile -Encoding UTF8 -NoNewline
 
-        # === SUBPROCESS ===
-        $subResult = Invoke-ClaudeSubprocess `
+        # === SUBPROCESS WITH INFINITE RETRY ===
+        # Track story start time for 30-minute limit
+        if (-not $script:State.CurrentStoryStartTime) {
+            $script:State.CurrentStoryStartTime = Get-Date
+        }
+
+        $subResult = Invoke-ClaudeWithInfiniteRetry `
             -ClaudePath $claudePath `
             -ClaudeArgs $claudeArgs `
             -Prompt $Prompt `
             -OutFile $outFile `
-            -ErrFile $errFile
+            -ErrFile $errFile `
+            -StoryId $(if ($storyId) { $storyId } else { $Identifier }) `
+            -StoryStartTime $script:State.CurrentStoryStartTime
 
         # === COMPUTE METRICS ===
         $iterationDuration = (Get-Date) - $iterationStart
@@ -309,125 +403,7 @@ function Get-ClaudePath {
     return $claudePath
 }
 
-function Invoke-ClaudeForFocusArea {
-    <#
-    .SYNOPSIS
-        Spawn Claude Code to work on a focus area
-    .PARAMETER FocusAreaId
-        The focus area ID to work on
-    .PARAMETER Context
-        Additional context from interview (optional)
-    .PARAMETER GeneratePRD
-        If specified, generate a new PRD for this focus area instead of working on stories
-    .RETURNS
-        $true if iteration succeeded, $false otherwise
-    #>
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$FocusAreaId,
-        [string]$Context = "",
-        [switch]$GeneratePRD
-    )
-
-    # === SPRINT-START EXPLORATION ===
-    # Run mandatory exploration before PRD generation if enabled
-    if ($GeneratePRD) {
-        $explorationConfig = $script:Config.exploration
-        $sprintStartEnabled = $explorationConfig -and $explorationConfig.enabled -and `
-                              $explorationConfig.sprintStart -and $explorationConfig.sprintStart.enabled
-
-        if ($sprintStartEnabled) {
-            Write-Host ""
-            Write-Host ">>> Sprint-Start Exploration: $FocusAreaId" -ForegroundColor Cyan
-            Write-Host ""
-
-            # Run full exploration
-            $explorationResult = Invoke-FocusAreaExploration -FocusArea $FocusAreaId -Reason "sprint_start" -FullExplore
-
-            # Reset stories counter since we're starting fresh
-            $script:State.StoriesSinceExploration = 0
-
-            Write-Host ""
-        }
-    }
-
-    # Archive existing incomplete sprint before generating new one
-    # (completed sprints are already archived by the calling loop)
-    if ($GeneratePRD -and (Test-Path $script:PrdFile)) {
-        $existingPrd = Get-Sprint
-        if ($existingPrd -and $existingPrd.userStories) {
-            $incompleteStories = @($existingPrd.userStories | Where-Object { $_.passes -ne $true })
-            if ($incompleteStories.Count -gt 0) {
-                Save-SprintArchive -Reason "superseded"
-            }
-        }
-    }
-
-    # Build the prompt
-    if ($GeneratePRD) {
-        # Build exploration context section for PRD prompt
-        $explorationSection = ""
-        if ($script:State.SprintExplorationContext) {
-            $explorationSection = @"
-
-## Exploration Context (Fresh Scan)
-$script:State.SprintExplorationContext
-
-Use this exploration context to inform story generation. Prioritize:
-- Issues discovered during exploration
-- Test failures that need fixing
-- Technical debt identified
-- Missing functionality noted
-
-"@
-        }
-
-        $prompt = @"
-You are generating a new sprint PRD for focus area: $FocusAreaId
-
-INSTRUCTIONS:
-1. Read scripts/ralph/ralph-config.json to understand the focus area
-2. Read scripts/ralph/prompt.md for context about the project
-3. Read CLAUDE.md for project conventions
-4. Read scripts/ralph/queue.json for interview details (story outline, architecture decisions, key files)
-5. Analyze the codebase to find improvement opportunities for '$FocusAreaId'
-6. Update scripts/ralph/prd.json with:
-   - focusArea: "$FocusAreaId"
-   - sprintNumber: increment from current
-   - branchName: "ralph/sprint-N" (matching sprintNumber)
-   - 8-12 specific user stories with:
-     - Clear acceptance criteria (4-6 items each)
-     - passes: false for all stories
-     - Action verbs in titles (Add, Create, Update, Fix, etc.)
-
-$(if ($Context) { "Context from user: $Context" } else { "" })
-$explorationSection
-Start by reading the config and prompt files, then generate the PRD.
-"@
-        $promptType = "prd_generation"
-    }
-    else {
-        $prompt = "Focus on: $FocusAreaId`n`n"
-        if ($Context) { $prompt += "Context: $Context`n`n" }
-        $prompt += "Read scripts/ralph/prompt.md for instructions. Work on ONE user story from prd.json that aligns with the focus area. If no stories exist for this focus area, generate appropriate stories first."
-        $promptType = "focus_area_work"
-    }
-
-    # Update progress file
-    $progressEntry = "`n## Focus Area: $FocusAreaId - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n- Status: In Progress...`n"
-    Add-Content -Path $script:ProgressFile -Value $progressEntry
-
-    # Invoke the common process handler
-    $useTools = $GeneratePRD -or $SkipPlanApproval
-    $result = Invoke-ClaudeProcess -Prompt $prompt -PromptType $promptType -Identifier $FocusAreaId -AllowedTools:$useTools
-
-    # After PRD generation, update queue context from the new PRD
-    if ($GeneratePRD -and $result) {
-        Update-ContextFromPRD
-    }
-
-    return $result
-}
+# Invoke-ClaudeForFocusArea moved to lib/claude.ps1
 
 function Complete-StoryAutomatically {
     <#
@@ -534,6 +510,9 @@ function Invoke-ClaudeForStory {
     $script:State.CurrentFocusArea = $focusArea
     $script:State.CurrentSprintNumber = if ($prd.sprintNumber) { $prd.sprintNumber } else { 0 }
 
+    # Reset story start time for 30-minute limit tracking
+    $script:State.CurrentStoryStartTime = Get-Date
+
     # Log story start
     Write-SessionLog -Event "story_start" -Message "Starting story $StoryId" -Data @{
         focusArea = $focusArea
@@ -563,8 +542,70 @@ function Invoke-ClaudeForStory {
     # Story 3.1: Adaptive prompt builder (consolidates Stories 1.2, 1.3, 1.6, 2.5, 3.3)
     $prompt = Build-StoryPrompt -StoryId $StoryId -Story $storyObj -FocusArea $focusArea -RetryCount $script:State.CurrentRetryCount
 
+    # Track errors for hard story detection
+    if (-not $script:State.CurrentStoryErrors) {
+        $script:State.CurrentStoryErrors = @()
+    }
+
     # Invoke the common process handler
-    return Invoke-ClaudeProcess -Prompt $prompt -PromptType "story_work" -Identifier $StoryId -FocusArea $focusArea -StoryObj $storyObj
+    $success = Invoke-ClaudeProcess -Prompt $prompt -PromptType "story_work" -Identifier $StoryId -FocusArea $focusArea -StoryObj $storyObj
+
+    # Check for hard story conditions
+    if (-not $success) {
+        # Track error
+        $script:State.CurrentStoryErrors += @{
+            ErrorType = "failure"
+            ErrorMessage = "Story failed on attempt $($script:State.CurrentRetryCount)"
+            Timestamp = (Get-Date).ToString("o")
+        }
+
+        # Check if we should mark as hard (3 failures or 30-min timeout)
+        $maxRetries = 3
+        if ($script:Config.autonomy -and $script:Config.autonomy.fastFail) {
+            $maxRetries = $script:Config.autonomy.fastFail.consecutiveFailures
+        }
+
+        $shouldMarkHard = $false
+        $reason = "3_failures"
+
+        # Check 30-minute limit
+        if ($script:State.CurrentStoryStartTime) {
+            $elapsed = (Get-Date) - $script:State.CurrentStoryStartTime
+            if ($elapsed.TotalMinutes -gt 30) {
+                $shouldMarkHard = $true
+                $reason = "30_minute_limit"
+            }
+        }
+
+        # Check failure count
+        if ($script:State.CurrentRetryCount -ge $maxRetries) {
+            $shouldMarkHard = $true
+        }
+
+        if ($shouldMarkHard) {
+            Write-Host "  [HARD STORY] $StoryId marked as hard ($reason)" -ForegroundColor Yellow
+            Mark-AsHardStory `
+                -StoryId $StoryId `
+                -Errors $script:State.CurrentStoryErrors `
+                -Reason $reason `
+                -FocusArea $focusArea `
+                -StoryTitle $(if ($storyObj) { $storyObj.title } else { "Unknown" })
+
+            # Reset error tracking for next story
+            $script:State.CurrentStoryErrors = @()
+            $script:State.CurrentStoryStartTime = $null
+
+            # Update PRD to mark story as skipped (special status)
+            Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "HARD STORY: Skipped after $reason - pending decomposition"
+        }
+    }
+    else {
+        # Success - reset error tracking
+        $script:State.CurrentStoryErrors = @()
+        $script:State.CurrentStoryStartTime = $null
+    }
+
+    return $success
 }
 
 # ============================================================================
@@ -747,6 +788,23 @@ function Get-SprintStatus {
 
 Write-RalphBanner -Queue:$Queue -TrueAuto:$TrueAuto -RalphsChoice:$RalphsChoice -RalphsChoiceAuto:$RalphsChoiceAuto
 
+# Check for crash recovery
+$crashRecovery = Test-CrashRecovery
+if ($crashRecovery -and $Resume) {
+    $recoveryResult = Invoke-CrashRecovery
+    if ($recoveryResult.Resume) {
+        Write-Host "  Resuming from crash recovery state..." -ForegroundColor Green
+        # The resume logic in the loops will pick up from the current PRD state
+    }
+}
+elseif ($crashRecovery -and -not $Resume) {
+    Write-Host ""
+    Write-Host "  [!] Previous session may have crashed" -ForegroundColor Yellow
+    Write-Host "  Run with -Resume to continue from crash state" -ForegroundColor DarkGray
+    Write-Host "  Crash state: Sprint $($crashRecovery.lastSprint), Story $($crashRecovery.lastStory)" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
 # Show diagnosis of last session (helps identify silent hangs)
 Show-LastSessionDiagnosis
 
@@ -789,6 +847,7 @@ $sessionMode = if ($Queue) { "Queue" }
     elseif ($TrueAuto) { "TrueAuto" }
     elseif ($RalphsChoice) { "RalphsChoice" }
     elseif ($RalphsChoiceAuto) { "RalphsChoiceAuto" }
+    elseif ($Overnight) { "Overnight" }
     else { "Standard" }
 
 # Log session start event
@@ -819,6 +878,17 @@ try {
     elseif ($RalphsChoiceAuto) {
         Start-RalphsChoiceAutoLoop
     }
+    elseif ($Overnight) {
+        # Overnight mode: adaptive multi-focus with rotation
+        $areasToUse = @()
+        if ($FocusAreas -and $FocusAreas.Count -gt 0) {
+            $areasToUse = $FocusAreas
+        }
+        elseif ($FocusArea) {
+            $areasToUse = @($FocusArea)
+        }
+        Start-AdaptiveOvernightLoop -FocusAreas $areasToUse -MaxHours $MaxHours
+    }
     else {
         Start-StandardLoop
     }
@@ -826,6 +896,9 @@ try {
 finally {
     # Session summary - always runs even if loop throws unhandled exception
     $duration = (Get-Date) - $script:State.SessionStartTime
+
+    # Clear crash recovery file on successful completion
+    Clear-CrashRecovery
 
     # Log session end event
     Append-SessionTimeline -Event "session_end" -Data @{

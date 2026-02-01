@@ -2,20 +2,22 @@
 
 <#
 .SYNOPSIS
-    Tests for the unified Ralph Loop launcher
+    Tests for the unified Ralph Loop entry point (interview.ps1)
 .DESCRIPTION
     Tests cover:
     - Mode selection functionality
     - Categorized focus area display
     - Configuration loading
     - Launch behavior for each mode
+    - Utility command handling
 #>
 
 BeforeAll {
     # Get paths - PSScriptRoot is scripts/ralph/tests, so go up one level for scripts/ralph
     $script:RalphDir = Split-Path -Parent $PSScriptRoot
-    $script:LauncherScript = Join-Path $script:RalphDir "launcher.ps1"
-    $script:ConfigFile = Join-Path $script:RalphDir "ralph-config.json"
+    $script:InterviewScript = Join-Path $script:RalphDir "interview.ps1"
+    # Config file is in config/ subdirectory
+    $script:ConfigFile = Join-Path $script:RalphDir "config\ralph-config.json"
     $script:TestDataDir = Join-Path $PSScriptRoot "testdata\launcher"
 
     # Create test data directory
@@ -23,9 +25,9 @@ BeforeAll {
         New-Item -ItemType Directory -Path $script:TestDataDir -Force | Out-Null
     }
 
-    # Source functions from launcher.ps1
-    if (Test-Path $script:LauncherScript) {
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:LauncherScript, [ref]$null, [ref]$null)
+    # Source functions from interview.ps1
+    if (Test-Path $script:InterviewScript) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:InterviewScript, [ref]$null, [ref]$null)
         $functions = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
 
         foreach ($func in $functions) {
@@ -52,7 +54,7 @@ AfterAll {
 # Configuration Tests
 # =============================================================================
 
-Describe "Launcher Configuration" -Tag "Unit", "Launcher" {
+Describe "Interview Configuration" -Tag "Unit", "Interview" {
     Context "ralph-config.json structure" {
         BeforeAll {
             $script:Config = Get-Content $script:ConfigFile -Raw | ConvertFrom-Json
@@ -115,7 +117,7 @@ Describe "Launcher Configuration" -Tag "Unit", "Launcher" {
 # Focus Area Category Tests
 # =============================================================================
 
-Describe "Focus Area Categories" -Tag "Unit", "Launcher" {
+Describe "Focus Area Categories" -Tag "Unit", "Interview" {
     BeforeAll {
         $script:Config = Get-Content $script:ConfigFile -Raw | ConvertFrom-Json
     }
@@ -168,18 +170,28 @@ Describe "Focus Area Categories" -Tag "Unit", "Launcher" {
 }
 
 # =============================================================================
-# Launcher File Tests
+# Entry Point File Tests
 # =============================================================================
 
-Describe "Launcher Files" -Tag "Unit", "Launcher" {
+Describe "Interview Entry Point Files" -Tag "Unit", "Interview" {
     Context "File existence" {
-        It "Should have launcher.ps1" {
-            Test-Path $script:LauncherScript | Should -BeTrue
+        It "Should have interview.ps1" {
+            Test-Path $script:InterviewScript | Should -BeTrue
         }
 
-        It "Should have sleep-thats-where-im-a-viking.bat" {
-            $batFile = Join-Path $script:RalphDir "sleep-thats-where-im-a-viking.bat"
-            Test-Path $batFile | Should -BeTrue
+        It "Should have ralph.ps1 (internal engine)" {
+            $ralphScript = Join-Path $script:RalphDir "ralph.ps1"
+            Test-Path $ralphScript | Should -BeTrue
+        }
+
+        It "Should NOT have old launcher.ps1" {
+            $launcherScript = Join-Path $script:RalphDir "launcher.ps1"
+            Test-Path $launcherScript | Should -BeFalse -Because "launcher.ps1 has been consolidated into interview.ps1"
+        }
+
+        It "Should NOT have old ralph.bat" {
+            $batFile = Join-Path $script:RalphDir "ralph.bat"
+            Test-Path $batFile | Should -BeFalse -Because "ralph.bat has been consolidated into interview.ps1"
         }
 
         It "Should NOT have old numbered bat files" {
@@ -190,7 +202,8 @@ Describe "Launcher Files" -Tag "Unit", "Launcher" {
                 "4-tastes-like-burning.bat",
                 "5-i-bent-my-wookie.bat",
                 "6-the-leprechaun-tells-me-to-burn-things.bat",
-                "7-hi-super-nintendo-chalmers.bat"
+                "7-hi-super-nintendo-chalmers.bat",
+                "sleep-thats-where-im-a-viking.bat"
             )
             foreach ($oldFile in $oldFiles) {
                 $path = Join-Path $script:RalphDir $oldFile
@@ -201,26 +214,27 @@ Describe "Launcher Files" -Tag "Unit", "Launcher" {
 }
 
 # =============================================================================
-# Launcher Function Tests
+# Interview Function Tests
 # =============================================================================
 
-Describe "Launcher Functions" -Tag "Unit", "Launcher" {
-    Context "Get-RalphConfig" {
-        It "Should load configuration successfully" {
-            if (Get-Command Get-RalphConfig -ErrorAction SilentlyContinue) {
-                $config = Get-RalphConfig
-                $config | Should -Not -BeNullOrEmpty
+Describe "Interview Functions" -Tag "Unit", "Interview" {
+    Context "Get-EmojiForCategory" {
+        It "Should return prefix for known categories" {
+            if (Get-Command Get-EmojiForCategory -ErrorAction SilentlyContinue) {
+                Get-EmojiForCategory -CategoryId "core" | Should -Not -BeNullOrEmpty
+                Get-EmojiForCategory -CategoryId "meta" | Should -Not -BeNullOrEmpty
             } else {
                 Set-ItResult -Skipped -Because "Function not loaded"
             }
         }
     }
 
-    Context "Get-EmojiForCategory" {
-        It "Should return prefix for known categories" {
-            if (Get-Command Get-EmojiForCategory -ErrorAction SilentlyContinue) {
-                Get-EmojiForCategory -CategoryId "core" | Should -Not -BeNullOrEmpty
-                Get-EmojiForCategory -CategoryId "meta" | Should -Not -BeNullOrEmpty
+    Context "Test-FocusAreaExists" {
+        It "Should validate known focus areas" {
+            if (Get-Command Test-FocusAreaExists -ErrorAction SilentlyContinue) {
+                # Mock config
+                $global:config = Get-Content $script:ConfigFile -Raw | ConvertFrom-Json
+                Test-FocusAreaExists -AreaId "pipeline" | Should -BeTrue
             } else {
                 Set-ItResult -Skipped -Because "Function not loaded"
             }
@@ -232,43 +246,110 @@ Describe "Launcher Functions" -Tag "Unit", "Launcher" {
 # Mode Selection Tests
 # =============================================================================
 
-Describe "Mode Selection" -Tag "Unit", "Launcher" {
-    Context "Available modes" {
+Describe "Mode Selection" -Tag "Unit", "Interview" {
+    Context "Available modes in param block" {
+        BeforeAll {
+            # Parse the param block to extract ValidateSet values
+            $scriptContent = Get-Content $script:InterviewScript -Raw
+            if ($scriptContent -match 'ValidateSet\s*\(\s*"([^"]+)"(?:\s*,\s*"([^"]+)")*\s*\)') {
+                $script:ValidModes = $Matches[0] -replace 'ValidateSet\s*\(|"|\s|\)' -split ','
+            }
+        }
+
         It "Should support standard mode" {
-            # Mode validation is in the param block
-            $true | Should -BeTrue
+            "standard" | Should -BeIn $script:ValidModes
         }
 
         It "Should support trueauto mode" {
-            $true | Should -BeTrue
+            "trueauto" | Should -BeIn $script:ValidModes
         }
 
-        It "Should support resume mode" {
-            $true | Should -BeTrue
+        It "Should support ralphschoice mode" {
+            "ralphschoice" | Should -BeIn $script:ValidModes
+        }
+
+        It "Should support ralphschoiceauto mode" {
+            "ralphschoiceauto" | Should -BeIn $script:ValidModes
+        }
+
+        It "Should support overnight mode" {
+            "overnight" | Should -BeIn $script:ValidModes
         }
 
         It "Should support smartqueue mode" {
-            $true | Should -BeTrue
+            "smartqueue" | Should -BeIn $script:ValidModes
+        }
+    }
+
+    Context "Utility flags" {
+        BeforeAll {
+            $scriptContent = Get-Content $script:InterviewScript -Raw
+            $script:HasStatusFlag = $scriptContent -match '\[switch\]\$Status'
+            $script:HasWatchFlag = $scriptContent -match '\[switch\]\$Watch'
+            $script:HasStopFlag = $scriptContent -match '\[switch\]\$Stop'
+            $script:HasLogsFlag = $scriptContent -match '\[switch\]\$Logs'
+            $script:HasRecoveryFlag = $scriptContent -match '\[switch\]\$Recovery'
+            $script:HasMorningFlag = $scriptContent -match '\[switch\]\$Morning'
         }
 
-        It "Should support status mode" {
-            $true | Should -BeTrue
+        It "Should have -Status flag" {
+            $script:HasStatusFlag | Should -BeTrue
         }
 
-        It "Should support morning mode" {
-            $true | Should -BeTrue
+        It "Should have -Watch flag" {
+            $script:HasWatchFlag | Should -BeTrue
         }
 
-        It "Should support logs mode" {
-            $true | Should -BeTrue
+        It "Should have -Stop flag" {
+            $script:HasStopFlag | Should -BeTrue
         }
 
-        It "Should support recovery mode" {
-            $true | Should -BeTrue
+        It "Should have -Logs flag" {
+            $script:HasLogsFlag | Should -BeTrue
         }
 
-        It "Should support watch mode" {
-            $true | Should -BeTrue
+        It "Should have -Recovery flag" {
+            $script:HasRecoveryFlag | Should -BeTrue
+        }
+
+        It "Should have -Morning flag" {
+            $script:HasMorningFlag | Should -BeTrue
+        }
+    }
+}
+
+# =============================================================================
+# Parameter Tests
+# =============================================================================
+
+Describe "Interview Parameters" -Tag "Unit", "Interview" {
+    Context "Required parameters" {
+        BeforeAll {
+            $scriptContent = Get-Content $script:InterviewScript -Raw
+        }
+
+        It "Should have -FocusArea parameter" {
+            $scriptContent | Should -Match '\[string\]\$FocusArea'
+        }
+
+        It "Should have -FocusAreas parameter for multiple areas" {
+            $scriptContent | Should -Match '\[string\[\]\]\$FocusAreas'
+        }
+
+        It "Should have -Mode parameter" {
+            $scriptContent | Should -Match '\[string\]\$Mode'
+        }
+
+        It "Should have -MaxHours parameter" {
+            $scriptContent | Should -Match '\[int\]\$MaxHours'
+        }
+
+        It "Should have -Resume switch" {
+            $scriptContent | Should -Match '\[switch\]\$Resume'
+        }
+
+        It "Should have -NoLaunch switch" {
+            $scriptContent | Should -Match '\[switch\]\$NoLaunch'
         }
     }
 }
