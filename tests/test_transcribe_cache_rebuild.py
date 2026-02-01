@@ -56,13 +56,7 @@ class TestTranscriptCacheFieldNames:
         transcript_file = cache_dir / "abc123.json"
         transcript_file.write_text(json.dumps(transcript_data))
 
-        # Create project config
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test
-cache:
-  cache_dir: ".cache"
-""")
+        # Note: Uses default cache_dir of ".cache"
 
         # Create mock state and checkpoint
         state = PipelineState()
@@ -104,13 +98,7 @@ cache:
         transcript_file = cache_dir / "abc123.json"
         transcript_file.write_text(json.dumps(transcript_data))
 
-        # Create project config
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test
-cache:
-  cache_dir: ".cache"
-""")
+        # Note: Uses default cache_dir of ".cache"
 
         # Create mock state and checkpoint
         state = PipelineState()
@@ -154,13 +142,7 @@ cache:
         transcript_file = cache_dir / "abc123.json"
         transcript_file.write_text(json.dumps(transcript_data))
 
-        # Create project config
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test
-cache:
-  cache_dir: ".cache"
-""")
+        # Note: Uses default cache_dir of ".cache"
 
         # Create mock state and checkpoint
         state = PipelineState()

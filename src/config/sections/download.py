@@ -141,13 +141,7 @@ class CaptionCircuitBreakerConfig:
       - Wait 120 seconds before allowing new fetches
       - On next successful fetch → circuit resets to closed state
 
-    Enable per-project in project_config.yaml:
-        download:
-          caption_first:
-            circuit_breaker:
-              enabled: true
-              threshold: 10
-              pause_seconds: 120
+    Configure in config.yaml under download.caption_first.circuit_breaker.
     """
     # Enable/disable circuit breaker
     enabled: bool = True
@@ -170,13 +164,7 @@ class CaptionRetryBudgetConfig:
     When limits are exceeded, remaining videos are skipped and use
     transcription fallback.
 
-    Example in project_config.yaml:
-        download:
-          caption_first:
-            retry_budget:
-              enabled: true
-              max_attempts: 100
-              max_backoff_time_seconds: 300
+    Configure in config.yaml under download.caption_first.retry_budget.
     """
     # Enable/disable retry budget tracking
     enabled: bool = True
@@ -196,14 +184,9 @@ class CaptionRetryBudgetConfig:
 class CaptionFirstConfig:
     """Caption-first mode configuration.
 
-    When enabled, fetches YouTube captions BEFORE video download, enabling
-    faster matching with lower bandwidth. If captions are unavailable,
-    falls back to Whisper transcription.
-
-    Enable per-project in project_config.yaml:
-        download:
-          caption_first:
-            enabled: true
+    Caption fetching is ALWAYS enabled - YouTube captions are fetched before
+    video download for faster matching with lower bandwidth. Videos without
+    captions fall back to the TRANSCRIBE stage (Whisper).
 
     Benefits:
     - Faster: No need to download/process audio for transcription
@@ -221,8 +204,9 @@ class CaptionFirstConfig:
     - Skips caption fetch for live streams to prevent hangs
     - Tracks skipped live streams in metrics separately
     """
-    # Enable/disable caption-first mode
-    enabled: bool = False  # Disabled by default, enable per-project
+    # DEPRECATED: Caption-first is now always enabled. This field is ignored.
+    # Kept for backward compatibility with existing config files.
+    enabled: bool = True
 
     # Fall back to Whisper transcription when captions unavailable
     fallback_to_transcription: bool = True
@@ -442,10 +426,7 @@ class AudioFirstConfig:
     then downloads only the matched video segments. This dramatically reduces
     download time and storage usage.
 
-    Enable per-project in project_config.yaml:
-        download:
-          audio_first:
-            enabled: true
+    Configure in config.yaml under download.audio_first.
     """
     # Enable/disable audio-first mode
     enabled: bool = False  # Disabled by default, enable per-project

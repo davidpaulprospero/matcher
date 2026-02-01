@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 
 def extract_keywords_from_srt(
     srt_path: str,
-    config,
-    max_keywords: int = None
+    config
 ) -> KeywordResult:
     """
     Convenience function to extract keywords from SRT file.
@@ -26,16 +25,11 @@ def extract_keywords_from_srt(
     Args:
         srt_path: Path to SRT file
         config: Pipeline config
-        max_keywords: Maximum keywords to extract (uses config default if None)
 
     Returns:
         KeywordResult with extracted keywords
     """
     import srt
-
-    # Use config default if not specified
-    if max_keywords is None:
-        max_keywords = getattr(config.keyword, 'max_keywords', 30)
 
     # Parse SRT
     with open(srt_path, 'r', encoding='utf-8') as f:
@@ -46,7 +40,7 @@ def extract_keywords_from_srt(
 
     # Extract keywords
     extractor = LLMKeywordExtractor(config)
-    return extractor.extract_keywords(segments, max_keywords=max_keywords)
+    return extractor.extract_keywords(segments)
 
 
 def extract_keyword_per_segment_from_srt(

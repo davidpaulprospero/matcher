@@ -114,8 +114,9 @@ Focus areas are organized into categories:
 
 ### Content Acquisition [A]
 - **rate-limiting** - YouTube download resilience (cookies, circuit breaker, impersonation)
-- **caption** - Caption-first mode and transcript handling
+- **caption** - Caption system (always-on caption-first), transcript caching
 - **download** - Core download logic, yt-dlp integration, browser impersonation
+- **mullvad-vpn** - Mullvad VPN integration for Tier 3 bypass (server rotation, verification)
 
 ### Content Processing [P]
 - **quality** - Match accuracy and confidence scores

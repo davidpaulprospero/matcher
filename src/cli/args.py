@@ -58,7 +58,7 @@ Examples:
         '--project', '-p',
         type=str,
         default=None,
-        help='Project directory (contains videos, outputs, project_config.yaml)'
+        help='Project directory (contains videos, outputs)'
     )
 
     parser.add_argument(

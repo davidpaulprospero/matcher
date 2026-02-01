@@ -420,10 +420,10 @@ class TestKeywordExtraction:
 
         mock_extractor = Mock()
         mock_extractor.extract_keywords.return_value = mock_result
-        mock_extractor.extract_keyword_per_segment.return_value = ['beach', 'ocean', 'wildlife', 'beach']
+        mock_extractor.extract_keywords_grouped.return_value = ['beach', 'ocean', 'wildlife']
 
         with patch('src.keyword_extractor.LLMKeywordExtractor', return_value=mock_extractor):
-            keywords, entities, topic = stage._extract_keywords(segments, 10, mock_config)
+            keywords, entities, topic = stage._extract_keywords(segments, mock_config)
 
         assert len(keywords) > 0
         assert 'beach' in keywords
@@ -439,10 +439,12 @@ class TestKeywordExtraction:
             VoiceoverSegment(index=0, start=0.0, end=3.0, text="beach ocean sunset"),
             VoiceoverSegment(index=1, start=3.0, end=6.0, text="wildlife nature animals")
         ]
+        # Set up proper config value for tfidf_max_features
+        mock_config.keyword.tfidf_max_features = 100
 
         # Mock LLM extractor to raise exception
         with patch('src.keyword_extractor.LLMKeywordExtractor', side_effect=Exception("LLM failed")):
-            keywords, entities, topic = stage._extract_keywords(segments, 5, mock_config)
+            keywords, entities, topic = stage._extract_keywords(segments, mock_config)
 
         # Should use TF-IDF fallback
         assert isinstance(keywords, list)
@@ -465,11 +467,13 @@ class TestTFIDFFallback:
             VoiceoverSegment(index=0, start=0.0, end=3.0, text="beautiful beach sunset ocean"),
             VoiceoverSegment(index=1, start=3.0, end=6.0, text="beach waves surfing ocean")
         ]
+        # Set up proper config value for tfidf_max_features
+        mock_config.keyword.tfidf_max_features = 100
 
-        keywords, entities, topic = stage._tfidf_fallback(segments, 5, mock_config)
+        keywords, entities, topic = stage._tfidf_fallback(segments, mock_config)
 
         assert isinstance(keywords, list)
-        assert len(keywords) <= 5
+        assert len(keywords) > 0  # Should get some keywords
         assert len(entities) == 0  # TF-IDF doesn't extract entities
         assert topic == ''  # TF-IDF doesn't detect topic
 
@@ -479,9 +483,10 @@ class TestTFIDFFallback:
         """Test TF-IDF fallback handles sklearn import error"""
         stage = AnalyzeStage()
         segments = [VoiceoverSegment(index=0, start=0.0, end=3.0, text="test")]
+        mock_config.keyword.tfidf_max_features = 100
 
         with patch('sklearn.feature_extraction.text.TfidfVectorizer', side_effect=ImportError("sklearn not found")):
-            keywords, entities, topic = stage._tfidf_fallback(segments, 5, mock_config)
+            keywords, entities, topic = stage._tfidf_fallback(segments, mock_config)
 
         assert keywords == []
         assert entities == []
@@ -693,7 +698,7 @@ class TestStageExecution:
 
         mock_extractor = Mock()
         mock_extractor.extract_keywords.return_value = mock_result
-        mock_extractor.extract_keyword_per_segment.return_value = ['beach', 'ocean']
+        mock_extractor.extract_keywords_grouped.return_value = ['beach', 'ocean']
 
         with patch('src.keyword_extractor.LLMKeywordExtractor', return_value=mock_extractor):
             result = stage.run(state, mock_config, mock_checkpoint)
@@ -880,25 +885,27 @@ class TestEdgeCases:
         assert segments[0].end == 2.5
 
     @pytest.mark.fast
-    def test_max_keywords_limit(self, mock_config):
-        """Test keyword extraction respects max_keywords limit"""
+    def test_extract_keywords_returns_all(self, mock_config):
+        """Test keyword extraction returns all deduplicated keywords"""
         stage = AnalyzeStage()
         segments = [VoiceoverSegment(index=0, start=0.0, end=3.0, text="test")]
 
         mock_result = Mock()
         mock_result.keywords = ['a', 'b', 'c']
         mock_result.entities = []
-        mock_result.topic = ''
+        mock_result.topic = 'test topic'
 
         mock_extractor = Mock()
         mock_extractor.extract_keywords.return_value = mock_result
-        # Return many keywords
-        mock_extractor.extract_keyword_per_segment.return_value = list('abcdefghijklmnopqrstuvwxyz')
+        # Return keywords including duplicates
+        mock_extractor.extract_keywords_grouped.return_value = ['kw1', 'kw2', 'kw1', 'kw3']
 
         with patch('src.keyword_extractor.LLMKeywordExtractor', return_value=mock_extractor):
-            keywords, _, _ = stage._extract_keywords(segments, max_keywords=5, config=mock_config)
+            keywords, _, _ = stage._extract_keywords(segments, config=mock_config)
 
-        assert len(keywords) <= 5
+        # Should have 3 unique keywords (deduplicated)
+        assert len(keywords) == 3
+        assert keywords == ['kw1', 'kw2', 'kw3']
 
     @pytest.mark.fast
     def test_empty_segment_text(self):

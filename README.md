@@ -14,7 +14,7 @@ An intelligent video matching pipeline that automatically synchronizes stock foo
 - **Location-Aware Matching**: Filters candidates by geographic proximity for travel content
 - **Entity Detection**: Automatically finds and downloads relevant images/videos for detected entities
 - **Vision API**: Generates semantic descriptions of silent footage for better matching
-- **Modular Architecture**: Clean separation of concerns with 10 pipeline stages
+- **Modular Architecture**: Clean separation of concerns with 7 pipeline stages
 
 ## Quick Start
 
@@ -36,16 +36,13 @@ python main.py --match-only
 
 | Stage | Purpose |
 |-------|---------|
-| ANALYZE | Extract keywords, topics, entities, and location chapters |
-| ENTITY_IMAGES | Download entity images (Google, Bing, Pexels) |
-| ENTITY_VIDEOS | Download stock videos for entities |
-| DOWNLOAD | YouTube video/audio download |
-| STOCK | Download generic stock footage (B-roll) |
-| REMIX | Filter videos by keyword relevance |
-| TRANSCRIBE | Whisper transcription + embeddings |
-| SCENE_DETECTION | Scene boundaries + face detection for B-roll |
-| MATCH | Embedding + LLM matching |
-| OUTPUT | OTIO, EDL, XML generation |
+| ANALYZE | Extract keywords, topics, entities from voiceover |
+| VIDEO_SEARCH | Search and queue videos from YouTube |
+| CAPTION | Fetch YouTube captions (always on) |
+| MATCH | Embedding + LLM semantic matching |
+| ITERATIVE_MATCH | Gap analysis and query refinement |
+| DOWNLOAD_SEGMENTS | Download matched video segments |
+| OUTPUT | OTIO, EDL, XML timeline generation |
 
 ## OTIO Track Layout
 

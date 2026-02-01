@@ -102,78 +102,33 @@ def make_paths_project_relative(config: 'Config', project_dir: Path) -> 'Config'
 
 def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config':
     """
-    Load configuration with project-specific overrides.
-
-    Loading order:
-    1. Base config from config_path (or default config.yaml)
-    2. Project-specific overrides from project_config.yaml
+    Load configuration for a project.
 
     Args:
         project_dir: Project directory
-        config_path: Path to base config file
+        config_path: Path to config file (defaults to config.yaml)
 
     Returns:
-        Merged configuration object
+        Configuration object with paths resolved to project directory
     """
     from ..config import load_config
 
-    # Determine project_config.yaml path first
-    project_config_path = project_dir / 'project_config.yaml'
-
-    # Load base config
-    # If config_path points to project_config.yaml, use default config instead
-    # (project_config should be used as overrides, not as base config)
+    # Load config from specified path or default
     if config_path and config_path.exists():
-        try:
-            # Check if config_path is the same as project_config.yaml
-            if config_path.resolve() == project_config_path.resolve():
-                print(f"  ⚠ --config points to project_config.yaml, using default config as base")
-                config = load_config()  # Use default config.yaml
-            else:
-                config = load_config(str(config_path))
-        except (OSError, ValueError):
-            # resolve() can fail on some paths, fall back to string comparison
-            if str(config_path).endswith('project_config.yaml'):
-                print(f"  ⚠ --config points to project_config.yaml, using default config as base")
-                config = load_config()
-            else:
-                config = load_config(str(config_path))
+        config = load_config(str(config_path))
     else:
         config = load_config()
 
-    # Look for project-specific config (apply overrides)
-    project_overrides = {}
-    if project_config_path.exists():
-        import yaml
-        print(f"  ✓ Loading project config: {project_config_path}")
-        try:
-            with open(project_config_path, 'r', encoding='utf-8') as f:
-                project_overrides = yaml.safe_load(f) or {}
-            config = merge_config(config, project_overrides)
-            # Re-convert nested configs after merge (per Rule 2 - dicts need conversion)
-            if hasattr(config, '_convert_nested_configs'):
-                config._convert_nested_configs()
-            # Re-resolve paths after merge to pick up video_source_dir
-            config._resolve_paths()
-        except Exception as e:
-            print(f"  ⚠ Failed to load project config: {e}")
-
     # Set project_dir and resolve all paths relative to it
-    # Reset paths to relative values so _resolve_paths() re-resolves them correctly
-    # (they may have been resolved to wrong base in __post_init__)
     config.project_dir = str(project_dir)
 
     # Reset cache_dir if it was resolved to wrong location
-    # Preserve custom values from project_config.yaml
     if config.cache.cache_dir and not str(config.cache.cache_dir).startswith(str(project_dir)):
-        custom_cache = project_overrides.get('cache', {}).get('cache_dir')
-        config.cache.cache_dir = custom_cache if custom_cache else ".cache"
+        config.cache.cache_dir = ".cache"
 
     # Reset log_dir if it was resolved to wrong location
-    # Preserve custom values from project_config.yaml
     if config.logging.log_dir and not str(config.logging.log_dir).startswith(str(project_dir)):
-        custom_log = project_overrides.get('logging', {}).get('log_dir')
-        config.logging.log_dir = custom_log if custom_log else "logs"
+        config.logging.log_dir = "logs"
 
     config._resolve_paths()
 

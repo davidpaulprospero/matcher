@@ -36,6 +36,7 @@ class KeywordConfig:
     max_keywords: int = 30
     min_keyword_length: int = 3
     max_keyword_words: int = 8  # Max words per keyword (filters "too long" phrases)
+    segments_per_query: int = 3  # Number of segments grouped per search query
 
     # List detection
     list_detection: ListDetectionConfig = None

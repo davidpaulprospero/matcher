@@ -86,7 +86,7 @@ class LLMKeywordExtractor:
             logger.warning(f"Failed to initialize LLM client: {e}")
 
     def _call_llm(self, prompt: str) -> str:
-        """Call LLM and return response text"""
+        """Call LLM and return response text (expects JSON array)"""
         from src.llm_client import LLMRequest, ResponseFormat
 
         max_tokens = getattr(self.config.llm, 'max_tokens', 2000)
@@ -102,6 +102,24 @@ class LLMKeywordExtractor:
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             return "[]"
+
+    def _call_llm_text(self, prompt: str) -> str:
+        """Call LLM and return plain text response (no JSON parsing)"""
+        from src.llm_client import LLMRequest, ResponseFormat
+
+        max_tokens = getattr(self.config.llm, 'max_tokens', 2000)
+        try:
+            request = LLMRequest(
+                prompt=prompt,
+                response_format=ResponseFormat.TEXT,
+                max_tokens=max_tokens,
+                cache_key_prefix="keyword_extraction"
+            )
+            response = self.llm_client.generate(request)
+            return response.text
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            return ""
 
     def _parse_keywords_json(self, response: str) -> List[str]:
         """Parse JSON array from LLM response"""
@@ -131,7 +149,6 @@ class LLMKeywordExtractor:
     def extract_keywords(
         self,
         segments: List[Dict],
-        max_keywords: int = None,
         expand: bool = True
     ) -> KeywordResult:
         """
@@ -139,16 +156,11 @@ class LLMKeywordExtractor:
 
         Args:
             segments: List of voiceover segments with 'text' field
-            max_keywords: Maximum number of keywords to return (uses config default if None)
             expand: Whether to expand keywords with LLM refinement
 
         Returns:
             KeywordResult with extracted keywords
         """
-        # Use config default if not specified
-        if max_keywords is None:
-            max_keywords = getattr(self.config.keyword, 'max_keywords', 30)
-
         if not segments:
             return KeywordResult(keywords=[], segments_analyzed=0, extraction_method="none")
 
@@ -163,15 +175,14 @@ class LLMKeywordExtractor:
 
         # Use LLM if available
         if self.llm_client:
-            return self._extract_with_llm(full_text, topic, max_keywords, expand, len(segments))
+            return self._extract_with_llm(full_text, topic, expand, len(segments))
         else:
-            return self._extract_with_tfidf(segments, max_keywords)
+            return self._extract_with_tfidf(segments)
 
     def _extract_with_llm(
         self,
         text: str,
         topic: str,
-        max_keywords: int,
         expand: bool,
         num_segments: int
     ) -> KeywordResult:
@@ -182,10 +193,10 @@ class LLMKeywordExtractor:
         entity_keywords, raw_entities = extract_entities(text[:8000], topic, self._call_llm)
         logger.info(f"Entity extraction: {len(entity_keywords)} entity-based keywords, {len(raw_entities)} entities")
 
-        # Step 2: General keyword extraction
+        # Step 2: General keyword extraction (request 50 keywords, no hard limit)
         prompt = KEYWORD_EXTRACTION_PROMPT.format(
             voiceover_text=text[:8000],  # Limit text length
-            max_keywords=max_keywords
+            max_keywords=50  # Request a reasonable number from LLM
         )
 
         logger.info("Extracting general keywords with LLM...")
@@ -201,9 +212,9 @@ class LLMKeywordExtractor:
         # Step 4: Expand if requested and we have keywords
         if expand and merged_keywords:
             expand_prompt = KEYWORD_EXPANSION_PROMPT.format(
-                initial_keywords=merged_keywords[:30],  # Limit for expansion
+                initial_keywords=merged_keywords[:30],  # Limit for expansion prompt
                 topic=topic,
-                max_keywords=max_keywords
+                max_keywords=50  # Request a reasonable number from LLM
             )
 
             logger.info("Expanding keywords with LLM...")
@@ -213,11 +224,11 @@ class LLMKeywordExtractor:
             if expanded_keywords:
                 # Keep entity keywords at the front, add expanded ones
                 all_keywords = entity_keywords + [k for k in expanded_keywords if k not in entity_keywords]
-                keywords = list(dict.fromkeys(all_keywords))[:max_keywords]
+                keywords = list(dict.fromkeys(all_keywords))
             else:
-                keywords = list(dict.fromkeys(merged_keywords))[:max_keywords]
+                keywords = list(dict.fromkeys(merged_keywords))
         else:
-            keywords = list(dict.fromkeys(merged_keywords))[:max_keywords]
+            keywords = list(dict.fromkeys(merged_keywords))
 
         # Validate keywords - filter out abstract/narrative phrases
         pre_validation_count = len(keywords)
@@ -242,8 +253,7 @@ class LLMKeywordExtractor:
 
     def _extract_with_tfidf(
         self,
-        segments: List[Dict],
-        max_keywords: int
+        segments: List[Dict]
     ) -> KeywordResult:
         """Fallback: extract keywords using TF-IDF"""
         from keyword_extractor import KeywordWeightExtractor
@@ -265,20 +275,13 @@ class LLMKeywordExtractor:
                 extraction_method="tfidf"
             )
 
-        # Override auto_detect_count in config temporarily
-        original_count = self.config.keyword_weights.auto_detect_count
-        self.config.keyword_weights.auto_detect_count = max_keywords
-
         extractor = KeywordWeightExtractor(self.config)
 
         # Get weighted terms (returns tuple of boost_terms, penalty_terms, tfidf_scores)
         boost_terms, _, tfidf_scores = extractor.extract_weighted_terms(texts)
 
-        # Restore original config
-        self.config.keyword_weights.auto_detect_count = original_count
-
         # Convert to search keywords (use boost terms which are top TF-IDF terms)
-        keywords = list(boost_terms)[:max_keywords]
+        keywords = list(boost_terms)
 
         return KeywordResult(
             keywords=keywords,
@@ -344,4 +347,42 @@ class LLMKeywordExtractor:
             llm_client=self.llm_client,
             llm_call_function=self._call_llm,
             topic=topic
+        )
+
+    def extract_keywords_grouped(
+        self,
+        segments: List[Dict],
+        topic: str = "",
+        segments_per_query: int = None
+    ) -> List[str]:
+        """
+        Extract ONE search query per group of N segments.
+
+        Groups segments into batches and generates one unified search query
+        per batch, reducing total queries while maintaining context.
+
+        Example: 90 segments with segments_per_query=3 → 30 search queries
+
+        Args:
+            segments: List of segment dicts with 'text' key
+            topic: Documentary topic for context
+            segments_per_query: Number of segments per search query
+                              (default: config.keyword.segments_per_query or 3)
+
+        Returns:
+            List of search queries (one per segment group)
+        """
+        from .segment_processor import extract_keywords_grouped as _extract_grouped
+
+        # Use config default if not specified
+        if segments_per_query is None:
+            segments_per_query = getattr(self.config.keyword, 'segments_per_query', 3)
+
+        # Use plain text LLM call since grouped prompts return plain text, not JSON
+        return _extract_grouped(
+            segments=segments,
+            llm_client=self.llm_client,
+            llm_call_function=self._call_llm_text,
+            topic=topic,
+            segments_per_query=segments_per_query
         )

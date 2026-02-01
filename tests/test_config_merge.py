@@ -424,72 +424,6 @@ class TestKeyNameMapping:
         assert merged.duration_tiers.long.videos_per_keyword == 3
 
 
-class TestConfigMergeIntegration:
-    """Integration tests for config merge with load_project_config."""
-
-    @pytest.mark.fast
-    def test_load_project_config_with_duration_tiers(self, tmp_path):
-        """Test load_project_config handles duration_tiers correctly."""
-        import yaml
-        from src.cli.config_utils import load_project_config
-
-        # Create project directory with config
-        project_dir = tmp_path / "test_project"
-        project_dir.mkdir()
-
-        project_config = {
-            'duration_tiers': {
-                'short': {'count': 2},
-                'medium': {'count': 2},
-                'long': {'count': 1},
-                'longer': {'count': 0}
-            }
-        }
-
-        config_file = project_dir / "project_config.yaml"
-        with open(config_file, 'w') as f:
-            yaml.dump(project_config, f)
-
-        config = load_project_config(project_dir)
-
-        assert config.duration_tiers.short.videos_per_keyword == 2
-        assert config.duration_tiers.medium.videos_per_keyword == 2
-        assert config.duration_tiers.long.videos_per_keyword == 1
-        assert config.duration_tiers.longer.videos_per_keyword == 0
-
-    @pytest.mark.fast
-    def test_load_project_config_with_legacy_path(self, tmp_path):
-        """Test load_project_config handles legacy download.tier_config."""
-        import yaml
-        from src.cli.config_utils import load_project_config
-
-        project_dir = tmp_path / "legacy_project"
-        project_dir.mkdir()
-
-        # Legacy format that existing projects might use
-        project_config = {
-            'download': {
-                'tier_config': {
-                    'short': {'per_keyword': 1},
-                    'medium': {'per_keyword': 1},
-                    'long': {'per_keyword': 1},
-                    'longer': {'per_keyword': 0}
-                }
-            }
-        }
-
-        config_file = project_dir / "project_config.yaml"
-        with open(config_file, 'w') as f:
-            yaml.dump(project_config, f)
-
-        config = load_project_config(project_dir)
-
-        assert config.duration_tiers.short.videos_per_keyword == 1
-        assert config.duration_tiers.medium.videos_per_keyword == 1
-        assert config.duration_tiers.long.videos_per_keyword == 1
-        assert config.duration_tiers.longer.videos_per_keyword == 0
-
-
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
@@ -595,37 +529,18 @@ class TestEdgeCases:
         assert tiers.medium.max_total == 0  # default
 
     @pytest.mark.fast
-    def test_load_project_config_with_invalid_yaml(self, tmp_path, capsys):
-        """Test load_project_config handles invalid YAML gracefully."""
+    def test_load_project_config_returns_base_config(self, tmp_path):
+        """Test load_project_config returns base config with project dir set."""
         from src.cli.config_utils import load_project_config
 
-        project_dir = tmp_path / "bad_yaml_project"
+        project_dir = tmp_path / "test_project"
         project_dir.mkdir()
 
-        # Create invalid YAML file
-        config_file = project_dir / "project_config.yaml"
-        with open(config_file, 'w') as f:
-            f.write("invalid: yaml: content: [unclosed")
-
-        # Should not crash, return base config with warning
-        config = load_project_config(project_dir)
-        captured = capsys.readouterr()
-
-        assert config is not None
-        assert "Failed to load project config" in captured.out or config is not None
-
-    @pytest.mark.fast
-    def test_load_project_config_without_project_config_file(self, tmp_path):
-        """Test load_project_config when no project_config.yaml exists."""
-        from src.cli.config_utils import load_project_config
-
-        project_dir = tmp_path / "empty_project"
-        project_dir.mkdir()
-
-        # Should return base config without error
+        # Should return base config with project_dir set
         config = load_project_config(project_dir)
 
         assert config is not None
+        assert config.project_dir == str(project_dir)
         # Should have default duration_tiers
         assert isinstance(config.duration_tiers.short, DurationTierConfig)
 
@@ -801,43 +716,6 @@ class TestDeepMergeEdgeCases:
 
         # Config should be unchanged
         assert merged.download.quality == original_quality
-
-    @pytest.mark.fast
-    def test_project_config_does_not_clobber_unrelated_sections(self, tmp_path):
-        """Test project_config.yaml overrides don't affect unrelated sections."""
-        import yaml
-        from src.cli.config_utils import load_project_config
-
-        project_dir = tmp_path / "isolated_override_project"
-        project_dir.mkdir()
-
-        # Load base config to get original values
-        base_config = load_config()
-        original_transcription_model = base_config.transcription.model
-        original_matching_confidence = base_config.matching.min_confidence
-        original_llm_provider = base_config.llm.provider
-
-        # Project config only touches download section
-        project_config = {
-            'download': {
-                'quality': '1080p',
-                'max_retries': 10
-            }
-        }
-
-        config_file = project_dir / "project_config.yaml"
-        with open(config_file, 'w') as f:
-            yaml.dump(project_config, f)
-
-        config = load_project_config(project_dir)
-
-        # Unrelated sections should be unchanged
-        assert config.transcription.model == original_transcription_model
-        assert config.matching.min_confidence == original_matching_confidence
-        assert config.llm.provider == original_llm_provider
-        # Only download section should change
-        assert config.download.quality == '1080p'
-        assert config.download.max_retries == 10
 
     @pytest.mark.fast
     def test_nested_dict_merge_preserves_unspecified_nested_keys(self):

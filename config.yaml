@@ -506,7 +506,8 @@ keyword:
   max_keywords: 30
   min_keyword_length: 3
   max_keyword_words: 8  # Max words per keyword (rejects "too long" phrases)
-  
+  segments_per_query: 3  # Number of voiceover segments grouped per search query
+
   # List-based keyword detection
   # Detects numbered lists (e.g., "Number 10 Austin, Texas") and ensures
   # each list item gets a guaranteed download keyword
@@ -972,9 +973,10 @@ download:
   # Benefits:
   #   - No audio download/transcription needed when captions available
   #   - Quality indicators: human vs auto-generated captions
-  #   - Falls back to Whisper transcription when captions unavailable
+  #   - Falls back to TRANSCRIBE stage (Whisper) when captions unavailable
   caption_first:
-    enabled: false                    # Enable caption-first mode (per-project)
+    # NOTE: Caption fetching is ALWAYS enabled (v4.0+). The 'enabled' field is deprecated.
+    enabled: true                     # DEPRECATED: caption-first is now always on
     fallback_to_transcription: true   # Fall back to Whisper when captions unavailable
     preferred_language: "en"          # Preferred caption language (ISO 639-1 code)
     # Configurable language fallback chain (US-003)

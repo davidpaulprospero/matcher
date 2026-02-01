@@ -33,7 +33,6 @@ ARCHIVE_ESSENTIALS = [
     "output",               # OTIO, EDL, XML files (new name)
     "otio_output",          # OTIO, EDL, XML files (legacy name)
     "voiceover",            # Original script
-    "project_config.yaml",  # Project settings
     "run.bat",              # Launcher (Windows)
     "run.sh",               # Launcher (Unix)
 ]
@@ -86,16 +85,8 @@ def format_size(size_bytes: int) -> str:
 
 
 def load_project_config(project_dir: Path) -> dict:
-    """Load project_config.yaml to find custom paths"""
-    config_path = project_dir / "project_config.yaml"
-    if not config_path.exists():
-        return {}
-
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f) or {}
-    except Exception:
-        return {}
+    """Load config for project (placeholder for future use)."""
+    return {}
 
 
 def find_short_path_dirs(project_dir: Path, config: dict) -> Dict[str, Optional[Path]]:
@@ -368,15 +359,15 @@ def cleanup_project(project_dir: Path, level: str = LEVEL_CACHE,
         print(f"  Error: Project directory not found: {project_dir}")
         return False
 
-    # Check if it's a valid project (has run.bat or project_config.yaml)
+    # Check if it's a valid project (has run.bat, run.sh, or checkpoint)
     is_project = (
         (project_dir / "run.bat").exists() or
         (project_dir / "run.sh").exists() or
-        (project_dir / "project_config.yaml").exists()
+        (project_dir / "checkpoint.json").exists()
     )
     if not is_project:
         print(f"  Error: Not a valid project directory: {project_dir}")
-        print("  (Missing run.bat, run.sh, or project_config.yaml)")
+        print("  (Missing run.bat, run.sh, or checkpoint.json)")
         return False
 
     # Check if already archived

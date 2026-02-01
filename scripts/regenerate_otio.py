@@ -359,7 +359,7 @@ def load_config(project_dir: Path) -> 'Config':
     print(f"  Loading config...")
     from src.cli.config_utils import load_project_config
 
-    # Load and merge configs (handles config.yaml + project_config.yaml merging)
+    # Load config and set project directory
     global_config_path = PROJECT_ROOT / "config.yaml"
     config = load_project_config(project_dir, global_config_path)
     print(f"  Config loaded")

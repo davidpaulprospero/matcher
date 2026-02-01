@@ -32,12 +32,6 @@ class TestPathResolutionToProjectDir:
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
 
-        # Create minimal project_config.yaml
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-""")
-
         # Load config with project_dir set
         config = load_project_config(project_dir)
 
@@ -53,11 +47,6 @@ project:
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
 
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-""")
-
         config = load_project_config(project_dir)
 
         # cache_dir should be under project_dir
@@ -69,11 +58,6 @@ project:
         """logging.log_dir should be relative to project_dir, not cwd."""
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
-
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-""")
 
         config = load_project_config(project_dir)
 
@@ -87,11 +71,6 @@ project:
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
 
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-""")
-
         config = load_project_config(project_dir)
 
         # project_dir should be the actual project directory, not "."
@@ -103,11 +82,6 @@ project:
         """When cwd differs from project_dir, paths should NOT be in cwd."""
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
-
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-""")
 
         # Save original cwd and change to a different directory
         original_cwd = os.getcwd()
@@ -133,43 +107,16 @@ class TestPathResolutionWithCustomConfig:
     """Test path resolution when custom paths are specified in config."""
 
     @pytest.mark.fast
-    def test_absolute_paths_preserved(self, tmp_path):
-        """Absolute paths in config should be preserved, not made relative."""
+    def test_default_paths_resolved_to_project(self, tmp_path):
+        """Default relative paths in config should resolve to project_dir."""
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
 
-        custom_output = tmp_path / "custom_output"
-
-        (project_dir / "project_config.yaml").write_text(f"""
-project:
-  name: test_project
-output:
-  output_dir: "{str(custom_output).replace(chr(92), '/')}"
-""")
-
         config = load_project_config(project_dir)
 
-        # Absolute path should be preserved
-        # Note: The path resolution may still make it project-relative if it wasn't absolute in the YAML
-
-    @pytest.mark.fast
-    def test_relative_paths_resolved_to_project(self, tmp_path):
-        """Relative paths in config should resolve to project_dir."""
-        project_dir = tmp_path / "my_project"
-        project_dir.mkdir()
-
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-cache:
-  cache_dir: "my_custom_cache"
-""")
-
-        config = load_project_config(project_dir)
-
-        # Relative path should be resolved to project_dir
+        # Default relative path should be resolved to project_dir
         assert str(project_dir) in config.cache.cache_dir
-        assert "my_custom_cache" in config.cache.cache_dir
+        assert ".cache" in config.cache.cache_dir
 
 
 class TestResolvePathsIdempotent:
@@ -180,11 +127,6 @@ class TestResolvePathsIdempotent:
         """Calling _resolve_paths multiple times should not change paths."""
         project_dir = tmp_path / "my_project"
         project_dir.mkdir()
-
-        (project_dir / "project_config.yaml").write_text("""
-project:
-  name: test_project
-""")
 
         config = load_project_config(project_dir)
 
@@ -212,9 +154,6 @@ class TestProjectDirReset:
         project_dir1.mkdir()
         project_dir2 = tmp_path / "project2"
         project_dir2.mkdir()
-
-        (project_dir1 / "project_config.yaml").write_text("project:\n  name: test1")
-        (project_dir2 / "project_config.yaml").write_text("project:\n  name: test2")
 
         config1 = load_project_config(project_dir1)
         config2 = load_project_config(project_dir2)
