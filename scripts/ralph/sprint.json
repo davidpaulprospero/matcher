@@ -1,0 +1,171 @@
+{
+    "branchName": "ralph/sprint-32",
+    "sprintNumber": 32,
+    "focusArea": "refactoring",
+    "projectContext": "Sprint 32 focuses on god file refactoring with smaller, testable stories after Sprint 31 had 0% pass rate due to timeouts. Key refactoring targets identified: (1) src/matching/tiered_matcher.py at 1,343 lines - extract embedding search and LLM reranking into separate classes; (2) src/matching/llm_providers.py at 1,042 lines - split into provider-specific modules; (3) src/downloader/retry_queue.py at 674 lines - extract config and statistics tracking. Each story targets ONE specific extraction with clear line counts and test requirements. Caption_fetcher.py work deferred pending completion of src/caption/ integration.",
+    "userStories": [
+        {
+            "id": "US-32-001",
+            "title": "Generate sprint stories for refactoring focus area",
+            "priority": 0,
+            "passes": true,
+            "notes": "Sprint story generation completed. Generated 10 stories (US-32-002 through US-32-011) focusing on god file refactoring.",
+            "acceptanceCriteria": [
+                "Analyze the codebase to find 8-12 specific improvements for 'refactoring'",
+                "Add stories US-32-002 through US-32-012 to scripts/ralph/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Mark this story (US-32-001) as passes: true when done"
+            ]
+        },
+        {
+            "id": "US-32-002",
+            "title": "Extract EmbeddingSearch class from TieredMatcher",
+            "priority": 1,
+            "passes": false,
+            "notes": "Tier 2 (Medium). Source: src/matching/tiered_matcher.py lines ~200-350. Extract _get_embedding_candidates and _compute_similarity methods.",
+            "acceptanceCriteria": [
+                "Create src/matching/embedding_search.py with EmbeddingSearch class",
+                "Move _get_embedding_candidates method from tiered_matcher.py to EmbeddingSearch.search()",
+                "Move _compute_similarity method to EmbeddingSearch._compute_similarity()",
+                "EmbeddingSearch.__init__ accepts config, embedding_index, and video_segments",
+                "New module under 150 lines with single responsibility: embedding similarity search",
+                "Run pytest tests/test_matching*.py -v --tb=short -x to verify no regressions"
+            ]
+        },
+        {
+            "id": "US-32-003",
+            "title": "Add tests for extracted EmbeddingSearch class",
+            "priority": 2,
+            "passes": false,
+            "notes": "Tier 1 (Quick Win). Create tests for new EmbeddingSearch class.",
+            "acceptanceCriteria": [
+                "Create tests/test_matching_embedding_search.py",
+                "Add test_embedding_search_init verifying config parameter handling",
+                "Add test_embedding_search_returns_top_k with mock embeddings",
+                "Add test_embedding_search_handles_empty_index edge case",
+                "Add test_embedding_search_similarity_calculation with known values",
+                "All 4 tests pass: pytest tests/test_matching_embedding_search.py -v"
+            ]
+        },
+        {
+            "id": "US-32-004",
+            "title": "Extract LLMReranker class from TieredMatcher",
+            "priority": 3,
+            "passes": false,
+            "notes": "Tier 2 (Medium). Source: src/matching/tiered_matcher.py lines ~400-600. Extract _rerank_with_llm and _prepare_rerank_prompt methods.",
+            "acceptanceCriteria": [
+                "Create src/matching/llm_reranker.py with LLMReranker class",
+                "Move _rerank_with_llm method from tiered_matcher.py to LLMReranker.rerank()",
+                "Move _prepare_rerank_prompt method to LLMReranker._prepare_prompt()",
+                "LLMReranker.__init__ accepts config and llm_provider",
+                "New module under 200 lines with single responsibility: LLM-based reranking",
+                "Run pytest tests/test_matching*.py -v --tb=short -x to verify no regressions"
+            ]
+        },
+        {
+            "id": "US-32-005",
+            "title": "Add tests for extracted LLMReranker class",
+            "priority": 4,
+            "passes": false,
+            "notes": "Tier 1 (Quick Win). Create tests for new LLMReranker class.",
+            "acceptanceCriteria": [
+                "Create tests/test_matching_llm_reranker.py",
+                "Add test_llm_reranker_init verifying provider injection",
+                "Add test_llm_reranker_prompt_format checking prompt structure",
+                "Add test_llm_reranker_handles_empty_candidates edge case",
+                "Add test_llm_reranker_respects_confidence_threshold",
+                "All 4 tests pass: pytest tests/test_matching_llm_reranker.py -v"
+            ]
+        },
+        {
+            "id": "US-32-006",
+            "title": "Split GeminiMatcher into separate module",
+            "priority": 5,
+            "passes": false,
+            "notes": "Tier 2 (Medium). Source: src/matching/llm_providers.py lines ~100-400. Extract GeminiMatcher class.",
+            "acceptanceCriteria": [
+                "Create src/matching/providers/gemini.py with GeminiMatcher class",
+                "Create src/matching/providers/__init__.py exporting GeminiMatcher",
+                "Move GeminiMatcher class from llm_providers.py to new module",
+                "Update llm_providers.py to re-export GeminiMatcher for backward compatibility",
+                "New module under 200 lines focused on Gemini API interaction",
+                "Run pytest tests/test_matching_llm_providers.py -v to verify no regressions"
+            ]
+        },
+        {
+            "id": "US-32-007",
+            "title": "Split ClaudeMatcher into separate module",
+            "priority": 6,
+            "passes": false,
+            "notes": "Tier 2 (Medium). Source: src/matching/llm_providers.py lines ~400-600. Extract ClaudeMatcher class.",
+            "acceptanceCriteria": [
+                "Create src/matching/providers/claude.py with ClaudeMatcher class",
+                "Update src/matching/providers/__init__.py to export ClaudeMatcher",
+                "Move ClaudeMatcher class from llm_providers.py to new module",
+                "Update llm_providers.py to re-export ClaudeMatcher for backward compatibility",
+                "New module under 150 lines focused on Claude API interaction",
+                "Run pytest tests/test_matching_llm_providers.py -v to verify no regressions"
+            ]
+        },
+        {
+            "id": "US-32-008",
+            "title": "Extract RetryQueueStats class from retry_queue.py",
+            "priority": 7,
+            "passes": false,
+            "notes": "Tier 2 (Medium). Source: src/downloader/retry_queue.py. Extract statistics tracking methods.",
+            "acceptanceCriteria": [
+                "Create src/downloader/retry_stats.py with RetryQueueStats dataclass",
+                "Move statistics tracking methods from RetryQueue to RetryQueueStats",
+                "Include get_summary(), get_failure_reasons(), get_retry_metrics() methods",
+                "Update RetryQueue to delegate to RetryQueueStats for all stats operations",
+                "New module under 100 lines with single responsibility: retry statistics",
+                "Run pytest tests/test_downloader_retry.py -v to verify no regressions"
+            ]
+        },
+        {
+            "id": "US-32-009",
+            "title": "Add tests for RetryQueueStats class",
+            "priority": 8,
+            "passes": false,
+            "notes": "Tier 1 (Quick Win). Create tests for new RetryQueueStats class.",
+            "acceptanceCriteria": [
+                "Create tests/test_downloader_retry_stats.py",
+                "Add test_retry_stats_empty_queue returns zero counts",
+                "Add test_retry_stats_tracks_failure_reasons correctly",
+                "Add test_retry_stats_get_summary_format matches expected structure",
+                "Add test_retry_stats_metrics_increment on add_item",
+                "All 4 tests pass: pytest tests/test_downloader_retry_stats.py -v"
+            ]
+        },
+        {
+            "id": "US-32-010",
+            "title": "Verify tiered_matcher.py reduced after extractions",
+            "priority": 9,
+            "passes": false,
+            "notes": "Tier 3 (Verification). Validation story to confirm refactoring reduced file size.",
+            "acceptanceCriteria": [
+                "Run wc -l src/matching/tiered_matcher.py and verify under 1100 lines",
+                "Verify TieredMatcher uses composition with EmbeddingSearch and LLMReranker",
+                "Run full matching test suite: pytest tests/test_matching*.py -v --tb=short",
+                "All matching tests pass with no new failures",
+                "Update src/matching/__init__.py to export new classes",
+                "Add docstring to tiered_matcher.py documenting refactored structure"
+            ]
+        },
+        {
+            "id": "US-32-011",
+            "title": "Verify llm_providers.py reduced after extractions",
+            "priority": 10,
+            "passes": false,
+            "notes": "Tier 3 (Verification). Validation story to confirm refactoring reduced file size.",
+            "acceptanceCriteria": [
+                "Run wc -l src/matching/llm_providers.py and verify under 700 lines",
+                "Verify src/matching/providers/ directory exists with gemini.py and claude.py",
+                "Run pytest tests/test_matching_llm_providers.py -v --tb=short",
+                "All LLM provider tests pass with no new failures",
+                "Backward compatibility imports work: from src.matching.llm_providers import GeminiMatcher",
+                "Add docstring to llm_providers.py documenting it as facade module"
+            ]
+        }
+    ]
+}
