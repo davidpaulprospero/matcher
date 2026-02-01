@@ -16,6 +16,7 @@ __pycache__/
 coverage.json
 htmlcov/
 .pytest_cache/
+.hypothesis/
 
 # Distribution / packaging
 build/
@@ -119,14 +120,12 @@ test_collection_mode/
 ~/
 
 # --- Ralph Loop ---
-# Session files (volatile, per-session)
+# Archive and state (development artifacts)
+scripts/ralph/archive/
+scripts/ralph/state/
+scripts/ralph/config/
+# Session files (volatile)
 scripts/ralph/session/
-# Volatile state files
-scripts/ralph/state/heartbeat.json
-scripts/ralph/state/health_metrics.json
-scripts/ralph/state/crash_recovery.json
-scripts/ralph/state/healing_state.json
-# Session logs
 scripts/ralph/logs/
 # Temp files
 scripts/ralph/**/*.tmp
