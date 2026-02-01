@@ -1213,7 +1213,7 @@ function Get-LLMScanDecisions {
         Uses Claude to analyze problem and determine which scans to run
     .PARAMETER UserInput
         The user's problem description
-    .PARAMETER Verbose
+    .PARAMETER ShowDetail
         Show detailed output
     .RETURNS
         Hashtable with scans (array of {id, priority, reason}) and framing (string)
@@ -1221,7 +1221,7 @@ function Get-LLMScanDecisions {
     param(
         [Parameter(Mandatory=$true)]
         [string]$UserInput,
-        [switch]$Verbose
+        [switch]$ShowDetail
     )
 
     # Load scan registry
@@ -1269,14 +1269,14 @@ RULES:
     $result = Invoke-LLMWithTimeout -Prompt $prompt -TimeoutSeconds 30
 
     if ($result.Success -and $result.Data -and $result.Data.scans) {
-        if ($Verbose) {
+        if ($ShowDetail) {
             Write-Host "  LLM decided on $($result.Data.scans.Count) scans" -ForegroundColor Green
         }
         return $result.Data
     }
 
     # Fallback to keyword-based decisions
-    if ($Verbose) {
+    if ($ShowDetail) {
         Write-Host "  LLM analysis failed, using keyword fallback..." -ForegroundColor Yellow
     }
     return Get-KeywordScanDecisions -UserInput $UserInput

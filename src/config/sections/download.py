@@ -25,6 +25,7 @@ __all__ = [
     'CircuitBreakerConfig',
     'BatchRetryConfig',
     'VPNConfig',
+    'MullvadConfig',
     'ImpersonationConfig',
     'ExtractorArgsConfig',
     'DownloadConfig',
@@ -860,6 +861,48 @@ class VPNConfig:
 
 
 @dataclass
+class MullvadConfig:
+    """Mullvad VPN-specific configuration for Tier 4 bypass.
+
+    Extends VPN functionality with Mullvad-specific features:
+    - Uses native mullvad CLI commands for connect/disconnect/rotate
+    - Verifies connection via am.i.mullvad.net API
+    - Supports geographic server rotation by country code
+
+    Tier 4 escalation: After cookie rotation (Tier 3) is exhausted,
+    MullvadVPN rotates servers to get a new IP address.
+
+    Requires: Mullvad VPN client installed with CLI access.
+    Install: winget install Mullvad.Mullvad (Windows)
+    """
+    # Enable/disable Mullvad VPN integration as Tier 4 bypass
+    enabled: bool = False
+
+    # Preferred countries for server rotation (ISO 3166-1 alpha-2 codes)
+    # Mullvad rotates through these when escalation triggers VPN rotation
+    # Empty list = use any available server (mullvad default)
+    preferred_countries: List[str] = field(default_factory=lambda: [
+        'us', 'gb', 'de', 'nl', 'se', 'ch'
+    ])
+
+    # Server rotation strategy:
+    # - 'random': Select random country from preferred_countries
+    # - 'sequential': Cycle through preferred_countries in order
+    # - 'nearest': Let Mullvad choose nearest server (ignores preferred_countries)
+    rotation_strategy: str = 'random'
+
+    # Maximum VPN server rotations per session (prevents infinite rotation loops)
+    max_rotations_per_session: int = 5
+
+    # Timeout for am.i.mullvad.net verification request (seconds)
+    # Falls back to generic ping verification if verification times out
+    verification_timeout: int = 10
+
+    # Wait time after rotation for connection to stabilize (seconds)
+    rotation_delay_seconds: int = 5
+
+
+@dataclass
 class ImpersonationConfig:
     """Browser impersonation configuration for yt-dlp TLS fingerprint bypass.
 
@@ -1028,6 +1071,10 @@ class DownloadConfig:
     # VPN integration: switch VPN servers when cookies are exhausted
     vpn: VPNConfig = field(default_factory=VPNConfig)
 
+    # Mullvad VPN: Tier 4 bypass using Mullvad CLI for IP rotation
+    # Activates after cookie rotation (Tier 3) is exhausted
+    mullvad: MullvadConfig = field(default_factory=MullvadConfig)
+
     # Speed tracking: monitor download speeds for adaptive timeouts
     speed_tracking: SpeedTrackingConfig = field(default_factory=SpeedTrackingConfig)
 
@@ -1083,6 +1130,8 @@ class DownloadConfig:
             self.rate_limit = RateLimitConfig(**self.rate_limit)
         if isinstance(self.vpn, dict):
             self.vpn = VPNConfig(**self.vpn)
+        if isinstance(self.mullvad, dict):
+            self.mullvad = MullvadConfig(**self.mullvad)
         if isinstance(self.speed_tracking, dict):
             self.speed_tracking = SpeedTrackingConfig(**self.speed_tracking)
         if isinstance(self.circuit_breaker, dict):

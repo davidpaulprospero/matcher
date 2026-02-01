@@ -27,7 +27,19 @@ function Invoke-FastHealthCheck {
         ChecksRun      = @()
     }
 
-    $projectRoot = if ($script:ProjectRoot) { $script:ProjectRoot } else { Get-Location }
+    # Determine project root from available sources (in order of reliability)
+    $projectRoot = if ($script:Paths -and $script:Paths.ProjectRoot) {
+        $script:Paths.ProjectRoot
+    } elseif ($script:ProjectRoot) {
+        $script:ProjectRoot
+    } elseif ($script:RalphDir) {
+        # RalphDir is scripts/ralph, so project root is 2 levels up
+        Split-Path -Parent (Split-Path -Parent $script:RalphDir)
+    } else {
+        # Fallback: Get-Location might be wrong, but log a warning
+        Write-Host "  WARNING: Could not determine project root, using current directory" -ForegroundColor Yellow
+        Get-Location
+    }
 
     # --- Check 1: py_compile changed .py files ---
     $pyFiles = @($ChangedFiles | Where-Object { $_ -match '\.py$' })
@@ -71,10 +83,12 @@ function Invoke-FastHealthCheck {
     # --- Check 4: Config validation ---
     $result.ChecksRun += "config_validation"
     try {
-        $mainPy = Join-Path $projectRoot "main.py"
-        $configOutput = Invoke-Expression "python `"$mainPy`" --validate-config 2>&1"
-        if ($LASTEXITCODE -ne 0) {
-            $result.ConfigErrors += ($configOutput | Out-String).Trim()
+        $validateScript = Join-Path $projectRoot "scripts\validate_config.py"
+        if (Test-Path $validateScript) {
+            $configOutput = Invoke-Expression "python `"$validateScript`" --quick 2>&1"
+            if ($LASTEXITCODE -ne 0) {
+                $result.ConfigErrors += ($configOutput | Out-String).Trim()
+            }
         }
     } catch {}
 

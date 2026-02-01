@@ -1,0 +1,12 @@
+﻿{
+    "mode":  "Standard",
+    "lastStory":  "",
+    "crashTime":  "2026-02-01T09:43:36.0345815+08:00",
+    "sessionId":  "2026-02-01_094335",
+    "error":  "The term \u0027if\u0027 is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.",
+    "nextStory":  "US-001",
+    "iterationCount":  0,
+    "lastSprint":  0,
+    "lastFocusArea":  "",
+    "stackTrace":  "at Get-CrashRecoveryFile, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\lib\\reporting.ps1: line 435\r\nat Test-CrashRecovery, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\lib\\reporting.ps1: line 485\r\nat \u003cScriptBlock\u003e, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\ralph.ps1: line 792\r\nat \u003cScriptBlock\u003e, \u003cNo file\u003e: line 1\r\nat \u003cScriptBlock\u003e, \u003cNo file\u003e: line 1"
+}

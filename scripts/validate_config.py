@@ -16,9 +16,14 @@ import time
 import argparse
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
-sys.path.insert(0, str(Path(__file__).parent))
+# Add project root to path (parent of scripts directory)
+# Use multiple methods to ensure robustness when called from different working directories
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+sys.path.insert(0, str(project_root))
+
+# Change to project root so relative paths (config.yaml) work correctly
+os.chdir(project_root)
 
 
 def print_header(title: str):
@@ -30,17 +35,17 @@ def print_header(title: str):
 
 def print_ok(msg: str):
     """Print success message"""
-    print(f"  ✓ {msg}")
+    print(f"  [OK] {msg}")
 
 
 def print_warn(msg: str):
     """Print warning message"""
-    print(f"  ⚠ {msg}")
+    print(f"  [WARN] {msg}")
 
 
 def print_error(msg: str):
     """Print error message"""
-    print(f"  ✗ {msg}")
+    print(f"  [ERROR] {msg}")
 
 
 def validate_config_loading():
