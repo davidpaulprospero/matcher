@@ -1,170 +1,187 @@
 {
-    "branchName": "ralph/sprint-32",
-    "sprintNumber": 32,
-    "focusArea": "refactoring",
-    "projectContext": "Sprint 32 focuses on god file refactoring with smaller, testable stories after Sprint 31 had 0% pass rate due to timeouts. Key refactoring targets identified: (1) src/matching/tiered_matcher.py at 1,343 lines - extract embedding search and LLM reranking into separate classes; (2) src/matching/llm_providers.py at 1,042 lines - split into provider-specific modules; (3) src/downloader/retry_queue.py at 674 lines - extract config and statistics tracking. Each story targets ONE specific extraction with clear line counts and test requirements. Caption_fetcher.py work deferred pending completion of src/caption/ integration.",
+    "branchName": "ralph/sprint-33",
+    "sprintNumber": 33,
+    "focusArea": "pipeline",
+    "projectContext": "Sprint 33 focuses on Mullvad VPN integration as Tier 4 bypass, download improvements with VPN-aware budgeting, and documentation. The codebase has a mature 3-tier escalation system (impersonation → extractor-args → cookie rotation). Mullvad adds a 4th tier for IP rotation when cookie rotation is exhausted. Key integration points: EscalationManager (src/downloader/escalation_manager.py), CircuitBreaker (src/downloader/circuit_breaker.py), RateLimitBudget (src/downloader/rate_limit_budget.py). Existing VPNManager (src/downloader/vpn_manager.py) is generic; this sprint creates Mullvad-specific implementation with `mullvad` CLI commands and `am.i.mullvad.net` verification.",
     "userStories": [
         {
-            "id": "US-32-001",
-            "title": "Generate sprint stories for refactoring focus area",
+            "id": "US-1-001",
+            "title": "Generate sprint stories for pipeline focus area",
             "priority": 0,
             "passes": true,
-            "notes": "Sprint story generation completed. Generated 10 stories (US-32-002 through US-32-011) focusing on god file refactoring.",
+            "notes": "Tier 1 (Quick Win). Sprint story generation completed. Generated 11 stories (US-1-002 through US-1-012) covering Mullvad VPN integration, download improvements, and documentation. Files analyzed: scripts/ralph/README.md (Ralph Loop architecture, focus areas at lines 109-140); scripts/ralph/queue.json (interview context with user request for mullvad implementation); CLAUDE.md (Rule 27: subprocess encoding, Rule 28: one-at-a-time downloads); src/downloader/escalation_manager.py lines 176-319 (EscalationManager 3-tier system); src/downloader/vpn_manager.py lines 21-372 (base VPNManager class); src/downloader/types.py lines 57-61 (EscalationTier enum); src/downloader/rate_limit_budget.py lines 1-200 (budget tracking); src/config/sections/download.py lines 200-250 (VPNConfig pattern).",
             "acceptanceCriteria": [
-                "Analyze the codebase to find 8-12 specific improvements for 'refactoring'",
-                "Add stories US-32-002 through US-32-012 to scripts/ralph/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Mark this story (US-32-001) as passes: true when done"
+                "Read scripts/ralph/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: Story IDs MUST follow format US-1-NNN to be unique across sprints",
+                "Generate 8-12 stories for Mullvad VPN integration, download improvements, documentation",
+                "Mark this story as passes: true when done"
             ]
         },
         {
-            "id": "US-32-002",
-            "title": "Extract EmbeddingSearch class from TieredMatcher",
+            "id": "US-1-002",
+            "title": "Create MullvadVPN class extending VPNManager",
             "priority": 1,
-            "passes": false,
-            "notes": "Tier 2 (Medium). Source: src/matching/tiered_matcher.py lines ~200-350. Extract _get_embedding_candidates and _compute_similarity methods.",
+            "passes": true,
+            "notes": "Tier 2 (Medium). Create Mullvad-specific VPN manager with CLI commands. Source files: src/downloader/vpn_manager.py (lines 21-372, base class to extend). Target: src/downloader/mullvad_vpn.py (new file).",
             "acceptanceCriteria": [
-                "Create src/matching/embedding_search.py with EmbeddingSearch class",
-                "Move _get_embedding_candidates method from tiered_matcher.py to EmbeddingSearch.search()",
-                "Move _compute_similarity method to EmbeddingSearch._compute_similarity()",
-                "EmbeddingSearch.__init__ accepts config, embedding_index, and video_segments",
-                "New module under 150 lines with single responsibility: embedding similarity search",
-                "Run pytest tests/test_matching*.py -v --tb=short -x to verify no regressions"
+                "Create src/downloader/mullvad_vpn.py with MullvadVPN class extending VPNManager",
+                "Implement connect() method using `mullvad connect` CLI command",
+                "Implement disconnect() method using `mullvad disconnect` CLI command",
+                "Implement rotate_server() method using `mullvad relay set location` for geographic rotation",
+                "Implement get_status() method parsing `mullvad status` output",
+                "Run python -m py_compile src/downloader/mullvad_vpn.py to verify syntax"
             ]
         },
         {
-            "id": "US-32-003",
-            "title": "Add tests for extracted EmbeddingSearch class",
+            "id": "US-1-003",
+            "title": "Add am.i.mullvad.net verification to MullvadVPN",
             "priority": 2,
-            "passes": false,
-            "notes": "Tier 1 (Quick Win). Create tests for new EmbeddingSearch class.",
+            "passes": true,
+            "notes": "Tier 1 (Quick Win). Implemented verify_connection() using am.i.mullvad.net/json API. Parses mullvad_exit_ip boolean, logs IP/location, falls back to ping verification on unreachable. Created tests/test_mullvad_vpn.py with 8 comprehensive tests. Source files: src/downloader/mullvad_vpn.py (lines 327-395).",
             "acceptanceCriteria": [
-                "Create tests/test_matching_embedding_search.py",
-                "Add test_embedding_search_init verifying config parameter handling",
-                "Add test_embedding_search_returns_top_k with mock embeddings",
-                "Add test_embedding_search_handles_empty_index edge case",
-                "Add test_embedding_search_similarity_calculation with known values",
-                "All 4 tests pass: pytest tests/test_matching_embedding_search.py -v"
+                "Add verify_connection() method that calls https://am.i.mullvad.net/json",
+                "Parse JSON response to check 'mullvad_exit_ip' boolean field",
+                "Return True only when mullvad_exit_ip is True (connected via Mullvad)",
+                "Add fallback to generic ping verification if am.i.mullvad.net is unreachable",
+                "Log verification result with IP address and server location from response",
+                "Run pytest tests/test_mullvad*.py -v to verify (create basic test if none exists)"
             ]
         },
         {
-            "id": "US-32-004",
-            "title": "Extract LLMReranker class from TieredMatcher",
+            "id": "US-1-004",
+            "title": "Add MullvadConfig dataclass to download config",
             "priority": 3,
             "passes": false,
-            "notes": "Tier 2 (Medium). Source: src/matching/tiered_matcher.py lines ~400-600. Extract _rerank_with_llm and _prepare_rerank_prompt methods.",
+            "notes": "Tier 1 (Quick Win). Add configuration section for Mullvad VPN. Source files: src/config/sections/download.py (lines 1-838, existing VPNConfig at lines ~200-250). Target: Add MullvadConfig dataclass after VPNConfig, update DownloadConfig.__post_init__.",
             "acceptanceCriteria": [
-                "Create src/matching/llm_reranker.py with LLMReranker class",
-                "Move _rerank_with_llm method from tiered_matcher.py to LLMReranker.rerank()",
-                "Move _prepare_rerank_prompt method to LLMReranker._prepare_prompt()",
-                "LLMReranker.__init__ accepts config and llm_provider",
-                "New module under 200 lines with single responsibility: LLM-based reranking",
-                "Run pytest tests/test_matching*.py -v --tb=short -x to verify no regressions"
+                "Create MullvadConfig dataclass in src/config/sections/download.py",
+                "Add fields: enabled (bool), preferred_countries (List[str]), rotation_strategy (str)",
+                "Add fields: max_rotations_per_session (int), verification_timeout (int)",
+                "Add MullvadConfig to DownloadConfig with __post_init__ dict conversion",
+                "Export MullvadConfig in __all__ list",
+                "Run python -m py_compile src/config/sections/download.py to verify syntax"
             ]
         },
         {
-            "id": "US-32-005",
-            "title": "Add tests for extracted LLMReranker class",
+            "id": "US-1-005",
+            "title": "Integrate MullvadVPN as Tier 4 in EscalationManager",
             "priority": 4,
             "passes": false,
-            "notes": "Tier 1 (Quick Win). Create tests for new LLMReranker class.",
+            "notes": "Tier 3 (Complex). Add VPN rotation as highest escalation tier. Source files: src/downloader/types.py (lines 57-61, EscalationTier enum - add VPN_ROTATION=4), src/downloader/escalation_manager.py (lines 176-319, EscalationManager class - update __init__, get_escalation_args, record_failure).",
             "acceptanceCriteria": [
-                "Create tests/test_matching_llm_reranker.py",
-                "Add test_llm_reranker_init verifying provider injection",
-                "Add test_llm_reranker_prompt_format checking prompt structure",
-                "Add test_llm_reranker_handles_empty_candidates edge case",
-                "Add test_llm_reranker_respects_confidence_threshold",
-                "All 4 tests pass: pytest tests/test_matching_llm_reranker.py -v"
+                "Add EscalationTier.VPN_ROTATION (value=4) to src/downloader/types.py after FULL_BYPASS",
+                "Update EscalationManager.__init__ (line 193) to accept optional mullvad_vpn parameter",
+                "Update get_escalation_args() (lines 254-313) to return VPN rotation signal at Tier 4",
+                "Update record_failure() (lines 362-435) to escalate to Tier 4 when Tier 3 fails repeatedly",
+                "Add set_mullvad_vpn() method for late binding (like set_circuit_breaker at line 233)",
+                "Run pytest tests/test_escalation*.py -v --tb=short to verify no regressions"
             ]
         },
         {
-            "id": "US-32-006",
-            "title": "Split GeminiMatcher into separate module",
+            "id": "US-1-006",
+            "title": "Add VPN-aware budget tracking to RateLimitBudget",
             "priority": 5,
             "passes": false,
-            "notes": "Tier 2 (Medium). Source: src/matching/llm_providers.py lines ~100-400. Extract GeminiMatcher class.",
+            "notes": "Tier 2 (Medium). Track VPN rotations in budget and reset budgets on IP change. Source files: src/downloader/rate_limit_budget.py (existing RateLimitBudget class). Target: Add _vpn_rotations counter, record_vpn_rotation(), can_rotate_vpn(), reset_on_ip_change() methods.",
             "acceptanceCriteria": [
-                "Create src/matching/providers/gemini.py with GeminiMatcher class",
-                "Create src/matching/providers/__init__.py exporting GeminiMatcher",
-                "Move GeminiMatcher class from llm_providers.py to new module",
-                "Update llm_providers.py to re-export GeminiMatcher for backward compatibility",
-                "New module under 200 lines focused on Gemini API interaction",
-                "Run pytest tests/test_matching_llm_providers.py -v to verify no regressions"
+                "Add _vpn_rotations counter to RateLimitBudget",
+                "Add record_vpn_rotation() method that increments counter",
+                "Add can_rotate_vpn() method checking max_vpn_switches from config",
+                "Add reset_on_ip_change() method that resets rotation/backoff budgets",
+                "Update is_exhausted() to consider VPN rotation budget",
+                "Run pytest tests/test_rate_limit*.py -v --tb=short to verify no regressions"
             ]
         },
         {
-            "id": "US-32-007",
-            "title": "Split ClaudeMatcher into separate module",
+            "id": "US-1-007",
+            "title": "Create tests for MullvadVPN class",
             "priority": 6,
             "passes": false,
-            "notes": "Tier 2 (Medium). Source: src/matching/llm_providers.py lines ~400-600. Extract ClaudeMatcher class.",
+            "notes": "Tier 1 (Quick Win). Create comprehensive tests for Mullvad integration. Target: tests/test_mullvad_vpn.py (new file). Use unittest.mock to mock subprocess calls.",
             "acceptanceCriteria": [
-                "Create src/matching/providers/claude.py with ClaudeMatcher class",
-                "Update src/matching/providers/__init__.py to export ClaudeMatcher",
-                "Move ClaudeMatcher class from llm_providers.py to new module",
-                "Update llm_providers.py to re-export ClaudeMatcher for backward compatibility",
-                "New module under 150 lines focused on Claude API interaction",
-                "Run pytest tests/test_matching_llm_providers.py -v to verify no regressions"
+                "Create tests/test_mullvad_vpn.py",
+                "Add test_mullvad_connect_calls_cli mocking subprocess",
+                "Add test_mullvad_disconnect_calls_cli mocking subprocess",
+                "Add test_mullvad_verify_connection_parses_json with mock response",
+                "Add test_mullvad_rotate_server_changes_location mocking subprocess",
+                "All 4 tests pass: pytest tests/test_mullvad_vpn.py -v"
             ]
         },
         {
-            "id": "US-32-008",
-            "title": "Extract RetryQueueStats class from retry_queue.py",
+            "id": "US-1-008",
+            "title": "Add VPN rotation to download core.py",
             "priority": 7,
             "passes": false,
-            "notes": "Tier 2 (Medium). Source: src/downloader/retry_queue.py. Extract statistics tracking methods.",
+            "notes": "Tier 2 (Medium). Integrate VPN rotation into the download flow. Source files: src/downloader/core.py (_run_download_cmd method). Target: Check EscalationResult for VPN rotation signal, call mullvad_vpn.rotate_server() when needed.",
             "acceptanceCriteria": [
-                "Create src/downloader/retry_stats.py with RetryQueueStats dataclass",
-                "Move statistics tracking methods from RetryQueue to RetryQueueStats",
-                "Include get_summary(), get_failure_reasons(), get_retry_metrics() methods",
-                "Update RetryQueue to delegate to RetryQueueStats for all stats operations",
-                "New module under 100 lines with single responsibility: retry statistics",
-                "Run pytest tests/test_downloader_retry.py -v to verify no regressions"
+                "Update _run_download_cmd to check for VPN rotation signal from EscalationResult",
+                "Call mullvad_vpn.rotate_server() when escalation indicates VPN rotation needed",
+                "Reset circuit breaker after successful VPN rotation",
+                "Record VPN rotation in rate_limit_budget",
+                "Log VPN rotation events with new IP address",
+                "Run pytest tests/test_downloader*.py -v --tb=short -x to verify no regressions"
             ]
         },
         {
-            "id": "US-32-009",
-            "title": "Add tests for RetryQueueStats class",
+            "id": "US-1-009",
+            "title": "Document Mullvad VPN setup and configuration",
             "priority": 8,
             "passes": false,
-            "notes": "Tier 1 (Quick Win). Create tests for new RetryQueueStats class.",
+            "notes": "Tier 1 (Quick Win). Create documentation for Mullvad integration. Target: CLAUDE.md (add Mullvad VPN Integration section under Troubleshooting).",
             "acceptanceCriteria": [
-                "Create tests/test_downloader_retry_stats.py",
-                "Add test_retry_stats_empty_queue returns zero counts",
-                "Add test_retry_stats_tracks_failure_reasons correctly",
-                "Add test_retry_stats_get_summary_format matches expected structure",
-                "Add test_retry_stats_metrics_increment on add_item",
-                "All 4 tests pass: pytest tests/test_downloader_retry_stats.py -v"
+                "Add 'Mullvad VPN Integration' section to CLAUDE.md under Troubleshooting",
+                "Document mullvad CLI installation requirement (winget install Mullvad.Mullvad)",
+                "Document config.yaml schema for mullvad section with example",
+                "Document escalation chain: rate limit → cookies → impersonate → extractor-args → VPN",
+                "Add troubleshooting for common VPN connection failures",
+                "Run grep -i mullvad CLAUDE.md to verify documentation exists"
             ]
         },
         {
-            "id": "US-32-010",
-            "title": "Verify tiered_matcher.py reduced after extractions",
+            "id": "US-1-010",
+            "title": "Add Mullvad config to config.yaml template",
             "priority": 9,
             "passes": false,
-            "notes": "Tier 3 (Verification). Validation story to confirm refactoring reduced file size.",
+            "notes": "Tier 1 (Quick Win). Add example configuration to config.yaml. Target: config.yaml (add mullvad section under download).",
             "acceptanceCriteria": [
-                "Run wc -l src/matching/tiered_matcher.py and verify under 1100 lines",
-                "Verify TieredMatcher uses composition with EmbeddingSearch and LLMReranker",
-                "Run full matching test suite: pytest tests/test_matching*.py -v --tb=short",
-                "All matching tests pass with no new failures",
-                "Update src/matching/__init__.py to export new classes",
-                "Add docstring to tiered_matcher.py documenting refactored structure"
+                "Add mullvad section under download in config.yaml",
+                "Include enabled: false as default (opt-in feature)",
+                "Add preferred_countries example: ['us', 'gb', 'de', 'nl']",
+                "Add rotation_strategy options comment: 'random', 'sequential', 'nearest'",
+                "Add max_rotations_per_session: 5 default",
+                "Run python -c 'from src.config import load_config; load_config()' to verify YAML validity"
             ]
         },
         {
-            "id": "US-32-011",
-            "title": "Verify llm_providers.py reduced after extractions",
+            "id": "US-1-011",
+            "title": "Add integration test for Tier 4 escalation flow",
             "priority": 10,
             "passes": false,
-            "notes": "Tier 3 (Verification). Validation story to confirm refactoring reduced file size.",
+            "notes": "Tier 2 (Medium). End-to-end test for full escalation to VPN rotation. Target: tests/test_escalation_tier4.py (new file).",
             "acceptanceCriteria": [
-                "Run wc -l src/matching/llm_providers.py and verify under 700 lines",
-                "Verify src/matching/providers/ directory exists with gemini.py and claude.py",
-                "Run pytest tests/test_matching_llm_providers.py -v --tb=short",
-                "All LLM provider tests pass with no new failures",
-                "Backward compatibility imports work: from src.matching.llm_providers import GeminiMatcher",
-                "Add docstring to llm_providers.py documenting it as facade module"
+                "Create tests/test_escalation_tier4.py",
+                "Add test_escalation_reaches_tier4_after_cookie_exhaustion with mocked failures",
+                "Add test_vpn_rotation_resets_circuit_breaker verifying CB reset",
+                "Add test_vpn_rotation_recorded_in_budget verifying budget tracking",
+                "Add test_escalation_metrics_include_tier4 verifying get_metrics()",
+                "All 4 tests pass: pytest tests/test_escalation_tier4.py -v"
+            ]
+        },
+        {
+            "id": "US-1-012",
+            "title": "Verify full escalation chain in E2E simulation",
+            "priority": 11,
+            "passes": false,
+            "notes": "Tier 3 (Verification). Validation story to confirm complete Tier 1→4 escalation. Target: tests/test_escalation_e2e.py (new file). Must verify all 4 tiers in sequence.",
+            "acceptanceCriteria": [
+                "Create tests/test_escalation_e2e.py with mock download scenario",
+                "Simulate 403 errors that escalate through all 4 tiers",
+                "Verify Tier 1 (impersonate) args present in first attempts",
+                "Verify Tier 2 (extractor-args) added after threshold failures",
+                "Verify Tier 3 (cookie rotation) triggered after Tier 2 failures",
+                "Verify Tier 4 (VPN rotation) triggered after cookie exhaustion"
             ]
         }
     ]
