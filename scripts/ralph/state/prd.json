@@ -118,7 +118,7 @@
             "id": "US-39-008",
             "title": "Add fallback caption_results preservation on text_metadata error",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Wrap _populate_text_metadata call in try-except block",
                 "On AttributeError, log ERROR with state type and available attributes",
@@ -126,7 +126,7 @@
                 "Add warning that matching stage can use caption_results directly if text_metadata population fails",
                 "Add unit test verifying caption_results is preserved even when text_metadata population fails"
             ],
-            "notes": "Tier 1: Error resilience. Files: src/stages/caption_stage.py (around line 720-736 based on current code). US-38-011 added caption_results preservation; this story adds the matching stage fallback path."
+            "notes": "COMPLETED: 1) Added specific AttributeError handler to existing try-except around _populate_text_metadata call (line 731-748). 2) AttributeError handler logs state type and first 20 available attributes. 3) caption_results preserved at line 728 (US-38-011). 4) Added warning about matching stage fallback capability. 5) Added TestCaptionResultsPreservationOnTextMetadataError class with 2 tests verifying caption_results is preserved even when _populate_text_metadata raises AttributeError. All tests pass."
         },
         {
             "id": "US-39-009",

@@ -730,6 +730,21 @@ class CaptionStage(Stage):
             # Store caption data in state.text_metadata for matching
             try:
                 self._populate_text_metadata(state, caption_results)
+            except AttributeError as e:
+                # US-39-008: Log AttributeError with state type and available attributes
+                state_type = type(state).__name__
+                state_attrs = [attr for attr in dir(state) if not attr.startswith('_')]
+                logger.error(
+                    f"_populate_text_metadata AttributeError: {e}. "
+                    f"State type: {state_type}, "
+                    f"Available attributes: {state_attrs[:20]}{'...' if len(state_attrs) > 20 else ''}"
+                )
+                # US-39-008: Warning that matching stage can use caption_results directly
+                logger.warning(
+                    f"Matching stage can use state.caption_results directly as fallback. "
+                    f"caption_results preserved with {len(caption_results)} videos, {success_count} succeeded."
+                )
+                raise
             except Exception as e:
                 # US-38-011: Log error with caption_results summary for debugging
                 logger.error(
