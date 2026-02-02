@@ -458,6 +458,192 @@ class TestRetryBudgetScaling:
 
 
 @pytest.mark.integration
+class TestLargeBatchSuccessRateIntegration:
+    """Integration tests for US-39-007: Large batch with 60% success rate.
+
+    Tests the complete flow:
+    1. 200 mock video IDs
+    2. Budget scales correctly (max_attempts >= 300)
+    3. No budget_exhausted errors with 60% success rate
+    4. text_metadata is populated correctly for successful captions
+    """
+
+    def test_200_video_batch_with_60_percent_success_rate(
+        self, large_batch_video_ids, mock_video_search_results
+    ):
+        """Test 200-video batch with 60% success rate completes without budget exhaustion.
+
+        US-39-007: Integration test verifying:
+        - Budget scales to >= 300 for 200 videos (200 * 1.5 = 300)
+        - No budget_exhausted errors occur with 60% success rate
+        - text_metadata is populated correctly for the ~120 successful captions
+        """
+        stage = CaptionStage()
+
+        # Create state with 200 video IDs
+        state = MockPipelineState(
+            video_ids=large_batch_video_ids,  # 200 videos
+            video_search_results=mock_video_search_results,  # 200 results
+        )
+
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,  # Will scale to 300 for 200 videos
+                'auto_scale': True,
+                'attempts_per_video': 1.5,
+                'min_success_rate': 0.2,  # Low threshold to not trigger early termination
+                'min_sample_for_early_termination': 50,
+            }
+        )
+        checkpoint = MockCheckpointManager()
+
+        # Track statistics
+        success_count = [0]
+        failure_count = [0]
+        budget_exhausted_triggered = [False]
+
+        def mock_batch_fetch(video_ids, retry_budget=None, **kwargs):
+            """Mock fetch with exactly 60% success rate."""
+            results = {}
+            for i, vid in enumerate(video_ids):
+                # 60% success rate (0, 1, 2 succeed; 3, 4 fail in each group of 5)
+                is_success = (i % 5) < 3  # 0, 1, 2 succeed; 3, 4 fail
+
+                if is_success:
+                    results[vid] = make_mock_caption_result(vid, segment_count=8)
+                    success_count[0] += 1
+                    if retry_budget:
+                        retry_budget.record_success(vid)
+                else:
+                    results[vid] = {
+                        'video_id': vid,
+                        'error': True,
+                        'reason': 'Captions unavailable',
+                        'caption_quality': 'low',
+                    }
+                    failure_count[0] += 1
+                    if retry_budget:
+                        retry_budget.record_failure(vid)
+
+                # Check if budget got exhausted (should NOT happen)
+                if retry_budget and retry_budget.budget_exhausted():
+                    budget_exhausted_triggered[0] = True
+
+            return results
+
+        # Run the stage with mocked fetcher
+        with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+            with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                    with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                        result = stage.run(state, config, checkpoint)
+
+        # === Verification 1: Budget scaled correctly ===
+        # The budget should have been scaled to 300 (200 * 1.5)
+        # We verify this by checking no budget exhaustion occurred
+        assert not budget_exhausted_triggered[0], (
+            "Budget should NOT have exhausted with 200 videos and 60% success rate. "
+            "Budget should have scaled to 300 attempts (200 * 1.5 = 300)."
+        )
+
+        # === Verification 2: No budget_exhausted errors ===
+        # Stage should complete successfully
+        assert result is not None, "Stage result should not be None"
+        assert result.success, f"Stage should succeed, got error: {result.error}"
+
+        # === Verification 3: Correct success/failure counts ===
+        # With 200 videos and 60% success rate: 120 success, 80 failure
+        assert success_count[0] == 120, f"Expected 120 successes, got {success_count[0]}"
+        assert failure_count[0] == 80, f"Expected 80 failures, got {failure_count[0]}"
+
+        # === Verification 4: text_metadata populated correctly ===
+        assert hasattr(state, 'text_metadata'), "state.text_metadata should exist"
+        assert state.text_metadata is not None, "text_metadata should not be None"
+        assert len(state.text_metadata) > 0, "text_metadata should have segments"
+
+        # Each successful video has 8 segments, so expect ~960 total segments (120 * 8)
+        # Allow some variance due to processing
+        expected_min_segments = 100 * 8  # At least 800 segments
+        assert len(state.text_metadata) >= expected_min_segments, (
+            f"Expected at least {expected_min_segments} text_metadata segments, "
+            f"got {len(state.text_metadata)}"
+        )
+
+        # Verify segment structure
+        sample_segment = state.text_metadata[0]
+        assert 'text' in sample_segment, "Segment should have 'text' field"
+        assert 'video_path' in sample_segment, "Segment should have 'video_path' field"
+        assert 'start_time' in sample_segment, "Segment should have 'start_time' field"
+        assert 'end_time' in sample_segment, "Segment should have 'end_time' field"
+
+    def test_budget_scales_to_300_for_200_videos(self):
+        """Test budget scales correctly to 300 for 200-video batch.
+
+        US-39-007: Verifies max_attempts >= 300 for 200 videos with attempts_per_video=1.5.
+        """
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=100,  # Default
+            auto_scale=True,
+            attempts_per_video=1.5,
+        ))
+
+        # Initial budget
+        assert budget.max_attempts == 100
+
+        # Scale to 200 videos
+        new_max = budget.scale_to_batch_size(200)
+
+        # Verify: 200 * 1.5 = 300
+        assert new_max >= 300, (
+            f"Budget should scale to >= 300 for 200 videos, got {new_max}"
+        )
+        assert new_max == 300, f"Expected exactly 300, got {new_max}"
+        assert budget.max_attempts == 300
+
+    def test_no_budget_exhaustion_at_200_attempts_with_scaled_budget(self):
+        """Test budget does not exhaust at 200 attempts when scaled for 200 videos.
+
+        US-39-007: With scaled budget of 300, processing 200 videos should not exhaust.
+        """
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=100,
+            auto_scale=True,
+            attempts_per_video=1.5,
+        ))
+
+        # Scale for 200 videos
+        budget.scale_to_batch_size(200)
+        assert budget.max_attempts == 300
+
+        # Record 200 attempts (one per video) - should NOT exhaust
+        for i in range(200):
+            budget.record_attempt(f"video_{i}")
+
+        assert not budget.budget_exhausted(), (
+            "Budget should NOT exhaust at 200 attempts with max_attempts=300"
+        )
+
+        # Even at 250 attempts, should not exhaust
+        for i in range(50):
+            budget.record_attempt(f"video_retry_{i}")
+
+        assert not budget.budget_exhausted(), (
+            "Budget should NOT exhaust at 250 attempts with max_attempts=300"
+        )
+
+        # At 300 attempts, should exhaust
+        for i in range(50):
+            budget.record_attempt(f"video_final_{i}")
+
+        assert budget.budget_exhausted(), (
+            "Budget SHOULD exhaust at 300 attempts"
+        )
+
+
+@pytest.mark.integration
 class TestStateAttributeInitialization:
     """Integration tests for state attribute defensive initialization."""
 
