@@ -579,3 +579,155 @@ class TestMullvadVPNMaxRotations:
 
         # Should use config value
         assert vpn._max_rotations == 3
+
+
+class TestMullvadVPNRotationCooldown:
+    """Tests for MullvadVPN rotation_delay_seconds cooldown (US-35-012)."""
+
+    def test_rotate_server_enforces_cooldown(self):
+        """Test that rotate_server() returns False when cooldown is active."""
+        import time
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 10
+        config.max_switches_per_session = 10
+        config.rotation_delay_seconds = 10  # 10 second cooldown
+        config.preferred_countries = ['us', 'de']
+
+        vpn = MullvadVPN(config)
+
+        # Simulate a recent rotation (1 second ago)
+        vpn._last_rotation_time = time.time() - 1
+
+        # Attempt rotation - should fail due to cooldown
+        result = vpn.rotate_server()
+        assert result is False
+
+    def test_rotate_server_allows_after_cooldown_expires(self):
+        """Test that rotate_server() allows rotation after cooldown expires."""
+        import time
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 10
+        config.max_switches_per_session = 10
+        config.rotation_delay_seconds = 5  # 5 second cooldown
+        config.preferred_countries = ['us', 'de']
+
+        vpn = MullvadVPN(config)
+
+        # Simulate an old rotation (10 seconds ago - beyond 5s cooldown)
+        vpn._last_rotation_time = time.time() - 10
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            result = vpn.rotate_server()
+
+        # Should succeed since cooldown has expired
+        assert result is True
+
+    def test_rotate_server_updates_last_rotation_time(self):
+        """Test that successful rotation updates _last_rotation_time."""
+        import time
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 10
+        config.max_switches_per_session = 10
+        config.rotation_delay_seconds = 5
+        config.preferred_countries = ['us', 'de']
+
+        vpn = MullvadVPN(config)
+
+        # Initially 0
+        assert vpn._last_rotation_time == 0.0
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            before = time.time()
+            result = vpn.rotate_server()
+            after = time.time()
+
+        assert result is True
+        # _last_rotation_time should be updated to around now
+        assert before <= vpn._last_rotation_time <= after
+
+    def test_rotation_delay_defaults_to_5(self):
+        """Test that _rotation_delay defaults to 5 if config attribute is missing."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        # Config without rotation_delay_seconds attribute
+        config = MagicMock(spec=['enabled', 'max_vpn_switches', 'switch_delay_seconds', 'min_switch_interval', 'switch_command'])
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.switch_command = ""
+
+        vpn = MullvadVPN(config)
+
+        # Should default to 5
+        assert vpn._rotation_delay == 5.0
+
+    def test_rotation_delay_uses_config_value(self):
+        """Test that _rotation_delay uses config.rotation_delay_seconds when set."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.rotation_delay_seconds = 15
+
+        vpn = MullvadVPN(config)
+
+        # Should use config value
+        assert vpn._rotation_delay == 15.0
+
+    def test_first_rotation_always_allowed(self):
+        """Test that first rotation is always allowed (no prior rotation)."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 10
+        config.max_switches_per_session = 10
+        config.rotation_delay_seconds = 60  # Long cooldown
+        config.preferred_countries = ['us', 'de']
+
+        vpn = MullvadVPN(config)
+
+        # _last_rotation_time starts at 0
+        assert vpn._last_rotation_time == 0.0
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            result = vpn.rotate_server()
+
+        # First rotation should succeed despite long cooldown setting
+        assert result is True
