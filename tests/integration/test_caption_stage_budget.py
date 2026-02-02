@@ -944,3 +944,153 @@ class TestCaptionResultsPreservation:
         assert "_populate_text_metadata failed" in error_message, (
             f"Error log should mention the failure: {error_message}"
         )
+
+
+# =============================================================================
+# US-39-002: Verify CaptionStage calls scale_to_batch_size
+# =============================================================================
+
+
+class TestCaptionStageCallsScaleToBatchSize:
+    """Tests verifying CaptionStage.run() calls scale_to_batch_size correctly.
+
+    US-39-002: Auto-scaling prevents budget exhaustion on large batches.
+    """
+
+    @pytest.mark.fast
+    def test_scale_to_batch_size_called_with_correct_batch_size(
+        self, batch_175_video_ids, caplog
+    ):
+        """Verify scale_to_batch_size is called with len(ids_to_fetch).
+
+        US-39-002: CaptionStage.run() must call retry_budget.scale_to_batch_size()
+        with the correct batch size BEFORE processing begins.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        # Setup
+        state = MockPipelineState(
+            video_ids=batch_175_video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in batch_175_video_ids
+            ],
+        )
+
+        caption_first_config = MockCaptionFirstConfig(
+            retry_budget={
+                'enabled': True,
+                'max_attempts': 100,  # Default will be scaled
+                'auto_scale': True,
+                'attempts_per_video': 1.5,
+            },
+        )
+        download_config = MockDownloadConfig(caption_first=caption_first_config)
+        config = MockConfig(download=download_config)
+        checkpoint = MockCheckpointManager()
+
+        stage = CaptionStage()
+
+        # Track whether scale_to_batch_size was called with correct arg
+        scale_calls = []
+
+        original_scale = CaptionRetryBudget.scale_to_batch_size
+
+        def track_scale_call(self, batch_size, attempts_per_video=None):
+            scale_calls.append(batch_size)
+            return original_scale(self, batch_size, attempts_per_video)
+
+        # Patch both the fetcher (lazy imported) and the scale method
+        with patch.object(CaptionRetryBudget, 'scale_to_batch_size', track_scale_call):
+            with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+                fetcher_instance = MockFetcher.return_value
+                fetcher_instance._timeout = 30
+                fetcher_instance.apply_adaptive_format_order.return_value = []
+                fetcher_instance._using_adaptive_order = False
+                fetcher_instance.fetch_captions_batch.return_value = {}
+
+                # Run the stage
+                stage.run(state, config, checkpoint)
+
+        # Verify scale_to_batch_size was called with 175 (the batch size)
+        assert len(scale_calls) == 1, (
+            f"scale_to_batch_size should be called exactly once, got {len(scale_calls)} calls"
+        )
+        assert scale_calls[0] == 175, (
+            f"scale_to_batch_size should be called with batch_size=175, got {scale_calls[0]}"
+        )
+
+        # Verify INFO log about scaling was produced
+        scaling_logs = [
+            r for r in caplog.records
+            if "scaled" in r.message.lower() and "175" in r.message
+        ]
+        assert scaling_logs, "Expected INFO log about scaling for 175 videos"
+
+    @pytest.mark.fast
+    def test_scale_to_batch_size_called_before_fetch(self, batch_175_video_ids):
+        """Verify scale_to_batch_size is called BEFORE fetch_captions_batch.
+
+        US-39-002: The budget must be scaled before processing starts to prevent
+        early exhaustion.
+        """
+        state = MockPipelineState(
+            video_ids=batch_175_video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in batch_175_video_ids
+            ],
+        )
+
+        caption_first_config = MockCaptionFirstConfig(
+            retry_budget={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+            },
+        )
+        download_config = MockDownloadConfig(caption_first=caption_first_config)
+        config = MockConfig(download=download_config)
+        checkpoint = MockCheckpointManager()
+
+        stage = CaptionStage()
+
+        # Track call order
+        call_order = []
+
+        original_scale = CaptionRetryBudget.scale_to_batch_size
+
+        def track_scale(self, batch_size, attempts_per_video=None):
+            call_order.append(('scale_to_batch_size', batch_size))
+            return original_scale(self, batch_size, attempts_per_video)
+
+        with patch.object(CaptionRetryBudget, 'scale_to_batch_size', track_scale):
+            with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+                fetcher_instance = MockFetcher.return_value
+                fetcher_instance._timeout = 30
+                fetcher_instance.apply_adaptive_format_order.return_value = []
+                fetcher_instance._using_adaptive_order = False
+
+                def track_fetch(*args, **kwargs):
+                    call_order.append(('fetch_captions_batch', len(args[0]) if args else 0))
+                    return {}
+
+                fetcher_instance.fetch_captions_batch.side_effect = track_fetch
+
+                stage.run(state, config, checkpoint)
+
+        # Find indexes
+        scale_idx = next(
+            (i for i, (name, _) in enumerate(call_order) if name == 'scale_to_batch_size'),
+            None
+        )
+        fetch_idx = next(
+            (i for i, (name, _) in enumerate(call_order) if name == 'fetch_captions_batch'),
+            None
+        )
+
+        assert scale_idx is not None, "scale_to_batch_size should have been called"
+        assert fetch_idx is not None, "fetch_captions_batch should have been called"
+        assert scale_idx < fetch_idx, (
+            f"scale_to_batch_size (index={scale_idx}) must be called BEFORE "
+            f"fetch_captions_batch (index={fetch_idx})"
+        )
