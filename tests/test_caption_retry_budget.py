@@ -5705,3 +5705,161 @@ class TestResetBudgetFlag:
         assert budget.backoff_time_spent == 0.0
         assert budget.attempts_remaining() == 100
         assert budget.backoff_time_remaining() == 300.0
+
+
+# ============================================================================
+# US-43-002: ensure_scaled checkpoint restore with insufficient max_attempts
+# ============================================================================
+
+
+class TestEnsureScaledCheckpoint:
+    """Test ensure_scaled behavior after checkpoint restore (US-43-002).
+
+    Root cause: The ensure_scaled() method checks if batch_size matches but
+    doesn't verify max_attempts is sufficient. When checkpoint restores
+    batch_size=175 but max_attempts=100 (config default), scaling is skipped
+    because batch_size already matches.
+
+    Fix: ensure_scaled now also verifies max_attempts >= required_attempts
+    before skipping scaling.
+    """
+
+    @pytest.mark.fast
+    def test_ensure_scaled_after_checkpoint_restore_with_insufficient_max(self):
+        """US-43-002: Test ensure_scaled detects insufficient max_attempts after checkpoint restore.
+
+        Scenario:
+        1. First run: 175 videos, ensure_scaled(175) scales max_attempts 100 -> 350
+        2. Checkpoint saves: batch_size=175, max_attempts=350 (but max_attempts is NOT
+           restored from checkpoint per caption_stage.py line 316)
+        3. Checkpoint restore: batch_size=175 from checkpoint, max_attempts=100 from config
+        4. ensure_scaled(175) called - must detect and fix the discrepancy
+
+        Expected behavior:
+        - ensure_scaled() should scale max_attempts from 100 to 350
+        - Scaling should occur even though batch_size (175) already matches
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # From config (default), NOT restored from checkpoint
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore: batch_size IS restored, max_attempts is NOT
+        # This mirrors what happens in caption_stage.py: we keep max_attempts from config
+        # but restore other fields from checkpoint
+        budget.batch_size = 175  # Restored from checkpoint
+        budget.attempts = 0  # Fresh run (or could have prior attempts)
+
+        # Required attempts = 175 * 2.0 = 350
+        # Current max_attempts = 100 < 350, so scaling MUST occur
+
+        result = budget.ensure_scaled(175)
+
+        # Assert scaling occurred
+        assert result is True, (
+            "ensure_scaled must return True when scaling occurs. "
+            f"batch_size={budget.batch_size}, max_attempts={budget.max_attempts}, "
+            f"required=350"
+        )
+        assert budget.max_attempts == 350, (
+            f"max_attempts should scale from 100 to 350 (175 * 2.0), got {budget.max_attempts}"
+        )
+        assert budget.batch_size == 175
+
+    @pytest.mark.fast
+    def test_ensure_scaled_checkpoint_restore_with_prior_attempts_used(self):
+        """US-43-002: Test scaling with prior attempts from checkpoint.
+
+        Extended scenario where checkpoint also restored prior usage counters.
+        Scaling should still occur based on batch size, not remaining capacity.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # Config default
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore with prior usage
+        budget.batch_size = 175  # From checkpoint
+        budget.attempts = 50  # 50 attempts used in prior run
+
+        # Despite having 50 attempts used, scaling should still occur
+        # because required (350) > max_attempts (100)
+        result = budget.ensure_scaled(175)
+
+        assert result is True, "Scaling must occur regardless of prior attempts"
+        assert budget.max_attempts == 350
+        # Attempts counter should be preserved (not reset by default)
+        assert budget.attempts == 50
+
+    @pytest.mark.fast
+    def test_ensure_scaled_checkpoint_restore_no_scaling_when_max_sufficient(self):
+        """US-43-002: Verify no scaling when max_attempts is already sufficient.
+
+        If checkpoint restore somehow preserved a sufficient max_attempts,
+        or if config has high enough value, scaling should be skipped.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 400  # High config value, already sufficient for 175
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore
+        budget.batch_size = 175  # From checkpoint
+
+        # Required = 350, but max_attempts (400) is already sufficient
+        result = budget.ensure_scaled(175)
+
+        assert result is False, "No scaling needed when max_attempts >= required"
+        assert budget.max_attempts == 400  # Unchanged
+
+    @pytest.mark.fast
+    def test_ensure_scaled_checkpoint_restore_logs_scaling_info(self, caplog):
+        """US-43-002: Verify scaling after checkpoint restore is logged.
+
+        The fix includes logging to help diagnose checkpoint restore scaling issues.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore with prior attempts (triggers [US-42-004] log)
+        budget.batch_size = 175
+        budget.attempts = 30  # Prior attempts indicate checkpoint restore
+
+        caplog.clear()
+        result = budget.ensure_scaled(175)
+
+        assert result is True
+
+        # Check for checkpoint restore scaling log
+        log_messages = ' '.join(rec.message for rec in caplog.records)
+        assert '[US-42-004]' in log_messages, (
+            "Scaling after checkpoint restore should log [US-42-004] marker"
+        )
+        assert 'checkpoint restore' in log_messages.lower(), (
+            "Log should mention checkpoint restore"
+        )
+
+    @pytest.mark.fast
+    def test_ensure_scaled_batch_size_matches_but_max_insufficient_exact_boundary(self):
+        """US-43-002: Edge case at exact boundary - batch_size matches, max_attempts just under.
+
+        Test the exact boundary condition where required_attempts slightly exceeds max_attempts.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 349  # Just under required 350
+        budget.attempts_per_video = 2.0
+
+        # batch_size matches previous run
+        budget.batch_size = 175
+
+        # Required = 350, max = 349, so scaling MUST occur
+        result = budget.ensure_scaled(175)
+
+        assert result is True, "Scaling must occur when max_attempts (349) < required (350)"
+        assert budget.max_attempts == 350
