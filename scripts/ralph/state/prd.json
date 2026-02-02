@@ -111,8 +111,8 @@
                 "If state lacks validate_state_attributes method, manually initialize text_metadata",
                 "Add test: _populate_text_metadata handles mock state object without text_metadata"
             ],
-            "passes": false,
-            "notes": "Tier: T1 (Defensive). Files: src/stages/caption_stage.py:1050-1060, src/state.py:179-207. Belt-and-suspenders defense: validate state attributes at usage point, not just creation."
+            "passes": true,
+            "notes": "Tier: T1 (Defensive). FIXED: Added US-41-007 defensive validation at start of _populate_text_metadata(). For PipelineState: calls validate_state_attributes() and logs WARNING if fields initialized. For non-PipelineState (mocks, etc): isinstance check falls through to manual text_metadata initialization with warning. Added TestPopulateTextMetadataDefensiveValidation class with 5 tests covering all acceptance criteria."
         },
         {
             "id": "US-41-008",

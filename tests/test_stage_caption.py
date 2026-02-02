@@ -5633,3 +5633,167 @@ class TestRetryBudgetSummaryLogging:
         assert '10 failed' in summary_log, f"failures not in summary: {summary_log}"
         # Check skipped
         assert '5 skipped' in summary_log, f"skipped not in summary: {summary_log}"
+
+
+@pytest.mark.fast
+class TestPopulateTextMetadataDefensiveValidation:
+    """US-41-007: Test defensive state validation before _populate_text_metadata."""
+
+    def test_validate_state_attributes_called_for_pipeline_state(self, caplog):
+        """US-41-007 AC1: validate_state_attributes() called at start."""
+        import logging
+        stage = CaptionStage()
+        state = PipelineState()
+
+        # Set text_metadata to None to trigger validation
+        state.text_metadata = None
+
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'Hello', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            }
+        }
+
+        with caplog.at_level(logging.WARNING):
+            stage._populate_text_metadata(state, caption_results)
+
+        # AC2: Warning logged when validation initializes fields
+        assert any(
+            'US-41-007' in record.message and 'text_metadata' in record.message
+            for record in caplog.records
+        ), f"Expected US-41-007 warning with text_metadata. Got: {[r.message for r in caplog.records]}"
+
+        # text_metadata should be populated
+        assert len(state.text_metadata) == 1
+
+    def test_handles_non_pipeline_state_isinstance_check(self, caplog):
+        """US-41-007 AC3: Handle case where state is not a PipelineState instance."""
+        import logging
+        stage = CaptionStage()
+
+        # Create mock state that's not a PipelineState
+        class MockState:
+            pass
+
+        state = MockState()
+
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'Test', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            }
+        }
+
+        with caplog.at_level(logging.WARNING):
+            stage._populate_text_metadata(state, caption_results)
+
+        # AC3: Should handle non-PipelineState gracefully
+        assert hasattr(state, 'text_metadata')
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['text'] == 'Test'
+
+        # Should log warning about non-PipelineState object
+        assert any(
+            'US-41-007' in record.message and 'Non-PipelineState' in record.message
+            for record in caplog.records
+        ), f"Expected US-41-007 Non-PipelineState warning. Got: {[r.message for r in caplog.records]}"
+
+    def test_handles_state_without_validate_state_attributes_method(self, caplog):
+        """US-41-007 AC4: Handle state lacking validate_state_attributes method."""
+        import logging
+        stage = CaptionStage()
+
+        # Create mock state without validate_state_attributes method
+        class MockStateNoValidate:
+            text_metadata = None  # Has attribute but is None
+
+        state = MockStateNoValidate()
+
+        caption_results = {
+            'xyz789': {
+                'segments': [{'text': 'Manual init', 'start': 0, 'end': 2}],
+                'language': 'es',
+                'is_auto_generated': True,
+            }
+        }
+
+        with caplog.at_level(logging.WARNING):
+            stage._populate_text_metadata(state, caption_results)
+
+        # Should manually initialize text_metadata
+        assert hasattr(state, 'text_metadata')
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['text'] == 'Manual init'
+
+        # Should log warning about manual initialization
+        assert any(
+            'US-41-007' in record.message and 'Manually initialized' in record.message
+            for record in caplog.records
+        ), f"Expected manual initialization warning. Got: {[r.message for r in caplog.records]}"
+
+    def test_mock_state_object_without_text_metadata(self, caplog):
+        """US-41-007 AC5: _populate_text_metadata handles mock state object without text_metadata."""
+        import logging
+        stage = CaptionStage()
+
+        # Simple mock object with no text_metadata attribute at all
+        class BareState:
+            pass
+
+        state = BareState()
+
+        caption_results = {
+            'video001': {
+                'segments': [
+                    {'text': 'First segment', 'start': 0, 'end': 1.5},
+                    {'text': 'Second segment', 'start': 1.5, 'end': 3},
+                ],
+                'language': 'en',
+                'is_auto_generated': False,
+                'caption_quality': 'high',
+            }
+        }
+
+        with caplog.at_level(logging.WARNING):
+            # Should not raise AttributeError
+            stage._populate_text_metadata(state, caption_results)
+
+        # text_metadata should be initialized and populated
+        assert hasattr(state, 'text_metadata')
+        assert isinstance(state.text_metadata, list)
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['text'] == 'First segment'
+        assert state.text_metadata[1]['text'] == 'Second segment'
+        assert state.text_metadata[0]['video_path'] == 'video001'
+
+    def test_no_warning_when_state_already_valid(self, caplog):
+        """Verify no warning is logged when state is already properly initialized."""
+        import logging
+        stage = CaptionStage()
+        state = PipelineState()
+
+        # Ensure text_metadata is already a list (default)
+        assert state.text_metadata == []
+
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'Valid state', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            }
+        }
+
+        with caplog.at_level(logging.WARNING):
+            stage._populate_text_metadata(state, caption_results)
+
+        # Should not log US-41-007 warning when state is already valid
+        assert not any(
+            'US-41-007' in record.message and 'initialized fields' in record.message.lower()
+            for record in caplog.records
+        ), f"Unexpected initialization warning. Got: {[r.message for r in caplog.records]}"
+
+        # text_metadata should be populated
+        assert len(state.text_metadata) == 1
