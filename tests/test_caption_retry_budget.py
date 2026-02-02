@@ -1348,6 +1348,87 @@ class TestCaptionRetryBudgetEnsureScaled:
         assert result is True
         assert budget.max_attempts == 200
 
+    @pytest.mark.fast
+    def test_ensure_scaled_with_reset_on_scale_clears_counters(self):
+        """Test ensure_scaled with reset_on_scale=true clears counters (US-41-009).
+
+        AC5: Add test: ensure_scaled with reset_on_scale=true clears counters
+
+        When reset_on_scale is enabled and scaling occurs, all usage counters
+        should be reset. This is useful when checkpoint restores a budget with
+        50 attempts used, but the current batch needs 300 attempts - the user
+        may want to start fresh rather than continue from the checkpoint's state.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.reset_on_scale = True  # Enable reset on scale
+
+        # Simulate prior usage (e.g., from checkpoint restore)
+        budget.attempts = 50
+        budget.failures = 20
+        budget.successes = 30
+        budget.backoff_time_spent = 45.0
+        budget.videos_skipped = 5
+        budget.error_counts = {CaptionErrorCategory.NETWORK: 10, CaptionErrorCategory.TIMEOUT: 10}
+        budget.attempts_per_video_id = {"video1": 3, "video2": 2}
+        budget.circuit_breaker_trips = 2
+        budget.early_terminated = True
+        budget.early_termination_reason = "Test reason"
+
+        # Scale up - should trigger reset
+        result = budget.ensure_scaled(200)  # 200 * 2.0 = 400 > 100
+
+        # Verify scaling occurred
+        assert result is True
+        assert budget.max_attempts == 400
+        assert budget.batch_size == 200
+
+        # Verify all counters were reset
+        assert budget.attempts == 0, "attempts should be reset"
+        assert budget.failures == 0, "failures should be reset"
+        assert budget.successes == 0, "successes should be reset"
+        assert budget.backoff_time_spent == 0.0, "backoff_time_spent should be reset"
+        assert budget.videos_skipped == 0, "videos_skipped should be reset"
+        assert budget.error_counts == {}, "error_counts should be cleared"
+        assert budget.attempts_per_video_id == {}, "attempts_per_video_id should be cleared"
+        assert budget.circuit_breaker_trips == 0, "circuit_breaker_trips should be reset"
+        assert budget.early_terminated is False, "early_terminated should be reset"
+        assert budget.early_termination_reason is None, "early_termination_reason should be reset"
+
+    @pytest.mark.fast
+    def test_ensure_scaled_without_reset_on_scale_preserves_counters(self):
+        """Test ensure_scaled without reset_on_scale preserves counters (US-41-009).
+
+        AC4: Default to false to preserve existing behavior
+
+        When reset_on_scale is False (the default), ensure_scaled should only
+        update max_attempts and batch_size without touching usage counters.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.reset_on_scale = False  # Default behavior
+
+        # Simulate prior usage
+        budget.attempts = 50
+        budget.failures = 20
+        budget.successes = 30
+        budget.backoff_time_spent = 45.0
+
+        # Scale up - should NOT reset counters
+        result = budget.ensure_scaled(200)
+
+        # Verify scaling occurred
+        assert result is True
+        assert budget.max_attempts == 400
+
+        # Verify counters were PRESERVED
+        assert budget.attempts == 50, "attempts should be preserved"
+        assert budget.failures == 20, "failures should be preserved"
+        assert budget.successes == 30, "successes should be preserved"
+        assert budget.backoff_time_spent == 45.0, "backoff_time_spent should be preserved"
+
 
 # ============================================================================
 # US-37-005: Detailed logging for retry budget consumption

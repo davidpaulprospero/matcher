@@ -63,6 +63,11 @@ class CaptionRetryBudgetConfig:
     min_success_rate: float = 0.3  # 30% minimum success rate
     min_sample_for_early_termination: int = 20  # Check after 20 videos
 
+    # Reset on scale-up settings (US-41-009)
+    # When enabled, scaling up budget also resets usage counters
+    # Useful when restoring from checkpoint with prior attempts and batch needs more budget
+    reset_on_scale: bool = False
+
 
 @dataclass
 class CaptionRetryBudget:
@@ -124,6 +129,9 @@ class CaptionRetryBudget:
     early_terminated: bool = False
     early_termination_reason: Optional[str] = None
 
+    # Reset on scale-up settings (US-41-009)
+    reset_on_scale: bool = False
+
     # Thread-safety lock
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
@@ -165,6 +173,8 @@ class CaptionRetryBudget:
             # US-37-009: Early termination on low success rate
             budget.min_success_rate = float(config.get('min_success_rate', 0.3))
             budget.min_sample_for_early_termination = int(config.get('min_sample_for_early_termination', 20))
+            # US-41-009: Reset on scale-up
+            budget.reset_on_scale = bool(config.get('reset_on_scale', False))
         else:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
@@ -176,6 +186,8 @@ class CaptionRetryBudget:
             # US-37-009: Early termination on low success rate
             budget.min_success_rate = float(getattr(config, 'min_success_rate', 0.3))
             budget.min_sample_for_early_termination = int(getattr(config, 'min_sample_for_early_termination', 20))
+            # US-41-009: Reset on scale-up
+            budget.reset_on_scale = bool(getattr(config, 'reset_on_scale', False))
 
         logger.debug(
             f"CaptionRetryBudget initialized: max_attempts={budget.max_attempts}, "
@@ -926,10 +938,29 @@ class CaptionRetryBudget:
             old_max = self.max_attempts
             self.max_attempts = required_attempts
             self.batch_size = batch_size
-            logger.info(
-                f"CaptionRetryBudget.ensure_scaled: scaled max_attempts from {old_max} "
-                f"to {self.max_attempts} for batch of {batch_size} videos"
-            )
+
+            # US-41-009: Reset counters on scale-up if configured
+            if self.reset_on_scale:
+                cleared_attempts = self.attempts
+                self.attempts = 0
+                self.failures = 0
+                self.successes = 0
+                self.backoff_time_spent = 0.0
+                self.videos_skipped = 0
+                self.error_counts.clear()
+                self.attempts_per_video_id.clear()
+                self.circuit_breaker_trips = 0
+                self.early_terminated = False
+                self.early_termination_reason = None
+                logger.info(
+                    f"CaptionRetryBudget.ensure_scaled: Budget scaled and reset: "
+                    f"{cleared_attempts} attempts cleared (scaled from {old_max} to {self.max_attempts})"
+                )
+            else:
+                logger.info(
+                    f"CaptionRetryBudget.ensure_scaled: scaled max_attempts from {old_max} "
+                    f"to {self.max_attempts} for batch of {batch_size} videos"
+                )
             return True
 
     def verify_budget_sufficient(self, batch_size: int) -> None:

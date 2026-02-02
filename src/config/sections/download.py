@@ -213,6 +213,12 @@ class CaptionRetryBudgetConfig:
     # Prevents premature termination on small samples
     min_sample_for_early_termination: int = 20
 
+    # Reset on scale-up settings (US-41-009)
+    # When enabled, scaling up the budget also resets usage counters
+    # Useful when restoring from checkpoint with prior attempts used
+    # and the batch needs a larger budget than the checkpoint had
+    reset_on_scale: bool = False
+
     def __post_init__(self) -> None:
         """US-41-004: Validate configuration values at load time."""
         if self.attempts_per_video <= 0:
