@@ -29,6 +29,24 @@ _shared_model = None  # Shared WhisperModel instance
 _model_config = {}  # Model configuration cache
 
 
+def _get_gpu_memory_mb() -> tuple[float, float]:
+    """
+    Get current GPU memory usage.
+
+    Returns:
+        Tuple of (allocated_mb, reserved_mb), or (0.0, 0.0) if CUDA unavailable
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / (1024 * 1024)
+            reserved = torch.cuda.memory_reserved() / (1024 * 1024)
+            return allocated, reserved
+    except ImportError:
+        pass
+    return 0.0, 0.0
+
+
 class WhisperClient:
     """
     Thread-safe Whisper model client with GPU locking.
@@ -69,6 +87,10 @@ class WhisperClient:
             # Double-check after acquiring lock
             if _shared_model is not None and _model_config == current_config:
                 return _shared_model
+
+            # Log GPU memory before initialization
+            mem_before_alloc, mem_before_reserved = _get_gpu_memory_mb()
+            logger.info(f"GPU memory before model init: allocated={mem_before_alloc:.1f}MB, reserved={mem_before_reserved:.1f}MB")
 
             logger.info(f"Initializing WhisperModel...")
             logger.info(f"  Model: {self.model_name}")
@@ -119,6 +141,12 @@ class WhisperClient:
 
                 logger.info(f"Step 3: Done!")
                 logger.info(f"✓ Model ready on {device} ({actual_compute})")
+
+                # Log GPU memory after initialization
+                mem_after_alloc, mem_after_reserved = _get_gpu_memory_mb()
+                logger.info(f"GPU memory after model init: allocated={mem_after_alloc:.1f}MB, reserved={mem_after_reserved:.1f}MB")
+                mem_delta = mem_after_alloc - mem_before_alloc
+                logger.info(f"GPU memory delta from model init: {mem_delta:.1f}MB")
 
                 return _shared_model
 
@@ -219,6 +247,10 @@ class WhisperClient:
 
         with _gpu_lock:
             if _shared_model is not None:
+                # Log GPU memory before cleanup
+                mem_before_alloc, mem_before_reserved = _get_gpu_memory_mb()
+                logger.info(f"GPU memory before cleanup: allocated={mem_before_alloc:.1f}MB, reserved={mem_before_reserved:.1f}MB")
+
                 logger.info("Unloading transcription model to free memory...")
                 del _shared_model
                 _shared_model = None
@@ -236,6 +268,12 @@ class WhisperClient:
                         logger.debug("Cleared CUDA cache")
                 except ImportError:
                     pass
+
+                # Log GPU memory after cleanup with delta
+                mem_after_alloc, mem_after_reserved = _get_gpu_memory_mb()
+                mem_delta = mem_before_alloc - mem_after_alloc
+                logger.info(f"GPU memory after cleanup: allocated={mem_after_alloc:.1f}MB, reserved={mem_after_reserved:.1f}MB")
+                logger.info(f"GPU memory freed by cleanup: {mem_delta:.1f}MB")
 
                 logger.info("Transcription model unloaded")
 

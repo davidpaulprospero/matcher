@@ -60,6 +60,8 @@ class TestModelInitialization:
         mock_model_instance = Mock()
         mock_torch = Mock()
         mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 0
+        mock_torch.cuda.memory_reserved.return_value = 0
 
         # Mock GPU properties properly
         gpu_props = Mock()
@@ -138,6 +140,8 @@ class TestModelInitialization:
 
         mock_torch = Mock()
         mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 0
+        mock_torch.cuda.memory_reserved.return_value = 0
         gpu_props = Mock()
         gpu_props.total_memory = 8 * 1024**3
         mock_torch.cuda.get_device_properties.return_value = gpu_props
@@ -448,6 +452,8 @@ class TestCleanup:
 
         mock_torch = Mock()
         mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 0
+        mock_torch.cuda.memory_reserved.return_value = 0
         gpu_props = Mock()
         gpu_props.total_memory = 8 * 1024**3
         mock_torch.cuda.get_device_properties.return_value = gpu_props
@@ -543,6 +549,8 @@ class TestCoverageGaps:
 
         mock_torch = Mock()
         mock_torch.cuda.is_available.return_value = False  # CUDA not available
+        mock_torch.cuda.memory_allocated.return_value = 0
+        mock_torch.cuda.memory_reserved.return_value = 0
 
         def mock_import(name, *args, **kwargs):
             if name == 'faster_whisper':
@@ -654,3 +662,199 @@ class TestEdgeCases:
             # Should handle empty words list
             assert len(result) == 1
             assert 'words' not in result[0]
+
+
+class TestMemoryLogging:
+    """Test GPU memory logging during model init and cleanup"""
+
+    @pytest.mark.fast
+    def test_memory_logging_during_init_with_cuda(self):
+        """Test that GPU memory is logged before/after model initialization (US-38-007)"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model_instance = Mock()
+        MockWhisperModel = Mock(return_value=mock_model_instance)
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 100 * 1024 * 1024  # 100MB
+        mock_torch.cuda.memory_reserved.return_value = 200 * 1024 * 1024  # 200MB
+
+        gpu_props = Mock()
+        gpu_props.total_memory = 8 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = gpu_props
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            with patch('src.transcription.whisper_client.logger') as mock_logger:
+                client = WhisperClient(model_name="base", compute_type="auto")
+                client.get_model()
+
+                # Verify memory logging was called
+                log_calls = [str(c) for c in mock_logger.info.call_args_list]
+
+                # Check for before init log
+                before_log_found = any('before model init' in c for c in log_calls)
+                assert before_log_found, f"Expected 'before model init' log. Calls: {log_calls}"
+
+                # Check for after init log
+                after_log_found = any('after model init' in c for c in log_calls)
+                assert after_log_found, f"Expected 'after model init' log. Calls: {log_calls}"
+
+                # Check for memory delta log
+                delta_log_found = any('memory delta' in c.lower() for c in log_calls)
+                assert delta_log_found, f"Expected memory delta log. Calls: {log_calls}"
+
+    @pytest.mark.fast
+    def test_memory_logging_during_init_without_cuda(self):
+        """Test memory logging fallback when CUDA unavailable (US-38-007)"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model_instance = Mock()
+        MockWhisperModel = Mock(return_value=mock_model_instance)
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                raise ImportError("No torch")
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            with patch('src.transcription.whisper_client.logger') as mock_logger:
+                client = WhisperClient(model_name="base", compute_type="auto")
+                client.get_model()
+
+                # Verify memory logging was called (with 0.0MB since no CUDA)
+                log_calls = [str(c) for c in mock_logger.info.call_args_list]
+
+                # Should still log memory (0.0MB values)
+                before_log_found = any('before model init' in c for c in log_calls)
+                assert before_log_found, f"Expected 'before model init' log. Calls: {log_calls}"
+
+    @pytest.mark.fast
+    def test_memory_logging_during_cleanup_with_cuda(self):
+        """Test that GPU memory delta is logged during cleanup (US-38-007)"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model = Mock()
+        MockWhisperModel = Mock(return_value=mock_model)
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+
+        # Simulate memory usage: high before cleanup, low after
+        memory_calls = [0]
+
+        def get_memory_allocated():
+            memory_calls[0] += 1
+            # First call (before cleanup): 500MB, Second call (after cleanup): 50MB
+            return 500 * 1024 * 1024 if memory_calls[0] <= 2 else 50 * 1024 * 1024
+
+        mock_torch.cuda.memory_allocated.side_effect = get_memory_allocated
+        mock_torch.cuda.memory_reserved.return_value = 600 * 1024 * 1024
+        mock_torch.cuda.empty_cache = Mock()
+        mock_torch.cuda.synchronize = Mock()
+
+        gpu_props = Mock()
+        gpu_props.total_memory = 8 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = gpu_props
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            with patch('src.transcription.whisper_client.logger') as mock_logger:
+                client = WhisperClient()
+                client.get_model()
+
+                # Reset mock logger to only capture cleanup logs
+                mock_logger.reset_mock()
+
+                # Cleanup
+                client.cleanup()
+
+                # Verify cleanup memory logging
+                log_calls = [str(c) for c in mock_logger.info.call_args_list]
+
+                # Check for before cleanup log
+                before_log_found = any('before cleanup' in c for c in log_calls)
+                assert before_log_found, f"Expected 'before cleanup' log. Calls: {log_calls}"
+
+                # Check for after cleanup log
+                after_log_found = any('after cleanup' in c for c in log_calls)
+                assert after_log_found, f"Expected 'after cleanup' log. Calls: {log_calls}"
+
+                # Check for memory freed log
+                freed_log_found = any('freed by cleanup' in c.lower() for c in log_calls)
+                assert freed_log_found, f"Expected 'freed by cleanup' log. Calls: {log_calls}"
+
+    @pytest.mark.fast
+    def test_get_gpu_memory_mb_returns_tuple(self):
+        """Test _get_gpu_memory_mb helper function returns correct tuple (US-38-007)"""
+        from src.transcription.whisper_client import _get_gpu_memory_mb
+
+        # Test without mocking - should return (0.0, 0.0) if CUDA unavailable
+        # or actual values if CUDA is available
+        result = _get_gpu_memory_mb()
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        assert isinstance(result[0], float)
+        assert isinstance(result[1], float)
+
+    @pytest.mark.fast
+    def test_get_gpu_memory_mb_with_cuda_available(self):
+        """Test _get_gpu_memory_mb with mocked CUDA (US-38-007)"""
+        import builtins
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 100 * 1024 * 1024  # 100MB
+        mock_torch.cuda.memory_reserved.return_value = 200 * 1024 * 1024  # 200MB
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            from src.transcription import whisper_client
+            # Force reimport to get mocked torch
+            import importlib
+            importlib.reload(whisper_client)
+
+            result = whisper_client._get_gpu_memory_mb()
+
+            # Should return approximately 100MB allocated, 200MB reserved
+            assert result[0] == pytest.approx(100.0, abs=1.0)
+            assert result[1] == pytest.approx(200.0, abs=1.0)
+
+            # Restore module
+            importlib.reload(whisper_client)
