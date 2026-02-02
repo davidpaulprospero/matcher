@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 41,
-    "focusArea": "rate-limiting",
-    "branchName": "ralph/sprint-41",
+    "sprintNumber": 42,
+    "focusArea": "download",
+    "branchName": "ralph/sprint-42",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,178 +11,178 @@
     },
     "userStories": [
         {
-            "id": "US-41-001",
-            "title": "Generate sprint stories for rate-limiting focus area",
+            "id": "US-42-001",
+            "title": "Generate sprint stories for download focus area",
             "priority": "high",
+            "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'rate-limiting' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'rate-limiting'",
-                "Add stories US-41-002 through US-41-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'download'",
+                "Add stories US-42-002 through US-42-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-41-NNN to be unique across sprints",
-                "Mark this story (US-41-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-42-NNN to be unique across sprints",
+                "Mark this story (US-42-001) as passes: true when done"
             ],
-            "passes": true,
-            "notes": "Generated 11 stories (US-41-002 through US-41-012) addressing the two critical bugs from user logs: (1) text_metadata AttributeError after caption fetch, (2) retry budget exhaustion at 100/100 for 175 video batch despite auto_scale=true"
+            "notes": "Sprint stories generated based on user-reported bugs:\n1. PipelineState missing text_metadata attribute during restore()\n2. Caption retry budget exhaustion with 175 videos and only 100 attempts"
         },
         {
-            "id": "US-41-002",
-            "title": "Fix PipelineState text_metadata AttributeError on checkpoint restore",
+            "id": "US-42-002",
+            "title": "Fix CaptionStage restore() missing _preflight_check call",
             "priority": "critical",
-            "acceptanceCriteria": [
-                "Add defensive hasattr() check before state.text_metadata.extend() in _populate_text_metadata()",
-                "Log warning when text_metadata attribute is missing and auto-initialize it",
-                "Add unit test that loads checkpoint with missing text_metadata and verifies graceful handling",
-                "Verify caption stage completes without AttributeError when state has no text_metadata attribute",
-                "Test passes with: pytest tests/test_stages/test_caption_stage.py -v -k text_metadata"
-            ],
             "passes": true,
-            "notes": "Tier: T1 (Critical Bug Fix). FIXED: Updated logger.debug to logger.warning with US-41-002 marker. Added TestCaptionStageTextMetadataCheckpointRestore class with 3 tests covering legacy state, SimpleNamespace, and warning logging. All 9 text_metadata tests pass."
+            "acceptanceCriteria": [
+                "restore() method in CaptionStage calls _ensure_state_attributes() or _preflight_check() before _populate_text_metadata()",
+                "state.text_metadata is guaranteed to exist when _populate_text_metadata() is called during restore",
+                "Checkpoint restoration no longer raises AttributeError for text_metadata",
+                "Add unit test that verifies restore() handles missing text_metadata attribute",
+                "Test passes with a mock state object that has no text_metadata attribute"
+            ],
+            "notes": "COMPLETED: Added self._ensure_state_attributes(state) call at start of restore() method (line 1064 after edit). Added 3 unit tests in tests/test_caption_stage_integration.py::TestUS42002RestoreMissingTextMetadata. All 35 tests in test_caption_stage_integration.py pass, all 244 checkpoint tests pass."
         },
         {
-            "id": "US-41-003",
-            "title": "Investigate and fix retry budget not scaling for large batches",
-            "priority": "critical",
-            "acceptanceCriteria": [
-                "Add INFO log at caption stage start showing: batch_size, max_attempts (before scaling), auto_scale setting",
-                "Add INFO log after ensure_scaled() showing: whether scaling occurred, new max_attempts value",
-                "Verify logs show 'scaled max_attempts from 100 to 350' for batch of 175 videos",
-                "Add test: batch of 175 with auto_scale=true should scale to 175*2.0=350 max_attempts",
-                "Verify budget exhaustion doesn't occur before video 100 for batch of 175"
-            ],
-            "passes": true,
-            "notes": "Tier: T1 (Critical Bug). FIXED: Added US-41-003 INFO logs in caption_stage.py showing budget state BEFORE and AFTER ensure_scaled(). Added TestCaptionRetryBudgetLargeBatchScaling test class with 6 tests covering: scaling to 350, no exhaustion before video 100, processing all 175 videos, log message verification, idempotency, and auto_scale=false behavior."
-        },
-        {
-            "id": "US-41-004",
-            "title": "Add retry budget scaling verification at batch start",
+            "id": "US-42-003",
+            "title": "Add defensive state validation in _populate_text_metadata",
             "priority": "high",
-            "acceptanceCriteria": [
-                "After ensure_scaled() call, verify max_attempts >= batch_size * attempts_per_video",
-                "If verification fails, raise ValueError with actionable message including config path",
-                "Add config validation in CaptionRetryBudgetConfig.__post_init__ for attempts_per_video > 0",
-                "Log WARNING if auto_scale=false and batch_size > max_attempts",
-                "Add test: verification raises ValueError when scaling math is wrong"
-            ],
-            "passes": true,
-            "notes": "Tier: T2 (Defensive). FIXED: Added verify_budget_sufficient() method in retry_budget.py:843-876 that validates max_attempts >= batch_size * attempts_per_video after ensure_scaled(). Raises ValueError with actionable message including config.yaml path when insufficient. Added __post_init__ validation for attempts_per_video > 0 in download.py:215-222. Logs WARNING when auto_scale=false and batch_size > max_attempts. Added 8 tests across TestCaptionRetryBudgetVerification and TestCaptionRetryBudgetConfigValidation classes. Commit: ae80a8f"
-        },
-        {
-            "id": "US-41-005",
-            "title": "Add per-video attempt counting to diagnose budget consumption",
-            "priority": "medium",
-            "acceptanceCriteria": [
-                "Track attempts_per_video_id: Dict[str, int] in CaptionRetryBudget",
-                "Log WARNING when any single video consumes >3 attempts (indicates retry loop)",
-                "Add get_high_attempt_videos(threshold=3) method returning video IDs with >threshold attempts",
-                "Include high_attempt_videos in budget summary when count > 0",
-                "Add test: video with 5 attempts appears in get_high_attempt_videos(3)"
-            ],
-            "passes": true,
-            "notes": "Tier: T2 (Observability). FIXED: Added attempts_per_video_id tracking dict to CaptionRetryBudget. record_attempt() tracks per-video counts and logs WARNING when crossing 4 attempts (logs once per video). get_high_attempt_videos(threshold=3) returns video IDs sorted by attempt count descending. get_summary() includes high_attempt_videos when count > 0. Added 11 tests in TestCaptionRetryBudgetPerVideoAttemptTracking class. Commit: d468b91"
-        },
-        {
-            "id": "US-41-006",
-            "title": "Add circuit breaker trip count to budget exhaustion logging",
-            "priority": "medium",
-            "acceptanceCriteria": [
-                "Add circuit_breaker_trips: int counter to CaptionRetryBudget",
-                "Increment when circuit breaker trips (record_circuit_trip method)",
-                "Include circuit_breaker_trips in get_summary() output",
-                "Log INFO showing trips when budget exhausts with >0 trips",
-                "Add test: budget summary includes circuit_breaker_trips field"
-            ],
-            "passes": true,
-            "notes": "Tier: T2 (Observability). FIXED: Added circuit_breaker_trips: int field, record_circuit_trip() method, included trips in get_summary() and to_dict()/from_dict(). budget_exhausted() logs INFO with trip count when >0. Added 9 tests in TestCaptionRetryBudgetCircuitBreakerTrips class covering: initial value, increment, summary inclusion, serialization, reset, and exhaustion logging."
-        },
-        {
-            "id": "US-41-007",
-            "title": "Add defensive state validation before _populate_text_metadata",
-            "priority": "high",
-            "acceptanceCriteria": [
-                "Call state.validate_state_attributes() at start of _populate_text_metadata()",
-                "If validation initializes fields, log WARNING with field names",
-                "Handle case where state is not a PipelineState instance (isinstance check)",
-                "If state lacks validate_state_attributes method, manually initialize text_metadata",
-                "Add test: _populate_text_metadata handles mock state object without text_metadata"
-            ],
-            "passes": true,
-            "notes": "Tier: T1 (Defensive). FIXED: Added US-41-007 defensive validation at start of _populate_text_metadata(). For PipelineState: calls validate_state_attributes() and logs WARNING if fields initialized. For non-PipelineState (mocks, etc): isinstance check falls through to manual text_metadata initialization with warning. Added TestPopulateTextMetadataDefensiveValidation class with 5 tests covering all acceptance criteria."
-        },
-        {
-            "id": "US-41-008",
-            "title": "Log retry budget state before and after checkpoint restore",
-            "priority": "medium",
-            "acceptanceCriteria": [
-                "Log INFO before checkpoint restore: 'Retry budget before restore: max_attempts=X, batch_size=Y'",
-                "Log INFO after checkpoint restore: 'Retry budget after restore: max_attempts=X, batch_size=Y, attempts_used=Z'",
-                "Log WARNING if restored budget has attempts > 0 but batch_size is None (indicates old checkpoint)",
-                "Include these logs in caption_stage.py initialization block",
-                "Add test: checkpoint restore logging shows expected values"
-            ],
-            "passes": true,
-            "notes": "Tier: T2 (Observability). FIXED: Added US-41-008 INFO logs in caption_stage.py:289-292 (before restore) and :313-316 (after restore). Added WARNING in :319-323 when restored budget has attempts > 0 but batch_size is None (indicates old checkpoint format). Added TestRetryBudgetCheckpointRestoreLogging class with 5 tests in test_caption_stage_integration.py. All 5 tests pass."
-        },
-        {
-            "id": "US-41-009",
-            "title": "Add retry budget reset option when auto_scale triggers",
-            "priority": "medium",
-            "acceptanceCriteria": [
-                "Add config option reset_on_scale: bool = false to CaptionRetryBudgetConfig",
-                "When ensure_scaled() scales up AND reset_on_scale=true, reset attempts/failures counters",
-                "Log INFO when reset occurs: 'Budget scaled and reset: {attempts} attempts cleared'",
-                "Default to false to preserve existing behavior",
-                "Add test: ensure_scaled with reset_on_scale=true clears counters"
-            ],
-            "passes": true,
-            "notes": "Tier: T3 (Enhancement). FIXED: Added reset_on_scale: bool = False to both CaptionRetryBudgetConfig classes (retry_budget.py and download.py). Modified ensure_scaled() to clear all counters when scaling AND reset_on_scale=true. Logs INFO with attempts cleared count. Added 2 tests: test_ensure_scaled_with_reset_on_scale_clears_counters and test_ensure_scaled_without_reset_on_scale_preserves_counters. All 8 ensure_scaled tests pass."
-        },
-        {
-            "id": "US-41-010",
-            "title": "Add batch progress percentage to budget exhaustion logs",
-            "priority": "low",
-            "acceptanceCriteria": [
-                "Include videos_processed/batch_size in EXHAUSTED log message",
-                "Format: 'EXHAUSTED at 57% progress (100/175 videos processed)'",
-                "Add progress_percentage property to CaptionRetryBudget",
-                "Include progress_percentage in get_summary() output",
-                "Add test: progress_percentage returns correct value"
-            ],
-            "passes": true,
-            "notes": "Tier: T3 (UX). FIXED: Added get_progress_percentage() method returning percentage of batch processed (successes+failures/batch_size*100). Added get_videos_processed() helper. Updated budget_exhausted() EXHAUSTED log to include 'at X% progress (Y/Z videos processed)'. Added progress_percentage and videos_processed to get_summary(). Added 9 tests in TestCaptionRetryBudgetProgressPercentage class."
-        },
-        {
-            "id": "US-41-011",
-            "title": "Add config validation for retry budget minimum values",
-            "priority": "low",
-            "acceptanceCriteria": [
-                "Add __post_init__ to CaptionRetryBudgetConfig with validation",
-                "Validate: max_attempts >= 10 or max_attempts == 0 (unlimited)",
-                "Validate: attempts_per_video >= 1.0",
-                "Validate: max_backoff_time_seconds >= 30.0 or == 0 (unlimited)",
-                "Raise ValueError with helpful message if validation fails"
-            ],
-            "passes": true,
-            "notes": "Tier: T3 (Defensive). FIXED: Extended __post_init__ in CaptionRetryBudgetConfig (src/config/sections/download.py:222-252) to validate all three settings. max_attempts must be >= 10 or 0 (unlimited). attempts_per_video must be >= 1.0 (not just > 0). max_backoff_time_seconds must be >= 30.0 or 0 (unlimited). All error messages include the config.yaml path. Added 14 tests in TestCaptionRetryBudgetConfigValidation class."
-        },
-        {
-            "id": "US-41-012",
-            "title": "Add checkpoint integrity check for retry budget batch_size",
-            "priority": "medium",
-            "acceptanceCriteria": [
-                "When restoring retry_budget from checkpoint, compare stored batch_size with current batch_size",
-                "Log WARNING if batch_size changed: 'Checkpoint batch_size (X) differs from current (Y)'",
-                "If current batch_size > restored batch_size, force re-scale even if already scaled",
-                "Add test: batch_size change triggers re-scale",
-                "Include batch_size_changed: bool in restored budget summary"
-            ],
             "passes": false,
-            "notes": "Tier: T2 (Defensive). Files: src/stages/caption_stage.py:286-310, src/caption/retry_budget.py:780-842. If checkpoint was from batch of 50 but current batch is 175, the restored max_attempts=100 is insufficient."
+            "acceptanceCriteria": [
+                "_populate_text_metadata() validates state has text_metadata before calling .extend()",
+                "If text_metadata is None, initialize it as empty list rather than raising AttributeError",
+                "Log warning when defensive initialization triggers (indicates caller bug)",
+                "Method remains backward compatible with existing callers",
+                "Add test that calls _populate_text_metadata with state missing text_metadata"
+            ],
+            "notes": "Tier 1 Bug Fix (Defense in Depth): src/stages/caption_stage.py line 1346+\n\nSecondary fix for US-42-002: Even after fixing restore(), add defensive check in _populate_text_metadata() itself.\n\nPattern to follow: Similar to _ensure_state_attributes() which uses setattr(state, 'text_metadata', []) for missing attributes."
+        },
+        {
+            "id": "US-42-004",
+            "title": "Fix auto_scale not triggering for large batches with restored checkpoint",
+            "priority": "critical",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When checkpoint restores retry budget with attempts, scaling still occurs for current batch size",
+                "Batch of 175 videos results in max_attempts >= 350 (175 * 2.0 attempts_per_video)",
+                "Log message shows scaled max_attempts when batch_size > original max_attempts",
+                "Add test: restore budget with 50 attempts used, new batch of 200, verify scaling to 400",
+                "ensure_scaled() considers remaining budget headroom, not just current max_attempts"
+            ],
+            "notes": "Tier 1 Bug Fix (Critical): src/caption/retry_budget.py + src/stages/caption_stage.py\n\nUser log shows: 175 videos, 100 max_attempts, 99 successes then budget_exhausted at video 101.\n\nWith auto_scale=true (default), a batch of 175 should scale to 175*2.0=350 attempts.\n\nLikely cause: Either auto_scale config is false, or ensure_scaled() isn't called after checkpoint restore, or the scaling logic has a bug when budget already has attempts used.\n\nKey methods:\n- ensure_scaled() in retry_budget.py\n- Lines 693-770 in caption_stage.py where scaling occurs"
+        },
+        {
+            "id": "US-42-005",
+            "title": "Add diagnostic logging when budget exhausts before batch completes",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When budget_exhausted() returns True, log includes: auto_scale setting, batch_size, config max_attempts, scaled max_attempts",
+                "Log shows why scaling didn't help (e.g., 'auto_scale=false' or 'scaling not triggered')",
+                "Include top 3 error categories from error_counts in exhaustion log",
+                "Add test that verifies diagnostic info is logged when budget exhausts",
+                "Diagnostic log uses INFO level and includes [US-42-005] marker"
+            ],
+            "notes": "Tier 2 Enhancement: src/caption/retry_budget.py budget_exhausted() method (lines 297-342)\n\nThe current EXHAUSTED log only shows attempts/max_attempts. Adding diagnostic context helps users understand why budget was insufficient.\n\nLog format: 'CaptionRetryBudget: EXHAUSTED (attempts: 100/100) [US-42-005] auto_scale=false, batch_size=175, original_max=100, top_errors=[RATE_LIMIT:45, TIMEOUT:30]'"
+        },
+        {
+            "id": "US-42-006",
+            "title": "Add config validation warning for auto_scale=false with large batches",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "_validate_budget_for_batch() warns when auto_scale=false AND batch_size > max_attempts",
+                "Warning message recommends enabling auto_scale or increasing max_attempts",
+                "Warning includes specific formula: 'batch_size * attempts_per_video = required_budget'",
+                "Add test: batch_size=200, max_attempts=100, auto_scale=false should log warning",
+                "Warning uses logger.warning() for visibility"
+            ],
+            "notes": "Tier 2 Enhancement: src/stages/caption_stage.py _validate_budget_for_batch() method (lines 1128-1170)\n\nExisting validation only warns if max_attempts < batch_size. Enhance to warn when auto_scale is disabled and budget may be insufficient.\n\nThis proactively alerts users before they hit exhaustion."
+        },
+        {
+            "id": "US-42-007",
+            "title": "Verify ensure_scaled resets budget counters when scaling up from restored state",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Document behavior: ensure_scaled() does NOT reset attempts counter when scaling",
+                "If reset_on_scale=true, ensure_scaled() resets attempts to 0 when scaling up",
+                "Add test: budget has 80 attempts used, scale up, verify attempts counter behavior based on reset_on_scale",
+                "Log when scaling resets counters: '[US-42-007] Budget scaled and reset: attempts 80->0'",
+                "Add comment in ensure_scaled() explaining the reset_on_scale behavior"
+            ],
+            "notes": "Tier 2 Investigation: src/caption/retry_budget.py ensure_scaled() method\n\nUS-41-009 added reset_on_scale config but need to verify it works correctly when restoring from checkpoint and then scaling.\n\nScenario: Checkpoint has 80/100 attempts used. New batch needs 200 attempts. Scale to 200, but should attempts stay at 80 or reset to 0?\n\nDefault (reset_on_scale=false): Keep attempts, so only 120 attempts remaining.\nWith reset_on_scale=true: Reset attempts to 0, so 200 attempts available."
+        },
+        {
+            "id": "US-42-008",
+            "title": "Add batch size to retry budget checkpoint data",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "to_dict() already includes batch_size (verify)",
+                "from_dict() restores batch_size field",
+                "restore_with_integrity_check() uses restored batch_size for comparison",
+                "Add test: save budget with batch_size=175, restore, verify batch_size preserved",
+                "Log batch_size in checkpoint restore summary"
+            ],
+            "notes": "Tier 2 Verification: src/caption/retry_budget.py to_dict() and from_dict() methods\n\nUS-38-009 added batch_size tracking. Verify checkpoint persistence works correctly.\n\nThis ensures batch_size mismatch detection (US-41-012) has the data it needs."
+        },
+        {
+            "id": "US-42-009",
+            "title": "Add integration test for full caption stage restore flow",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Test creates checkpoint with caption stage data including retry_budget",
+                "Test restores from checkpoint with a state object that simulates missing attributes",
+                "Test verifies state.text_metadata exists after restore",
+                "Test verifies retry budget is properly scaled for new batch",
+                "Test file: tests/test_stage_caption_restore.py or tests/test_caption_checkpoint.py"
+            ],
+            "notes": "Tier 2 Testing: tests/test_stage_caption*.py\n\nIntegration test for the full restore flow that triggered the user's bugs.\n\nMock components:\n- CheckpointManager.get_stage_data() returns caption data\n- PipelineState without text_metadata attribute\n- Config with retry_budget settings"
+        },
+        {
+            "id": "US-42-010",
+            "title": "Add retry budget health check at batch start",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "At start of caption batch, log budget health: 'Budget health: {remaining}/{max} attempts available for {batch_size} videos'",
+                "If remaining < batch_size, log WARNING: 'Budget may be insufficient'",
+                "If remaining < batch_size * 0.5, log ERROR: 'Budget critically low - expect skipped videos'",
+                "Add test that verifies health check logs appropriate level based on budget state",
+                "Health check occurs after checkpoint restore but before processing"
+            ],
+            "notes": "Tier 2 Enhancement: src/stages/caption_stage.py run() method, after retry budget setup\n\nProactive check helps users understand budget state before processing begins.\n\nInsert after line 770 (verify_budget_sufficient) in caption_stage.py."
+        },
+        {
+            "id": "US-42-011",
+            "title": "Add graceful degradation when budget insufficient for batch",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When budget is insufficient (remaining < batch_size), offer option to continue with warning",
+                "In non-interactive mode, continue with warning rather than failing",
+                "Log expected number of videos that will be skipped: 'Expected ~{n} videos to be skipped due to budget'",
+                "Track actual vs expected skips in summary log",
+                "Add test: budget has 50 remaining, batch of 100, verify continues and logs expected skips"
+            ],
+            "notes": "Tier 3 Enhancement: src/stages/caption_stage.py\n\nCurrently verify_budget_sufficient() may raise ValueError. Add option for graceful degradation.\n\nUsers may prefer partial results over complete failure, especially when re-running with limited budget."
+        },
+        {
+            "id": "US-42-012",
+            "title": "Add CLI flag to reset retry budget on resume",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add --reset-budget flag to main.py CLI",
+                "When flag is set, retry budget counters are reset to 0 even when restoring from checkpoint",
+                "Flag is documented in --help output",
+                "Add test: run with --resume --reset-budget, verify budget counters are 0",
+                "Log when flag triggers reset: 'Retry budget reset by --reset-budget flag'"
+            ],
+            "notes": "Tier 3 Enhancement: main.py, src/cli/args.py\n\nGives users manual control when they know rate limiting has subsided and want to retry with fresh budget.\n\nAlternative to increasing max_attempts - just reset the counters."
         }
     ]
 }

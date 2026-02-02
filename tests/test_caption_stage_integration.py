@@ -1357,3 +1357,125 @@ class TestRetryBudgetCheckpointRestoreLogging:
         assert 'batch_size=75' in after_log, f"Expected batch_size=75 in log: {after_log}"
         # Attempts used should be 42 from checkpoint
         assert 'attempts_used=42' in after_log, f"Expected attempts_used=42 in log: {after_log}"
+
+
+# =============================================================================
+# US-42-002: Test restore() handles missing text_metadata attribute
+# =============================================================================
+
+
+class TestUS42002RestoreMissingTextMetadata:
+    """Tests for US-42-002: Fix restore() missing _preflight_check call.
+
+    Root cause: restore() was calling _populate_text_metadata() without first
+    calling _ensure_state_attributes(), which initializes text_metadata.
+
+    The fix adds self._ensure_state_attributes(state) at the start of restore()
+    before accessing state.text_metadata.
+    """
+
+    @pytest.mark.fast
+    def test_restore_with_state_missing_text_metadata(self):
+        """Test restore() handles a state object that lacks text_metadata attribute.
+
+        AC1: restore() method in CaptionStage calls _ensure_state_attributes()
+             or _preflight_check() before _populate_text_metadata()
+        AC2: state.text_metadata is guaranteed to exist when _populate_text_metadata()
+             is called during restore
+        AC3: Checkpoint restoration no longer raises AttributeError for text_metadata
+        """
+        stage = CaptionStage()
+
+        # Create a minimal mock state that deliberately lacks text_metadata
+        class MinimalState:
+            """State object without text_metadata attribute."""
+            pass
+
+        state = MinimalState()
+
+        # Checkpoint with caption results that would trigger _populate_text_metadata
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {
+                        'vid001': {
+                            'video_id': 'vid001',
+                            'segments': [
+                                {'text': 'Hello world', 'start': 0.0, 'end': 1.0}
+                            ]
+                        }
+                    },
+                    'total_segments': 1,
+                }
+            }
+        )
+
+        # Before US-42-002 fix, this would raise:
+        # AttributeError: 'MinimalState' object has no attribute 'text_metadata'
+        # After the fix, it should succeed
+        result = stage.restore(state, checkpoint)
+
+        assert result is True, "restore() should return True on successful restoration"
+        assert hasattr(state, 'text_metadata'), "state should have text_metadata after restore"
+
+    @pytest.mark.fast
+    def test_restore_initializes_all_required_state_attributes(self):
+        """Test restore() initializes all state attributes via _ensure_state_attributes().
+
+        AC4: Add unit test that verifies restore() handles missing text_metadata attribute
+        AC5: Test passes with a mock state object that has no text_metadata attribute
+        """
+        stage = CaptionStage()
+
+        # Create state with NO attributes at all
+        class BareState:
+            """Completely bare state object."""
+            pass
+
+        state = BareState()
+
+        # Empty checkpoint (valid no-op case)
+        checkpoint = MockCheckpointManager(stage_data={})
+
+        result = stage.restore(state, checkpoint)
+
+        assert result is True, "restore() should succeed with empty checkpoint"
+
+        # Verify _ensure_state_attributes initialized the required fields
+        assert hasattr(state, 'text_metadata'), "text_metadata should be initialized"
+        assert hasattr(state, 'caption_results'), "caption_results should be initialized"
+        assert hasattr(state, 'video_ids'), "video_ids should be initialized"
+        assert hasattr(state, 'video_search_results'), "video_search_results should be initialized"
+
+        # Verify correct types
+        assert isinstance(state.text_metadata, list), "text_metadata should be a list"
+        assert isinstance(state.caption_results, dict), "caption_results should be a dict"
+
+    @pytest.mark.fast
+    def test_restore_does_not_overwrite_existing_text_metadata(self):
+        """Test restore() doesn't clobber existing text_metadata values.
+
+        _ensure_state_attributes only initializes if attribute doesn't exist.
+        """
+        stage = CaptionStage()
+
+        # State with pre-existing text_metadata
+        existing_metadata = [{'video_id': 'existing', 'text': 'pre-existing data'}]
+
+        class StateWithMetadata:
+            def __init__(self):
+                self.text_metadata = existing_metadata.copy()
+                self.caption_results = {}
+                self.video_ids = []
+                self.video_search_results = []
+
+        state = StateWithMetadata()
+
+        # Empty checkpoint
+        checkpoint = MockCheckpointManager(stage_data={})
+
+        result = stage.restore(state, checkpoint)
+
+        assert result is True
+        # Verify the existing metadata wasn't overwritten
+        assert state.text_metadata == existing_metadata, "Existing text_metadata should be preserved"
