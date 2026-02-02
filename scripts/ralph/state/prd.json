@@ -41,8 +41,8 @@
                 "Verify caption stage completes without AttributeError when state has no text_metadata attribute",
                 "Test passes with: pytest tests/test_stages/test_caption_stage.py -v -k text_metadata"
             ],
-            "passes": false,
-            "notes": "Tier: T1 (Critical Bug Fix). Files: src/stages/caption_stage.py:1053 (_populate_text_metadata). Root cause: state object may not be a proper PipelineState instance when restored from legacy checkpoint or created via from_legacy_pipeline(). The __post_init__ and validate_state_attributes() exist but aren't called on every code path."
+            "passes": true,
+            "notes": "Tier: T1 (Critical Bug Fix). FIXED: Updated logger.debug to logger.warning with US-41-002 marker. Added TestCaptionStageTextMetadataCheckpointRestore class with 3 tests covering legacy state, SimpleNamespace, and warning logging. All 9 text_metadata tests pass."
         },
         {
             "id": "US-41-003",
