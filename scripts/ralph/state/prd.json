@@ -168,8 +168,8 @@
                 "Add unit test verifying caption_results is set even if _populate_text_metadata raises",
                 "Add unit test verifying error log includes caption_results count"
             ],
-            "passes": false,
-            "notes": "Tier 1 (bug fix). Target: src/stages/caption_stage.py:680-690. Currently caption_results are lost if _populate_text_metadata fails. The error traceback shows 99 succeeded but data was lost."
+            "passes": true,
+            "notes": "Tier 1 (bug fix). Added `state.caption_results = caption_results` BEFORE calling _populate_text_metadata at src/stages/caption_stage.py:724. Wrapped _populate_text_metadata in try/except with error logging that includes video count and success count. Added TestCaptionResultsPreservation class with 2 tests in tests/integration/test_caption_stage_budget.py verifying caption_results preservation and error log includes count."
         },
         {
             "id": "US-38-012",
