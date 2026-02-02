@@ -979,12 +979,12 @@ Use this exploration context to inform story generation. Prioritize:
 You are generating a new sprint PRD for focus area: $FocusAreaId
 
 INSTRUCTIONS:
-1. Read scripts/ralph/ralph-config.json to understand the focus area
-2. Read scripts/ralph/prompt.md for context about the project
+1. Read scripts/ralph/config/ralph-config.json to understand the focus area
+2. Read scripts/ralph/session/prompt.md for context about the project
 3. Read CLAUDE.md for project conventions
-4. Read scripts/ralph/queue.json for interview details (story outline, architecture decisions, key files)
+4. Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)
 5. Analyze the codebase to find improvement opportunities for '$FocusAreaId'
-6. Update scripts/ralph/prd.json with:
+6. Update scripts/ralph/state/prd.json with:
    - focusArea: "$FocusAreaId"
    - sprintNumber: increment from current (check current prd.json first)
    - branchName: "ralph/sprint-N" (matching sprintNumber)
@@ -1004,7 +1004,7 @@ Start by reading the config and prompt files to get the current sprintNumber, th
     else {
         $prompt = "Focus on: $FocusAreaId`n`n"
         if ($Context) { $prompt += "Context: $Context`n`n" }
-        $prompt += "Read scripts/ralph/prompt.md for instructions. Work on ONE user story from prd.json that aligns with the focus area. If no stories exist for this focus area, generate appropriate stories first."
+        $prompt += "Read scripts/ralph/session/prompt.md for instructions. Work on ONE user story from scripts/ralph/state/prd.json that aligns with the focus area. If no stories exist for this focus area, generate appropriate stories first."
         $promptType = "focus_area_work"
     }
 

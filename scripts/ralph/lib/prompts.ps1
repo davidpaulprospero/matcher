@@ -318,9 +318,9 @@ function Build-StoryPrompt {
     # Concise instructions - story details already provided above
     $promptParts += "INSTRUCTIONS:"
     $promptParts += "1. All story details are above - DO NOT read prd.json (saves time)"
-    $promptParts += "2. Read scripts/ralph/prompt.md for project-level instructions"
+    $promptParts += "2. Read scripts/ralph/session/prompt.md for project-level instructions"
     $promptParts += "3. Implement the story, verify all acceptance criteria"
-    $promptParts += "4. Update prd.json to set passes: true when complete"
+    $promptParts += "4. Update scripts/ralph/state/prd.json to set passes: true when complete"
 
     $prompt = $promptParts -join "`n"
 
