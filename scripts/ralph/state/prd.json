@@ -174,7 +174,7 @@
             "id": "US-39-012",
             "title": "Add match stage fallback for missing text_metadata",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In MatchStage.run(), check if text_metadata is empty or missing",
                 "If missing but caption_results exists, log WARNING and attempt to populate from caption_results",
@@ -182,7 +182,7 @@
                 "Add unit test verifying match stage can recover when text_metadata is empty but caption_results exists",
                 "Add unit test verifying appropriate error when both text_metadata and caption_results are missing"
             ],
-            "notes": "Tier 1: Error recovery. Files: src/stages/match.py (run method), src/stages/caption_stage.py (_populate_text_metadata). Provides graceful degradation when caption stage partial failure leaves caption_results but no text_metadata."
+            "notes": "COMPLETED: 1) Added check in MatchStage.run() for empty text_metadata with existing caption_results (line 82-89). 2) Logs WARNING 'text_metadata is empty but caption_results exists. Attempting recovery from caption_results.' 3) Added _recover_text_metadata_from_captions() method that replicates CaptionStage._populate_text_metadata() logic locally (lines 341-391). Method includes all fields: text, video_path, start_time, end_time, source_file, caption_source, caption_language, caption_auto_generated, caption_quality, timing_penalty. Skips unavailable/errored/skipped results. 4) Added TestTextMetadataFallback class with 8 tests: test_recover_text_metadata_from_captions, test_recover_skips_unavailable_captions, test_recover_preserves_existing_text_metadata, test_recover_handles_empty_caption_results, test_match_stage_run_triggers_recovery, test_match_stage_run_fails_when_both_missing, test_match_stage_run_no_caption_results_attribute, test_recover_metadata_includes_all_fields. All 8 new tests pass."
         }
     ]
 }

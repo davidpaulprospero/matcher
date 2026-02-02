@@ -1502,3 +1502,228 @@ class TestParametrizedEdgeCases:
 
         # Penalized confidence should still be >= 0
         assert penalized_confidence >= 0.0 or reuse_penalty > 0.45
+
+
+# ============================================================================
+# Test Text Metadata Fallback (US-39-012)
+# ============================================================================
+
+class TestTextMetadataFallback:
+    """Tests for US-39-012: Match stage fallback for missing text_metadata"""
+
+    @pytest.fixture
+    def mock_caption_results(self):
+        """Create mock caption_results with segments"""
+        return {
+            'video123': {
+                'video_id': 'video123',
+                'language': 'en',
+                'is_auto_generated': False,
+                'caption_quality': 'high',
+                'timing_penalty': 1.0,
+                'segments': [
+                    {'text': 'Ocean waves crashing', 'start': 0.0, 'end': 5.0},
+                    {'text': 'Sunset over the water', 'start': 5.0, 'end': 10.0},
+                ],
+            },
+            'video456': {
+                'video_id': 'video456',
+                'language': 'en',
+                'is_auto_generated': True,
+                'caption_quality': 'medium',
+                'timing_penalty': 0.95,
+                'segments': [
+                    {'text': 'Beach exploration', 'start': 0.0, 'end': 7.0},
+                ],
+            },
+        }
+
+    @pytest.mark.fast
+    def test_recover_text_metadata_from_captions(self, mock_caption_results, mock_voiceover_segments):
+        """Test recovery of text_metadata when empty but caption_results exists"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []  # Empty
+        state.caption_results = mock_caption_results
+
+        # Call the recovery method directly
+        stage._recover_text_metadata_from_captions(state)
+
+        # Should have populated text_metadata
+        assert len(state.text_metadata) == 3  # 2 + 1 segments
+        assert state.text_metadata[0]['video_path'] == 'video123'
+        assert state.text_metadata[0]['text'] == 'Ocean waves crashing'
+        assert state.text_metadata[0]['caption_quality'] == 'high'
+        assert state.text_metadata[2]['video_path'] == 'video456'
+        assert state.text_metadata[2]['caption_quality'] == 'medium'
+
+    @pytest.mark.fast
+    def test_recover_skips_unavailable_captions(self, mock_voiceover_segments):
+        """Test that recovery skips unavailable/errored caption results"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []
+        state.caption_results = {
+            'video123': {
+                'video_id': 'video123',
+                'unavailable': True,
+                'reason': 'no_captions_available',
+            },
+            'video456': {
+                'video_id': 'video456',
+                'error': 'fetch_failed',
+            },
+            'video789': {
+                'video_id': 'video789',
+                'skipped': True,
+                'reason': 'live_stream',
+            },
+            'video_valid': {
+                'video_id': 'video_valid',
+                'language': 'en',
+                'segments': [
+                    {'text': 'Valid segment', 'start': 0.0, 'end': 5.0},
+                ],
+            },
+        }
+
+        stage._recover_text_metadata_from_captions(state)
+
+        # Should only have the valid segment
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_path'] == 'video_valid'
+
+    @pytest.mark.fast
+    def test_recover_preserves_existing_text_metadata(self, mock_caption_results, mock_voiceover_segments):
+        """Test that recovery extends rather than replaces existing text_metadata"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = [
+            {'video_path': 'existing.mp4', 'text': 'Existing segment', 'start_time': 0, 'end_time': 1}
+        ]
+        state.caption_results = mock_caption_results
+
+        stage._recover_text_metadata_from_captions(state)
+
+        # Should have existing + recovered
+        assert len(state.text_metadata) == 4  # 1 existing + 3 recovered
+        assert state.text_metadata[0]['video_path'] == 'existing.mp4'
+
+    @pytest.mark.fast
+    def test_recover_handles_empty_caption_results(self, mock_voiceover_segments, caplog):
+        """Test that recovery handles empty caption_results gracefully"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []
+        state.caption_results = {}
+
+        stage._recover_text_metadata_from_captions(state)
+
+        # Should remain empty
+        assert len(state.text_metadata) == 0
+        assert "Cannot recover: caption_results is empty" in caplog.text
+
+    @pytest.mark.fast
+    def test_match_stage_run_triggers_recovery(self, mock_config, mock_checkpoint,
+                                                mock_caption_results, mock_voiceover_segments, caplog):
+        """Test that MatchStage.run() triggers recovery when text_metadata empty but caption_results exists"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []  # Empty - should trigger recovery
+        state.caption_results = mock_caption_results
+        state.embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        state.embedding_index = Mock()
+        state.face_preference = 'neutral'
+        state.location_chapters = []
+
+        with patch('src.matching.match_all_segments', return_value=[]):
+            with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
+                with patch('src.embeddings.get_embedding_provider', return_value=Mock()):
+                    with patch('src.utils.CacheManager', return_value=Mock()):
+                        result = stage.run(state, mock_config, mock_checkpoint)
+
+        # Recovery should have been triggered
+        assert "Attempting recovery from caption_results" in caplog.text
+        # text_metadata should be populated from caption_results
+        assert len(state.text_metadata) == 3
+        # Result should include warning about recovery
+        assert any("Recovered" in w for w in result.warnings)
+
+    @pytest.mark.fast
+    def test_match_stage_run_fails_when_both_missing(self, mock_config, mock_checkpoint,
+                                                      mock_voiceover_segments):
+        """Test that MatchStage.run() returns appropriate result when both text_metadata and caption_results missing"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []
+        state.caption_results = {}  # Empty - no recovery possible
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        # Should succeed but with warning and empty matches
+        assert result.success is True
+        assert result.data.get('matches') == []
+        assert any("video" in w.lower() or "metadata" in w.lower() for w in result.warnings)
+
+    @pytest.mark.fast
+    def test_match_stage_run_no_caption_results_attribute(self, mock_config, mock_checkpoint,
+                                                           mock_voiceover_segments):
+        """Test that MatchStage.run() handles state without caption_results attribute"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []
+        # No caption_results attribute at all
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        # Should succeed but with warning and empty matches
+        assert result.success is True
+        assert result.data.get('matches') == []
+
+    @pytest.mark.fast
+    def test_recover_metadata_includes_all_fields(self, mock_voiceover_segments):
+        """Test that recovered text_metadata includes all expected fields"""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = []
+        state.caption_results = {
+            'testVideo': {
+                'video_id': 'testVideo',
+                'language': 'es',
+                'is_auto_generated': True,
+                'caption_quality': 'low',
+                'timing_penalty': 0.8,
+                'segments': [
+                    {'text': 'Prueba de texto', 'start': 1.5, 'end': 4.5},
+                ],
+            },
+        }
+
+        stage._recover_text_metadata_from_captions(state)
+
+        # Verify all expected fields
+        meta = state.text_metadata[0]
+        assert meta['text'] == 'Prueba de texto'
+        assert meta['video_path'] == 'testVideo'
+        assert meta['start_time'] == 1.5
+        assert meta['end_time'] == 4.5
+        assert meta['source_file'] == 'testVideo'
+        assert meta['caption_source'] == 'youtube'
+        assert meta['caption_language'] == 'es'
+        assert meta['caption_auto_generated'] is True
+        assert meta['caption_quality'] == 'low'
+        assert meta['timing_penalty'] == 0.8
