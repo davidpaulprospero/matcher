@@ -175,6 +175,97 @@ class TestMullvadVPNRotateServer:
             first_call = calls[0][0][0]
             assert first_call == ["mullvad", "relay", "set", "location", "de"]
 
+    def test_mullvad_rotate_server_resets_circuit_breaker(self):
+        """Test that rotate_server() resets circuit breaker on successful rotation."""
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.max_switches_per_session = 10
+
+        vpn = MullvadVPN(config)
+
+        # Create circuit breaker with some failure state
+        cb_config = CircuitBreakerConfig(enabled=True, consecutive_failures_threshold=3)
+        circuit_breaker = CircuitBreaker(cb_config)
+
+        # Trip the circuit breaker
+        circuit_breaker.record_failure()
+        circuit_breaker.record_failure()
+        circuit_breaker.record_failure()
+        assert circuit_breaker.is_open is True
+        assert circuit_breaker.state.consecutive_failures == 3
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = vpn.rotate_server(country="de", circuit_breaker=circuit_breaker)
+
+            assert result is True
+            # Circuit breaker should be reset after VPN rotation
+            assert circuit_breaker.is_open is False
+            assert circuit_breaker.state.consecutive_failures == 0
+
+    def test_mullvad_rotate_server_no_circuit_breaker_reset_on_failure(self):
+        """Test that circuit breaker is NOT reset when rotation fails."""
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.max_switches_per_session = 10
+
+        vpn = MullvadVPN(config)
+
+        # Create circuit breaker with some failure state
+        cb_config = CircuitBreakerConfig(enabled=True, consecutive_failures_threshold=3)
+        circuit_breaker = CircuitBreaker(cb_config)
+
+        # Trip the circuit breaker
+        circuit_breaker.record_failure()
+        circuit_breaker.record_failure()
+        circuit_breaker.record_failure()
+        assert circuit_breaker.is_open is True
+
+        with patch("subprocess.run") as mock_run:
+            # Simulate rotation failure
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Error")
+            result = vpn.rotate_server(country="de", circuit_breaker=circuit_breaker)
+
+            assert result is False
+            # Circuit breaker should still be tripped (not reset on failure)
+            assert circuit_breaker.is_open is True
+            assert circuit_breaker.state.consecutive_failures == 3
+
+    def test_mullvad_rotate_server_without_circuit_breaker(self):
+        """Test that rotate_server() works without circuit_breaker parameter."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.max_switches_per_session = 10
+
+        vpn = MullvadVPN(config)
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            # Should work without circuit_breaker parameter (backwards compatible)
+            result = vpn.rotate_server(country="de")
+
+            assert result is True
+
 
 class TestMullvadVPNGetStatus:
     """Tests for MullvadVPN.get_status() method."""
