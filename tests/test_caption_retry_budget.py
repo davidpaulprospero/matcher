@@ -4235,6 +4235,160 @@ class TestCaptionRetryBudgetVerification:
         assert "max_attempts" in error_msg
 
 
+class TestCaptionRetryBudgetHealthCheck:
+    """Tests for US-42-010: Budget health check at batch start.
+
+    Verifies that log_health_check() logs appropriate level based on
+    remaining budget vs batch size to help users understand budget state
+    before processing begins.
+    """
+
+    @pytest.mark.fast
+    def test_health_check_logs_info_when_budget_sufficient(self, caplog):
+        """Verify INFO log when remaining budget >= batch_size.
+
+        US-42-010 AC1: Log 'Budget health: {remaining}/{max} attempts available'.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 200
+        budget.attempts = 0  # Full budget available
+
+        budget.log_health_check(100)  # 200 remaining >= 100 batch
+
+        # Should log INFO with health message
+        info_logs = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert len(info_logs) >= 1, "Expected INFO log for health check"
+
+        health_log = [r for r in info_logs if "Budget health" in r.message][0]
+        assert "200/200" in health_log.message  # remaining/max
+        assert "100 videos" in health_log.message
+        assert "US-42-010" in health_log.message
+
+    @pytest.mark.fast
+    def test_health_check_logs_warning_when_budget_may_be_insufficient(self, caplog):
+        """Verify WARNING when remaining < batch_size but >= batch_size * 0.5.
+
+        US-42-010 AC2: If remaining < batch_size, log WARNING: 'Budget may be insufficient'.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.attempts = 30  # 70 remaining
+
+        budget.log_health_check(100)  # 70 < 100 but >= 50
+
+        # Should log WARNING
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1, "Expected WARNING log when budget may be insufficient"
+
+        log_msg = warning_logs[0].message
+        assert "insufficient" in log_msg.lower()
+        assert "70" in log_msg  # remaining
+        assert "100" in log_msg  # batch_size
+        assert "US-42-010" in log_msg
+
+    @pytest.mark.fast
+    def test_health_check_logs_error_when_budget_critically_low(self, caplog):
+        """Verify ERROR when remaining < batch_size * 0.5.
+
+        US-42-010 AC3: If remaining < batch_size * 0.5, log ERROR: 'Budget critically low'.
+        """
+        import logging
+        caplog.set_level(logging.ERROR)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.attempts = 70  # 30 remaining
+
+        budget.log_health_check(100)  # 30 < 50 (100 * 0.5)
+
+        # Should log ERROR
+        error_logs = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(error_logs) >= 1, "Expected ERROR log when budget critically low"
+
+        log_msg = error_logs[0].message
+        assert "critically low" in log_msg.lower()
+        assert "skipped videos" in log_msg.lower()
+        assert "US-42-010" in log_msg
+
+    @pytest.mark.fast
+    def test_health_check_no_warning_when_budget_abundant(self, caplog):
+        """Verify no WARNING/ERROR when remaining >= batch_size.
+
+        US-42-010: Only log INFO when budget is sufficient.
+        """
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 500
+        budget.attempts = 100  # 400 remaining
+
+        budget.log_health_check(200)  # 400 >= 200
+
+        # Should NOT log WARNING or ERROR
+        warning_error_logs = [
+            r for r in caplog.records
+            if r.levelno >= logging.WARNING
+        ]
+        assert len(warning_error_logs) == 0, (
+            f"Expected no WARNING/ERROR logs when budget abundant, got: "
+            f"{[r.message for r in warning_error_logs]}"
+        )
+
+    @pytest.mark.fast
+    def test_health_check_boundary_at_exactly_batch_size(self, caplog):
+        """Verify boundary: remaining == batch_size logs only INFO.
+
+        US-42-010: remaining < batch_size triggers WARNING (not <=).
+        """
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.attempts = 0  # 100 remaining == 100 batch
+
+        budget.log_health_check(100)  # remaining == batch_size
+
+        # Should NOT log WARNING (equal is not less than)
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) == 0, (
+            f"Expected no WARNING when remaining == batch_size, got: "
+            f"{[r.message for r in warning_logs]}"
+        )
+
+    @pytest.mark.fast
+    def test_health_check_boundary_at_exactly_half_batch(self, caplog):
+        """Verify boundary: remaining == batch_size * 0.5 logs WARNING not ERROR.
+
+        US-42-010: remaining < batch_size * 0.5 triggers ERROR (not <=).
+        """
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.attempts = 50  # 50 remaining == 100 * 0.5
+
+        budget.log_health_check(100)  # remaining == batch * 0.5
+
+        # Should log WARNING but NOT ERROR
+        error_logs = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(error_logs) == 0, (
+            f"Expected no ERROR when remaining == batch_size * 0.5, got: "
+            f"{[r.message for r in error_logs]}"
+        )
+
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1, "Expected WARNING when remaining < batch_size"
+
+
 class TestCaptionRetryBudgetConfigValidation:
     """Tests for US-41-004 and US-41-011: Config validation in __post_init__.
 

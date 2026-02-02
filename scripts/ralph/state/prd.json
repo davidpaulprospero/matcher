@@ -132,7 +132,7 @@
             "id": "US-42-009",
             "title": "Add integration test for full caption stage restore flow",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Test creates checkpoint with caption stage data including retry_budget",
                 "Test restores from checkpoint with a state object that simulates missing attributes",
@@ -140,13 +140,13 @@
                 "Test verifies retry budget is properly scaled for new batch",
                 "Test file: tests/test_stage_caption_restore.py or tests/test_caption_checkpoint.py"
             ],
-            "notes": "Tier 2 Testing: tests/test_stage_caption*.py\n\nIntegration test for the full restore flow that triggered the user's bugs.\n\nMock components:\n- CheckpointManager.get_stage_data() returns caption data\n- PipelineState without text_metadata attribute\n- Config with retry_budget settings"
+            "notes": "COMPLETED: Created tests/test_caption_stage_restore_flow.py with 9 integration tests.\n\nTests cover:\n1. AC1: test_restore_creates_checkpoint_with_caption_data_and_retry_budget - verifies checkpoint data structure\n2. AC2: test_restore_with_state_missing_attributes - uses FreshPipelineState class with no text_metadata\n3. AC3: test_restore_verifies_text_metadata_exists_after_restore - verifies 3 segments restored\n4. AC4: test_retry_budget_properly_scaled_for_new_batch - tests scaling from batch 175 to 200\n5. Additional tests: test_retry_budget_not_scaled_when_sufficient, test_full_restore_flow_integration\n6. Budget scaling tests: test_budget_scales_when_batch_size_set_but_max_attempts_insufficient, test_budget_does_not_scale_twice_for_same_batch, test_restore_with_integrity_check_detects_batch_size_change\n\nAll 9 tests pass."
         },
         {
             "id": "US-42-010",
             "title": "Add retry budget health check at batch start",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "At start of caption batch, log budget health: 'Budget health: {remaining}/{max} attempts available for {batch_size} videos'",
                 "If remaining < batch_size, log WARNING: 'Budget may be insufficient'",
@@ -154,7 +154,7 @@
                 "Add test that verifies health check logs appropriate level based on budget state",
                 "Health check occurs after checkpoint restore but before processing"
             ],
-            "notes": "Tier 2 Enhancement: src/stages/caption_stage.py run() method, after retry budget setup\n\nProactive check helps users understand budget state before processing begins.\n\nInsert after line 770 (verify_budget_sufficient) in caption_stage.py."
+            "notes": "COMPLETED: Added log_health_check() method to CaptionRetryBudget class.\n\nChanges:\n1. Added log_health_check(batch_size) method to src/caption/retry_budget.py (lines 1215-1241)\n2. Method logs INFO: 'Budget health: {remaining}/{max} attempts available for {batch_size} videos'\n3. If remaining < batch_size * 0.5: logs ERROR with 'critically low' message\n4. If remaining < batch_size: logs WARNING with 'may be insufficient' message\n5. Called in caption_stage.py after verify_budget_sufficient() (line 774)\n6. Added 6 tests in TestCaptionRetryBudgetHealthCheck class covering all scenarios including boundaries\n\nAll 6 new tests pass."
         },
         {
             "id": "US-42-011",
