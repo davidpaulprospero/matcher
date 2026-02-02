@@ -1152,6 +1152,9 @@ class CaptionRetryBudget:
 
             # Check if auto_scale is disabled
             if not self.auto_scale:
+                # US-43-009: Always set batch_size, even when not scaling
+                if self.batch_size is None:
+                    self.batch_size = batch_size
                 logger.debug(
                     f"CaptionRetryBudget.ensure_scaled: auto_scale disabled, "
                     f"not scaling for batch_size={batch_size}"
@@ -1165,6 +1168,13 @@ class CaptionRetryBudget:
             # max_attempts was insufficient for the batch.
             # Now we also verify max_attempts is sufficient before skipping.
             if self.batch_size == batch_size and required_attempts <= self.max_attempts:
+                # US-43-009: batch_size is already set (since self.batch_size == batch_size)
+                # No action needed - just verify it's not None
+                if self.batch_size is None:
+                    logger.error(
+                        f"[US-43-009] ensure_scaled BUG: batch_size condition matched but is None"
+                    )
+                    self.batch_size = batch_size
                 logger.debug(
                     f"CaptionRetryBudget.ensure_scaled: already scaled for "
                     f"batch_size={batch_size} (max_attempts={self.max_attempts} >= "
@@ -1232,6 +1242,15 @@ class CaptionRetryBudget:
                     f"CaptionRetryBudget.ensure_scaled: scaled max_attempts from {old_max} "
                     f"to {self.max_attempts} for batch of {batch_size} videos"
                 )
+
+            # US-43-009: Validate batch_size is set before returning
+            if self.batch_size is None:
+                logger.error(
+                    f"[US-43-009] ensure_scaled BUG: batch_size is None after scaling "
+                    f"(input batch_size={batch_size})"
+                )
+                self.batch_size = batch_size  # Defensive fix
+
             return True
 
     def verify_budget_sufficient(

@@ -5899,3 +5899,66 @@ class TestEnsureScaledCheckpoint:
         assert 'batch_size matches but max_attempts insufficient' in log_messages, (
             "Log should explain why force scaling occurred"
         )
+
+    def test_ensure_scaled_always_sets_batch_size_when_scaling(self):
+        """US-43-009: Verify batch_size is set after ensure_scaled when scaling occurs."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.auto_scale = True
+        budget.attempts_per_video = 2.0
+        assert budget.batch_size is None, "batch_size should start as None"
+
+        # When scaling occurs (batch of 200 requires 400 attempts)
+        result = budget.ensure_scaled(200)
+
+        assert result is True, "ensure_scaled should return True when scaling"
+        assert budget.batch_size == 200, "batch_size must be set to 200 after ensure_scaled"
+        assert budget.max_attempts == 400, "max_attempts should scale to 400"
+
+    def test_ensure_scaled_always_sets_batch_size_when_not_scaling(self):
+        """US-43-009: Verify batch_size is set after ensure_scaled even when no scaling needed."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 500  # Already sufficient for batch of 50
+        budget.auto_scale = True
+        budget.attempts_per_video = 2.0
+        assert budget.batch_size is None, "batch_size should start as None"
+
+        # No scaling needed (batch of 50 requires 100 attempts, max is 500)
+        result = budget.ensure_scaled(50)
+
+        assert result is False, "ensure_scaled should return False when no scaling needed"
+        assert budget.batch_size == 50, "batch_size must be set to 50 even without scaling"
+        assert budget.max_attempts == 500, "max_attempts should remain 500"
+
+    def test_ensure_scaled_always_sets_batch_size_when_auto_scale_disabled(self):
+        """US-43-009: Verify batch_size is set after ensure_scaled when auto_scale is disabled."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.auto_scale = False  # Auto-scale disabled
+        budget.attempts_per_video = 2.0
+        assert budget.batch_size is None, "batch_size should start as None"
+
+        # Auto-scale disabled, should set batch_size anyway
+        result = budget.ensure_scaled(200)
+
+        assert result is False, "ensure_scaled should return False when auto_scale disabled"
+        assert budget.batch_size == 200, "batch_size must be set to 200 even with auto_scale disabled"
+        assert budget.max_attempts == 100, "max_attempts should remain unchanged"
+
+    def test_ensure_scaled_always_sets_batch_size_when_already_scaled(self):
+        """US-43-009: Verify batch_size stays set after ensure_scaled called multiple times."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.auto_scale = True
+        budget.attempts_per_video = 2.0
+
+        # First call - scales
+        budget.ensure_scaled(200)
+        assert budget.batch_size == 200
+
+        # Second call with same batch - should not change batch_size
+        result = budget.ensure_scaled(200)
+
+        assert result is False, "ensure_scaled should return False when already scaled"
+        assert budget.batch_size == 200, "batch_size must still be 200"
+        assert budget.max_attempts == 400, "max_attempts should remain 400"
