@@ -102,15 +102,19 @@ class MullvadVPN(VPNManager):
         Initialize Mullvad VPN manager.
 
         Args:
-            config: VPNConfig with VPN settings
+            config: VPNConfig with VPN settings (typically MullvadConfig)
         """
         super().__init__(config)
         self._current_country: Optional[str] = None
         self._used_countries: List[str] = []
         self._last_verified_ip: Optional[str] = None
+        # Initialize max rotations from config (MullvadConfig.max_rotations_per_session)
+        self._max_rotations: int = getattr(config, 'max_rotations_per_session', 5)
 
         if self.is_enabled:
-            logger.info("Mullvad VPN manager initialized")
+            logger.info(
+                f"Mullvad VPN manager initialized (max_rotations={self._max_rotations})"
+            )
 
     def connect(self) -> bool:
         """
@@ -209,8 +213,16 @@ class MullvadVPN(VPNManager):
                             rotation since a new IP has fresh rate limit budget.
 
         Returns:
-            True if rotation was successful
+            True if rotation was successful, False if max rotations reached or failed
         """
+        # Check max rotations limit before attempting rotation
+        if self._switch_count >= self._max_rotations:
+            logger.warning(
+                f"Mullvad max rotations reached ({self._switch_count}/{self._max_rotations}). "
+                "No more VPN rotations available this session."
+            )
+            return False
+
         if not self.can_switch():
             return False
 
