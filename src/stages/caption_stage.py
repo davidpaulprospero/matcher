@@ -1305,7 +1305,32 @@ class CaptionStage(Stage):
 
         US-007: Includes caption_quality field for matching confidence adjustment.
         US-008 Sprint 7: Includes timing_penalty for timing-based confidence adjustment.
+        US-41-007: Defensive state validation before attribute access.
         """
+        # US-41-007: Belt-and-suspenders defense - validate state at usage point
+        # Import PipelineState here to avoid circular import issues
+        from ..state import PipelineState
+
+        if isinstance(state, PipelineState):
+            # State is proper PipelineState - use validate_state_attributes()
+            if hasattr(state, 'validate_state_attributes'):
+                initialized_fields = state.validate_state_attributes()
+                if initialized_fields:
+                    logger.warning(
+                        f"US-41-007: State validation initialized fields: {initialized_fields}. "
+                        "This may indicate checkpoint was loaded from legacy format or "
+                        "state was not properly constructed."
+                    )
+        else:
+            # State is not a PipelineState instance (mock, dict-like, etc.)
+            # Handle case where state lacks validate_state_attributes method
+            if not hasattr(state, 'text_metadata') or state.text_metadata is None:
+                state.text_metadata = []
+                logger.warning(
+                    f"US-41-007: Non-PipelineState object ({type(state).__name__}) missing "
+                    "text_metadata attribute. Manually initialized to empty list."
+                )
+
         text_metadata = []
 
         for video_id, result in caption_results.items():
@@ -1334,13 +1359,13 @@ class CaptionStage(Stage):
                     'timing_penalty': timing_penalty,  # US-008 Sprint 7: Timing penalty factor
                 })
 
-        # US-37-010/US-41-002: Defensive check before extending (belt-and-suspenders)
-        if not hasattr(state, 'text_metadata'):
+        # US-37-010/US-41-002/US-41-007: Final safety check before extending
+        # This is a secondary fallback after the validate_state_attributes() call at the start
+        if not hasattr(state, 'text_metadata') or state.text_metadata is None:
             state.text_metadata = []
             logger.warning(
-                "US-41-002: text_metadata attribute missing from state object. "
-                "Auto-initialized to empty list. This may indicate checkpoint was loaded "
-                "from legacy format or state object was not properly constructed."
+                "US-41-007: text_metadata still missing after validation. "
+                "Auto-initialized to empty list (secondary fallback)."
             )
 
         # Extend existing text_metadata (don't replace, as TRANSCRIBE may add more)
