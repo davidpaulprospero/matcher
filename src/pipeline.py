@@ -110,11 +110,9 @@ class PipelineOrchestrator:
                 "Consider using --fresh to start a new run."
             )
 
-        # Validate and restore any missing state attributes after checkpoint load
-        # This handles incomplete state data from older checkpoints or corrupted files
-        initialized = self.state.validate_state_attributes()
-        if initialized:
-            logger.info(f"Initialized {len(initialized)} missing state attribute(s) after checkpoint restoration")
+        # US-40-003: Use CheckpointManager.restore_state() for defensive validation
+        # This validates and initializes any missing state attributes after checkpoint load
+        self.state = self.checkpoint.restore_state(self.state)
 
         self.resume_mode = True
         return True
