@@ -1427,3 +1427,118 @@ class TestEscalationCheckpointPersistence:
         # Should still be functional for new keywords
         result = restored.get_escalation_args("new_keyword")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+
+# ---------------------------------------------------------------------------
+# Factory Method: create_with_mullvad (Sprint 35 US-003)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FakeMullvadConfig:
+    """Minimal stand-in for MullvadConfig."""
+    enabled: bool = False
+    preferred_countries: List[str] = field(default_factory=lambda: ['us', 'gb'])
+    rotation_strategy: str = 'random'
+    max_rotations_per_session: int = 5
+    verification_timeout: int = 10
+    rotation_delay_seconds: int = 5
+
+
+@pytest.mark.fast
+class TestCreateWithMullvad:
+    """Tests for EscalationManager.create_with_mullvad() factory method (US-35-003)."""
+
+    def test_create_with_mullvad_enabled(self, imp_manager, ext_config):
+        """Factory method creates EscalationManager with MullvadVPN when enabled."""
+        mullvad_config = FakeMullvadConfig(enabled=True)
+
+        # Patch at module level where the import happens inside the factory method
+        with patch('src.downloader.mullvad_vpn.MullvadVPN') as MockVPN:
+            mock_vpn_instance = MagicMock()
+            MockVPN.return_value = mock_vpn_instance
+
+            manager = EscalationManager.create_with_mullvad(
+                impersonation_manager=imp_manager,
+                extractor_args_config=ext_config,
+                mullvad_config=mullvad_config,
+            )
+
+            # MullvadVPN should be instantiated with the config
+            MockVPN.assert_called_once_with(mullvad_config)
+            # set_mullvad_vpn should have been called
+            assert manager._mullvad_vpn is mock_vpn_instance
+
+    def test_create_with_mullvad_disabled(self, imp_manager, ext_config):
+        """Factory method does NOT create MullvadVPN when disabled."""
+        mullvad_config = FakeMullvadConfig(enabled=False)
+
+        with patch('src.downloader.mullvad_vpn.MullvadVPN') as MockVPN:
+            manager = EscalationManager.create_with_mullvad(
+                impersonation_manager=imp_manager,
+                extractor_args_config=ext_config,
+                mullvad_config=mullvad_config,
+            )
+
+            # MullvadVPN should NOT be instantiated
+            MockVPN.assert_not_called()
+            assert manager._mullvad_vpn is None
+
+    def test_create_with_mullvad_none_config(self, imp_manager, ext_config):
+        """Factory method handles None mullvad_config gracefully."""
+        with patch('src.downloader.mullvad_vpn.MullvadVPN') as MockVPN:
+            manager = EscalationManager.create_with_mullvad(
+                impersonation_manager=imp_manager,
+                extractor_args_config=ext_config,
+                mullvad_config=None,
+            )
+
+            # MullvadVPN should NOT be instantiated
+            MockVPN.assert_not_called()
+            assert manager._mullvad_vpn is None
+
+    def test_create_with_mullvad_functional(self, imp_manager, ext_config):
+        """Factory-created manager is fully functional for escalation."""
+        mullvad_config = FakeMullvadConfig(enabled=True)
+
+        with patch('src.downloader.mullvad_vpn.MullvadVPN') as MockVPN:
+            MockVPN.return_value = MagicMock()
+
+            manager = EscalationManager.create_with_mullvad(
+                impersonation_manager=imp_manager,
+                extractor_args_config=ext_config,
+                mullvad_config=mullvad_config,
+            )
+
+            # Manager should be functional
+            result = manager.get_escalation_args("test_keyword")
+            assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+            # Can record failure and escalate
+            manager.record_failure("test_keyword")
+            manager.record_failure("test_keyword")
+            result2 = manager.get_escalation_args("test_keyword")
+            assert result2.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_create_with_mullvad_passes_all_params(self, imp_manager, ext_config):
+        """Factory method passes budget and strategy to EscalationManager."""
+        mullvad_config = FakeMullvadConfig(enabled=True)
+        mock_budget = MagicMock()
+        mock_strategy = MagicMock()
+        # Make sure strategy returns expected behavior
+        mock_strategy.should_escalate.return_value = False
+        mock_strategy.get_extractor_args.return_value = []
+
+        with patch('src.downloader.mullvad_vpn.MullvadVPN') as MockVPN:
+            MockVPN.return_value = MagicMock()
+
+            manager = EscalationManager.create_with_mullvad(
+                impersonation_manager=imp_manager,
+                extractor_args_config=ext_config,
+                mullvad_config=mullvad_config,
+                budget=mock_budget,
+                strategy=mock_strategy,
+            )
+
+            # Verify budget and strategy were passed
+            assert manager._budget is mock_budget
+            assert manager._strategy is mock_strategy
