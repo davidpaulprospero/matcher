@@ -131,6 +131,10 @@ class CaptionRetryBudget:
     # Optional - allows summary to include circuit breaker state when set
     circuit_breaker: Optional[Any] = field(default=None, repr=False, compare=False)
 
+    # Per-video attempt tracking for diagnosing budget consumption (US-41-005)
+    # Maps video_id -> number of attempts recorded for that video
+    attempts_per_video_id: Dict[str, int] = field(default_factory=dict)
+
     @classmethod
     def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
         """Create a CaptionRetryBudget from config.
@@ -185,6 +189,16 @@ class CaptionRetryBudget:
         with self._lock:
             self.attempts += 1
             attempts_count = self.attempts
+            # Track per-video attempts (US-41-005)
+            if video_id:
+                self.attempts_per_video_id[video_id] = self.attempts_per_video_id.get(video_id, 0) + 1
+                video_attempts = self.attempts_per_video_id[video_id]
+                # Warn when single video consumes >3 attempts (indicates retry loop)
+                if video_attempts == 4:  # Log only once when crossing threshold
+                    logger.warning(
+                        f"CaptionRetryBudget: video {video_id} has consumed {video_attempts} attempts "
+                        f"(>3 indicates possible retry loop)"
+                    )
         logger.debug(f"CaptionRetryBudget: attempt recorded for {video_id or 'unknown'} "
                      f"(total: {attempts_count})")
         # Check if we crossed a consumption threshold (US-37-005)
@@ -303,6 +317,34 @@ class CaptionRetryBudget:
                 reverse=True
             )
             return sorted_errors[:limit]
+
+    def get_high_attempt_videos(self, threshold: int = 3) -> List[str]:
+        """Get video IDs that have consumed more than threshold attempts (US-41-005).
+
+        Used to diagnose budget consumption issues - if one video consumes 10+
+        attempts due to a retry loop, it starves other videos of budget.
+
+        Args:
+            threshold: Minimum attempts to be considered high. Default 3.
+                       Returns videos with >threshold attempts (not >=).
+
+        Returns:
+            List of video IDs with more than threshold attempts, sorted by
+            attempt count descending.
+
+        Example:
+            >>> budget.get_high_attempt_videos(3)
+            ['video_abc', 'video_xyz']  # Videos with 4+ attempts
+        """
+        with self._lock:
+            high_attempt = [
+                (video_id, count)
+                for video_id, count in self.attempts_per_video_id.items()
+                if count > threshold
+            ]
+            # Sort by count descending
+            high_attempt.sort(key=lambda x: x[1], reverse=True)
+            return [video_id for video_id, _ in high_attempt]
 
     def get_rate_limit_error_percentage(self) -> float:
         """Get the percentage of failures that are RATE_LIMIT errors (US-37-008).
@@ -616,14 +658,17 @@ class CaptionRetryBudget:
         """Get a summary of budget usage for reporting.
 
         Returns:
-            Dict with budget usage statistics including error breakdown (US-37-006)
-            and early termination state (US-37-009).
+            Dict with budget usage statistics including error breakdown (US-37-006),
+            early termination state (US-37-009), and high-attempt videos (US-41-005).
         """
         with self._lock:
             # Build error breakdown (category name -> count)
             error_breakdown = {cat.name: count for cat, count in self.error_counts.items()}
 
-            return {
+            # Get high-attempt videos (US-41-005)
+            high_attempt_videos = self.get_high_attempt_videos(threshold=3)
+
+            summary = {
                 "attempts": self.attempts,
                 "attempts_remaining": self.attempts_remaining(),
                 "successes": self.successes,
@@ -644,6 +689,12 @@ class CaptionRetryBudget:
                 "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
                 "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
             }
+
+            # Only include high_attempt_videos if there are any (US-41-005)
+            if high_attempt_videos:
+                summary["high_attempt_videos"] = high_attempt_videos
+
+            return summary
 
     def _get_circuit_breaker_state(self) -> Optional[str]:
         """Get circuit breaker state for observability (US-40-011).
@@ -688,7 +739,8 @@ class CaptionRetryBudget:
 
         Returns:
             Dict with all budget state data including error_counts (US-37-006),
-            vpn_resets_used (US-37-008), and early termination state (US-37-009).
+            vpn_resets_used (US-37-008), early termination state (US-37-009),
+            and per-video attempt tracking (US-41-005).
         """
         with self._lock:
             return {
@@ -705,6 +757,7 @@ class CaptionRetryBudget:
                 "early_terminated": self.early_terminated,  # US-37-009
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
                 "batch_size": self.batch_size,  # US-38-009
+                "attempts_per_video_id": dict(self.attempts_per_video_id),  # US-41-005
             }
 
     @classmethod
@@ -751,6 +804,9 @@ class CaptionRetryBudget:
         # Restore batch size (US-38-009)
         budget.batch_size = data.get("batch_size")
 
+        # Restore per-video attempt tracking (US-41-005)
+        budget.attempts_per_video_id = dict(data.get("attempts_per_video_id", {}))
+
         return budget
 
     def reset(self, preserve_vpn_count: bool = True) -> None:
@@ -767,6 +823,7 @@ class CaptionRetryBudget:
             self.backoff_time_spent = 0.0
             self.videos_skipped = 0
             self.error_counts.clear()  # US-37-006
+            self.attempts_per_video_id.clear()  # US-41-005
             if not preserve_vpn_count:
                 self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
             # US-37-009: Reset early termination state

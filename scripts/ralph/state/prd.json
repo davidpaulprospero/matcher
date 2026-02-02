@@ -69,8 +69,8 @@
                 "Log WARNING if auto_scale=false and batch_size > max_attempts",
                 "Add test: verification raises ValueError when scaling math is wrong"
             ],
-            "passes": false,
-            "notes": "Tier: T2 (Defensive). Files: src/stages/caption_stage.py:686-695, src/caption/retry_budget.py:780-842. Fail-fast when budget is mathematically insufficient rather than discovering 74 videos later."
+            "passes": true,
+            "notes": "Tier: T2 (Defensive). FIXED: Added verify_budget_sufficient() method in retry_budget.py:843-876 that validates max_attempts >= batch_size * attempts_per_video after ensure_scaled(). Raises ValueError with actionable message including config.yaml path when insufficient. Added __post_init__ validation for attempts_per_video > 0 in download.py:215-222. Logs WARNING when auto_scale=false and batch_size > max_attempts. Added 8 tests across TestCaptionRetryBudgetVerification and TestCaptionRetryBudgetConfigValidation classes. Commit: ae80a8f"
         },
         {
             "id": "US-41-005",
