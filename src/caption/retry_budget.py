@@ -45,9 +45,9 @@ class CaptionRetryBudgetConfig:
     auto_scale: bool = True
 
     # Attempts per video multiplier for auto-scaling
-    # e.g., 1.5 means budget = batch_size * 1.5
+    # 2.0 = 1 attempt + 1 retry per video average
     # Only scales UP when batch > max_attempts / attempts_per_video
-    attempts_per_video: float = 1.5
+    attempts_per_video: float = 2.0
 
     # VPN rotation on rate limit exhaustion (US-37-008)
     # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
@@ -111,7 +111,7 @@ class CaptionRetryBudget:
 
     # Auto-scaling settings (US-37-004)
     auto_scale: bool = True
-    attempts_per_video: float = 1.5
+    attempts_per_video: float = 2.0
 
     # VPN rotation settings (US-37-008)
     trigger_vpn_on_rate_limit: bool = True
@@ -146,7 +146,7 @@ class CaptionRetryBudget:
             budget.max_attempts = int(config.get('max_attempts', 100))
             budget.max_backoff_time = float(config.get('max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(config.get('auto_scale', True))
-            budget.attempts_per_video = float(config.get('attempts_per_video', 1.5))
+            budget.attempts_per_video = float(config.get('attempts_per_video', 2.0))
             # US-37-008: VPN rotation on rate limit exhaustion
             budget.trigger_vpn_on_rate_limit = bool(config.get('trigger_vpn_rotation_on_rate_limit', True))
             budget.max_vpn_resets = int(config.get('max_vpn_resets_per_session', 2))
@@ -157,7 +157,7 @@ class CaptionRetryBudget:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(getattr(config, 'auto_scale', True))
-            budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 1.5))
+            budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 2.0))
             # US-37-008: VPN rotation on rate limit exhaustion
             budget.trigger_vpn_on_rate_limit = bool(getattr(config, 'trigger_vpn_rotation_on_rate_limit', True))
             budget.max_vpn_resets = int(getattr(config, 'max_vpn_resets_per_session', 2))

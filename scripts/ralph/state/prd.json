@@ -90,7 +90,7 @@
             "id": "US-40-006",
             "title": "Increase default attempts_per_video multiplier to 2.0",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Change CaptionRetryBudgetConfig.attempts_per_video from 1.5 to 2.0",
                 "Update CaptionRetryBudget.attempts_per_video default from 1.5 to 2.0",
@@ -98,7 +98,7 @@
                 "Add unit test verifying 175 videos scales to 350 attempts (175 * 2.0)",
                 "Update existing tests that hardcode 1.5 multiplier expectations"
             ],
-            "notes": "Tier 2 (Configuration). Files: src/caption/retry_budget.py lines 49-50 (CaptionRetryBudgetConfig.attempts_per_video), lines 113-114 (CaptionRetryBudget.attempts_per_video), config.yaml. The 1.5 multiplier gives 262 attempts for 175 videos, but we're exhausting at 100 - need more headroom."
+            "notes": "Tier 2 (Configuration). COMPLETE: Updated defaults from 1.5 to 2.0 in: (1) CaptionRetryBudgetConfig at retry_budget.py:50, (2) CaptionRetryBudget at retry_budget.py:114, (3) from_config fallbacks at retry_budget.py:149 and 160, (4) download.py:190, (5) config.yaml:1081. Updated config.yaml comment to '2.0 = 1 attempt + 1 retry per video average'. Updated test_large_batch_175_scales_to_350 and test_acceptance_criteria_175_videos_becomes_350 tests to verify 175 * 2.0 = 350. Updated all tests checking for default 1.5 to expect 2.0. All 224 related tests pass."
         },
         {
             "id": "US-40-007",

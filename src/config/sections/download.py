@@ -185,9 +185,9 @@ class CaptionRetryBudgetConfig:
     auto_scale: bool = True
 
     # Attempts per video multiplier for auto-scaling
-    # e.g., 1.5 means budget = batch_size * 1.5
+    # 2.0 = 1 attempt + 1 retry per video average
     # Only scales UP when batch > max_attempts / attempts_per_video
-    attempts_per_video: float = 1.5
+    attempts_per_video: float = 2.0
 
     # VPN rotation on rate limit exhaustion (US-37-008)
     # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
