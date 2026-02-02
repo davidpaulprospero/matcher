@@ -1070,6 +1070,20 @@ download:
     # Workers exceeding this threshold are reported in progress callbacks.
     stuck_worker_threshold: 60.0      # Seconds before worker is considered slow (default: 60s)
 
+    # Batch retry budget (US-33-010, US-37-004, US-37-008)
+    # Global limits for caption fetch attempts across entire batch.
+    # When limits are exceeded, remaining videos fall back to transcription.
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100               # Maximum total fetch attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 1.5         # Multiplier for auto-scaling (budget = batch * 1.5)
+                                      # Only scales UP, never below max_attempts
+      # VPN rotation on rate limit exhaustion (US-37-008)
+      trigger_vpn_rotation_on_rate_limit: true  # Rotate VPN when >50% rate limit errors
+      max_vpn_resets_per_session: 2   # Max VPN-triggered budget resets to prevent loops
+
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
   zero_download_remix:

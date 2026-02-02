@@ -2082,3 +2082,386 @@ class TestCaptionRetryBudgetCheckpointPersistence:
         # Defaults for limits
         assert budget.max_attempts == 100
         assert budget.max_backoff_time == 300.0
+
+
+# ============================================================================
+# US-37-008: Budget exhaustion recovery with VPN rotation trigger
+# ============================================================================
+
+
+class TestCaptionRetryBudgetVPNRotationTrigger:
+    """Test VPN rotation trigger on budget exhaustion (US-37-008)."""
+
+    @pytest.mark.fast
+    def test_get_rate_limit_error_percentage_zero_failures(self):
+        """Test rate limit percentage is 0 when no failures."""
+        budget = CaptionRetryBudget()
+        for i in range(10):
+            budget.record_success(f"video_{i}")
+
+        assert budget.get_rate_limit_error_percentage() == 0.0
+
+    @pytest.mark.fast
+    def test_get_rate_limit_error_percentage_no_rate_limits(self):
+        """Test rate limit percentage when only network errors."""
+        budget = CaptionRetryBudget()
+        for i in range(10):
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.NETWORK)
+
+        assert budget.get_rate_limit_error_percentage() == 0.0
+
+    @pytest.mark.fast
+    def test_get_rate_limit_error_percentage_all_rate_limits(self):
+        """Test rate limit percentage when all errors are rate limits."""
+        budget = CaptionRetryBudget()
+        for i in range(10):
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.get_rate_limit_error_percentage() == 100.0
+
+    @pytest.mark.fast
+    def test_get_rate_limit_error_percentage_mixed(self):
+        """Test rate limit percentage with mixed errors."""
+        budget = CaptionRetryBudget()
+        for i in range(6):
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for i in range(4):
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.NETWORK)
+
+        # 6 out of 10 = 60%
+        assert budget.get_rate_limit_error_percentage() == 60.0
+
+    @pytest.mark.fast
+    def test_should_trigger_vpn_rotation_not_exhausted(self):
+        """Test VPN rotation not triggered when budget not exhausted."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.trigger_vpn_on_rate_limit = True
+
+        # Add rate limit errors but don't exhaust budget
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert not budget.budget_exhausted()
+        assert not budget.should_trigger_vpn_rotation()
+
+    @pytest.mark.fast
+    def test_should_trigger_vpn_rotation_exhausted_rate_limits(self):
+        """Test VPN rotation triggered when exhausted with >50% rate limits."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.trigger_vpn_on_rate_limit = True
+
+        # All failures are rate limits
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.budget_exhausted()
+        assert budget.should_trigger_vpn_rotation()
+
+    @pytest.mark.fast
+    def test_should_trigger_vpn_rotation_exhausted_low_rate_limits(self):
+        """Test VPN rotation NOT triggered when exhausted with <50% rate limits."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.trigger_vpn_on_rate_limit = True
+
+        # Mix of errors: 3 rate limits, 7 network (30%)
+        for i in range(3):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for i in range(7):
+            budget.record_attempt(f"net_{i}")
+            budget.record_failure(f"net_{i}", error_category=CaptionErrorCategory.NETWORK)
+
+        assert budget.budget_exhausted()
+        assert not budget.should_trigger_vpn_rotation()
+
+    @pytest.mark.fast
+    def test_should_trigger_vpn_rotation_disabled_in_config(self):
+        """Test VPN rotation not triggered when disabled in config."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.trigger_vpn_on_rate_limit = False  # Disabled
+
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.budget_exhausted()
+        assert not budget.should_trigger_vpn_rotation()
+
+    @pytest.mark.fast
+    def test_should_trigger_vpn_rotation_max_resets_reached(self):
+        """Test VPN rotation not triggered when max resets reached."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.trigger_vpn_on_rate_limit = True
+        budget.max_vpn_resets = 2
+        budget.vpn_resets_used = 2  # Already used both
+
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.budget_exhausted()
+        assert not budget.should_trigger_vpn_rotation()
+
+    @pytest.mark.fast
+    def test_record_vpn_reset_increments_count(self):
+        """Test record_vpn_reset increments vpn_resets_used."""
+        budget = CaptionRetryBudget()
+        budget.max_vpn_resets = 5
+
+        assert budget.vpn_resets_used == 0
+
+        budget.record_vpn_reset()
+        assert budget.vpn_resets_used == 1
+
+        budget.record_vpn_reset()
+        assert budget.vpn_resets_used == 2
+
+    @pytest.mark.fast
+    def test_can_vpn_reset_true(self):
+        """Test can_vpn_reset returns True when resets available."""
+        budget = CaptionRetryBudget()
+        budget.max_vpn_resets = 2
+        budget.vpn_resets_used = 0
+
+        assert budget.can_vpn_reset()
+
+        budget.vpn_resets_used = 1
+        assert budget.can_vpn_reset()
+
+    @pytest.mark.fast
+    def test_can_vpn_reset_false(self):
+        """Test can_vpn_reset returns False when resets exhausted."""
+        budget = CaptionRetryBudget()
+        budget.max_vpn_resets = 2
+        budget.vpn_resets_used = 2
+
+        assert not budget.can_vpn_reset()
+
+    @pytest.mark.fast
+    def test_reset_preserves_vpn_count_by_default(self):
+        """Test reset() preserves vpn_resets_used by default."""
+        budget = CaptionRetryBudget()
+        budget.vpn_resets_used = 1
+        budget.record_attempt("test")
+
+        budget.reset()
+
+        assert budget.attempts == 0
+        assert budget.vpn_resets_used == 1  # Preserved
+
+    @pytest.mark.fast
+    def test_reset_clears_vpn_count_when_requested(self):
+        """Test reset(preserve_vpn_count=False) clears vpn_resets_used."""
+        budget = CaptionRetryBudget()
+        budget.vpn_resets_used = 2
+        budget.record_attempt("test")
+
+        budget.reset(preserve_vpn_count=False)
+
+        assert budget.attempts == 0
+        assert budget.vpn_resets_used == 0  # Cleared
+
+    @pytest.mark.fast
+    def test_to_dict_includes_vpn_reset_state(self):
+        """Test to_dict includes vpn_resets_used and max_vpn_resets."""
+        budget = CaptionRetryBudget()
+        budget.vpn_resets_used = 1
+        budget.max_vpn_resets = 3
+
+        data = budget.to_dict()
+
+        assert data['vpn_resets_used'] == 1
+        assert data['max_vpn_resets'] == 3
+
+    @pytest.mark.fast
+    def test_from_dict_restores_vpn_reset_state(self):
+        """Test from_dict restores vpn_resets_used and max_vpn_resets."""
+        data = {
+            'attempts': 50,
+            'vpn_resets_used': 1,
+            'max_vpn_resets': 3,
+        }
+
+        budget = CaptionRetryBudget.from_dict(data)
+
+        assert budget.vpn_resets_used == 1
+        assert budget.max_vpn_resets == 3
+
+    @pytest.mark.fast
+    def test_from_dict_uses_defaults_for_vpn_state(self):
+        """Test from_dict uses defaults when vpn state not in checkpoint."""
+        data = {
+            'attempts': 50,
+            # No vpn_resets_used or max_vpn_resets
+        }
+
+        budget = CaptionRetryBudget.from_dict(data)
+
+        assert budget.vpn_resets_used == 0
+        assert budget.max_vpn_resets == 2  # Default
+
+    @pytest.mark.fast
+    def test_from_config_dict_sets_vpn_options(self):
+        """Test from_config with dict sets VPN rotation options."""
+        config = {
+            'max_attempts': 100,
+            'trigger_vpn_rotation_on_rate_limit': True,
+            'max_vpn_resets_per_session': 5,
+        }
+
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.trigger_vpn_on_rate_limit is True
+        assert budget.max_vpn_resets == 5
+
+    @pytest.mark.fast
+    def test_from_config_dataclass_sets_vpn_options(self):
+        """Test from_config with dataclass sets VPN rotation options."""
+        from src.config.sections.download import CaptionRetryBudgetConfig as DLConfig
+
+        config = DLConfig(
+            max_attempts=100,
+            trigger_vpn_rotation_on_rate_limit=False,
+            max_vpn_resets_per_session=3,
+        )
+
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.trigger_vpn_on_rate_limit is False
+        assert budget.max_vpn_resets == 3
+
+
+class TestCaptionRetryBudgetVPNRotationIntegration:
+    """Integration tests for VPN rotation with CaptionRetryBudget (US-37-008)."""
+
+    @pytest.mark.fast
+    def test_vpn_rotation_workflow(self):
+        """Test complete VPN rotation workflow: exhaust -> rotate -> reset -> continue."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 20
+        budget.trigger_vpn_on_rate_limit = True
+        budget.max_vpn_resets = 2
+
+        # Process videos until budget exhausted with rate limit errors
+        for i in range(20):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.budget_exhausted()
+        assert budget.should_trigger_vpn_rotation()
+
+        # Simulate VPN rotation
+        budget.record_vpn_reset()
+        budget.reset()  # Preserves vpn_resets_used
+
+        # Budget should be fresh but VPN count preserved
+        assert not budget.budget_exhausted()
+        assert budget.vpn_resets_used == 1
+        assert budget.can_vpn_reset()  # Still have 1 more reset
+
+        # Process more videos
+        for i in range(20):
+            budget.record_attempt(f"video2_{i}")
+            budget.record_failure(f"video2_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.budget_exhausted()
+        assert budget.should_trigger_vpn_rotation()
+
+        # Second VPN rotation
+        budget.record_vpn_reset()
+        budget.reset()
+
+        assert not budget.budget_exhausted()
+        assert budget.vpn_resets_used == 2
+        assert not budget.can_vpn_reset()  # No more resets
+
+        # Process more videos - will exhaust again
+        for i in range(20):
+            budget.record_attempt(f"video3_{i}")
+            budget.record_failure(f"video3_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        assert budget.budget_exhausted()
+        # This time should NOT trigger VPN rotation (max reached)
+        assert not budget.should_trigger_vpn_rotation()
+
+    @pytest.mark.fast
+    def test_vpn_rotation_logging(self):
+        """Test VPN rotation trigger logging."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.trigger_vpn_on_rate_limit = True
+        budget.max_vpn_resets = 2
+
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            result = budget.should_trigger_vpn_rotation()
+
+            assert result is True
+            # Check logging
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if 'rotating VPN' in str(c)]
+            assert len(info_calls) >= 1
+            # Verify log includes percentage
+            call_str = str(info_calls[0])
+            assert '100.0%' in call_str or '100%' in call_str
+
+    @pytest.mark.fast
+    def test_vpn_rotation_logging_max_reached(self):
+        """Test logging when max VPN rotations reached."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.trigger_vpn_on_rate_limit = True
+        budget.max_vpn_resets = 2
+        budget.vpn_resets_used = 2  # Already used all
+
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            result = budget.should_trigger_vpn_rotation()
+
+            assert result is False
+            # Check logging about limit reached
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if 'rotation limit reached' in str(c)]
+            assert len(info_calls) >= 1
+
+    @pytest.mark.fast
+    def test_vpn_rotation_serialization_roundtrip(self):
+        """Test VPN rotation state survives serialization roundtrip."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 20
+        budget.trigger_vpn_on_rate_limit = True
+        budget.max_vpn_resets = 3
+
+        # Simulate partial VPN rotation usage
+        budget.vpn_resets_used = 1
+
+        # Add some errors
+        for i in range(15):
+            budget.record_attempt(f"video_{i}")
+        for i in range(10):
+            budget.record_failure(f"fail_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        # Serialize and restore
+        data = budget.to_dict()
+        restored = CaptionRetryBudget.from_dict(data)
+
+        # Verify VPN state preserved
+        assert restored.vpn_resets_used == 1
+        assert restored.max_vpn_resets == 3
+        # Verify can still calculate VPN rotation eligibility
+        assert restored.can_vpn_reset()
+        # Note: trigger_vpn_on_rate_limit is not serialized (config setting)
+        # but from_dict defaults it to True
