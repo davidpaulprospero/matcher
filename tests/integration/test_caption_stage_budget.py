@@ -153,7 +153,7 @@ class TestRetryBudgetFallback:
         assert budget.max_attempts == 100  # Default
         assert budget.max_backoff_time == 300.0  # Default
         assert budget.auto_scale is True  # Default
-        assert budget.attempts_per_video == 1.5  # Default
+        assert budget.attempts_per_video == 2.0  # Default (US-40-006)
 
     def test_budget_created_from_empty_dict(self):
         """Test retry_budget created from empty dict config."""
@@ -170,7 +170,7 @@ class TestRetryBudgetFallback:
 
         assert budget.max_attempts == 200
         assert budget.auto_scale is True  # Falls back to default
-        assert budget.attempts_per_video == 1.5  # Falls back to default
+        assert budget.attempts_per_video == 2.0  # Falls back to default (US-40-006)
 
     def test_budget_created_from_dataclass_config(self):
         """Test retry_budget created from dataclass config."""
