@@ -292,18 +292,25 @@ class MullvadVPN(VPNManager):
         """
         Pick the next country for rotation.
 
+        Uses config.preferred_countries if set and non-empty,
+        otherwise falls back to hardcoded MULLVAD_COUNTRIES list.
         Avoids recently used countries when possible.
 
         Returns:
             2-letter country code
         """
+        # Use config.preferred_countries if available and non-empty,
+        # otherwise fall back to hardcoded default list
+        config_countries = getattr(self.config, 'preferred_countries', None)
+        country_pool = config_countries if config_countries else MULLVAD_COUNTRIES
+
         # Get countries not recently used
-        available = [c for c in MULLVAD_COUNTRIES if c not in self._used_countries[-3:]]
+        available = [c for c in country_pool if c not in self._used_countries[-3:]]
 
         # If all used recently, reset and use all
         if not available:
             self._used_countries = []
-            available = MULLVAD_COUNTRIES.copy()
+            available = list(country_pool)
 
         # Avoid current country if possible
         if self._current_country and self._current_country in available and len(available) > 1:
