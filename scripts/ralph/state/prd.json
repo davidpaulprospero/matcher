@@ -126,8 +126,8 @@
                 "Add unit test verifying text_metadata is preserved if already set",
                 "Pattern follows from_legacy_pipeline() defensive initialization style"
             ],
-            "passes": false,
-            "notes": "Tier 1 (bug fix). Target: src/state.py:127-262 (PipelineState class). Belt-and-suspenders fix for AttributeError. US-37-010 added runtime check, this adds init-time guarantee."
+            "passes": true,
+            "notes": "Tier 1 (bug fix). Added __post_init__ method to PipelineState that initializes text_metadata to [] if None. Added TestPipelineStatePostInit class with 4 tests in test_state_dataclasses.py: test_text_metadata_never_none_after_creation, test_text_metadata_preserved_if_already_set, test_text_metadata_initialized_when_none_manually_set, test_post_init_follows_from_legacy_pipeline_pattern. All tests pass."
         },
         {
             "id": "US-38-009",
@@ -140,8 +140,8 @@
                 "Include batch_size in to_dict() for checkpoint persistence",
                 "Add unit test verifying batch_size is included in summary"
             ],
-            "passes": false,
-            "notes": "Tier 2 (diagnostic). Target: src/caption/retry_budget.py:67-127 (CaptionRetryBudget dataclass). Helps debugging by showing what batch size the budget was scaled for."
+            "passes": true,
+            "notes": "Tier 2 (diagnostic). Added batch_size: Optional[int] = None field to CaptionRetryBudget. Set in scale_to_batch_size(). Included in get_summary(), to_dict(), and from_dict() for checkpoint persistence. Added TestCaptionRetryBudgetBatchSizeTracking class with 7 tests verifying all acceptance criteria."
         },
         {
             "id": "US-38-010",
