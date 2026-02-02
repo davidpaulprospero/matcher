@@ -112,8 +112,8 @@
                 "Add unit test verifying memory logging occurs during init (mock torch.cuda)",
                 "Add unit test verifying memory logging occurs during cleanup"
             ],
-            "passes": false,
-            "notes": "Tier 3 (diagnostic). Target: src/transcription/whisper_client.py:51-130, cleanup_model function. Helps debug GPU memory issues during long pipeline runs."
+            "passes": true,
+            "notes": "Tier 3 (diagnostic). Added _get_gpu_memory_mb() helper function that returns (allocated_mb, reserved_mb) tuple. Added memory logging in get_model() (before/after init with delta) and cleanup() (before/after with freed amount). Added TestMemoryLogging class with 5 tests verifying memory logging during init and cleanup with mocked torch.cuda."
         },
         {
             "id": "US-38-008",
