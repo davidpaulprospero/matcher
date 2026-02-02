@@ -164,6 +164,13 @@ class PipelineState:
     face_preference: str = "neutral"
     stage_timings: Dict[str, float] = field(default_factory=dict)
 
+    def __post_init__(self):
+        """Defensive initialization for fields that must never be None."""
+        # Belt-and-suspenders fix for US-38-008: ensure text_metadata is never None
+        # This guards against edge cases like deserialization or manual construction
+        if self.text_metadata is None:
+            self.text_metadata = []
+
     def get_video_count(self) -> int:
         """Get total number of video IDs from search"""
         return len(self.video_ids)
