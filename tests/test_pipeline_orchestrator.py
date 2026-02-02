@@ -1768,11 +1768,13 @@ class TestCollectEscalationMetrics:
             'keywords_at_each_tier': {},
         }
 
-        # Setup MullvadVPN with rotation count
+        # Setup MullvadVPN with full status (US-35-004)
         mock_mullvad = Mock()
         mock_mullvad.get_status_extended.return_value = {
             'switch_count': 3,
             'used_countries': ['us', 'de', 'gb'],
+            'mullvad_connected': True,
+            'current_country': 'gb',
         }
         mock_esc_mgr._mullvad_vpn = mock_mullvad
 
@@ -1791,12 +1793,19 @@ class TestCollectEscalationMetrics:
         # Run the function
         _collect_escalation_metrics(pipeline, orchestrator)
 
-        # Verify VPN data was added to escalation metrics
+        # Verify VPN data was added to escalation metrics (US-35-004)
         esc_call = orchestrator.set_escalation_metrics.call_args[0][0]
-        assert 'vpn_rotation_count' in esc_call
-        assert esc_call['vpn_rotation_count'] == 3
+        # Connection status
+        assert 'mullvad_connected' in esc_call
+        assert esc_call['mullvad_connected'] is True
+        # Current and used countries
+        assert 'vpn_current_country' in esc_call
+        assert esc_call['vpn_current_country'] == 'gb'
         assert 'vpn_countries_used' in esc_call
         assert esc_call['vpn_countries_used'] == ['us', 'de', 'gb']
+        # Switch count from base VPNManager
+        assert 'vpn_switch_count' in esc_call
+        assert esc_call['vpn_switch_count'] == 3
 
     @pytest.mark.fast
     def test_collect_escalation_metrics_without_mullvad(
@@ -1836,10 +1845,12 @@ class TestCollectEscalationMetrics:
         # Run the function
         _collect_escalation_metrics(pipeline, orchestrator)
 
-        # Verify escalation metrics were set but without VPN data
+        # Verify escalation metrics were set but without VPN data (US-35-004)
         esc_call = orchestrator.set_escalation_metrics.call_args[0][0]
-        assert 'vpn_rotation_count' not in esc_call
+        assert 'mullvad_connected' not in esc_call
+        assert 'vpn_current_country' not in esc_call
         assert 'vpn_countries_used' not in esc_call
+        assert 'vpn_switch_count' not in esc_call
 
     @pytest.mark.fast
     def test_collect_escalation_metrics_uses_get_status_fallback(
@@ -1864,7 +1875,9 @@ class TestCollectEscalationMetrics:
         mock_mullvad = Mock(spec=['get_status'])  # Only has get_status, not get_status_extended
         mock_mullvad.get_status.return_value = {
             'switches': 2,
-            # get_status doesn't include used_countries
+            'connected': True,
+            'country': 'us',
+            # get_status doesn't include used_countries - gets empty list fallback
         }
         mock_esc_mgr._mullvad_vpn = mock_mullvad
 
@@ -1881,10 +1894,20 @@ class TestCollectEscalationMetrics:
 
         _collect_escalation_metrics(pipeline, orchestrator)
 
-        # Should still collect vpn_rotation_count using fallback
+        # Should still collect VPN metrics using fallback (US-35-004)
         esc_call = orchestrator.set_escalation_metrics.call_args[0][0]
-        assert 'vpn_rotation_count' in esc_call
-        assert esc_call['vpn_rotation_count'] == 2
+        # Connection status from fallback
+        assert 'mullvad_connected' in esc_call
+        assert esc_call['mullvad_connected'] is True
+        # Country from fallback
+        assert 'vpn_current_country' in esc_call
+        assert esc_call['vpn_current_country'] == 'us'
+        # Empty list fallback for used_countries
+        assert 'vpn_countries_used' in esc_call
+        assert esc_call['vpn_countries_used'] == []
+        # Switch count from fallback
+        assert 'vpn_switch_count' in esc_call
+        assert esc_call['vpn_switch_count'] == 2
 
 
 @pytest.mark.fast

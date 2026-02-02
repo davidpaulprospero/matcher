@@ -50,8 +50,8 @@
             "id": "US-35-004",
             "title": "Add VPN rotation metrics to _collect_escalation_metrics",
             "priority": 4,
-            "passes": false,
-            "notes": "Tier 1 (Quick Win). The _collect_escalation_metrics helper at src/pipeline.py:656-703 partially collects VPN metrics but doesn't include all MullvadVPN status fields. Source files: src/pipeline.py (lines 686-695), src/downloader/mullvad_vpn.py (lines 408-427, get_status_extended method).",
+            "passes": true,
+            "notes": "Tier 1 (Quick Win). Updated _collect_escalation_metrics to include all VPN status fields: mullvad_connected, vpn_current_country, vpn_countries_used, vpn_switch_count. Updated existing tests in TestCollectEscalationMetrics class to verify new fields. All 134 pipeline tests pass. Files modified: src/pipeline.py (lines 701-710), tests/test_pipeline_orchestrator.py (TestCollectEscalationMetrics class).",
             "acceptanceCriteria": [
                 "Update _collect_escalation_metrics to include mullvad_connected status",
                 "Include current_country and used_countries list in escalation metrics",

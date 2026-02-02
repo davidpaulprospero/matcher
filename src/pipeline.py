@@ -698,12 +698,16 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
                 # Collect escalation metrics with VPN rotation count (US-1-012)
                 esc_metrics = esc_mgr.get_metrics()
 
-                # Add VPN rotation count from MullvadVPN if available
+                # Add VPN metrics from MullvadVPN if available (US-35-004)
                 mullvad_vpn = getattr(esc_mgr, '_mullvad_vpn', None)
                 if mullvad_vpn is not None:
                     vpn_status = mullvad_vpn.get_status_extended() if hasattr(mullvad_vpn, 'get_status_extended') else mullvad_vpn.get_status()
-                    esc_metrics['vpn_rotation_count'] = vpn_status.get('switch_count', vpn_status.get('switches', 0))
+                    # Connection and country status
+                    esc_metrics['mullvad_connected'] = vpn_status.get('mullvad_connected', vpn_status.get('connected', False))
+                    esc_metrics['vpn_current_country'] = vpn_status.get('current_country', vpn_status.get('country'))
                     esc_metrics['vpn_countries_used'] = vpn_status.get('used_countries', [])
+                    # Rotation count from base VPNManager
+                    esc_metrics['vpn_switch_count'] = vpn_status.get('switch_count', vpn_status.get('switches', 0))
 
                 orchestrator.set_escalation_metrics(esc_metrics)
 
