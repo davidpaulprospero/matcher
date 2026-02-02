@@ -3837,3 +3837,190 @@ class TestCaptionRetryBudgetConfigValidation:
 
         config = ConfigCaptionRetryBudgetConfig(attempts_per_video=2.0)
         assert config.attempts_per_video == 2.0
+
+
+class TestCaptionRetryBudgetPerVideoAttemptTracking:
+    """Tests for US-41-005: Per-video attempt counting to diagnose budget consumption.
+
+    When one video consumes 10+ attempts due to retry loops, it starves other videos
+    of budget. This feature tracks per-video attempts to diagnose such issues.
+    """
+
+    @pytest.mark.fast
+    def test_track_attempts_per_video_id(self):
+        """Verify attempts_per_video_id dict tracks per-video attempt counts (US-41-005 AC1)."""
+        budget = CaptionRetryBudget()
+
+        # Record attempts for different videos
+        budget.record_attempt("video_abc")
+        budget.record_attempt("video_abc")
+        budget.record_attempt("video_xyz")
+
+        assert budget.attempts_per_video_id["video_abc"] == 2
+        assert budget.attempts_per_video_id["video_xyz"] == 1
+
+    @pytest.mark.fast
+    def test_warning_logged_when_video_exceeds_3_attempts(self, caplog):
+        """Verify WARNING logged when single video consumes >3 attempts (US-41-005 AC2)."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        budget = CaptionRetryBudget()
+
+        # Record 3 attempts - no warning yet
+        budget.record_attempt("video_problematic")
+        budget.record_attempt("video_problematic")
+        budget.record_attempt("video_problematic")
+
+        assert "retry loop" not in caplog.text.lower()
+
+        # 4th attempt triggers warning
+        budget.record_attempt("video_problematic")
+
+        assert "video_problematic" in caplog.text
+        assert ">3" in caplog.text or "4 attempts" in caplog.text
+        assert "retry loop" in caplog.text.lower()
+
+    @pytest.mark.fast
+    def test_get_high_attempt_videos_returns_videos_above_threshold(self):
+        """Verify get_high_attempt_videos() returns video IDs with >threshold attempts (US-41-005 AC3)."""
+        budget = CaptionRetryBudget()
+
+        # video_a: 5 attempts (above threshold of 3)
+        for _ in range(5):
+            budget.record_attempt("video_a")
+
+        # video_b: 3 attempts (at threshold, not above)
+        for _ in range(3):
+            budget.record_attempt("video_b")
+
+        # video_c: 4 attempts (above threshold)
+        for _ in range(4):
+            budget.record_attempt("video_c")
+
+        high_attempt = budget.get_high_attempt_videos(threshold=3)
+
+        # Should include video_a and video_c (>3 attempts) but not video_b (=3)
+        assert "video_a" in high_attempt
+        assert "video_c" in high_attempt
+        assert "video_b" not in high_attempt
+
+    @pytest.mark.fast
+    def test_get_high_attempt_videos_sorted_by_count_descending(self):
+        """Verify high attempt videos are sorted by attempt count descending."""
+        budget = CaptionRetryBudget()
+
+        for _ in range(4):
+            budget.record_attempt("video_low")
+        for _ in range(10):
+            budget.record_attempt("video_high")
+        for _ in range(6):
+            budget.record_attempt("video_mid")
+
+        high_attempt = budget.get_high_attempt_videos(threshold=3)
+
+        # Should be sorted: video_high (10), video_mid (6), video_low (4)
+        assert high_attempt == ["video_high", "video_mid", "video_low"]
+
+    @pytest.mark.fast
+    def test_summary_includes_high_attempt_videos_when_present(self):
+        """Verify get_summary includes high_attempt_videos when count > 0 (US-41-005 AC4)."""
+        budget = CaptionRetryBudget()
+
+        # Record 5 attempts for one video (exceeds threshold of 3)
+        for _ in range(5):
+            budget.record_attempt("video_problematic")
+
+        summary = budget.get_summary()
+
+        assert "high_attempt_videos" in summary
+        assert "video_problematic" in summary["high_attempt_videos"]
+
+    @pytest.mark.fast
+    def test_summary_excludes_high_attempt_videos_when_none(self):
+        """Verify get_summary excludes high_attempt_videos when no videos exceed threshold."""
+        budget = CaptionRetryBudget()
+
+        # All videos have <=3 attempts
+        budget.record_attempt("video_a")
+        budget.record_attempt("video_b")
+        budget.record_attempt("video_c")
+
+        summary = budget.get_summary()
+
+        assert "high_attempt_videos" not in summary
+
+    @pytest.mark.fast
+    def test_video_with_5_attempts_appears_in_get_high_attempt_videos_3(self):
+        """Verify video with 5 attempts appears in get_high_attempt_videos(3) (US-41-005 AC5)."""
+        budget = CaptionRetryBudget()
+
+        # Record exactly 5 attempts for test_video
+        for _ in range(5):
+            budget.record_attempt("test_video")
+
+        result = budget.get_high_attempt_videos(3)
+
+        assert "test_video" in result
+
+    @pytest.mark.fast
+    def test_per_video_tracking_serialization(self):
+        """Verify attempts_per_video_id is preserved in to_dict/from_dict."""
+        budget = CaptionRetryBudget()
+
+        for _ in range(5):
+            budget.record_attempt("video_a")
+        for _ in range(3):
+            budget.record_attempt("video_b")
+
+        # Serialize
+        data = budget.to_dict()
+        assert "attempts_per_video_id" in data
+        assert data["attempts_per_video_id"]["video_a"] == 5
+        assert data["attempts_per_video_id"]["video_b"] == 3
+
+        # Deserialize
+        restored = CaptionRetryBudget.from_dict(data)
+        assert restored.attempts_per_video_id["video_a"] == 5
+        assert restored.attempts_per_video_id["video_b"] == 3
+
+    @pytest.mark.fast
+    def test_per_video_tracking_reset(self):
+        """Verify attempts_per_video_id is cleared on reset()."""
+        budget = CaptionRetryBudget()
+
+        for _ in range(5):
+            budget.record_attempt("video_a")
+        assert len(budget.attempts_per_video_id) > 0
+
+        budget.reset()
+
+        assert len(budget.attempts_per_video_id) == 0
+
+    @pytest.mark.fast
+    def test_empty_video_id_not_tracked(self):
+        """Verify empty string video_id is not tracked in per-video dict."""
+        budget = CaptionRetryBudget()
+
+        # Record attempts with empty video_id
+        budget.record_attempt("")
+        budget.record_attempt("")
+
+        # Empty string should not be in tracking
+        assert "" not in budget.attempts_per_video_id
+
+    @pytest.mark.fast
+    def test_warning_only_logged_once_per_video(self, caplog):
+        """Verify warning is logged only once per video (at 4th attempt)."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        budget = CaptionRetryBudget()
+
+        # Record 10 attempts for same video
+        for _ in range(10):
+            budget.record_attempt("video_repeat")
+
+        # Should only have one warning message for this video
+        warning_count = caplog.text.count("video_repeat")
+        assert warning_count == 1, f"Expected 1 warning, got {warning_count}"
