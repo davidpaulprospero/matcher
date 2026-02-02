@@ -62,7 +62,7 @@
             "id": "US-39-004",
             "title": "Add PipelineState restoration validation after checkpoint load",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add validate_state_attributes() method to PipelineState that ensures all required fields exist",
                 "Call validate_state_attributes() after any checkpoint restoration",
@@ -70,7 +70,7 @@
                 "Log WARNING when any field requires initialization: 'Restored missing {field} after checkpoint load'",
                 "Add unit test for checkpoint restoration with incomplete state data"
             ],
-            "notes": "Tier 1: Defensive fix. Files: src/state.py (PipelineState class), src/checkpoint.py (load and restore methods). The from_dict/from_legacy_pipeline methods may produce incomplete state objects."
+            "notes": "COMPLETED: 1) Added validate_state_attributes() method to PipelineState in src/state.py that initializes text_metadata=[], caption_results={}, video_ids=[] if missing. 2) Call validate_state_attributes() in pipeline.py load_checkpoint() AND after each stage.restore() in both pipeline.py (line 191) and agents/runner.py (line 143). 3) Logs WARNING for each restored field: 'Restored missing {field} after checkpoint load'. 4) Added 6 unit tests in test_checkpoint_unit.py: TestPipelineStateValidation class covering all_present, missing_text_metadata, missing_caption_results, missing_video_ids, multiple_missing, and logs_warning scenarios. All tests pass."
         },
         {
             "id": "US-39-005",

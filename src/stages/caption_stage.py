@@ -818,6 +818,9 @@ class CaptionStage(Stage):
                     if rb_summary['is_exhausted']:
                         print(f"    ! Retry budget EXHAUSTED - remaining videos skipped")
 
+                # US-39-005: Log budget consumption summary at INFO level for diagnosis
+                logger.info(retry_budget.get_formatted_summary())
+
             # US-002 Sprint 7: Save format statistics for cross-run learning
             # This enables adaptive format ordering in future runs
             if caption_cache.enabled and metrics.format_success_counts:

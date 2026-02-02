@@ -637,7 +637,29 @@ class CaptionRetryBudget:
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
                 "error_breakdown": error_breakdown,  # US-37-006
                 "batch_size": self.batch_size,  # US-38-009
+                "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
             }
+
+    def get_formatted_summary(self) -> str:
+        """Get a formatted summary string for logging at stage completion (US-39-005).
+
+        Returns a single-line summary with all key budget metrics for easy
+        diagnosis of budget exhaustion issues.
+
+        Returns:
+            Formatted string: 'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts,
+            {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N})'
+
+        Example:
+            >>> budget.get_formatted_summary()
+            'CaptionRetryBudget summary: 150/175 attempts, 120 succeeded, 30 failed, 5 skipped (batch_size=150)'
+        """
+        with self._lock:
+            return (
+                f"CaptionRetryBudget summary: {self.attempts}/{self.max_attempts} attempts, "
+                f"{self.successes} succeeded, {self.failures} failed, "
+                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0})"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize budget state for checkpoint persistence.
