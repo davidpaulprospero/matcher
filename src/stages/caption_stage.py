@@ -152,8 +152,11 @@ class CaptionStage(Stage):
         US-37-010: Ensures state has required attributes before processing.
 
         US-39-009: Validates state type and converts legacy objects if needed.
+
+        US-40-004: Logs retry budget summary at stage completion (success or failure).
         """
         warnings = []
+        retry_budget = None  # US-40-004: Initialize early for access in except block
 
         try:
             # US-39-009: Validate state type at stage entry
@@ -263,7 +266,6 @@ class CaptionStage(Stage):
                 CaptionRetryBudget,
                 CaptionRetryBudgetConfig,
             )
-            retry_budget = None
             rb_config = getattr(caption_config, 'retry_budget', None)
             if rb_config:
                 # Convert dict to config if needed
@@ -904,6 +906,7 @@ class CaptionStage(Stage):
                           f"{cb_stats['consecutive_failures']} recent failures")
 
             # US-33-010: Print retry budget stats if used
+            # US-40-004: Log summary at stage completion for observability
             if retry_budget:
                 rb_summary = retry_budget.get_summary()
                 if rb_summary['attempts'] > 0 or rb_summary['videos_skipped'] > 0:
@@ -914,8 +917,15 @@ class CaptionStage(Stage):
                     if rb_summary['is_exhausted']:
                         print(f"    ! Retry budget EXHAUSTED - remaining videos skipped")
 
-                # US-39-005: Log budget consumption summary at INFO level for diagnosis
+                # US-40-004: Log INFO with formatted budget summary
                 logger.info(retry_budget.get_formatted_summary())
+
+                # US-40-004: Log WARNING if any videos were skipped due to budget exhaustion
+                if rb_summary['videos_skipped'] > 0:
+                    logger.warning(
+                        f"CaptionRetryBudget: {rb_summary['videos_skipped']} videos skipped "
+                        f"due to budget exhaustion"
+                    )
 
             # US-002 Sprint 7: Save format statistics for cross-run learning
             # This enables adaptive format ordering in future runs
@@ -955,6 +965,15 @@ class CaptionStage(Stage):
             return StageResult.fail(f"Caption fetcher not available: {e}", warnings)
         except Exception as e:
             logger.exception(f"Caption stage failed: {e}")
+            # US-40-004: Log retry budget summary even when stage fails
+            if retry_budget is not None:
+                logger.info(retry_budget.get_formatted_summary())
+                rb_summary = retry_budget.get_summary()
+                if rb_summary['videos_skipped'] > 0:
+                    logger.warning(
+                        f"CaptionRetryBudget: {rb_summary['videos_skipped']} videos skipped "
+                        f"due to budget exhaustion"
+                    )
             return StageResult.fail(str(e), warnings)
 
     def can_skip(
