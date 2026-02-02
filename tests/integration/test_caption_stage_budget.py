@@ -1096,23 +1096,24 @@ class TestCaptionResultsPreservation:
 
 
 # =============================================================================
-# US-39-002: Verify CaptionStage calls scale_to_batch_size
+# US-39-002/US-39-010: Verify CaptionStage calls ensure_scaled
 # =============================================================================
 
 
-class TestCaptionStageCallsScaleToBatchSize:
-    """Tests verifying CaptionStage.run() calls scale_to_batch_size correctly.
+class TestCaptionStageCallsEnsureScaled:
+    """Tests verifying CaptionStage.run() calls ensure_scaled correctly.
 
     US-39-002: Auto-scaling prevents budget exhaustion on large batches.
+    US-39-010: ensure_scaled() convenience method is the preferred API.
     """
 
     @pytest.mark.fast
-    def test_scale_to_batch_size_called_with_correct_batch_size(
+    def test_ensure_scaled_called_with_correct_batch_size(
         self, batch_175_video_ids, caplog
     ):
-        """Verify scale_to_batch_size is called with len(ids_to_fetch).
+        """Verify ensure_scaled is called with len(ids_to_fetch).
 
-        US-39-002: CaptionStage.run() must call retry_budget.scale_to_batch_size()
+        US-39-010: CaptionStage.run() must call retry_budget.ensure_scaled()
         with the correct batch size BEFORE processing begins.
         """
         import logging
@@ -1140,17 +1141,17 @@ class TestCaptionStageCallsScaleToBatchSize:
 
         stage = CaptionStage()
 
-        # Track whether scale_to_batch_size was called with correct arg
+        # Track whether ensure_scaled was called with correct arg
         scale_calls = []
 
-        original_scale = CaptionRetryBudget.scale_to_batch_size
+        original_ensure_scaled = CaptionRetryBudget.ensure_scaled
 
-        def track_scale_call(self, batch_size, attempts_per_video=None):
+        def track_ensure_scaled_call(self, batch_size):
             scale_calls.append(batch_size)
-            return original_scale(self, batch_size, attempts_per_video)
+            return original_ensure_scaled(self, batch_size)
 
-        # Patch both the fetcher (lazy imported) and the scale method
-        with patch.object(CaptionRetryBudget, 'scale_to_batch_size', track_scale_call):
+        # Patch both the fetcher (lazy imported) and the ensure_scaled method
+        with patch.object(CaptionRetryBudget, 'ensure_scaled', track_ensure_scaled_call):
             with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
                 fetcher_instance = MockFetcher.return_value
                 fetcher_instance._timeout = 30
@@ -1161,12 +1162,12 @@ class TestCaptionStageCallsScaleToBatchSize:
                 # Run the stage
                 stage.run(state, config, checkpoint)
 
-        # Verify scale_to_batch_size was called with 175 (the batch size)
+        # Verify ensure_scaled was called with 175 (the batch size)
         assert len(scale_calls) == 1, (
-            f"scale_to_batch_size should be called exactly once, got {len(scale_calls)} calls"
+            f"ensure_scaled should be called exactly once, got {len(scale_calls)} calls"
         )
         assert scale_calls[0] == 175, (
-            f"scale_to_batch_size should be called with batch_size=175, got {scale_calls[0]}"
+            f"ensure_scaled should be called with batch_size=175, got {scale_calls[0]}"
         )
 
         # Verify INFO log about scaling was produced
@@ -1177,10 +1178,10 @@ class TestCaptionStageCallsScaleToBatchSize:
         assert scaling_logs, "Expected INFO log about scaling for 175 videos"
 
     @pytest.mark.fast
-    def test_scale_to_batch_size_called_before_fetch(self, batch_175_video_ids):
-        """Verify scale_to_batch_size is called BEFORE fetch_captions_batch.
+    def test_ensure_scaled_called_before_fetch(self, batch_175_video_ids):
+        """Verify ensure_scaled is called BEFORE fetch_captions_batch.
 
-        US-39-002: The budget must be scaled before processing starts to prevent
+        US-39-010: The budget must be scaled before processing starts to prevent
         early exhaustion.
         """
         state = MockPipelineState(
@@ -1206,13 +1207,13 @@ class TestCaptionStageCallsScaleToBatchSize:
         # Track call order
         call_order = []
 
-        original_scale = CaptionRetryBudget.scale_to_batch_size
+        original_ensure_scaled = CaptionRetryBudget.ensure_scaled
 
-        def track_scale(self, batch_size, attempts_per_video=None):
-            call_order.append(('scale_to_batch_size', batch_size))
-            return original_scale(self, batch_size, attempts_per_video)
+        def track_ensure_scaled(self, batch_size):
+            call_order.append(('ensure_scaled', batch_size))
+            return original_ensure_scaled(self, batch_size)
 
-        with patch.object(CaptionRetryBudget, 'scale_to_batch_size', track_scale):
+        with patch.object(CaptionRetryBudget, 'ensure_scaled', track_ensure_scaled):
             with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
                 fetcher_instance = MockFetcher.return_value
                 fetcher_instance._timeout = 30
@@ -1229,7 +1230,7 @@ class TestCaptionStageCallsScaleToBatchSize:
 
         # Find indexes
         scale_idx = next(
-            (i for i, (name, _) in enumerate(call_order) if name == 'scale_to_batch_size'),
+            (i for i, (name, _) in enumerate(call_order) if name == 'ensure_scaled'),
             None
         )
         fetch_idx = next(
@@ -1237,9 +1238,9 @@ class TestCaptionStageCallsScaleToBatchSize:
             None
         )
 
-        assert scale_idx is not None, "scale_to_batch_size should have been called"
+        assert scale_idx is not None, "ensure_scaled should have been called"
         assert fetch_idx is not None, "fetch_captions_batch should have been called"
         assert scale_idx < fetch_idx, (
-            f"scale_to_batch_size (index={scale_idx}) must be called BEFORE "
+            f"ensure_scaled (index={scale_idx}) must be called BEFORE "
             f"fetch_captions_batch (index={fetch_idx})"
         )

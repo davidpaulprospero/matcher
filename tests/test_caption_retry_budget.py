@@ -1244,6 +1244,104 @@ class TestCaptionRetryBudgetScaleToBatchSize:
 
 
 # ============================================================================
+# US-39-010: CaptionRetryBudget.ensure_scaled() convenience method
+# ============================================================================
+
+
+class TestCaptionRetryBudgetEnsureScaled:
+    """Test ensure_scaled convenience method (US-39-010)."""
+
+    @pytest.mark.fast
+    def test_ensure_scaled_returns_true_when_scaling_occurs(self):
+        """Test ensure_scaled returns True when budget is scaled."""
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+
+        result = budget.ensure_scaled(200)  # 200 * 1.5 = 300 > 100
+
+        assert result is True
+        assert budget.max_attempts == 300
+        assert budget.batch_size == 200
+
+    @pytest.mark.fast
+    def test_ensure_scaled_returns_false_when_auto_scale_disabled(self):
+        """Test ensure_scaled returns False when auto_scale is disabled."""
+        budget = CaptionRetryBudget()
+        budget.auto_scale = False
+        budget.max_attempts = 100
+
+        result = budget.ensure_scaled(200)
+
+        assert result is False
+        assert budget.max_attempts == 100  # Unchanged
+
+    @pytest.mark.fast
+    def test_ensure_scaled_idempotent_same_batch_size(self):
+        """Test ensure_scaled is idempotent - calling twice with same batch_size does nothing (US-39-010).
+
+        This is a key acceptance criterion: ensure_scaled() should be safe to call
+        multiple times without redundant scaling.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+
+        # First call - should scale
+        result1 = budget.ensure_scaled(200)
+        assert result1 is True
+        assert budget.max_attempts == 300
+
+        # Second call with same batch_size - should NOT scale again
+        result2 = budget.ensure_scaled(200)
+        assert result2 is False
+        assert budget.max_attempts == 300  # Still 300, not doubled
+
+    @pytest.mark.fast
+    def test_ensure_scaled_idempotent_smaller_batch_size(self):
+        """Test ensure_scaled doesn't reduce when called with smaller batch size."""
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+
+        # First call - scale to 300 for 200 videos
+        budget.ensure_scaled(200)
+        assert budget.max_attempts == 300
+
+        # Second call with smaller batch - should NOT reduce
+        result = budget.ensure_scaled(50)  # 50 * 1.5 = 75 < 300
+        assert result is False
+        # max_attempts stays at 300 (already scaled higher)
+        assert budget.max_attempts == 300
+
+    @pytest.mark.fast
+    def test_ensure_scaled_returns_false_when_budget_sufficient(self):
+        """Test ensure_scaled returns False when existing budget is sufficient."""
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+
+        result = budget.ensure_scaled(50)  # 50 * 1.5 = 75 < 100
+
+        assert result is False
+        assert budget.max_attempts == 100  # Unchanged
+        assert budget.batch_size == 50  # Still tracks batch_size
+
+    @pytest.mark.fast
+    def test_ensure_scaled_uses_instance_attempts_per_video(self):
+        """Test ensure_scaled uses the instance attempts_per_video config."""
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0  # Custom multiplier
+
+        result = budget.ensure_scaled(100)  # 100 * 2.0 = 200 > 100
+
+        assert result is True
+        assert budget.max_attempts == 200
+
+
+# ============================================================================
 # US-37-005: Detailed logging for retry budget consumption
 # ============================================================================
 

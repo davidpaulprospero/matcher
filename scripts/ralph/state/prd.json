@@ -146,7 +146,7 @@
             "id": "US-39-010",
             "title": "Add CaptionRetryBudget.ensure_scaled() convenience method",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add ensure_scaled(batch_size) method that calls scale_to_batch_size if auto_scale=True",
                 "Method returns True if scaling occurred, False if already scaled or auto_scale disabled",
@@ -154,7 +154,7 @@
                 "Add unit test verifying idempotency",
                 "Update CaptionStage to use ensure_scaled() instead of direct scale_to_batch_size() call"
             ],
-            "notes": "Tier 3: API improvement. Files: src/caption/retry_budget.py. Makes it harder to forget to scale the budget by providing a single entry point."
+            "notes": "COMPLETED: 1) Added ensure_scaled(batch_size) method to CaptionRetryBudget in src/caption/retry_budget.py lines 758-821. Returns True if scaling occurred, False otherwise. 2) Method handles auto_scale check internally and is idempotent (tracks batch_size to skip redundant calls). 3) Added TestCaptionRetryBudgetEnsureScaled class with 7 tests including test_ensure_scaled_idempotent_same_batch_size. 4) Updated CaptionStage to use ensure_scaled() (lines 615-622). 5) Updated integration tests TestCaptionStageCallsEnsureScaled. 6) Also fixed PipelineState.from_legacy_pipeline to copy video_ids and video_search_results directly. All 184 caption budget tests pass."
         },
         {
             "id": "US-39-011",
