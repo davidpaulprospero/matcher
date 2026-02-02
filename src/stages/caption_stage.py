@@ -804,6 +804,58 @@ class CaptionStage(Stage):
                     # Helps users understand budget state after checkpoint restore
                     retry_budget.log_health_check(batch_size)
 
+                    # US-43-010: Fail-fast check for budget exhaustion before batch start
+                    # If checkpoint restores budget with 100/100 attempts already used,
+                    # detect and report early instead of immediately skipping all videos
+                    if retry_budget.budget_exhausted():
+                        logger.error(
+                            "[US-43-010] Budget already exhausted at batch start - check checkpoint restore. "
+                            f"Attempts: {retry_budget.attempts}/{retry_budget.max_attempts}, "
+                            f"Backoff: {retry_budget.backoff_time_spent:.1f}s/{retry_budget.max_backoff_time}s"
+                        )
+                        print(f"\n  ! Budget already exhausted at batch start:")
+                        print(f"    - Attempts used: {retry_budget.attempts}/{retry_budget.max_attempts}")
+                        print(f"    - Backoff time: {retry_budget.backoff_time_spent:.1f}s/{retry_budget.max_backoff_time}s")
+                        print(f"    - {len(ids_to_fetch)} videos will be skipped")
+                        print(f"    - Consider: --reset-budget flag or deleting checkpoint.json")
+
+                        # Mark all videos as skipped due to budget exhaustion
+                        for video_id in ids_to_fetch:
+                            caption_results[video_id] = {
+                                'video_id': video_id,
+                                'skipped': True,
+                                'reason': 'budget_exhausted_at_start',
+                                'caption_quality': 'low',
+                            }
+
+                        # Store caption_results in state
+                        state.caption_results = caption_results
+
+                        # Populate text_metadata for consistency
+                        try:
+                            self._populate_text_metadata(state, caption_results)
+                        except Exception as e:
+                            logger.warning(f"Failed to populate text_metadata: {e}")
+
+                        # Return early with warning
+                        warnings.append(
+                            f"Budget exhausted at batch start: {len(ids_to_fetch)} videos skipped. "
+                            f"Use --reset-budget or delete checkpoint.json"
+                        )
+
+                        # Log retry budget summary for debugging
+                        logger.info(retry_budget.get_formatted_summary())
+
+                        return StageResult.ok({
+                            'caption_results': caption_results,
+                            'success_count': 0,
+                            'skip_count': skip_count,
+                            'fail_count': 0,
+                            'budget_exhausted_at_start': True,
+                            'skipped_due_to_budget': len(ids_to_fetch),
+                            'retry_budget': retry_budget.to_dict(),
+                        }, warnings)
+
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
                 # US-33-009: With circuit breaker for consecutive failure protection
