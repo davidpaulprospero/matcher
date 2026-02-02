@@ -55,8 +55,8 @@
                 "Add test: batch of 175 with auto_scale=true should scale to 175*2.0=350 max_attempts",
                 "Verify budget exhaustion doesn't occur before video 100 for batch of 175"
             ],
-            "passes": false,
-            "notes": "Tier: T1 (Critical Bug). Files: src/stages/caption_stage.py:678-690, src/caption/retry_budget.py:780-842. The logs show 100/100 exhaustion for 175 videos, indicating ensure_scaled() may not be called or auto_scale is false. Need to trace why scaling didn't occur."
+            "passes": true,
+            "notes": "Tier: T1 (Critical Bug). FIXED: Added US-41-003 INFO logs in caption_stage.py showing budget state BEFORE and AFTER ensure_scaled(). Added TestCaptionRetryBudgetLargeBatchScaling test class with 6 tests covering: scaling to 350, no exhaustion before video 100, processing all 175 videos, log message verification, idempotency, and auto_scale=false behavior."
         },
         {
             "id": "US-41-004",
