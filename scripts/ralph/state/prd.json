@@ -183,8 +183,8 @@
                 "Add unit test verifying retry occurs on transient error",
                 "Add unit test verifying no retry on file not found"
             ],
-            "passes": false,
-            "notes": "Tier 3 (resilience). Target: src/transcription/parallel_processor.py transcribe_video function. Pattern from caption fetcher retry logic. Whisper can occasionally fail on GPU memory pressure."
+            "passes": true,
+            "notes": "Tier 3 (resilience). Created src/transcription/exceptions.py with TranscriptionError hierarchy and is_transient_error() function. Modified transcribe_video() in src/transcription/parallel_processor.py to retry up to 2 times with exponential backoff (1s, 2s) for transient errors (CUDA, memory, etc) but NOT for file not found or permission errors. Added TestTranscriptionRetry class with 5 tests in tests/test_transcription_parallel_processor.py: test_retry_on_transient_cuda_error, test_retry_logs_warning_on_each_retry, test_no_retry_on_file_not_found, test_no_retry_on_permission_error, test_all_retries_exhausted_returns_empty."
         }
     ]
 }

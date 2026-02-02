@@ -38,6 +38,12 @@ from .whisper_client import WhisperClient, cleanup_model
 from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
 from .utils import extract_audio, write_srt, extract_video_id, format_timestamp_srt
+from .exceptions import (
+    TranscriptionError,
+    TransientTranscriptionError,
+    PermanentTranscriptionError,
+    is_transient_error
+)
 
 # Import orchestration functions from parallel_processor
 from .parallel_processor import (
@@ -67,6 +73,12 @@ __all__ = [
     'WhisperClient',
     'TranscriptCache',
     'DeltaAwareIndex',
+
+    # Exceptions (from exceptions)
+    'TranscriptionError',
+    'TransientTranscriptionError',
+    'PermanentTranscriptionError',
+    'is_transient_error',
 
     # Cleanup
     'cleanup_model',
