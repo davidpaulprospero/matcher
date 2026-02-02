@@ -1021,3 +1021,133 @@ class TestBothBudgetClassesCoverage:
 
         assert restored_batch.processed_videos == 30
         assert restored_batch.category_counts[CaptionErrorCategory.NETWORK] == 10
+
+
+# ============================================================================
+# US-37-003: Scale CaptionRetryBudget max_attempts proportional to batch size
+# ============================================================================
+
+
+class TestCaptionRetryBudgetScaleToBatchSize:
+    """Test scale_to_batch_size method (US-37-003)."""
+
+    @pytest.mark.fast
+    def test_small_batch_keeps_default_100(self):
+        """Test small batch (50 videos) keeps default max_attempts=100."""
+        budget = CaptionRetryBudget()
+        assert budget.max_attempts == 100
+
+        result = budget.scale_to_batch_size(50)
+
+        # 50 * 1.5 = 75 < 100, so keep default
+        assert budget.max_attempts == 100
+        assert result == 100
+
+    @pytest.mark.fast
+    def test_boundary_batch_67_keeps_default(self):
+        """Test batch of 67 videos keeps default (67 * 1.5 = 100.5 rounds to 101)."""
+        budget = CaptionRetryBudget()
+
+        # 66 * 1.5 = 99, should keep default 100
+        budget.scale_to_batch_size(66)
+        assert budget.max_attempts == 100
+
+    @pytest.mark.fast
+    def test_large_batch_175_scales_to_263(self):
+        """Test large batch (175 videos) scales to ~263 attempts."""
+        budget = CaptionRetryBudget()
+        assert budget.max_attempts == 100
+
+        result = budget.scale_to_batch_size(175)
+
+        # 175 * 1.5 = 262.5, rounds to 263
+        assert budget.max_attempts == 263
+        assert result == 263
+
+    @pytest.mark.fast
+    def test_custom_attempts_per_video(self):
+        """Test custom attempts_per_video parameter."""
+        budget = CaptionRetryBudget()
+
+        # 50 videos with 2.5 attempts each = 125
+        budget.scale_to_batch_size(50, attempts_per_video=2.5)
+        assert budget.max_attempts == 125
+
+    @pytest.mark.fast
+    def test_never_reduces_below_default(self):
+        """Test that scaling never reduces below default max_attempts."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 200  # Already above default
+
+        # 50 * 1.5 = 75 < 200, should NOT reduce
+        budget.scale_to_batch_size(50)
+        assert budget.max_attempts == 200
+
+    @pytest.mark.fast
+    def test_scale_returns_new_max_attempts(self):
+        """Test scale_to_batch_size returns the new max_attempts value."""
+        budget = CaptionRetryBudget()
+
+        result = budget.scale_to_batch_size(200)
+
+        # 200 * 1.5 = 300
+        assert result == 300
+        assert budget.max_attempts == 300
+
+    @pytest.mark.fast
+    def test_scale_with_zero_batch_size(self):
+        """Test scale with zero batch size keeps default."""
+        budget = CaptionRetryBudget()
+
+        result = budget.scale_to_batch_size(0)
+
+        # 0 * 1.5 = 0 < 100, keep default
+        assert budget.max_attempts == 100
+        assert result == 100
+
+    @pytest.mark.fast
+    def test_scale_is_thread_safe(self):
+        """Test scale_to_batch_size is thread-safe."""
+        budget = CaptionRetryBudget()
+
+        def scale_and_record():
+            budget.scale_to_batch_size(200)
+            budget.record_attempt("test")
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(scale_and_record) for _ in range(10)]
+            for f in futures:
+                f.result()
+
+        # Should have scaled to 300 and recorded 10 attempts
+        assert budget.max_attempts == 300
+        assert budget.attempts == 10
+
+    @pytest.mark.fast
+    def test_scale_multiple_calls_uses_largest(self):
+        """Test multiple scale calls use the largest requirement."""
+        budget = CaptionRetryBudget()
+
+        budget.scale_to_batch_size(100)  # 100 * 1.5 = 150
+        assert budget.max_attempts == 150
+
+        budget.scale_to_batch_size(200)  # 200 * 1.5 = 300
+        assert budget.max_attempts == 300
+
+        budget.scale_to_batch_size(50)  # 50 * 1.5 = 75 < 300, no change
+        assert budget.max_attempts == 300
+
+    @pytest.mark.fast
+    def test_acceptance_criteria_50_videos_stays_100(self):
+        """Acceptance: 50 videos -> max_attempts stays at 100."""
+        budget = CaptionRetryBudget()
+        budget.scale_to_batch_size(50)
+        assert budget.max_attempts == 100
+
+    @pytest.mark.fast
+    def test_acceptance_criteria_175_videos_becomes_263(self):
+        """Acceptance: 175 videos -> max_attempts becomes 263."""
+        budget = CaptionRetryBudget()
+        budget.scale_to_batch_size(175)
+        assert budget.max_attempts == 263
