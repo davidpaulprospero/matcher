@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 39,
-    "focusArea": "pipeline",
-    "branchName": "ralph/sprint-39",
+    "sprintNumber": 40,
+    "focusArea": "architecture",
+    "branchName": "ralph/sprint-40",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,178 +11,179 @@
     },
     "userStories": [
         {
-            "id": "US-39-001",
-            "title": "Generate sprint stories for pipeline focus area",
+            "id": "US-40-001",
+            "title": "Generate sprint stories for architecture focus area",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'architecture' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
-                "Add stories US-39-002 through US-39-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'architecture'",
+                "Add stories US-40-002 through US-40-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-39-NNN to be unique across sprints",
-                "Mark this story (US-39-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-40-NNN to be unique across sprints",
+                "Mark this story (US-40-001) as passes: true when done"
             ],
-            "notes": "Completed: Generated 11 stories (US-39-002 through US-39-012) based on user-reported bugs (budget exhaustion, text_metadata AttributeError) and related improvements."
+            "notes": "Story generation complete. Generated 11 stories (US-40-002 through US-40-012) addressing caption retry budget exhaustion, checkpoint state restoration, and match stage robustness issues from user-reported logs."
         },
         {
-            "id": "US-39-002",
-            "title": "Ensure CaptionRetryBudget auto-scaling is called for batch processing",
-            "priority": "critical",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Verify scale_to_batch_size() is called in CaptionStage.run() before processing begins",
-                "Add explicit call to budget.scale_to_batch_size(len(video_ids)) if not present",
-                "Log INFO when budget is scaled: 'CaptionRetryBudget scaled for batch of {N} videos'",
-                "Add unit test verifying scale_to_batch_size is called with correct batch size",
-                "Add unit test verifying budget is NOT exhausted when processing batches up to 200 videos with 50% success rate"
-            ],
-            "notes": "COMPLETED: Verified scale_to_batch_size() IS called in CaptionStage.run() lines 607-612 when auto_scale=True. Added tests: TestCaptionRetryBudgetAutoScaleSufficiency (5 tests in test_caption_retry_budget.py) and TestCaptionStageCallsScaleToBatchSize (2 tests in test_caption_stage_budget.py). Tests verify: 1) Budget scales correctly for 175/200 videos, 2) Budget not exhausted at 70% success rate, 3) Budget DOES exhaust without auto_scale, 4) INFO logging occurs on scaling, 5) scale_to_batch_size called before fetch_captions_batch. All 206 tests pass."
-        },
-        {
-            "id": "US-39-003",
-            "title": "Add defensive text_metadata initialization in CaptionStage _ensure_state_attributes",
-            "priority": "critical",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Verify _ensure_state_attributes() is called at the START of CaptionStage.run()",
-                "Add explicit setattr(state, 'text_metadata', []) if hasattr returns False",
-                "Add logging when attribute is initialized: 'Initialized missing text_metadata on state object'",
-                "Add unit test with mock state object missing text_metadata attribute",
-                "Add unit test verifying _ensure_state_attributes handles state objects created via object() or SimpleNamespace"
-            ],
-            "notes": "COMPLETED: 1) Verified _ensure_state_attributes() IS called at line 123 in run(). 2) Changed direct assignment to explicit setattr(). 3) Changed logging from DEBUG to INFO with exact message 'Initialized missing text_metadata on state object'. 4) Existing test test_ensure_state_attributes_on_legacy_object_missing_text_metadata covers mock state. 5) Added 3 new tests: test_ensure_state_attributes_handles_simple_namespace, test_ensure_state_attributes_handles_object_subclass, test_ensure_state_attributes_logs_initialization. All 11 defensive initialization tests pass."
-        },
-        {
-            "id": "US-39-004",
-            "title": "Add PipelineState restoration validation after checkpoint load",
+            "id": "US-40-002",
+            "title": "Add checkpoint restoration hook to re-scale CaptionRetryBudget",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Add validate_state_attributes() method to PipelineState that ensures all required fields exist",
-                "Call validate_state_attributes() after any checkpoint restoration",
-                "Method must initialize text_metadata=[], caption_results={}, video_ids=[] if missing",
-                "Log WARNING when any field requires initialization: 'Restored missing {field} after checkpoint load'",
-                "Add unit test for checkpoint restoration with incomplete state data"
+                "In CaptionStage.run(), after restoring retry_budget from checkpoint, call ensure_scaled() with the current batch size",
+                "Log INFO message: 'Retry budget restored from checkpoint, re-scaling for batch of {N} videos'",
+                "Add unit test verifying ensure_scaled() is called after checkpoint restoration",
+                "Add unit test verifying max_attempts is updated when batch_size increases after resume",
+                "Verify budget is scaled BEFORE fetch_captions_batch is called"
             ],
-            "notes": "COMPLETED: 1) Added validate_state_attributes() method to PipelineState in src/state.py that initializes text_metadata=[], caption_results={}, video_ids=[] if missing. 2) Call validate_state_attributes() in pipeline.py load_checkpoint() AND after each stage.restore() in both pipeline.py (line 191) and agents/runner.py (line 143). 3) Logs WARNING for each restored field: 'Restored missing {field} after checkpoint load'. 4) Added 6 unit tests in test_checkpoint_unit.py: TestPipelineStateValidation class covering all_present, missing_text_metadata, missing_caption_results, missing_video_ids, multiple_missing, and logs_warning scenarios. All tests pass."
+            "notes": "Tier 1 (Core Bug Fix). COMPLETE: All implementation and tests already exist. Implementation at src/stages/caption_stage.py:676-704 (ensure_scaled called after restoration, log messages). Tests at tests/test_caption_stage_integration.py:740-958 (TestCaptionStageRetryBudgetCheckpointRestoration class with 3 tests). All tests pass."
         },
         {
-            "id": "US-39-005",
-            "title": "Add budget consumption summary logging at stage completion",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Log INFO at end of caption stage with budget summary: attempts, successes, failures, skipped",
-                "Include batch_size in summary log message",
-                "Include scaled max_attempts value (actual vs default 100)",
-                "Add unit test verifying summary is logged with all required fields",
-                "Summary format: 'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts, {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N})'"
-            ],
-            "notes": "COMPLETED: 1) Added get_formatted_summary() method to CaptionRetryBudget that returns exact format with batch_size. 2) Called logger.info(retry_budget.get_formatted_summary()) at line 822 in caption_stage.py. 3) Added 5 tests in TestCaptionRetryBudgetFormattedSummary class verifying all fields. Commit: f5108f6"
-        },
-        {
-            "id": "US-39-006",
-            "title": "Add warning when budget may be insufficient before processing",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Before processing starts, calculate required budget: batch_size * attempts_per_video",
-                "Log WARNING if required > max_attempts AND auto_scale is disabled: 'Budget may be insufficient: {max_attempts} attempts for {batch_size} videos'",
-                "Include recommendation in warning: 'Consider enabling auto_scale in config or increasing max_attempts'",
-                "Add unit test verifying warning is logged when auto_scale=false and batch_size > max_attempts",
-                "Add unit test verifying NO warning when auto_scale=true"
-            ],
-            "notes": "COMPLETED: 1) Updated _validate_budget_for_batch() in caption_stage.py to calculate required_budget = batch_size * attempts_per_video. 2) Added WARNING with exact format 'Budget may be insufficient: {max_attempts} attempts for {batch_size} videos'. 3) Warning includes recommendation 'Consider enabling auto_scale in config or increasing max_attempts'. 4) Added TestBudgetInsufficientWarning class with 4 tests: test_warning_logged_when_auto_scale_false_and_batch_exceeds_budget, test_no_warning_when_auto_scale_true, test_warning_includes_recommendation, test_no_warning_when_budget_sufficient. All 37 tests in test_caption_stage_budget.py pass."
-        },
-        {
-            "id": "US-39-007",
-            "title": "Add integration test for large batch caption processing",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Create integration test with 200 mock video IDs",
-                "Test must verify budget scales correctly (max_attempts >= 300 for 200 videos)",
-                "Test must verify no budget_exhausted errors with 60% success rate",
-                "Test must verify text_metadata is populated correctly for successful captions",
-                "Test must use --non-interactive flag per project conventions"
-            ],
-            "notes": "COMPLETED: Added TestLargeBatchSuccessRateIntegration class with 3 tests in test_caption_stage_large_batch.py: 1) test_200_video_batch_with_60_percent_success_rate - comprehensive test with 200 videos, 60% success rate, verifies budget scales to 300, no budget_exhausted errors, text_metadata populated with ~960 segments. 2) test_budget_scales_to_300_for_200_videos - unit test verifying exact scaling calculation. 3) test_no_budget_exhaustion_at_200_attempts_with_scaled_budget - verifies no exhaustion at 200/250 attempts with max_attempts=300. Uses mocked CaptionFetcher (--non-interactive equivalent). All 15 tests in file pass."
-        },
-        {
-            "id": "US-39-008",
-            "title": "Add fallback caption_results preservation on text_metadata error",
+            "id": "US-40-003",
+            "title": "Add defensive checkpoint state validation on load",
             "priority": "high",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Wrap _populate_text_metadata call in try-except block",
-                "On AttributeError, log ERROR with state type and available attributes",
-                "Preserve caption_results in state BEFORE calling _populate_text_metadata (already done in US-38-011)",
-                "Add warning that matching stage can use caption_results directly if text_metadata population fails",
-                "Add unit test verifying caption_results is preserved even when text_metadata population fails"
+                "In CheckpointManager.restore_state(), call state.validate_state_attributes() after deserializing",
+                "Log WARNING for each attribute that was missing/None and initialized",
+                "Add unit test verifying text_metadata is initialized to [] if missing from checkpoint",
+                "Add unit test verifying caption_results is initialized to {} if missing from checkpoint",
+                "Add unit test verifying video_ids is initialized to [] if missing from checkpoint"
             ],
-            "notes": "COMPLETED: 1) Added specific AttributeError handler to existing try-except around _populate_text_metadata call (line 731-748). 2) AttributeError handler logs state type and first 20 available attributes. 3) caption_results preserved at line 728 (US-38-011). 4) Added warning about matching stage fallback capability. 5) Added TestCaptionResultsPreservationOnTextMetadataError class with 2 tests verifying caption_results is preserved even when _populate_text_metadata raises AttributeError. All tests pass."
+            "notes": "Tier 1 (Core Bug Fix). Files: src/checkpoint.py (CheckpointManager.restore_state), src/state.py lines 179-207 (validate_state_attributes already exists). The error 'PipelineState object has no attribute text_metadata' indicates checkpoint restore bypasses field defaults."
         },
         {
-            "id": "US-39-009",
-            "title": "Add state type validation at stage entry points",
+            "id": "US-40-004",
+            "title": "Add CaptionRetryBudget summary logging at stage completion",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add _validate_state_type() method that checks isinstance(state, PipelineState)",
-                "Log WARNING if state is not PipelineState: 'Non-standard state object: {type(state).__name__}'",
-                "Call _validate_state_type at start of each stage's run() method",
-                "If state is not PipelineState, attempt to convert using PipelineState.from_legacy_pipeline()",
-                "Add unit test verifying warning is logged for non-PipelineState objects"
+                "At end of CaptionStage.run(), log INFO with retry_budget.get_formatted_summary()",
+                "Include batch_size, max_attempts (scaled value), attempts used, successes, failures, skipped",
+                "Log WARNING if videos_skipped > 0 with specific count",
+                "Add unit test verifying summary is logged on successful completion",
+                "Add unit test verifying summary is logged even when stage fails"
             ],
-            "notes": "COMPLETED: 1) Added _validate_state_type() method to Stage base class in src/stages/__init__.py that checks isinstance(state, PipelineState). 2) Logs WARNING with exact message 'Non-standard state object: {type(state).__name__}'. 3) Called _validate_state_type at start of run() in caption_stage.py, match.py, and iterative_match.py. 4) Attempts conversion via PipelineState.from_legacy_pipeline() if not PipelineState. 5) Added TestValidateStateType class with 4 tests in test_stages_init_coverage.py verifying: PipelineState unchanged, warning logged for non-PipelineState, legacy conversion works, and conversion failure handled gracefully."
+            "notes": "Tier 2 (Observability). Files: src/stages/caption_stage.py (end of run() method), src/caption/retry_budget.py lines 643-662 (get_formatted_summary already exists). This helps diagnose why budget exhausted for 74 videos."
         },
         {
-            "id": "US-39-010",
-            "title": "Add CaptionRetryBudget.ensure_scaled() convenience method",
+            "id": "US-40-005",
+            "title": "Add per-video retry logging to diagnose budget consumption",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "In caption fetcher, log DEBUG for each retry attempt with video_id, attempt_number, error_reason",
+                "Log INFO when budget reaches 50%, 75%, 90% thresholds (already exists via _check_and_log_threshold)",
+                "Add budget consumption percentage to existing threshold logs",
+                "Add unit test verifying retry attempt is logged with error reason",
+                "Add unit test verifying threshold crossing is logged with correct percentage"
+            ],
+            "notes": "Tier 2 (Observability). Files: src/caption_fetcher.py (fetch retry logic), src/caption/retry_budget.py lines 550-573 (_check_and_log_threshold). Need to trace why 100 attempts were consumed by first 100 videos."
+        },
+        {
+            "id": "US-40-006",
+            "title": "Increase default attempts_per_video multiplier to 2.0",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Change CaptionRetryBudgetConfig.attempts_per_video from 1.5 to 2.0",
+                "Update CaptionRetryBudget.attempts_per_video default from 1.5 to 2.0",
+                "Add config.yaml comment explaining the multiplier: '2.0 = 1 attempt + 1 retry per video average'",
+                "Add unit test verifying 175 videos scales to 350 attempts (175 * 2.0)",
+                "Update existing tests that hardcode 1.5 multiplier expectations"
+            ],
+            "notes": "Tier 2 (Configuration). Files: src/caption/retry_budget.py lines 49-50 (CaptionRetryBudgetConfig.attempts_per_video), lines 113-114 (CaptionRetryBudget.attempts_per_video), config.yaml. The 1.5 multiplier gives 262 attempts for 175 videos, but we're exhausting at 100 - need more headroom."
+        },
+        {
+            "id": "US-40-007",
+            "title": "Add match stage defensive check for empty text_metadata",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "At start of MatchStage.run(), check if text_metadata is None or empty list",
+                "If empty but caption_results has entries, attempt to recover by calling _populate_text_metadata logic",
+                "Log WARNING: 'text_metadata empty, attempting recovery from caption_results'",
+                "If both empty, return StageResult with error explaining no captions available",
+                "Add unit test verifying recovery from caption_results when text_metadata empty",
+                "Add unit test verifying appropriate error when both are unavailable"
+            ],
+            "notes": "Tier 1 (Core Bug Fix). Files: src/stages/match.py (run method entry), src/stages/caption_stage.py lines 1040-1100 (_populate_text_metadata for reference). Match stage failed because text_metadata was missing - need defensive fallback."
+        },
+        {
+            "id": "US-40-008",
+            "title": "Add state attribute existence check at each stage entry",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Create utility function validate_required_state_attrs(state, required_attrs, stage_name)",
+                "Function initializes missing attrs to defaults and logs WARNING for each",
+                "Call from MatchStage.run() with ['text_metadata', 'caption_results', 'voiceover_segments']",
+                "Call from IterativeMatchStage.run() with ['matches', 'text_metadata']",
+                "Add unit test verifying missing attribute is initialized and warning logged",
+                "Add unit test verifying existing attribute is not modified"
+            ],
+            "notes": "Tier 2 (Defensive Programming). Files: src/stages/__init__.py (add utility function), src/stages/match.py, src/stages/iterative_match.py. Prevents AttributeError crashes when checkpoint restoration fails to initialize all fields."
+        },
+        {
+            "id": "US-40-009",
+            "title": "Add IterativeMatchStage pre-check for empty candidate pool",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "At start of IterativeMatchStage.run(), count available candidates from text_metadata",
+                "If candidate pool is 0, log WARNING and return early with appropriate StageResult",
+                "Log INFO with candidate pool size at stage entry: 'IterativeMatch starting with {N} candidates'",
+                "Add unit test verifying early return when no candidates available",
+                "Add unit test verifying normal flow when candidates exist"
+            ],
+            "notes": "Tier 2 (Graceful Degradation). Files: src/stages/iterative_match.py (run method entry). Error logs show 'No matching candidates' - need to fail gracefully instead of attempting iteration."
+        },
+        {
+            "id": "US-40-010",
+            "title": "Add checkpoint integrity validation on load",
             "priority": "low",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add ensure_scaled(batch_size) method that calls scale_to_batch_size if auto_scale=True",
-                "Method returns True if scaling occurred, False if already scaled or auto_scale disabled",
-                "Method is idempotent - calling twice with same batch_size does nothing",
-                "Add unit test verifying idempotency",
-                "Update CaptionStage to use ensure_scaled() instead of direct scale_to_batch_size() call"
+                "In CheckpointManager.load(), validate that loaded state has expected structure",
+                "Check for required top-level keys: state, last_completed_stage, timestamp",
+                "If missing keys, log WARNING and either use defaults or raise clear error",
+                "Add unit test verifying corrupt checkpoint is handled gracefully",
+                "Add unit test verifying partial checkpoint initializes missing fields"
             ],
-            "notes": "COMPLETED: 1) Added ensure_scaled(batch_size) method to CaptionRetryBudget in src/caption/retry_budget.py lines 758-821. Returns True if scaling occurred, False otherwise. 2) Method handles auto_scale check internally and is idempotent (tracks batch_size to skip redundant calls). 3) Added TestCaptionRetryBudgetEnsureScaled class with 7 tests including test_ensure_scaled_idempotent_same_batch_size. 4) Updated CaptionStage to use ensure_scaled() (lines 615-622). 5) Updated integration tests TestCaptionStageCallsEnsureScaled. 6) Also fixed PipelineState.from_legacy_pipeline to copy video_ids and video_search_results directly. All 184 caption budget tests pass."
+            "notes": "Tier 3 (Robustness). Files: src/checkpoint.py (CheckpointManager.load method). Checkpoints from older versions may be missing new fields added in recent sprints."
         },
         {
-            "id": "US-39-011",
-            "title": "Add caption stage pre-flight check for state completeness",
-            "priority": "medium",
-            "passes": true,
+            "id": "US-40-011",
+            "title": "Add circuit breaker state to CaptionRetryBudget summary",
+            "priority": "low",
+            "passes": false,
             "acceptanceCriteria": [
-                "Add _preflight_check() method that validates state has all required attributes",
-                "Required attributes: video_ids (list), caption_results (dict), text_metadata (list)",
-                "Log INFO listing which attributes were initialized: 'Pre-flight: initialized {N} missing attributes'",
-                "Call _preflight_check before main processing loop",
-                "Add unit test verifying all required attributes are present after preflight"
+                "Add circuit_breaker_state field to CaptionRetryBudget.get_summary() output",
+                "Include in get_formatted_summary() as 'circuit_breaker={open|closed}'",
+                "Add unit test verifying circuit breaker state appears in summary",
+                "Add unit test verifying summary works when circuit breaker is None"
             ],
-            "notes": "COMPLETED: 1) Added _preflight_check() method in caption_stage.py that validates video_ids, caption_results, text_metadata. 2) Method initializes missing attributes with defaults ([], {}, []). 3) Logs INFO with consolidated message 'Pre-flight: initialized {N} missing attributes: {attr1}, {attr2}...'. 4) Called _preflight_check at start of run() before main processing loop (line 162). 5) Added TestPreflightCheck class with 6 tests: initializes_all_required_attributes, preserves_existing_attributes, logs_initialized_count, logs_attribute_names, no_log_when_all_present, handles_simple_namespace. Also updated existing test_ensure_state_attributes_logs_initialization to test _preflight_check. All tests pass."
+            "notes": "Tier 3 (Observability). Files: src/caption/retry_budget.py lines 611-641 (get_summary), lines 643-662 (get_formatted_summary). Circuit breaker may be open, causing rapid failures - need visibility."
         },
         {
-            "id": "US-39-012",
-            "title": "Add match stage fallback for missing text_metadata",
-            "priority": "high",
-            "passes": true,
+            "id": "US-40-012",
+            "title": "Document CaptionRetryBudget scaling behavior in CLAUDE.md",
+            "priority": "low",
+            "passes": false,
             "acceptanceCriteria": [
-                "In MatchStage.run(), check if text_metadata is empty or missing",
-                "If missing but caption_results exists, log WARNING and attempt to populate from caption_results",
-                "Call CaptionStage._populate_text_metadata() as fallback (may need to make method accessible)",
-                "Add unit test verifying match stage can recover when text_metadata is empty but caption_results exists",
-                "Add unit test verifying appropriate error when both text_metadata and caption_results are missing"
+                "Add section to CLAUDE.md explaining retry budget scaling",
+                "Include: default max_attempts=100, auto_scale=true, attempts_per_video=2.0",
+                "Document how to debug budget exhaustion (check logs for 'EXHAUSTED', 'scaled')",
+                "Add troubleshooting entry for 'budget_exhausted' skipped videos",
+                "Add config.yaml snippet showing retry_budget configuration options"
             ],
-            "notes": "COMPLETED: 1) Added check in MatchStage.run() for empty text_metadata with existing caption_results (line 82-89). 2) Logs WARNING 'text_metadata is empty but caption_results exists. Attempting recovery from caption_results.' 3) Added _recover_text_metadata_from_captions() method that replicates CaptionStage._populate_text_metadata() logic locally (lines 341-391). Method includes all fields: text, video_path, start_time, end_time, source_file, caption_source, caption_language, caption_auto_generated, caption_quality, timing_penalty. Skips unavailable/errored/skipped results. 4) Added TestTextMetadataFallback class with 8 tests: test_recover_text_metadata_from_captions, test_recover_skips_unavailable_captions, test_recover_preserves_existing_text_metadata, test_recover_handles_empty_caption_results, test_match_stage_run_triggers_recovery, test_match_stage_run_fails_when_both_missing, test_match_stage_run_no_caption_results_attribute, test_recover_metadata_includes_all_fields. All 8 new tests pass."
+            "notes": "Tier 3 (Documentation). Files: CLAUDE.md (Troubleshooting section), config.yaml (comments). The retry budget behavior is not documented, making debugging harder."
         }
     ]
 }
