@@ -3371,3 +3371,143 @@ class TestCaptionRetryBudgetPerVideoLogging:
             # 90% threshold also includes success/failure counts
             assert 'successes' in call_str
             assert 'failures' in call_str
+
+
+class TestCaptionRetryBudgetCircuitBreakerState:
+    """Tests for US-40-011: Circuit breaker state in CaptionRetryBudget summary.
+
+    These tests verify that circuit breaker state is included in budget summaries
+    for improved observability when investigating rapid failures.
+    """
+
+    @pytest.mark.fast
+    def test_get_summary_includes_circuit_breaker_state_field(self):
+        """Verify get_summary returns circuit_breaker_state field (US-40-011 AC1)."""
+        budget = CaptionRetryBudget()
+        summary = budget.get_summary()
+
+        assert 'circuit_breaker_state' in summary
+
+    @pytest.mark.fast
+    def test_get_summary_circuit_breaker_state_none_when_not_set(self):
+        """Verify circuit_breaker_state is None when no circuit breaker attached (US-40-011 AC4)."""
+        budget = CaptionRetryBudget()
+        # circuit_breaker defaults to None
+
+        summary = budget.get_summary()
+
+        assert summary['circuit_breaker_state'] is None
+
+    @pytest.mark.fast
+    def test_get_summary_circuit_breaker_state_closed(self):
+        """Verify circuit_breaker_state is 'closed' when circuit is normal."""
+        from src.caption.circuit_breaker import CaptionCircuitBreaker
+
+        budget = CaptionRetryBudget()
+        circuit_breaker = CaptionCircuitBreaker()
+        budget.circuit_breaker = circuit_breaker
+
+        summary = budget.get_summary()
+
+        assert summary['circuit_breaker_state'] == 'closed'
+
+    @pytest.mark.fast
+    def test_get_summary_circuit_breaker_state_open(self):
+        """Verify circuit_breaker_state is 'open' when circuit is tripped."""
+        from src.caption.circuit_breaker import CaptionCircuitBreaker, CaptionCircuitBreakerConfig
+
+        budget = CaptionRetryBudget()
+        config = CaptionCircuitBreakerConfig(threshold=3, pause_seconds=60.0)
+        circuit_breaker = CaptionCircuitBreaker(config)
+        budget.circuit_breaker = circuit_breaker
+
+        # Trip the circuit by recording enough failures
+        for _ in range(3):
+            circuit_breaker.record_failure()
+
+        assert circuit_breaker.is_open is True  # Verify circuit is tripped
+
+        summary = budget.get_summary()
+
+        assert summary['circuit_breaker_state'] == 'open'
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_includes_circuit_breaker_closed(self):
+        """Verify get_formatted_summary includes circuit_breaker=closed (US-40-011 AC2)."""
+        from src.caption.circuit_breaker import CaptionCircuitBreaker
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.batch_size = 50
+        circuit_breaker = CaptionCircuitBreaker()
+        budget.circuit_breaker = circuit_breaker
+
+        summary = budget.get_formatted_summary()
+
+        assert 'circuit_breaker=closed' in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_includes_circuit_breaker_open(self):
+        """Verify get_formatted_summary includes circuit_breaker=open when tripped."""
+        from src.caption.circuit_breaker import CaptionCircuitBreaker, CaptionCircuitBreakerConfig
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.batch_size = 50
+        config = CaptionCircuitBreakerConfig(threshold=3, pause_seconds=60.0)
+        circuit_breaker = CaptionCircuitBreaker(config)
+        budget.circuit_breaker = circuit_breaker
+
+        # Trip the circuit
+        for _ in range(3):
+            circuit_breaker.record_failure()
+
+        summary = budget.get_formatted_summary()
+
+        assert 'circuit_breaker=open' in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_no_circuit_breaker_suffix_when_none(self):
+        """Verify get_formatted_summary has no circuit_breaker suffix when None (US-40-011 AC4)."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.batch_size = 50
+
+        summary = budget.get_formatted_summary()
+
+        # Should NOT contain circuit_breaker when None
+        assert 'circuit_breaker=' not in summary
+        # Should still have the basic format
+        assert 'CaptionRetryBudget summary:' in summary
+        assert 'batch_size=50)' in summary  # Ends with batch_size
+
+    @pytest.mark.fast
+    def test_circuit_breaker_state_with_mock_object(self):
+        """Verify circuit breaker state works with any object having is_open property."""
+        from unittest.mock import Mock
+
+        budget = CaptionRetryBudget()
+
+        # Use mock with is_open = True
+        mock_breaker = Mock()
+        mock_breaker.is_open = True
+        budget.circuit_breaker = mock_breaker
+
+        summary = budget.get_summary()
+        assert summary['circuit_breaker_state'] == 'open'
+
+        # Switch to closed
+        mock_breaker.is_open = False
+        summary = budget.get_summary()
+        assert summary['circuit_breaker_state'] == 'closed'
+
+    @pytest.mark.fast
+    def test_circuit_breaker_state_graceful_with_invalid_object(self):
+        """Verify circuit breaker state returns None for objects without is_open."""
+        budget = CaptionRetryBudget()
+
+        # Set a non-circuit-breaker object
+        budget.circuit_breaker = "not a circuit breaker"
+
+        summary = budget.get_summary()
+        assert summary['circuit_breaker_state'] is None

@@ -127,6 +127,10 @@ class CaptionRetryBudget:
     # Thread-safety lock
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
+    # Circuit breaker reference for observability (US-40-011)
+    # Optional - allows summary to include circuit breaker state when set
+    circuit_breaker: Optional[Any] = field(default=None, repr=False, compare=False)
+
     @classmethod
     def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
         """Create a CaptionRetryBudget from config.
@@ -638,7 +642,23 @@ class CaptionRetryBudget:
                 "error_breakdown": error_breakdown,  # US-37-006
                 "batch_size": self.batch_size,  # US-38-009
                 "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
+                "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
             }
+
+    def _get_circuit_breaker_state(self) -> Optional[str]:
+        """Get circuit breaker state for observability (US-40-011).
+
+        Returns:
+            'open' if circuit is tripped (blocking fetches),
+            'closed' if circuit is normal,
+            None if no circuit breaker is attached.
+        """
+        if self.circuit_breaker is None:
+            return None
+        # CaptionCircuitBreaker has is_open property
+        if hasattr(self.circuit_breaker, 'is_open'):
+            return 'open' if self.circuit_breaker.is_open else 'closed'
+        return None
 
     def get_formatted_summary(self) -> str:
         """Get a formatted summary string for logging at stage completion (US-39-005).
@@ -648,17 +668,19 @@ class CaptionRetryBudget:
 
         Returns:
             Formatted string: 'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts,
-            {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N})'
+            {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N}, circuit_breaker={state})'
 
         Example:
             >>> budget.get_formatted_summary()
-            'CaptionRetryBudget summary: 150/175 attempts, 120 succeeded, 30 failed, 5 skipped (batch_size=150)'
+            'CaptionRetryBudget summary: 150/175 attempts, 120 succeeded, 30 failed, 5 skipped (batch_size=150, circuit_breaker=closed)'
         """
         with self._lock:
+            cb_state = self._get_circuit_breaker_state()
+            cb_suffix = f", circuit_breaker={cb_state}" if cb_state else ""
             return (
                 f"CaptionRetryBudget summary: {self.attempts}/{self.max_attempts} attempts, "
                 f"{self.successes} succeeded, {self.failures} failed, "
-                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0})"
+                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{cb_suffix})"
             )
 
     def to_dict(self) -> Dict[str, Any]:
