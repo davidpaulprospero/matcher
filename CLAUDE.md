@@ -248,6 +248,42 @@ download:
 | VPN rotation fails | Check `mullvad status`, ensure account is active |
 | Verification fails | Firewall may block am.i.mullvad.net; rotation still works |
 
+### Caption Retry Budget
+
+Controls how many caption fetch attempts are allowed before falling back to transcription. Prevents infinite retry loops when YouTube is rate-limiting or captions are unavailable.
+
+**Defaults:**
+- `max_attempts`: 100 (maximum total fetch attempts across batch)
+- `auto_scale`: true (scales max_attempts based on batch size)
+- `attempts_per_video`: 2.0 (1 attempt + 1 retry per video average)
+- `max_backoff_time_seconds`: 300.0 (5 min cumulative backoff limit)
+
+**Configuration in config.yaml:**
+```yaml
+download:
+  caption_first:
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100               # Maximum total fetch attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 2.0         # 2.0 = 1 attempt + 1 retry per video average
+```
+
+**Auto-Scaling Behavior:**
+- When `auto_scale: true`, max_attempts scales UP for large batches
+- Formula: `scaled_max = max(original_max, batch_size * attempts_per_video)`
+- Example: batch of 200 videos → scaled max = 200 × 2.0 = 400 attempts
+- Only scales UP, never reduces below configured max_attempts
+
+**Debugging Budget Exhaustion:**
+1. Check logs for `CaptionRetryBudget: EXHAUSTED` - shows which limit was hit
+2. Check logs for `scaled max_attempts` - shows if auto-scaling triggered
+3. Look for `budget_exhausted` in skipped video reasons
+4. Review `error_counts` in budget summary for error category breakdown
+
+**Related classes:** `CaptionRetryBudget`, `CaptionRetryBudgetConfig` in `src/caption/retry_budget.py`
+
 ## Testing
 
 ```bash
@@ -292,6 +328,7 @@ pytest tests/ -v --tb=short -x
 | `--output-only` runs stages | Checkpoint corrupted | Use `--match-only` instead |
 | Checkpoint corrupted | Various | Restore from `checkpoint.backup.json` |
 | Subprocess crash | Windows encoding | Rule 27: Add `encoding='utf-8', errors='replace'` |
+| Videos skipped (budget_exhausted) | Logs show `EXHAUSTED` | Increase `retry_budget.max_attempts` or check for rate limiting |
 
 ### Debug Workflows
 
