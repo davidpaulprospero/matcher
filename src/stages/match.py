@@ -76,6 +76,16 @@ class MatchStage(Stage):
 
             # In simplified pipeline, text_metadata comes from CAPTION stage
             # Embeddings are optional for caption-first matching
+
+            # US-39-012: Fallback recovery if text_metadata is empty but caption_results exists
+            if not state.text_metadata and getattr(state, 'caption_results', None):
+                logger.warning(
+                    "text_metadata is empty but caption_results exists. "
+                    "Attempting recovery from caption_results."
+                )
+                warnings.append("Recovered text_metadata from caption_results (CAPTION stage partial failure)")
+                self._recover_text_metadata_from_captions(state)
+
             if not state.text_metadata:
                 print("  ! No video data to match against")
                 warnings.append("No video text metadata (run CAPTION stage)")
@@ -327,6 +337,58 @@ class MatchStage(Stage):
         return None
 
     # === Helper Methods ===
+
+    def _recover_text_metadata_from_captions(self, state: 'PipelineState') -> None:
+        """Recover text_metadata from caption_results when CAPTION stage had partial failure.
+
+        US-39-012: Provides graceful degradation when caption stage partial failure
+        leaves caption_results populated but text_metadata empty.
+
+        Uses the same logic as CaptionStage._populate_text_metadata() to convert
+        caption_results into text_metadata format expected by matching.
+
+        Args:
+            state: PipelineState with caption_results but empty text_metadata.
+        """
+        caption_results = getattr(state, 'caption_results', {})
+        if not caption_results:
+            logger.warning("Cannot recover: caption_results is empty")
+            return
+
+        # Ensure text_metadata exists
+        if not hasattr(state, 'text_metadata'):
+            state.text_metadata = []
+
+        text_metadata = []
+
+        for video_id, result in caption_results.items():
+            # Skip unavailable/errored captions
+            if result.get('unavailable') or result.get('error') or result.get('skipped'):
+                continue
+
+            segments = result.get('segments', [])
+            language = result.get('language', 'en')
+            is_auto = result.get('is_auto_generated', False)
+            caption_quality = result.get('caption_quality', 'medium')
+            timing_penalty = result.get('timing_penalty', 1.0)
+
+            for seg in segments:
+                text_metadata.append({
+                    'text': seg.get('text', ''),
+                    'video_path': video_id,  # In caption-first mode, this is video ID
+                    'start_time': seg.get('start', 0),
+                    'end_time': seg.get('end', 0),
+                    'source_file': video_id,
+                    # Caption-specific metadata
+                    'caption_source': 'youtube',
+                    'caption_language': language,
+                    'caption_auto_generated': is_auto,
+                    'caption_quality': caption_quality,
+                    'timing_penalty': timing_penalty,
+                })
+
+        state.text_metadata.extend(text_metadata)
+        logger.info(f"Recovered {len(text_metadata)} text_metadata entries from caption_results")
 
     def _print_settings(self, config: 'Config'):
         """Print matching settings"""
