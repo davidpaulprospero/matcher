@@ -167,8 +167,8 @@
                 "Validate: max_backoff_time_seconds >= 30.0 or == 0 (unlimited)",
                 "Raise ValueError with helpful message if validation fails"
             ],
-            "passes": false,
-            "notes": "Tier: T3 (Defensive). Files: src/caption/retry_budget.py:25-65. Prevents misconfiguration like max_attempts=5 for 175 videos which guarantees failure."
+            "passes": true,
+            "notes": "Tier: T3 (Defensive). FIXED: Extended __post_init__ in CaptionRetryBudgetConfig (src/config/sections/download.py:222-252) to validate all three settings. max_attempts must be >= 10 or 0 (unlimited). attempts_per_video must be >= 1.0 (not just > 0). max_backoff_time_seconds must be >= 30.0 or 0 (unlimited). All error messages include the config.yaml path. Added 14 tests in TestCaptionRetryBudgetConfigValidation class."
         },
         {
             "id": "US-41-012",
