@@ -146,9 +146,9 @@
                                 "Run: pytest tests/test_caption_retry_budget.py::test_ensure_scaled -v --tb=short",
                                 "Commit: fix: [US-43-009] Ensure batch_size is always set in ensure_scaled"
                             ],
-                            "passes": false,
+                            "passes": true,
                             "priority": 43009,
-                            "notes": "Tier 1 (robustness). File: src/caption/retry_budget.py. If batch_size is not set, the health check and diagnostic logging can't report correctly."
+                            "notes": "Tier 1 (robustness). Modified ensure_scaled() to set batch_size in ALL code paths: (1) when auto_scale disabled, (2) when already scaled, (3) when scaling occurs. Added 4 tests: test_ensure_scaled_always_sets_batch_size_when_scaling/when_not_scaling/when_auto_scale_disabled/when_already_scaled. All 24 ensure_scaled tests pass."
                         },
                         {
                             "id":  "US-43-010",

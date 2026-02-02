@@ -360,3 +360,252 @@ class TestCaptionStageCheckpointRestoreScaling:
         assert captured_budget['max_attempts'] == 200, (
             f"Expected max_attempts=200 (unchanged), got {captured_budget['max_attempts']}"
         )
+
+
+# =============================================================================
+# US-43-010: Fail-fast Check for Budget Exhaustion Before Batch Start
+# =============================================================================
+
+
+class TestCaptionStageFailFastBudgetExhaustion:
+    """Test fail-fast detection when budget is already exhausted at batch start.
+
+    US-43-010: If checkpoint restores budget with 100/100 attempts already used,
+    the batch should immediately detect and report this rather than trying to
+    process and skip all videos.
+    """
+
+    @pytest.mark.integration
+    def test_fail_fast_when_budget_exhausted_at_start(self):
+        """Test that CaptionStage returns early when budget is already exhausted.
+
+        AC1: Add check in CaptionStage.run() after ensure_scaled() call
+        AC2: If budget_exhausted() is already True, log ERROR and skip batch processing
+        AC3: Log: '[US-43-010] Budget already exhausted at batch start - check checkpoint restore'
+        AC4: Return early with appropriate warnings about skipped videos
+        """
+        # Create 50 video IDs that would be fetched
+        video_ids = [f"vid{i:04d}xxxx" for i in range(50)]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in video_ids
+            ],
+        )
+
+        # Config with retry budget enabled
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+                'attempts_per_video': 2.0,
+            }
+        )
+
+        # AC1/AC2: Checkpoint with budget ALREADY exhausted (100/100 attempts used)
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},  # No prior results - all attempts failed
+                    'retry_budget': {
+                        'attempts': 100,        # ALL attempts used!
+                        'failures': 100,        # All failed
+                        'successes': 0,
+                        'backoff_time_spent': 50.0,
+                        'videos_skipped': 0,    # No videos skipped yet
+                        'max_attempts': 100,    # Limit reached
+                        'max_backoff_time': 300.0,
+                        'batch_size': 100,
+                    }
+                }
+            }
+        )
+
+        stage = CaptionStage()
+
+        # Track whether fetch was called (it should NOT be called)
+        fetch_called = {'value': False}
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            fetch_called['value'] = True
+            return {vid: {} for vid in video_ids}
+
+        # AC3/AC4: Run the stage and check for early exit
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+
+            result = stage.run(state, config, checkpoint)
+
+        # Verify the stage returned early (OK with warnings, not fail)
+        assert result.success is True, "Stage should return success (graceful early exit)"
+
+        # Verify fetch was NOT called (fail-fast should prevent batch processing)
+        assert fetch_called['value'] is False, (
+            "fetch_captions_batch should NOT be called when budget is exhausted at start"
+        )
+
+        # AC4: Verify appropriate warnings are present
+        assert len(result.warnings) > 0, "Should have warnings about skipped videos"
+        warning_text = ' '.join(result.warnings)
+        assert 'exhausted' in warning_text.lower() or 'skipped' in warning_text.lower(), (
+            f"Warnings should mention exhaustion or skipped videos: {result.warnings}"
+        )
+
+        # Verify result data indicates budget exhaustion
+        assert result.data.get('budget_exhausted_at_start') is True, (
+            "Result should indicate budget_exhausted_at_start=True"
+        )
+        assert result.data.get('skipped_due_to_budget') == 50, (
+            f"Expected 50 videos skipped, got {result.data.get('skipped_due_to_budget')}"
+        )
+
+        # Verify all videos are marked as skipped in caption_results
+        caption_results = result.data.get('caption_results', {})
+        for video_id in video_ids:
+            assert video_id in caption_results, f"Video {video_id} should be in results"
+            assert caption_results[video_id].get('skipped') is True
+            assert caption_results[video_id].get('reason') == 'budget_exhausted_at_start'
+
+    @pytest.mark.integration
+    def test_no_fail_fast_when_budget_has_remaining_attempts(self):
+        """Test that CaptionStage proceeds normally when budget has remaining attempts.
+
+        Even if some attempts have been used, if budget is not exhausted,
+        processing should proceed normally.
+        """
+        video_ids = [f"vid{i:04d}xxxx" for i in range(50)]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in video_ids
+            ],
+        )
+
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 200,  # High limit
+                'auto_scale': True,
+                'attempts_per_video': 2.0,
+            }
+        )
+
+        # Checkpoint with some attempts used but NOT exhausted
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 50,         # 50/200 used - plenty remaining
+                        'failures': 10,
+                        'successes': 40,
+                        'backoff_time_spent': 10.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 200,
+                        'max_backoff_time': 300.0,
+                        'batch_size': 50,
+                    }
+                }
+            }
+        )
+
+        stage = CaptionStage()
+        fetch_called = {'value': False}
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            fetch_called['value'] = True
+            return {vid: {'video_id': vid, 'segments': []} for vid in video_ids}
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+
+            result = stage.run(state, config, checkpoint)
+
+        # fetch SHOULD be called when budget is not exhausted
+        assert fetch_called['value'] is True, (
+            "fetch_captions_batch should be called when budget has remaining attempts"
+        )
+
+        # Should not have budget_exhausted_at_start flag
+        assert result.data.get('budget_exhausted_at_start') is not True, (
+            "Should not have budget_exhausted_at_start when budget has remaining"
+        )
+
+    @pytest.mark.integration
+    def test_fail_fast_when_backoff_time_exhausted(self):
+        """Test fail-fast when backoff time budget is exhausted.
+
+        Budget can be exhausted via attempts OR backoff time. Test the backoff time case.
+        """
+        video_ids = [f"vid{i:04d}xxxx" for i in range(50)]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in video_ids
+            ],
+        )
+
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 500,  # High attempt limit
+                'auto_scale': True,
+                'attempts_per_video': 2.0,
+                'max_backoff_time_seconds': 100.0,  # Low backoff time limit
+            }
+        )
+
+        # Checkpoint with backoff time exhausted
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 50,         # Not many attempts
+                        'failures': 50,
+                        'successes': 0,
+                        'backoff_time_spent': 100.0,  # Backoff time exhausted!
+                        'videos_skipped': 0,
+                        'max_attempts': 500,
+                        'max_backoff_time': 100.0,    # Same as spent
+                        'batch_size': 50,
+                    }
+                }
+            }
+        )
+
+        stage = CaptionStage()
+        fetch_called = {'value': False}
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            fetch_called['value'] = True
+            return {vid: {} for vid in video_ids}
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+
+            result = stage.run(state, config, checkpoint)
+
+        # Fetch should NOT be called - budget exhausted via backoff time
+        assert fetch_called['value'] is False, (
+            "fetch_captions_batch should NOT be called when backoff time exhausted"
+        )
+
+        # Verify budget exhausted flag
+        assert result.data.get('budget_exhausted_at_start') is True
