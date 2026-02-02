@@ -1900,3 +1900,185 @@ class TestCaptionRetryBudgetErrorCategoryIntegration:
         assert budget.error_counts[CaptionErrorCategory.NETWORK] == 200
         assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 100
         assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 100
+
+
+class TestCaptionRetryBudgetCheckpointPersistence:
+    """Test checkpoint persistence for resume support (US-37-007)."""
+
+    @pytest.mark.fast
+    def test_to_dict_includes_all_state(self):
+        """Test to_dict() includes all budget state for checkpoint."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 200
+        budget.max_backoff_time = 600.0
+
+        # Record various operations
+        for i in range(50):
+            budget.record_attempt(f"video_{i}")
+        for i in range(40):
+            budget.record_success(f"video_{i}")
+        budget.record_failure("fail1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("fail2", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("fail3", error_category=CaptionErrorCategory.RATE_LIMIT)
+        budget.record_backoff(45.5, "video1")
+        budget.record_skipped("skipped1")
+        budget.record_skipped("skipped2")
+        budget.record_skipped("skipped3")
+
+        data = budget.to_dict()
+
+        assert data['attempts'] == 50
+        assert data['successes'] == 40
+        assert data['failures'] == 3
+        assert data['backoff_time_spent'] == 45.5
+        assert data['videos_skipped'] == 3
+        assert data['max_attempts'] == 200
+        assert data['max_backoff_time'] == 600.0
+        assert data['error_counts']['NETWORK'] == 2
+        assert data['error_counts']['RATE_LIMIT'] == 1
+
+    @pytest.mark.fast
+    def test_from_dict_restores_all_state(self):
+        """Test from_dict() restores all budget state from checkpoint."""
+        data = {
+            'attempts': 75,
+            'successes': 60,
+            'failures': 10,
+            'backoff_time_spent': 120.5,
+            'videos_skipped': 5,
+            'max_attempts': 250,
+            'max_backoff_time': 500.0,
+            'error_counts': {
+                'NETWORK': 5,
+                'TIMEOUT': 3,
+                'RATE_LIMIT': 2,
+            }
+        }
+
+        budget = CaptionRetryBudget.from_dict(data)
+
+        assert budget.attempts == 75
+        assert budget.successes == 60
+        assert budget.failures == 10
+        assert budget.backoff_time_spent == 120.5
+        assert budget.videos_skipped == 5
+        assert budget.max_attempts == 250
+        assert budget.max_backoff_time == 500.0
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 5
+        assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 3
+        assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 2
+
+    @pytest.mark.fast
+    def test_budget_remaining_correct_on_resume(self):
+        """Test budget remaining is calculated correctly after restore."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 300.0
+
+        # Simulate partial run
+        for i in range(45):
+            budget.record_attempt(f"video_{i}")
+        for i in range(40):
+            budget.record_success(f"video_{i}")
+        for i in range(5):
+            budget.record_failure(f"fail_{i}")
+        budget.record_backoff(100.0, "v1")
+
+        # Save state
+        data = budget.to_dict()
+
+        # Restore in new session (simulating resume)
+        restored = CaptionRetryBudget.from_dict(data)
+
+        # Check remaining budget
+        assert restored.attempts_remaining() == 55  # 100 - 45
+        assert restored.backoff_time_remaining() == 200.0  # 300 - 100
+        assert not restored.budget_exhausted()
+
+    @pytest.mark.fast
+    def test_exhausted_budget_state_preserved(self):
+        """Test exhausted budget state is correctly preserved on restore."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 50
+        budget.max_backoff_time = 100.0
+
+        # Exhaust the budget
+        for i in range(50):
+            budget.record_attempt(f"video_{i}")
+        budget.record_skipped("skipped1")
+
+        assert budget.budget_exhausted()
+
+        # Save and restore
+        data = budget.to_dict()
+        restored = CaptionRetryBudget.from_dict(data)
+
+        assert restored.budget_exhausted()
+        assert restored.attempts_remaining() == 0
+        assert restored.videos_skipped == 1
+
+    @pytest.mark.fast
+    def test_complete_roundtrip_preserves_all_fields(self):
+        """Test complete round-trip serialization preserves all budget fields."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 300
+        budget.max_backoff_time = 450.0
+        budget.auto_scale = True
+        budget.attempts_per_video = 2.0
+
+        # Simulate realistic batch processing
+        for i in range(150):
+            budget.record_attempt(f"video_{i}")
+        for i in range(120):
+            budget.record_success(f"video_{i}")
+        for i in range(25):
+            budget.record_failure(f"fail_{i}", error_category=CaptionErrorCategory.NETWORK)
+        for i in range(5):
+            budget.record_failure(f"fail_{i}", error_category=CaptionErrorCategory.TIMEOUT)
+        budget.record_backoff(75.5, "v1")
+        budget.record_backoff(25.0, "v2")
+        for i in range(10):
+            budget.record_skipped(f"skipped_{i}")
+
+        # Round-trip
+        data = budget.to_dict()
+        restored = CaptionRetryBudget.from_dict(data)
+
+        # Verify all state
+        assert restored.attempts == 150
+        assert restored.successes == 120
+        assert restored.failures == 30
+        assert restored.backoff_time_spent == 100.5
+        assert restored.videos_skipped == 10
+        assert restored.max_attempts == 300
+        assert restored.max_backoff_time == 450.0
+        assert restored.error_counts[CaptionErrorCategory.NETWORK] == 25
+        assert restored.error_counts[CaptionErrorCategory.TIMEOUT] == 5
+
+        # Verify summary matches
+        orig_summary = budget.get_summary()
+        rest_summary = restored.get_summary()
+        assert orig_summary['attempts'] == rest_summary['attempts']
+        assert orig_summary['failures'] == rest_summary['failures']
+        assert orig_summary['videos_skipped'] == rest_summary['videos_skipped']
+
+    @pytest.mark.fast
+    def test_from_dict_partial_data_uses_defaults(self):
+        """Test from_dict handles partial checkpoint data gracefully."""
+        partial_data = {
+            'attempts': 25,
+            'successes': 20,
+            # Missing: failures, backoff_time_spent, videos_skipped, error_counts
+        }
+
+        budget = CaptionRetryBudget.from_dict(partial_data)
+
+        assert budget.attempts == 25
+        assert budget.successes == 20
+        assert budget.failures == 0
+        assert budget.backoff_time_spent == 0.0
+        assert budget.videos_skipped == 0
+        assert budget.error_counts == {}
+        # Defaults for limits
+        assert budget.max_attempts == 100
+        assert budget.max_backoff_time == 300.0

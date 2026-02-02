@@ -109,7 +109,7 @@
             "id": "US-37-007",
             "title": "Add budget checkpoint persistence for resume support",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "CaptionRetryBudget.to_dict() includes error_counts in serialization",
                 "CaptionRetryBudget.from_dict() restores error_counts from checkpoint",
@@ -118,7 +118,7 @@
                 "Budget remaining is recalculated correctly on resume",
                 "Unit test verifies round-trip serialization preserves all budget state"
             ],
-            "notes": "Tier: T2-Medium (checkpoint integration). Source files: src/caption/retry_budget.py:258-300 (to_dict, from_dict), src/stages/caption_stage.py. Currently to_dict/from_dict exist but may not include new error_counts field. Checkpoint persistence ensures resume doesn't reset budget unnecessarily."
+            "notes": "COMPLETE. to_dict() and from_dict() already included error_counts from US-37-006. Added retry_budget to checkpoint_data in CaptionStage (line 762-763). Added restore logging for retry_budget in restore() method (lines 815-822). Added 6 unit tests in TestCaptionRetryBudgetCheckpointPersistence covering: to_dict includes all state, from_dict restores all state, budget remaining correct on resume, exhausted budget preserved, complete roundtrip, partial data with defaults. All 117 tests in test_caption_retry_budget.py pass."
         },
         {
             "id": "US-37-008",
