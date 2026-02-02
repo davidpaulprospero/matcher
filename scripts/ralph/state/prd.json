@@ -83,8 +83,8 @@
                 "Include high_attempt_videos in budget summary when count > 0",
                 "Add test: video with 5 attempts appears in get_high_attempt_videos(3)"
             ],
-            "passes": false,
-            "notes": "Tier: T2 (Observability). Files: src/caption/retry_budget.py:95-130, src/caption/retry_budget.py:615-646. If one video consumes 10+ attempts due to retry loop, it starves others. This helps diagnose why budget exhausted early."
+            "passes": true,
+            "notes": "Tier: T2 (Observability). FIXED: Added attempts_per_video_id tracking dict to CaptionRetryBudget. record_attempt() tracks per-video counts and logs WARNING when crossing 4 attempts (logs once per video). get_high_attempt_videos(threshold=3) returns video IDs sorted by attempt count descending. get_summary() includes high_attempt_videos when count > 0. Added 11 tests in TestCaptionRetryBudgetPerVideoAttemptTracking class. Commit: d468b91"
         },
         {
             "id": "US-41-006",
@@ -97,8 +97,8 @@
                 "Log INFO showing trips when budget exhausts with >0 trips",
                 "Add test: budget summary includes circuit_breaker_trips field"
             ],
-            "passes": false,
-            "notes": "Tier: T2 (Observability). Files: src/caption/retry_budget.py:95-132, src/caption/retry_budget.py:615-646. Circuit breaker trips indicate transient failures that consumed budget. Helps distinguish rate-limiting from other failures."
+            "passes": true,
+            "notes": "Tier: T2 (Observability). FIXED: Added circuit_breaker_trips: int field, record_circuit_trip() method, included trips in get_summary() and to_dict()/from_dict(). budget_exhausted() logs INFO with trip count when >0. Added 9 tests in TestCaptionRetryBudgetCircuitBreakerTrips class covering: initial value, increment, summary inclusion, serialization, reset, and exhaustion logging."
         },
         {
             "id": "US-41-007",

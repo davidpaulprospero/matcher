@@ -135,6 +135,10 @@ class CaptionRetryBudget:
     # Maps video_id -> number of attempts recorded for that video
     attempts_per_video_id: Dict[str, int] = field(default_factory=dict)
 
+    # Circuit breaker trip tracking (US-41-006)
+    # Counts how many times the circuit breaker tripped during this budget's lifetime
+    circuit_breaker_trips: int = 0
+
     @classmethod
     def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
         """Create a CaptionRetryBudget from config.
@@ -266,6 +270,18 @@ class CaptionRetryBudget:
         logger.debug(f"CaptionRetryBudget: skipped {video_id or 'unknown'} "
                      f"(total skipped: {self.videos_skipped})")
 
+    def record_circuit_trip(self) -> None:
+        """Record a circuit breaker trip event (US-41-006).
+
+        Called when the circuit breaker transitions to the open state.
+        This indicates transient failures that consumed budget, helping
+        distinguish rate-limiting from other failure types.
+        """
+        with self._lock:
+            self.circuit_breaker_trips += 1
+            trips = self.circuit_breaker_trips
+        logger.debug(f"CaptionRetryBudget: circuit breaker tripped (total trips: {trips})")
+
     def budget_exhausted(self) -> bool:
         """Check if the retry budget is exhausted.
 
@@ -282,6 +298,12 @@ class CaptionRetryBudget:
                 logger.info(
                     f"CaptionRetryBudget: EXHAUSTED (attempts: {self.attempts}/{self.max_attempts})"
                 )
+                # US-41-006: Log circuit breaker trips if any occurred
+                if self.circuit_breaker_trips > 0:
+                    logger.info(
+                        f"CaptionRetryBudget: {self.circuit_breaker_trips} circuit breaker trip(s) "
+                        f"contributed to budget exhaustion (indicates transient failures)"
+                    )
                 return True
 
             # Check backoff time limit
@@ -290,6 +312,12 @@ class CaptionRetryBudget:
                     f"CaptionRetryBudget: EXHAUSTED (backoff: {self.backoff_time_spent:.1f}s/"
                     f"{self.max_backoff_time}s)"
                 )
+                # US-41-006: Log circuit breaker trips if any occurred
+                if self.circuit_breaker_trips > 0:
+                    logger.info(
+                        f"CaptionRetryBudget: {self.circuit_breaker_trips} circuit breaker trip(s) "
+                        f"contributed to budget exhaustion (indicates transient failures)"
+                    )
                 return True
 
             return False
@@ -688,6 +716,7 @@ class CaptionRetryBudget:
                 "batch_size": self.batch_size,  # US-38-009
                 "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
                 "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
+                "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
             }
 
             # Only include high_attempt_videos if there are any (US-41-005)
@@ -758,6 +787,7 @@ class CaptionRetryBudget:
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
                 "batch_size": self.batch_size,  # US-38-009
                 "attempts_per_video_id": dict(self.attempts_per_video_id),  # US-41-005
+                "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
             }
 
     @classmethod
@@ -807,6 +837,9 @@ class CaptionRetryBudget:
         # Restore per-video attempt tracking (US-41-005)
         budget.attempts_per_video_id = dict(data.get("attempts_per_video_id", {}))
 
+        # Restore circuit breaker trip count (US-41-006)
+        budget.circuit_breaker_trips = data.get("circuit_breaker_trips", 0)
+
         return budget
 
     def reset(self, preserve_vpn_count: bool = True) -> None:
@@ -824,6 +857,7 @@ class CaptionRetryBudget:
             self.videos_skipped = 0
             self.error_counts.clear()  # US-37-006
             self.attempts_per_video_id.clear()  # US-41-005
+            self.circuit_breaker_trips = 0  # US-41-006
             if not preserve_vpn_count:
                 self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
             # US-37-009: Reset early termination state
