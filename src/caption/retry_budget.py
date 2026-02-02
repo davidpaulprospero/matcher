@@ -309,6 +309,45 @@ class CaptionRetryBudget:
             self.videos_skipped = 0
         logger.debug("CaptionRetryBudget: reset for new batch")
 
+    def scale_to_batch_size(self, batch_size: int, attempts_per_video: float = 1.5) -> int:
+        """Scale max_attempts proportionally to batch size (US-37-003).
+
+        The default max_attempts of 100 is insufficient for large batches (175+ videos).
+        Budget exhausts at video 101, skipping remaining videos. This method scales
+        the limit so each video has ~1.5 attempts on average (1 attempt + 0.5 retries).
+
+        Args:
+            batch_size: Number of videos in the batch.
+            attempts_per_video: Average attempts per video (default 1.5 = 1 + 0.5 retries).
+
+        Returns:
+            The new max_attempts value (for logging/testing convenience).
+
+        Example:
+            - 50 videos -> max_attempts stays at 100 (50 * 1.5 = 75 < 100)
+            - 175 videos -> max_attempts becomes 263 (175 * 1.5 = 262.5, rounded up)
+        """
+        with self._lock:
+            # Calculate required attempts for this batch
+            required_attempts = int(batch_size * attempts_per_video + 0.5)  # Round up
+
+            # Only scale UP, never reduce below default
+            if required_attempts > self.max_attempts:
+                old_max = self.max_attempts
+                self.max_attempts = required_attempts
+                logger.info(
+                    f"CaptionRetryBudget: scaled max_attempts from {old_max} to "
+                    f"{self.max_attempts} for batch of {batch_size} videos "
+                    f"({attempts_per_video:.1f} attempts/video)"
+                )
+            else:
+                logger.debug(
+                    f"CaptionRetryBudget: max_attempts {self.max_attempts} sufficient for "
+                    f"{batch_size} videos (required: {required_attempts})"
+                )
+
+            return self.max_attempts
+
 
 @dataclass
 class BatchRetryBudget:

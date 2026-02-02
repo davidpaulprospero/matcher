@@ -49,7 +49,7 @@
             "id": "US-37-003",
             "title": "Scale CaptionRetryBudget max_attempts proportional to batch size",
             "priority": "critical",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Modify CaptionRetryBudget to support dynamic max_attempts based on batch size",
                 "Add `scale_to_batch_size(batch_size: int, attempts_per_video: float = 1.5)` method",
@@ -58,7 +58,7 @@
                 "CaptionStage calls scale_to_batch_size() before starting batch fetch",
                 "Unit test verifies budget scales correctly: 50 videos -> 100, 175 videos -> 263"
             ],
-            "notes": "Tier: T2-Medium (logic change). Source files: src/caption/retry_budget.py:45-310 (CaptionRetryBudget class), src/stages/caption_stage.py. The current 100 attempt limit is insufficient for 175+ video batches - budget exhausts at video 101, skipping 74 videos. Fix: attempts_per_video accounts for 1 attempt + ~0.5 retries on average."
+            "notes": "COMPLETE. Added scale_to_batch_size() method to CaptionRetryBudget in src/caption/retry_budget.py:313-355. CaptionStage calls it at line 547-550 before batch fetch. Added 11 unit tests in TestCaptionRetryBudgetScaleToBatchSize. All 65 tests pass."
         },
         {
             "id": "US-37-004",

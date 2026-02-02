@@ -542,6 +542,12 @@ class CaptionStage(Stage):
                     except Exception as e:
                         logger.warning(f"Failed to initialize GlobalRateLimitCoordinator: {e}")
 
+                # US-37-003: Scale retry budget to batch size
+                # Default max_attempts=100 is insufficient for large batches (175+ videos)
+                if retry_budget:
+                    batch_size = len(ids_to_fetch)
+                    retry_budget.scale_to_batch_size(batch_size)
+
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
                 # US-33-009: With circuit breaker for consecutive failure protection
