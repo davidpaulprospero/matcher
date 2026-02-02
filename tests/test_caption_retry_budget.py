@@ -4247,3 +4247,152 @@ class TestCaptionRetryBudgetCircuitBreakerTrips:
 
         # Check for the circuit breaker trip log message
         assert "1 circuit breaker trip(s)" in caplog.text
+
+
+class TestCaptionRetryBudgetProgressPercentage:
+    """Tests for US-41-010: Batch progress percentage tracking."""
+
+    @pytest.mark.fast
+    def test_progress_percentage_returns_correct_value(self):
+        """Verify progress_percentage returns correct value based on batch processing."""
+        budget = CaptionRetryBudget(max_attempts=500)
+        budget.batch_size = 175
+
+        # Process 100 videos (80 successes + 20 failures)
+        for _ in range(80):
+            budget.record_success("video_success")
+        for _ in range(20):
+            budget.record_failure("video_failure")
+
+        # 100/175 = 57.14%
+        progress = budget.get_progress_percentage()
+        assert progress == 57.14
+
+    @pytest.mark.fast
+    def test_progress_percentage_returns_none_when_no_batch_size(self):
+        """Verify progress_percentage returns None when batch_size not set."""
+        budget = CaptionRetryBudget(max_attempts=500)
+        # batch_size is None by default
+        budget.record_success("video")
+        budget.record_failure("video2")
+
+        assert budget.get_progress_percentage() is None
+
+    @pytest.mark.fast
+    def test_progress_percentage_returns_none_when_batch_size_zero(self):
+        """Verify progress_percentage returns None when batch_size is 0."""
+        budget = CaptionRetryBudget(max_attempts=500)
+        budget.batch_size = 0
+        budget.record_success("video")
+
+        assert budget.get_progress_percentage() is None
+
+    @pytest.mark.fast
+    def test_progress_percentage_in_summary(self):
+        """Verify progress_percentage is included in get_summary() output."""
+        budget = CaptionRetryBudget(max_attempts=500)
+        budget.batch_size = 200
+
+        for _ in range(50):
+            budget.record_success("video")
+        for _ in range(50):
+            budget.record_failure("video")
+
+        summary = budget.get_summary()
+
+        # 100/200 = 50%
+        assert "progress_percentage" in summary
+        assert summary["progress_percentage"] == 50.0
+        assert "videos_processed" in summary
+        assert summary["videos_processed"] == 100
+
+    @pytest.mark.fast
+    def test_progress_percentage_zero_when_no_processing(self):
+        """Verify progress_percentage is 0.0 when no videos processed."""
+        budget = CaptionRetryBudget(max_attempts=500)
+        budget.batch_size = 100
+
+        assert budget.get_progress_percentage() == 0.0
+
+    @pytest.mark.fast
+    def test_exhausted_log_includes_progress(self, caplog):
+        """Verify EXHAUSTED log message includes progress percentage."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget(max_attempts=5)
+        budget.batch_size = 175
+
+        # Process some videos before exhaustion
+        for _ in range(80):
+            budget.record_success(f"success_video")
+        for _ in range(20):
+            budget.record_failure(f"failure_video")
+
+        # Exhaust the budget
+        for _ in range(5):
+            budget.record_attempt("exhaust_video")
+
+        # Trigger exhaustion check
+        assert budget.budget_exhausted() is True
+
+        # Check log includes progress info
+        assert "EXHAUSTED" in caplog.text
+        assert "57%" in caplog.text
+        assert "100/175 videos processed" in caplog.text
+
+    @pytest.mark.fast
+    def test_exhausted_log_no_progress_when_batch_size_missing(self, caplog):
+        """Verify EXHAUSTED log omits progress when batch_size not set."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget(max_attempts=5)
+        # No batch_size set
+
+        for _ in range(5):
+            budget.record_attempt("video")
+
+        assert budget.budget_exhausted() is True
+
+        # Should NOT contain progress info
+        assert "videos processed" not in caplog.text
+
+    @pytest.mark.fast
+    def test_backoff_exhausted_log_includes_progress(self, caplog):
+        """Verify backoff EXHAUSTED log message includes progress percentage."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget(max_attempts=0, max_backoff_time=10.0)
+        budget.batch_size = 100
+
+        # Process 40 videos
+        for _ in range(30):
+            budget.record_success("video")
+        for _ in range(10):
+            budget.record_failure("video")
+
+        # Exhaust via backoff
+        budget.record_backoff(10.0, "test_video")
+
+        assert budget.budget_exhausted() is True
+
+        # Check log includes progress info
+        assert "EXHAUSTED" in caplog.text
+        assert "40%" in caplog.text
+        assert "40/100 videos processed" in caplog.text
+
+    @pytest.mark.fast
+    def test_get_videos_processed(self):
+        """Verify get_videos_processed returns successes + failures."""
+        budget = CaptionRetryBudget(max_attempts=500)
+
+        assert budget.get_videos_processed() == 0
+
+        for _ in range(25):
+            budget.record_success("video")
+        for _ in range(15):
+            budget.record_failure("video")
+
+        assert budget.get_videos_processed() == 40

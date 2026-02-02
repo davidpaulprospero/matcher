@@ -305,10 +305,17 @@ class CaptionRetryBudget:
             True if budget is exhausted and remaining videos should be skipped.
         """
         with self._lock:
+            # US-41-010: Build progress suffix for EXHAUSTED messages
+            progress_suffix = ""
+            videos_processed = self.successes + self.failures
+            if self.batch_size and self.batch_size > 0:
+                progress_pct = round((videos_processed / self.batch_size) * 100, 0)
+                progress_suffix = f" at {progress_pct:.0f}% progress ({videos_processed}/{self.batch_size} videos processed)"
+
             # Check attempt limit
             if self.max_attempts > 0 and self.attempts >= self.max_attempts:
                 logger.info(
-                    f"CaptionRetryBudget: EXHAUSTED (attempts: {self.attempts}/{self.max_attempts})"
+                    f"CaptionRetryBudget: EXHAUSTED (attempts: {self.attempts}/{self.max_attempts}){progress_suffix}"
                 )
                 # US-41-006: Log circuit breaker trips if any occurred
                 if self.circuit_breaker_trips > 0:
@@ -322,7 +329,7 @@ class CaptionRetryBudget:
             if self.max_backoff_time > 0 and self.backoff_time_spent >= self.max_backoff_time:
                 logger.info(
                     f"CaptionRetryBudget: EXHAUSTED (backoff: {self.backoff_time_spent:.1f}s/"
-                    f"{self.max_backoff_time}s)"
+                    f"{self.max_backoff_time}s){progress_suffix}"
                 )
                 # US-41-006: Log circuit breaker trips if any occurred
                 if self.circuit_breaker_trips > 0:
@@ -658,6 +665,35 @@ class CaptionRetryBudget:
                 self._log_consumption_status("threshold", video_id)
                 break
 
+    def get_progress_percentage(self) -> Optional[float]:
+        """Get batch progress as percentage of videos processed (US-41-010).
+
+        Returns:
+            Percentage (0.0 to 100.0) of batch processed, or None if batch_size not set.
+            Calculated as (successes + failures) / batch_size * 100.
+
+        Example:
+            >>> budget.batch_size = 175
+            >>> budget.successes = 80
+            >>> budget.failures = 20
+            >>> budget.get_progress_percentage()
+            57.14  # 100/175 = 57.14%
+        """
+        with self._lock:
+            if self.batch_size is None or self.batch_size == 0:
+                return None
+            videos_processed = self.successes + self.failures
+            return round((videos_processed / self.batch_size) * 100, 2)
+
+    def get_videos_processed(self) -> int:
+        """Get total videos processed (successes + failures).
+
+        Returns:
+            Total count of videos that have been processed.
+        """
+        with self._lock:
+            return self.successes + self.failures
+
     def attempts_remaining(self) -> Optional[int]:
         """Get remaining attempts before exhaustion.
 
@@ -721,6 +757,8 @@ class CaptionRetryBudget:
                     else None
                 ),
                 "videos_skipped": self.videos_skipped,
+                "videos_processed": self.successes + self.failures,  # US-41-010
+                "progress_percentage": self.get_progress_percentage(),  # US-41-010
                 "is_exhausted": self.budget_exhausted(),
                 "early_terminated": self.early_terminated,  # US-37-009
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
