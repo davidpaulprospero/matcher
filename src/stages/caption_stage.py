@@ -1054,8 +1054,17 @@ class CaptionStage(Stage):
         checkpoint: 'CheckpointManager',
         config: 'Config' = None
     ) -> bool:
-        """Restore caption stage from checkpoint."""
+        """Restore caption stage from checkpoint.
+
+        US-42-002: Ensures state attributes (text_metadata, caption_results, etc.)
+        exist before restoration. This mirrors _preflight_check() in run().
+        """
         try:
+            # US-42-002: Ensure state has required attributes before restoration
+            # This is critical because restore() may be called on a fresh state
+            # that hasn't gone through _preflight_check() yet
+            self._ensure_state_attributes(state)
+
             data = checkpoint.get_stage_data(self.name)
             if not data:
                 # No stage data means CAPTION stage had nothing to do
