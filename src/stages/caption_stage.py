@@ -158,6 +158,13 @@ class CaptionStage(Stage):
         warnings = []
         retry_budget = None  # US-40-004: Initialize early for access in except block
 
+        # US-43-005: Defensive text_metadata initialization at very start of run()
+        # This ensures text_metadata exists even if _validate_state_type or
+        # _preflight_check fail, preventing AttributeError downstream
+        if not hasattr(state, 'text_metadata') or state.text_metadata is None:
+            state.text_metadata = []
+            logger.warning('[US-43-005] Defensive init: text_metadata was missing/None')
+
         try:
             # US-39-009: Validate state type at stage entry
             state = self._validate_state_type(state)
