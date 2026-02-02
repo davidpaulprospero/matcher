@@ -90,7 +90,7 @@
             "id": "US-42-006",
             "title": "Add config validation warning for auto_scale=false with large batches",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "_validate_budget_for_batch() warns when auto_scale=false AND batch_size > max_attempts",
                 "Warning message recommends enabling auto_scale or increasing max_attempts",
@@ -98,13 +98,13 @@
                 "Add test: batch_size=200, max_attempts=100, auto_scale=false should log warning",
                 "Warning uses logger.warning() for visibility"
             ],
-            "notes": "Tier 2 Enhancement: src/stages/caption_stage.py _validate_budget_for_batch() method (lines 1128-1170)\n\nExisting validation only warns if max_attempts < batch_size. Enhance to warn when auto_scale is disabled and budget may be insufficient.\n\nThis proactively alerts users before they hit exhaustion."
+            "notes": "COMPLETED: Enhanced _validate_budget_for_batch() in src/stages/caption_stage.py to warn when auto_scale=false AND required budget exceeds max_attempts.\n\nChanges:\n1. Added [US-42-006] marker to warning message for traceability\n2. Warning includes formula: 'batch_size * attempts_per_video = required_budget'\n3. Warning recommends enabling auto_scale or increasing max_attempts\n4. Uses logger.warning() for visibility\n5. Added test: test_warning_with_formula_batch_200_max_100_auto_scale_false\n\nAll 3 related tests pass."
         },
         {
             "id": "US-42-007",
             "title": "Verify ensure_scaled resets budget counters when scaling up from restored state",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Document behavior: ensure_scaled() does NOT reset attempts counter when scaling",
                 "If reset_on_scale=true, ensure_scaled() resets attempts to 0 when scaling up",
@@ -112,7 +112,7 @@
                 "Log when scaling resets counters: '[US-42-007] Budget scaled and reset: attempts 80->0'",
                 "Add comment in ensure_scaled() explaining the reset_on_scale behavior"
             ],
-            "notes": "Tier 2 Investigation: src/caption/retry_budget.py ensure_scaled() method\n\nUS-41-009 added reset_on_scale config but need to verify it works correctly when restoring from checkpoint and then scaling.\n\nScenario: Checkpoint has 80/100 attempts used. New batch needs 200 attempts. Scale to 200, but should attempts stay at 80 or reset to 0?\n\nDefault (reset_on_scale=false): Keep attempts, so only 120 attempts remaining.\nWith reset_on_scale=true: Reset attempts to 0, so 200 attempts available."
+            "notes": "COMPLETED: Documented and tested ensure_scaled() reset_on_scale behavior.\n\nChanges:\n1. AC1: Added docstring section 'Counter Reset Behavior (US-42-007)' explaining default preserves counters, reset_on_scale=true clears them\n2. AC2: Verified existing code at lines 1139-1160 resets all counters when reset_on_scale=true\n3. AC3: Added 3 tests:\n   - test_ensure_scaled_from_checkpoint_80_attempts_preserves_counters_by_default\n   - test_ensure_scaled_from_checkpoint_80_attempts_resets_with_reset_on_scale\n   - test_ensure_scaled_logs_reset_with_story_id\n4. AC4: Updated log message to use '[US-42-007] Budget scaled and reset: attempts 80->0' format\n5. AC5: Added comment explaining reset_on_scale behavior in ensure_scaled()\n\nFiles modified:\n- src/caption/retry_budget.py: Enhanced docstring and log message\n- tests/test_caption_retry_budget.py: Added 3 tests for 80 attempts scenario\n\nAll 275 tests in test_caption_retry_budget.py pass."
         },
         {
             "id": "US-42-008",
