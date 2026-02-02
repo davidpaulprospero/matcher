@@ -956,9 +956,12 @@ class CaptionStage(Stage):
         US-38-010: Proactive warning helps users understand potential budget
         issues before they cause failures.
 
+        US-39-006: Enhanced to calculate required budget (batch_size * attempts_per_video)
+        and provide actionable recommendations when budget may be insufficient.
+
         Logs warnings for:
+        - required_budget > max_attempts AND auto_scale disabled: Budget may be insufficient
         - max_attempts < batch_size: Not enough attempts for 1 per video
-        - auto_scale=False and batch_size > 100: Large batch without auto-scaling
 
         Args:
             batch_size: Number of videos to be fetched.
@@ -967,18 +970,24 @@ class CaptionStage(Stage):
         if retry_budget is None or batch_size <= 0:
             return
 
-        # Check if max_attempts < batch_size (not enough for 1 attempt each)
+        # US-39-006: Calculate required budget: batch_size * attempts_per_video
+        attempts_per_video = retry_budget.attempts_per_video
+        required_budget = int(batch_size * attempts_per_video + 0.5)  # Round up
+
+        # US-39-006: Log WARNING if required > max_attempts AND auto_scale is disabled
+        if not retry_budget.auto_scale and retry_budget.max_attempts > 0:
+            if required_budget > retry_budget.max_attempts:
+                logger.warning(
+                    f"Budget may be insufficient: {retry_budget.max_attempts} attempts "
+                    f"for {batch_size} videos. "
+                    f"Consider enabling auto_scale in config or increasing max_attempts"
+                )
+
+        # Legacy check: max_attempts < batch_size (not enough for 1 attempt each)
         if retry_budget.max_attempts > 0 and retry_budget.max_attempts < batch_size:
             logger.warning(
                 f"Retry budget may be insufficient: max_attempts={retry_budget.max_attempts} "
                 f"< batch_size={batch_size} (not enough for 1 attempt per video)"
-            )
-
-        # Check if auto_scale=False and batch_size > 100
-        if not retry_budget.auto_scale and batch_size > 100:
-            logger.warning(
-                f"Large batch ({batch_size} videos) without auto_scale enabled: "
-                f"max_attempts={retry_budget.max_attempts} may be exhausted before completion"
             )
 
     def _get_video_ids(
