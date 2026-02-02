@@ -80,6 +80,7 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 29 | LLM response format | Use `ResponseFormat.TEXT` for non-JSON responses, not `JSON_ARRAY` |
 | 30 | Per-project config | Use `--config custom.yaml` flag — project_config.yaml auto-merge removed |
 | 31 | Pipeline stages source | `src/checkpoint.py:STAGE_ORDER` is truth; sync `scripts/ralph/config/ralph-config.json` |
+| 32 | Ralph file paths | Always use `state/prd.json`, `state/queue.json`, `session/prompt.md`, `config/ralph-config.json` — never root-level |
 
 ### Config Access Pattern
 
@@ -303,6 +304,17 @@ pytest tests/ -v --tb=short -x
 ## Ralph Loop (Autonomous Development)
 
 Location: `scripts/ralph/` — See [scripts/ralph/README.md](scripts/ralph/README.md) for full documentation.
+
+### Ralph Directory Structure
+
+| Directory | Purpose | Key Files |
+|-----------|---------|-----------|
+| `config/` | Static config | `ralph-config.json` |
+| `state/` | Persistent state | `prd.json`, `queue.json`, `sprint_history.json` |
+| `session/` | Volatile per-session | `prompt.md`, `metrics.csv`, `healing_log.jsonl` |
+| `archive/` | Completed sprints | `sprint-N.json`, `sessions/` |
+
+**CRITICAL:** When generating stories or updating PRD, always use `scripts/ralph/state/prd.json` — NOT `scripts/ralph/prd.json` (root level doesn't exist).
 
 ```powershell
 # Unified launcher
