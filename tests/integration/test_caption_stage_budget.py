@@ -969,6 +969,55 @@ class TestBudgetInsufficientWarning:
             f"got: {[r.message for r in caplog.records]}"
         )
 
+    def test_warning_with_formula_batch_200_max_100_auto_scale_false(self, caplog):
+        """Test warning includes formula when batch_size=200, max_attempts=100, auto_scale=false.
+
+        US-42-006: Verifies warning message includes specific formula:
+        'batch_size * attempts_per_video = required_budget'
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget: batch_size=200, max_attempts=100, auto_scale=false
+        # With default attempts_per_video=2.0: required = 200 * 2.0 = 400 > 100
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=100,
+            auto_scale=False,
+            attempts_per_video=2.0,
+        ))
+
+        stage._validate_budget_for_batch(200, budget)
+
+        # Find warning messages
+        warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warnings) >= 1, "Expected at least one warning"
+
+        # Check for the [US-42-006] marker and formula
+        formula_warning_found = False
+        for record in warnings:
+            msg = record.message
+            if "[US-42-006]" in msg:
+                # AC1: warns when auto_scale=false AND batch_size > max_attempts
+                assert "100 attempts" in msg, f"Expected '100 attempts' in: {msg}"
+                assert "200 videos" in msg, f"Expected '200 videos' in: {msg}"
+                # AC3: Warning includes specific formula
+                assert "200 * 2.0 = 400" in msg, (
+                    f"Expected formula '200 * 2.0 = 400' in: {msg}"
+                )
+                # AC2: recommends enabling auto_scale or increasing max_attempts
+                assert "enabling auto_scale" in msg or "increasing max_attempts" in msg, (
+                    f"Expected recommendation in: {msg}"
+                )
+                formula_warning_found = True
+                break
+
+        assert formula_warning_found, (
+            f"Expected [US-42-006] warning with formula, got: {[r.message for r in warnings]}"
+        )
+
 
 # =============================================================================
 # Integration Tests: Caption Results Preservation (US-38-011)

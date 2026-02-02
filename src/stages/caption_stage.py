@@ -1162,12 +1162,12 @@ class CaptionStage(Stage):
         attempts_per_video = retry_budget.attempts_per_video
         required_budget = int(batch_size * attempts_per_video + 0.5)  # Round up
 
-        # US-39-006: Log WARNING if required > max_attempts AND auto_scale is disabled
+        # US-39-006/US-42-006: Log WARNING if required > max_attempts AND auto_scale is disabled
         if not retry_budget.auto_scale and retry_budget.max_attempts > 0:
             if required_budget > retry_budget.max_attempts:
                 logger.warning(
-                    f"Budget may be insufficient: {retry_budget.max_attempts} attempts "
-                    f"for {batch_size} videos. "
+                    f"[US-42-006] Budget may be insufficient: {retry_budget.max_attempts} attempts "
+                    f"for {batch_size} videos (required: {batch_size} * {attempts_per_video} = {required_budget}). "
                     f"Consider enabling auto_scale in config or increasing max_attempts"
                 )
 
