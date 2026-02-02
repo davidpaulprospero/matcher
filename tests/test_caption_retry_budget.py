@@ -5863,3 +5863,39 @@ class TestEnsureScaledCheckpoint:
 
         assert result is True, "Scaling must occur when max_attempts (349) < required (350)"
         assert budget.max_attempts == 350
+
+    @pytest.mark.fast
+    def test_ensure_scaled_logs_us_43_003_when_batch_matches_but_max_insufficient(self, caplog):
+        """US-43-003: Verify specific diagnostic log when batch_size matches but max_attempts insufficient.
+
+        The fix adds a specific log message '[US-43-003] Force scaling: batch_size matches but
+        max_attempts insufficient' to help diagnose checkpoint restore issues.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # Insufficient for batch of 175
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore: batch_size already set but max_attempts insufficient
+        budget.batch_size = 175  # From checkpoint
+
+        caplog.clear()
+        result = budget.ensure_scaled(175)
+
+        assert result is True, "Scaling must occur"
+        assert budget.max_attempts == 350
+
+        # Check for US-43-003 specific log
+        log_messages = ' '.join(rec.message for rec in caplog.records)
+        assert '[US-43-003]' in log_messages, (
+            "Scaling when batch_size matches but max_attempts insufficient should log [US-43-003]"
+        )
+        assert 'Force scaling' in log_messages, (
+            "Log should mention 'Force scaling'"
+        )
+        assert 'batch_size matches but max_attempts insufficient' in log_messages, (
+            "Log should explain why force scaling occurred"
+        )

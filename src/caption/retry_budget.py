@@ -1163,6 +1163,15 @@ class CaptionRetryBudget:
                 )
                 return False
 
+            # US-43-003: Detect and log when batch_size matches but max_attempts insufficient
+            # This is the specific scenario from checkpoint restore where batch_size is
+            # restored but max_attempts defaults to config value
+            if self.batch_size == batch_size and required_attempts > self.max_attempts:
+                logger.info(
+                    f"[US-43-003] Force scaling: batch_size matches but max_attempts insufficient "
+                    f"(batch_size={batch_size}, max_attempts={self.max_attempts}, required={required_attempts})"
+                )
+
             # Only scale if required exceeds current max
             if required_attempts <= self.max_attempts:
                 # Still record batch_size for tracking even if no scaling needed
