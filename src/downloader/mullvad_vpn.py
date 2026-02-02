@@ -60,6 +60,43 @@ class MullvadVPN(VPNManager):
                 # Continue downloading with new IP
     """
 
+    @staticmethod
+    def is_available() -> bool:
+        """
+        Check if Mullvad CLI is available on the system.
+
+        Runs 'mullvad --version' to verify the CLI is installed and accessible.
+        Should be called before instantiating MullvadVPN to avoid runtime errors.
+
+        Returns:
+            True if mullvad CLI is available and can be executed
+        """
+        try:
+            result = subprocess.run(
+                ["mullvad", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                encoding='utf-8',
+                errors='replace'
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
+                logger.debug(f"Mullvad CLI available: {version}")
+                return True
+            else:
+                logger.debug(f"Mullvad CLI check failed: {result.stderr.strip()}")
+                return False
+        except FileNotFoundError:
+            logger.debug("Mullvad CLI not found in PATH")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.debug("Mullvad CLI check timed out")
+            return False
+        except Exception as e:
+            logger.debug(f"Mullvad CLI check error: {e}")
+            return False
+
     def __init__(self, config: 'VPNConfig'):
         """
         Initialize Mullvad VPN manager.

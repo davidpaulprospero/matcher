@@ -653,14 +653,22 @@ def create_healing_pipeline(
     # US-35-002: Auto-activate Mullvad VPN when enabled in config
     # Instantiate MullvadVPN early so it can be wired into EscalationManager
     # when stages create their downloaders
+    # US-35-009: Check CLI availability before instantiating
     download_config = getattr(config, 'download', None)
     mullvad_config = getattr(download_config, 'mullvad', None) if download_config else None
     if mullvad_config and getattr(mullvad_config, 'enabled', False):
         from .downloader.mullvad_vpn import MullvadVPN
-        mullvad_vpn = MullvadVPN(mullvad_config)
-        orchestrator.set_mullvad_vpn(mullvad_vpn)
-        logger.debug("Mullvad VPN auto-activated in create_healing_pipeline (config.download.mullvad.enabled=true)")
-        logger.info("Mullvad VPN enabled for Tier 4 IP rotation bypass")
+        if MullvadVPN.is_available():
+            mullvad_vpn = MullvadVPN(mullvad_config)
+            orchestrator.set_mullvad_vpn(mullvad_vpn)
+            logger.debug("Mullvad VPN auto-activated in create_healing_pipeline (config.download.mullvad.enabled=true)")
+            logger.info("Mullvad VPN enabled for Tier 4 IP rotation bypass")
+        else:
+            logger.warning(
+                "Mullvad VPN is enabled in config but mullvad CLI is not available. "
+                "Install Mullvad VPN or disable config.download.mullvad.enabled. "
+                "Tier 4 VPN rotation will be skipped."
+            )
 
     return pipeline, orchestrator, runner
 

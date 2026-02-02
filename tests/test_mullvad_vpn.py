@@ -1,9 +1,80 @@
 """Tests for MullvadVPN class."""
 
 import json
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+class TestMullvadVPNIsAvailable:
+    """Tests for MullvadVPN.is_available() static method (US-35-009)."""
+
+    def test_is_available_returns_true_when_cli_found(self):
+        """Test is_available() returns True when mullvad CLI runs successfully."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="mullvad 2023.5",
+                stderr=""
+            )
+            result = MullvadVPN.is_available()
+
+            assert result is True
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args[0][0]
+            assert call_args == ["mullvad", "--version"]
+
+    def test_is_available_returns_false_when_cli_not_found(self):
+        """Test is_available() returns False when mullvad CLI is not installed."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("mullvad not found")
+            result = MullvadVPN.is_available()
+
+            assert result is False
+
+    def test_is_available_returns_false_on_nonzero_exit(self):
+        """Test is_available() returns False when mullvad returns error."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="unknown command"
+            )
+            result = MullvadVPN.is_available()
+
+            assert result is False
+
+    def test_is_available_returns_false_on_timeout(self):
+        """Test is_available() returns False when mullvad times out."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired("mullvad", 10)
+            result = MullvadVPN.is_available()
+
+            assert result is False
+
+    def test_is_available_is_static_method(self):
+        """Test that is_available() is a static method callable without instance."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        # Should be callable as a static method (without creating an instance)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="mullvad 2023.5",
+                stderr=""
+            )
+            # Call as class method, not instance method
+            result = MullvadVPN.is_available()
+            assert isinstance(result, bool)
 
 
 class TestMullvadVPNConnect:
