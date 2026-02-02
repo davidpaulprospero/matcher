@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 36,
-    "focusArea": "download",
-    "branchName": "ralph/sprint-36",
+    "sprintNumber": 37,
+    "focusArea": "caption",
+    "branchName": "ralph/sprint-37",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,178 +11,189 @@
     },
     "userStories": [
         {
-            "id": "US-36-001",
-            "title": "Generate sprint stories for download focus area",
+            "id": "US-37-001",
+            "title": "Generate sprint stories for caption focus area",
+            "priority": "high",
+            "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'caption' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'download'",
-                "Add stories US-36-002 through US-36-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'caption'",
+                "Add stories US-37-002 through US-37-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-36-NNN to be unique across sprints",
-                "Mark this story (US-36-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-37-NNN to be unique across sprints",
+                "Mark this story (US-37-001) as passes: true when done"
             ],
+            "notes": "Story generation complete. Generated 11 stories (US-37-002 through US-37-012) addressing the two critical issues: (1) Missing text_metadata attribute on PipelineState causing AttributeError, (2) CaptionRetryBudget exhaustion at 100 attempts causing 75+ videos to be skipped."
+        },
+        {
+            "id": "US-37-002",
+            "title": "Add text_metadata attribute to PipelineState class",
+            "priority": "critical",
             "passes": true,
+            "acceptanceCriteria": [
+                "Add `text_metadata: List[Dict[str, Any]] = field(default_factory=list)` to PipelineState dataclass in src/state.py",
+                "Attribute is placed in the CAPTION STATE section after caption_results (line ~149)",
+                "Type hint uses `List[Dict[str, Any]]` matching the pattern in _populate_text_metadata",
+                "Unit test verifies new PipelineState instance has empty text_metadata list",
+                "Unit test verifies text_metadata.extend() works without AttributeError",
+                "Pipeline runs without AttributeError at caption_stage.py:1053"
+            ],
+            "notes": "COMPLETE. Added text_metadata field to PipelineState in src/state.py:150. Added 5 unit tests in tests/test_state_dataclasses.py::TestPipelineStateTextMetadata. All tests pass, main.py runs without errors."
+        },
+        {
+            "id": "US-37-003",
+            "title": "Scale CaptionRetryBudget max_attempts proportional to batch size",
+            "priority": "critical",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Modify CaptionRetryBudget to support dynamic max_attempts based on batch size",
+                "Add `scale_to_batch_size(batch_size: int, attempts_per_video: float = 1.5)` method",
+                "Default max_attempts stays at 100 but scales up when batch > 67 videos",
+                "For 175 videos, max_attempts becomes ~263 (175 * 1.5) ensuring all videos can be attempted",
+                "CaptionStage calls scale_to_batch_size() before starting batch fetch",
+                "Unit test verifies budget scales correctly: 50 videos -> 100, 175 videos -> 263"
+            ],
+            "notes": "Tier: T2-Medium (logic change). Source files: src/caption/retry_budget.py:45-310 (CaptionRetryBudget class), src/stages/caption_stage.py. The current 100 attempt limit is insufficient for 175+ video batches - budget exhausts at video 101, skipping 74 videos. Fix: attempts_per_video accounts for 1 attempt + ~0.5 retries on average."
+        },
+        {
+            "id": "US-37-004",
+            "title": "Add batch size config option for retry budget scaling",
             "priority": "high",
-            "notes": "Meta-story for sprint generation. Sprint 36 focuses on: (1) VPN-aware budget reset integration, (2) Download error handling improvements, (3) Documentation updates for Mullvad workflow. Sprint 35 completed the MullvadVPN architecture - Sprint 36 wires it into operational flow."
-        },
-        {
-            "id": "US-36-002",
-            "title": "Add budget reset_on_ip_change call after VPN rotation in core.py",
-            "acceptanceCriteria": [
-                "Update core.py line ~2224 to call self.rate_limit_budget.reset_on_ip_change() after successful mullvad rotation",
-                "Add logging showing budget was reset after VPN IP change",
-                "Add test in tests/test_downloader_core.py verifying budget reset is called after VPN rotation",
-                "Run python -m py_compile src/downloader/core.py to verify syntax",
-                "Run pytest tests/test_downloader_core.py -v --tb=short -x to verify"
-            ],
-            "passes": true,
-            "priority": 2,
-            "notes": "Tier 1 (Quick Win). COMPLETED: Code already existed in core.py:2226 from previous Sprint 35 implementation. Added TestVPNRotationBudgetReset test class with 2 tests to test_downloader_core.py verifying the integration. All tests pass."
-        },
-        {
-            "id": "US-36-003",
-            "title": "Add budget reset_on_ip_change call to EscalationManager on_vpn_rotation callback",
-            "acceptanceCriteria": [
-                "Update the on_vpn_rotation_needed callback setup in create_healing_pipeline to include budget.reset_on_ip_change()",
-                "Verify both budget reset and circuit breaker reset happen on VPN rotation",
-                "Add test verifying budget reset is triggered when EscalationManager escalates to Tier 4",
-                "Run pytest tests/test_pipeline_orchestrator.py -v --tb=short -x to verify",
-                "Run pytest tests/test_escalation_tier4.py -v --tb=short -x to verify"
-            ],
             "passes": false,
-            "priority": 3,
-            "notes": "Tier 2 (Medium). Source file: src/pipeline.py. Sprint 35 added the on_vpn_rotation_needed callback (US-35-008) - now connect it to budget reset. This ensures that when EscalationManager hits Tier 4, the budget is reset for the new IP."
+            "acceptanceCriteria": [
+                "Add `attempts_per_video: float = 1.5` field to CaptionRetryBudgetConfig in download.py",
+                "Add `auto_scale: bool = True` field to enable/disable automatic scaling",
+                "Update config.yaml with new options under download.caption_first.retry_budget",
+                "CaptionRetryBudget.from_config() reads and applies new settings",
+                "Unit test verifies config values are correctly loaded from dict and dataclass",
+                "Documentation comment explains the 1.5 multiplier (1 attempt + avg 0.5 retries)"
+            ],
+            "notes": "Tier: T2-Medium (config extension). Source files: src/config/sections/download.py:160-181 (CaptionRetryBudgetConfig), src/caption/retry_budget.py:86-112 (from_config method), config.yaml. Follow CLAUDE.md Rule 1: update BOTH config sections AND config.yaml."
         },
         {
-            "id": "US-36-004",
-            "title": "Add VPN rotation count to checkpoint persistence",
-            "acceptanceCriteria": [
-                "Update DownloadCheckpoint to include vpn_rotation_count field",
-                "Save MullvadVPN._switch_count to checkpoint on save",
-                "Restore _switch_count from checkpoint on resume (to not exceed max_rotations_per_session)",
-                "Add test verifying VPN rotation count persists across checkpoint save/restore",
-                "Run pytest tests/test_checkpoint*.py -v --tb=short -x to verify"
-            ],
+            "id": "US-37-005",
+            "title": "Add detailed logging for retry budget consumption",
+            "priority": "medium",
             "passes": false,
-            "priority": 4,
-            "notes": "Tier 2 (Medium). Source files: src/downloader/checkpoint.py, src/downloader/mullvad_vpn.py. Currently MullvadVPN._switch_count resets on new session - need to persist to respect max_rotations_per_session across resume."
+            "acceptanceCriteria": [
+                "Log the error category (NETWORK, TIMEOUT, RATE_LIMIT, etc.) when recording failures",
+                "Log budget remaining after each attempt: 'CaptionRetryBudget: {remaining}/{max} attempts remaining'",
+                "Log when budget reaches 50% and 75% consumption thresholds",
+                "Add summary log when batch completes: success rate, skipped count, top error categories",
+                "Existing log at INFO level; add DEBUG level for per-video tracking",
+                "Unit test verifies threshold warnings are logged at correct consumption levels"
+            ],
+            "notes": "Tier: T2-Medium (logging enhancement). Source files: src/caption/retry_budget.py:114-170 (record_* methods), src/caption/batch_processor.py:259-276 (budget checks). The current log 'EXHAUSTED (attempts: 100/100)' repeats for every skipped video but doesn't explain WHY attempts were consumed."
         },
         {
-            "id": "US-36-005",
-            "title": "Add MullvadVPN status to _collect_download_metrics",
-            "acceptanceCriteria": [
-                "Update _collect_download_metrics in pipeline.py to include mullvad_status when MullvadVPN is active",
-                "Include: connected status, current_country, rotation_count, countries_used list",
-                "Add test verifying MullvadVPN metrics are collected in download metrics",
-                "Run pytest tests/test_pipeline*.py -v --tb=short -x to verify",
-                "Verify metrics include VPN info with: grep -n 'mullvad' tests/test_pipeline*.py"
-            ],
+            "id": "US-37-006",
+            "title": "Add error category tracking to CaptionRetryBudget",
+            "priority": "medium",
             "passes": false,
-            "priority": 5,
-            "notes": "Tier 1 (Quick Win). Source file: src/pipeline.py. Sprint 35 added VPN metrics to _collect_escalation_metrics (US-35-004) - now add to _collect_download_metrics for completeness."
+            "acceptanceCriteria": [
+                "Add `error_counts: Dict[CaptionErrorCategory, int]` field to CaptionRetryBudget",
+                "Modify record_failure() to accept optional error_category parameter",
+                "Update batch_processor.py to pass error category when recording failures",
+                "Add get_top_errors() method returning sorted list of (category, count) tuples",
+                "Include error breakdown in get_summary() output",
+                "Unit test verifies error categories are tracked correctly across multiple failures"
+            ],
+            "notes": "Tier: T2-Medium (feature addition). Source files: src/caption/retry_budget.py:45-75 (CaptionRetryBudget fields), src/caption/retry_budget.py:136-145 (record_failure), src/caption/batch_processor.py:351-407. This enables diagnosing whether budget exhaustion is due to rate limits, network issues, or parsing errors."
         },
         {
-            "id": "US-36-006",
-            "title": "Add VPN_ROTATION tier to escalation checkpoint serialization",
-            "acceptanceCriteria": [
-                "Update EscalationManager.from_dict() to handle tier value 4 (VPN_ROTATION)",
-                "Currently line 786 clamps to FULL_BYPASS.value - extend to VPN_ROTATION.value",
-                "Add test verifying Tier 4 state is preserved across checkpoint restore",
-                "Run pytest tests/test_escalation_manager.py -v --tb=short -x to verify",
-                "Verify with: grep -n 'FULL_BYPASS.value' src/downloader/escalation_manager.py"
-            ],
+            "id": "US-37-007",
+            "title": "Add budget checkpoint persistence for resume support",
+            "priority": "medium",
             "passes": false,
-            "priority": 6,
-            "notes": "Tier 1 (Quick Win). Source file: src/downloader/escalation_manager.py:786. The from_dict() clamps tier to FULL_BYPASS.value (3) but VPN_ROTATION is tier 4 - need to update clamp."
+            "acceptanceCriteria": [
+                "CaptionRetryBudget.to_dict() includes error_counts in serialization",
+                "CaptionRetryBudget.from_dict() restores error_counts from checkpoint",
+                "CaptionStage saves budget state to checkpoint after batch completion",
+                "CaptionStage restores budget state when resuming from checkpoint",
+                "Budget remaining is recalculated correctly on resume",
+                "Unit test verifies round-trip serialization preserves all budget state"
+            ],
+            "notes": "Tier: T2-Medium (checkpoint integration). Source files: src/caption/retry_budget.py:258-300 (to_dict, from_dict), src/stages/caption_stage.py. Currently to_dict/from_dict exist but may not include new error_counts field. Checkpoint persistence ensures resume doesn't reset budget unnecessarily."
         },
         {
-            "id": "US-36-007",
-            "title": "Add Mullvad troubleshooting section to CLAUDE.md",
-            "acceptanceCriteria": [
-                "Add troubleshooting table after existing Mullvad Configuration section in CLAUDE.md",
-                "Document: CLI not found, VPN rotation fails, verification fails, max rotations reached",
-                "Add rotation delay/cooldown explanation (from US-35-012)",
-                "Verify section exists with: grep -A 10 'Troubleshooting' CLAUDE.md | head -20",
-                "Run python -c \"print('OK')\" to verify no syntax issues (documentation only)"
-            ],
+            "id": "US-37-008",
+            "title": "Add budget exhaustion recovery with VPN rotation trigger",
+            "priority": "low",
             "passes": false,
-            "priority": 7,
-            "notes": "Tier 1 (Quick Win). Source file: CLAUDE.md. CLAUDE.md already has Mullvad Configuration section (from Sprint 35) - add troubleshooting below it. Reference existing table in CLAUDE.md lines ~200-210."
+            "acceptanceCriteria": [
+                "When budget exhausts due to >50% RATE_LIMIT errors, trigger VPN rotation if enabled",
+                "After VPN rotation, reset budget and retry remaining videos",
+                "Add `trigger_vpn_rotation_on_rate_limit: bool = True` config option",
+                "Limit VPN-triggered budget resets to max 2 per session to prevent loops",
+                "Log VPN rotation trigger: 'Budget exhausted with {rate_limit_pct}% rate limit errors, rotating VPN'",
+                "Integration test verifies VPN rotation resets budget (requires mock VPN)"
+            ],
+            "notes": "Tier: T3-Complex (cross-system integration). Source files: src/caption/retry_budget.py, src/stages/caption_stage.py, src/downloader/mullvad_vpn.py. This connects caption budget exhaustion to the existing Mullvad VPN rotation (Tier 4 bypass). Only triggers when rate limits dominate errors."
         },
         {
-            "id": "US-36-008",
-            "title": "Add logging for VPN rotation trigger reason in EscalationManager",
-            "acceptanceCriteria": [
-                "Update record_failure() to log the trigger_category when escalating to Tier 4",
-                "Log format: 'VPN rotation triggered by {trigger_category} for keyword={keyword}'",
-                "Add test verifying trigger category is logged on Tier 4 escalation",
-                "Run pytest tests/test_escalation*.py -v --tb=short -x to verify",
-                "Verify with: grep -n 'trigger_category' src/downloader/escalation_manager.py"
-            ],
+            "id": "US-37-009",
+            "title": "Add early termination when success rate drops below threshold",
+            "priority": "medium",
             "passes": false,
-            "priority": 8,
-            "notes": "Tier 1 (Quick Win). Source file: src/downloader/escalation_manager.py:480-492. The trigger_category is already classified but not included in the Tier 4 warning log. Add it for debugging."
+            "acceptanceCriteria": [
+                "Add `min_success_rate: float = 0.3` config option to CaptionRetryBudgetConfig",
+                "After processing 20+ videos, check if success rate < min_success_rate",
+                "If success rate too low, log warning and skip remaining videos gracefully",
+                "Add `early_terminated: bool` flag to budget state for checkpoint",
+                "BatchResult includes early_termination_reason when terminated",
+                "Unit test verifies early termination triggers at 20% success rate"
+            ],
+            "notes": "Tier: T2-Medium (optimization). Source files: src/caption/retry_budget.py, src/caption/batch_processor.py:446-558. When 80%+ of fetches fail, continuing wastes time. Early termination saves time while preserving successful fetches for matching."
         },
         {
-            "id": "US-36-009",
-            "title": "Add VPN rotation to caption_fetcher.py escalation path",
-            "acceptanceCriteria": [
-                "Check if caption_fetcher.py can access EscalationManager for Tier 4 escalation",
-                "If not accessible, add optional escalation_manager parameter to fetch_captions()",
-                "Call escalation_manager.record_failure() on caption fetch 403/429 errors",
-                "Add test verifying caption errors can trigger escalation",
-                "Run pytest tests/test_caption*.py -v --tb=short -x to verify"
-            ],
+            "id": "US-37-010",
+            "title": "Consolidate text_metadata population with defensive initialization",
+            "priority": "medium",
             "passes": false,
-            "priority": 9,
-            "notes": "Tier 2 (Medium). Source file: src/caption_fetcher.py:~2966. Caption fetching currently has its own timeout manager but doesn't integrate with the 4-tier escalation. Wire it up so caption 403s can trigger VPN rotation."
+            "acceptanceCriteria": [
+                "Add hasattr check before extending text_metadata: `if not hasattr(state, 'text_metadata'): state.text_metadata = []`",
+                "Apply same defensive pattern for other dynamically-added attributes",
+                "Add _ensure_state_attributes() helper method to CaptionStage",
+                "Call _ensure_state_attributes() at start of run() method",
+                "Remove any duplicate text_metadata initialization elsewhere",
+                "Unit test verifies both legacy and new PipelineState objects work"
+            ],
+            "notes": "Tier: T1-Simple (defensive coding). Source files: src/stages/caption_stage.py:647, src/stages/caption_stage.py:1053. This provides belt-and-suspenders protection even if PipelineState is instantiated without text_metadata field. Follows existing patterns in from_legacy_pipeline()."
         },
         {
-            "id": "US-36-010",
-            "title": "Add VPN enabled status check to download stage pre-flight",
-            "acceptanceCriteria": [
-                "Add pre-flight check in DOWNLOAD_SEGMENTS stage to log VPN status at start",
-                "Log: 'VPN: enabled={enabled}, available={available}, rotations_remaining={N}'",
-                "Only log if config.download.mullvad.enabled is true",
-                "Add test verifying VPN status is logged at stage start",
-                "Run pytest tests/test_stages*.py -v --tb=short -x to verify"
-            ],
+            "id": "US-37-011",
+            "title": "Add CaptionStage batch progress reporting",
+            "priority": "low",
             "passes": false,
-            "priority": 10,
-            "notes": "Tier 1 (Quick Win). Source file: src/stages/download_segments.py. Add informational logging at stage start so users know VPN is available. Helps with debugging when VPN rotation doesn't trigger."
+            "acceptanceCriteria": [
+                "Log progress every 25 videos: '[50/175] 45 success, 3 failed, 2 skipped'",
+                "Log budget consumption alongside progress: '(budget: 67/263 attempts used)'",
+                "Add estimated time remaining based on average fetch time",
+                "Progress callback updates checkpoint with partial results",
+                "Progress is visible in non-verbose mode (INFO level)",
+                "Unit test verifies progress logging at correct intervals"
+            ],
+            "notes": "Tier: T2-Medium (UX improvement). Source files: src/stages/caption_stage.py, src/caption/batch_processor.py:427-441 (_notify_progress). Current logging shows per-video status but no batch-level progress summary. Users can't easily tell how far along the batch is."
         },
         {
-            "id": "US-36-011",
-            "title": "Add get_rotation_budget_status method to MullvadVPN",
-            "acceptanceCriteria": [
-                "Add get_rotation_budget_status() method returning dict with: rotations_used, rotations_remaining, cooldown_active, cooldown_remaining_seconds",
-                "Use existing _switch_count, _max_rotations, _last_rotation_time, _rotation_delay fields",
-                "Add test verifying budget status reflects current rotation state",
-                "Run pytest tests/test_mullvad*.py -v --tb=short -x to verify",
-                "Run python -m py_compile src/downloader/mullvad_vpn.py to verify syntax"
-            ],
+            "id": "US-37-012",
+            "title": "Add integration test for caption stage with large batch",
+            "priority": "low",
             "passes": false,
-            "priority": 11,
-            "notes": "Tier 1 (Quick Win). Source file: src/downloader/mullvad_vpn.py. Sprint 35 added the fields - now expose them via a clean getter for metrics/reporting."
-        },
-        {
-            "id": "US-36-012",
-            "title": "Sprint 36 verification",
             "acceptanceCriteria": [
-                "Verify all Sprint 36 stories (US-36-002 through US-36-011) are complete",
-                "Run pytest tests/test_mullvad*.py tests/test_vpn*.py tests/test_escalation*.py -v --tb=short",
-                "Run pytest tests/test_pipeline*.py -v --tb=short",
-                "Verify no regressions: pytest tests/ -v --tb=short -x (stop on first failure)",
-                "Update CLAUDE.md Session History with Sprint 36 summary if needed"
+                "Create test_caption_stage_large_batch.py in tests/integration/",
+                "Test fixture generates 200 mock video IDs",
+                "Test verifies budget scales correctly for large batch",
+                "Test verifies text_metadata is populated without AttributeError",
+                "Test verifies early termination works when success rate drops",
+                "Test marked with @pytest.mark.integration for selective runs"
             ],
-            "passes": false,
-            "priority": 12,
-            "notes": "Meta-story for sprint verification. Ensures all stories pass and no regressions introduced."
+            "notes": "Tier: T2-Medium (test coverage). Source files: tests/integration/ (new file), src/stages/caption_stage.py. Integration test ensures the fixes work together for realistic batch sizes. Uses mocked CaptionFetcher to avoid network calls."
         }
     ]
 }

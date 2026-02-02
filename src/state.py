@@ -147,6 +147,7 @@ class PipelineState:
 
     # === CAPTION STATE ===
     caption_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # video_id -> caption data
+    text_metadata: List[Dict[str, Any]] = field(default_factory=list)  # Populated by _populate_text_metadata
 
     # === MATCHING STATE ===
     matches: List[Match] = field(default_factory=list)
