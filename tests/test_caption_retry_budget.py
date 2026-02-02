@@ -4505,3 +4505,247 @@ class TestCaptionRetryBudgetProgressPercentage:
             budget.record_failure("video")
 
         assert budget.get_videos_processed() == 40
+
+
+class TestCaptionRetryBudgetIntegrityCheck:
+    """Test restore_with_integrity_check for batch_size mismatch detection (US-41-012)."""
+
+    @pytest.mark.fast
+    def test_batch_size_change_triggers_warning(self, caplog):
+        """Verify batch_size change is detected and logged as WARNING."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        checkpoint_data = {
+            "attempts": 50,
+            "failures": 10,
+            "successes": 40,
+            "backoff_time_spent": 5.0,
+            "videos_skipped": 0,
+            "max_attempts": 100,
+            "max_backoff_time": 300.0,
+            "batch_size": 50,  # Old checkpoint was for 50 videos
+            "error_counts": {},
+            "vpn_resets_used": 0,
+            "max_vpn_resets": 2,
+            "early_terminated": False,
+            "early_termination_reason": None,
+        }
+
+        # Current batch has 175 videos - much larger
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+        )
+
+        # Verify batch_size_changed is True
+        assert restore_info["batch_size_changed"] is True
+        assert restore_info["restored_batch_size"] == 50
+        assert restore_info["current_batch_size"] == 175
+
+        # Verify WARNING was logged
+        assert "[US-41-012]" in caplog.text
+        assert "batch_size (50) differs from current (175)" in caplog.text
+
+    @pytest.mark.fast
+    def test_batch_size_increase_triggers_rescale(self, caplog):
+        """Verify current > restored batch_size forces re-scale."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        checkpoint_data = {
+            "attempts": 50,
+            "failures": 10,
+            "successes": 40,
+            "backoff_time_spent": 5.0,
+            "videos_skipped": 0,
+            "max_attempts": 100,  # Scaled for 50 videos
+            "max_backoff_time": 300.0,
+            "batch_size": 50,
+            "error_counts": {},
+            "vpn_resets_used": 0,
+            "max_vpn_resets": 2,
+            "early_terminated": False,
+            "early_termination_reason": None,
+        }
+
+        # Current batch is 175 - requires ~263 attempts at 1.5/video
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+            auto_scale=True,
+            attempts_per_video=1.5,
+        )
+
+        # Verify force_rescaled is True
+        assert restore_info["force_rescaled"] is True
+        # 175 * 1.5 = 262.5 -> 263
+        assert restore_info["scaled_max_attempts"] == 263
+        assert budget.max_attempts == 263
+        assert budget.batch_size == 175
+
+        # Verify INFO log about re-scaling
+        assert "Force re-scaled" in caplog.text
+
+    @pytest.mark.fast
+    def test_batch_size_decrease_no_rescale(self):
+        """Verify current < restored batch_size does NOT force re-scale."""
+        checkpoint_data = {
+            "attempts": 50,
+            "failures": 10,
+            "successes": 40,
+            "backoff_time_spent": 5.0,
+            "videos_skipped": 0,
+            "max_attempts": 300,  # Was scaled for 200 videos
+            "max_backoff_time": 300.0,
+            "batch_size": 200,
+            "error_counts": {},
+            "vpn_resets_used": 0,
+            "max_vpn_resets": 2,
+            "early_terminated": False,
+            "early_termination_reason": None,
+        }
+
+        # Current batch is only 50 - smaller than original
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=50,
+            auto_scale=True,
+            attempts_per_video=1.5,
+        )
+
+        # batch_size changed but no rescale needed (current smaller)
+        assert restore_info["batch_size_changed"] is True
+        assert restore_info["force_rescaled"] is False
+        assert restore_info["scaled_max_attempts"] is None
+        # max_attempts preserved from checkpoint
+        assert budget.max_attempts == 300
+        assert budget.batch_size == 50
+
+    @pytest.mark.fast
+    def test_no_checkpoint_data_returns_empty_info(self):
+        """Verify None checkpoint data returns proper defaults."""
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            None,
+            current_batch_size=100,
+        )
+
+        assert restore_info["batch_size_changed"] is False
+        assert restore_info["restored_batch_size"] is None
+        assert restore_info["current_batch_size"] == 100
+        assert restore_info["force_rescaled"] is False
+        assert restore_info["scaled_max_attempts"] is None
+        assert budget.batch_size == 100
+
+    @pytest.mark.fast
+    def test_restore_info_includes_all_fields(self):
+        """Verify restore_info dict has all required fields per acceptance criteria."""
+        checkpoint_data = {
+            "batch_size": 50,
+            "max_attempts": 100,
+        }
+
+        _, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+        )
+
+        # All required fields must be present
+        assert "batch_size_changed" in restore_info
+        assert "restored_batch_size" in restore_info
+        assert "current_batch_size" in restore_info
+        assert "force_rescaled" in restore_info
+        assert "scaled_max_attempts" in restore_info
+
+    @pytest.mark.fast
+    def test_same_batch_size_no_change(self):
+        """Verify same batch_size reports no change."""
+        checkpoint_data = {
+            "batch_size": 100,
+            "max_attempts": 150,
+        }
+
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=100,
+        )
+
+        assert restore_info["batch_size_changed"] is False
+        assert restore_info["force_rescaled"] is False
+        assert budget.batch_size == 100
+
+    @pytest.mark.fast
+    def test_auto_scale_disabled_no_rescale(self):
+        """Verify auto_scale=False prevents force re-scale."""
+        checkpoint_data = {
+            "batch_size": 50,
+            "max_attempts": 100,
+        }
+
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+            auto_scale=False,  # Disabled
+        )
+
+        # batch_size changed but no rescale because auto_scale=False
+        assert restore_info["batch_size_changed"] is True
+        assert restore_info["force_rescaled"] is False
+        assert budget.max_attempts == 100  # Unchanged
+
+    @pytest.mark.fast
+    def test_rescale_respects_attempts_per_video(self):
+        """Verify different attempts_per_video ratios affect scaling."""
+        checkpoint_data = {
+            "batch_size": 50,
+            "max_attempts": 100,
+        }
+
+        # With 2.0 attempts_per_video: 175 * 2.0 = 350
+        _, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+            auto_scale=True,
+            attempts_per_video=2.0,
+        )
+
+        assert restore_info["force_rescaled"] is True
+        assert restore_info["scaled_max_attempts"] == 350
+
+    @pytest.mark.fast
+    def test_null_batch_size_in_checkpoint(self):
+        """Verify checkpoint with null batch_size doesn't trigger change warning."""
+        checkpoint_data = {
+            "batch_size": None,  # Old checkpoint format
+            "max_attempts": 100,
+        }
+
+        _, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+        )
+
+        # None != 175 but we only flag change when restored_batch_size is not None
+        assert restore_info["batch_size_changed"] is False
+        assert restore_info["restored_batch_size"] is None
+
+    @pytest.mark.fast
+    def test_rescale_only_when_required_exceeds_max(self):
+        """Verify re-scale only happens when required > current max_attempts."""
+        checkpoint_data = {
+            "batch_size": 50,
+            "max_attempts": 500,  # Already high enough for 175 videos
+        }
+
+        # 175 * 1.5 = 263, but max_attempts is already 500
+        budget, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+            checkpoint_data,
+            current_batch_size=175,
+            auto_scale=True,
+            attempts_per_video=1.5,
+        )
+
+        # batch_size changed but no rescale needed (500 > 263)
+        assert restore_info["batch_size_changed"] is True
+        assert restore_info["force_rescaled"] is False
+        assert budget.max_attempts == 500  # Preserved

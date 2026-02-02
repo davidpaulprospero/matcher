@@ -286,6 +286,8 @@ class CaptionStage(Stage):
             # US-40-002: Restore retry budget state from checkpoint if available
             # When resuming from checkpoint, the budget limits may have been scaled for
             # a previous batch size. After restoring, we'll re-scale for the current batch.
+            # US-41-012: Store checkpoint data for later integrity check when batch_size is known
+            checkpoint_retry_budget_data = None
             if retry_budget:
                 # US-41-008: Log retry budget state BEFORE checkpoint restore
                 logger.info(
@@ -295,8 +297,10 @@ class CaptionStage(Stage):
                 try:
                     checkpoint_data = checkpoint.get_stage_data(self.name)
                     if checkpoint_data and 'retry_budget' in checkpoint_data:
+                        # US-41-012: Store for later integrity check
+                        checkpoint_retry_budget_data = checkpoint_data['retry_budget']
                         restored_budget = CaptionRetryBudget.from_dict(
-                            checkpoint_data['retry_budget']
+                            checkpoint_retry_budget_data
                         )
                         # Preserve usage counters from checkpoint
                         retry_budget.attempts = restored_budget.attempts
@@ -697,6 +701,7 @@ class CaptionStage(Stage):
                 # US-39-010: Use ensure_scaled() convenience method
                 # US-40-002: Re-scale budget after checkpoint restoration
                 # US-41-003: Log budget state BEFORE and AFTER scaling for debugging
+                # US-41-012: Perform batch_size integrity check when checkpoint data exists
                 # This handles auto_scale check, idempotency, and logging internally
                 if retry_budget:
                     # Check if budget was restored from checkpoint (has previous batch_size)
@@ -710,29 +715,55 @@ class CaptionStage(Stage):
                         f"auto_scale={retry_budget.auto_scale}"
                     )
 
-                    scaled = retry_budget.ensure_scaled(batch_size)
+                    # US-41-012: Perform integrity check if checkpoint data exists
+                    restore_info = None
+                    if checkpoint_retry_budget_data:
+                        _, restore_info = CaptionRetryBudget.restore_with_integrity_check(
+                            checkpoint_retry_budget_data,
+                            current_batch_size=batch_size,
+                            auto_scale=retry_budget.auto_scale,
+                            attempts_per_video=retry_budget.attempts_per_video,
+                        )
+                        # Log restore info for debugging
+                        if restore_info.get("batch_size_changed"):
+                            logger.warning(
+                                f"[US-41-012] Checkpoint batch_size ({restore_info['restored_batch_size']}) "
+                                f"differs from current ({batch_size})"
+                            )
+                        if restore_info.get("force_rescaled"):
+                            # Apply the forced re-scale to our budget
+                            retry_budget.max_attempts = restore_info["scaled_max_attempts"]
+                            retry_budget.batch_size = batch_size
+                            logger.info(
+                                f"[US-41-012] Force re-scaled from checkpoint: max_attempts="
+                                f"{restore_info['scaled_max_attempts']} for batch_size={batch_size}"
+                            )
 
-                    # US-41-003: Log AFTER scaling - shows whether scaling occurred and new value
-                    if scaled:
-                        logger.info(
-                            f"[US-41-003] Retry budget scaled: max_attempts from 100 to "
-                            f"{retry_budget.max_attempts} for batch of {batch_size} videos"
-                        )
-                        if was_restored and old_batch_size != batch_size:
+                    # Only call ensure_scaled if we didn't already force re-scale
+                    if not (restore_info and restore_info.get("force_rescaled")):
+                        scaled = retry_budget.ensure_scaled(batch_size)
+
+                        # US-41-003: Log AFTER scaling - shows whether scaling occurred and new value
+                        if scaled:
                             logger.info(
-                                f"Retry budget restored from checkpoint, re-scaling for batch of "
-                                f"{batch_size} videos (was {old_batch_size})"
+                                f"[US-41-003] Retry budget scaled: max_attempts from 100 to "
+                                f"{retry_budget.max_attempts} for batch of {batch_size} videos"
                             )
-                    else:
-                        logger.info(
-                            f"[US-41-003] Retry budget scaling not needed: max_attempts="
-                            f"{retry_budget.max_attempts} sufficient for batch_size={batch_size}"
-                        )
-                        if was_restored:
+                            if was_restored and old_batch_size != batch_size:
+                                logger.info(
+                                    f"Retry budget restored from checkpoint, re-scaling for batch of "
+                                    f"{batch_size} videos (was {old_batch_size})"
+                                )
+                        else:
                             logger.info(
-                                f"Retry budget restored from checkpoint, re-scaling for batch of "
-                                f"{batch_size} videos"
+                                f"[US-41-003] Retry budget scaling not needed: max_attempts="
+                                f"{retry_budget.max_attempts} sufficient for batch_size={batch_size}"
                             )
+                            if was_restored:
+                                logger.info(
+                                    f"Retry budget restored from checkpoint, re-scaling for batch of "
+                                    f"{batch_size} videos"
+                                )
 
                     # US-41-004: Fail-fast verification - catch math errors before processing
                     # This raises ValueError if budget is insufficient, preventing wasted work
