@@ -48,7 +48,7 @@
             "id": "US-42-003",
             "title": "Add defensive state validation in _populate_text_metadata",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "_populate_text_metadata() validates state has text_metadata before calling .extend()",
                 "If text_metadata is None, initialize it as empty list rather than raising AttributeError",
@@ -56,13 +56,13 @@
                 "Method remains backward compatible with existing callers",
                 "Add test that calls _populate_text_metadata with state missing text_metadata"
             ],
-            "notes": "Tier 1 Bug Fix (Defense in Depth): src/stages/caption_stage.py line 1346+\n\nSecondary fix for US-42-002: Even after fixing restore(), add defensive check in _populate_text_metadata() itself.\n\nPattern to follow: Similar to _ensure_state_attributes() which uses setattr(state, 'text_metadata', []) for missing attributes."
+            "notes": "PRE-IMPLEMENTED by US-41-007: Defensive validation already exists in _populate_text_metadata() (lines 1369-1428 in caption_stage.py). Includes:\n1. validate_state_attributes() call for PipelineState instances (lines 1373-1382)\n2. Manual initialization for non-PipelineState objects (lines 1384-1391)\n3. Secondary fallback before .extend() call (lines 1421-1428)\n4. All paths log US-41-007 warnings when initialization triggers\n5. Tests exist in TestUS41007PopulateTextMetadataDefensiveValidation class including test_mock_state_object_without_text_metadata"
         },
         {
             "id": "US-42-004",
             "title": "Fix auto_scale not triggering for large batches with restored checkpoint",
             "priority": "critical",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When checkpoint restores retry budget with attempts, scaling still occurs for current batch size",
                 "Batch of 175 videos results in max_attempts >= 350 (175 * 2.0 attempts_per_video)",
@@ -70,7 +70,7 @@
                 "Add test: restore budget with 50 attempts used, new batch of 200, verify scaling to 400",
                 "ensure_scaled() considers remaining budget headroom, not just current max_attempts"
             ],
-            "notes": "Tier 1 Bug Fix (Critical): src/caption/retry_budget.py + src/stages/caption_stage.py\n\nUser log shows: 175 videos, 100 max_attempts, 99 successes then budget_exhausted at video 101.\n\nWith auto_scale=true (default), a batch of 175 should scale to 175*2.0=350 attempts.\n\nLikely cause: Either auto_scale config is false, or ensure_scaled() isn't called after checkpoint restore, or the scaling logic has a bug when budget already has attempts used.\n\nKey methods:\n- ensure_scaled() in retry_budget.py\n- Lines 693-770 in caption_stage.py where scaling occurs"
+            "notes": "COMPLETED: Fixed bug in ensure_scaled() (src/caption/retry_budget.py lines 1015-1096).\n\nRoot Cause: When checkpoint restored batch_size=175 but caption_stage.py kept max_attempts=100 from config (line 316 comment: 'Keep max_attempts from config'), the old idempotency check `if self.batch_size == batch_size` would skip scaling because batch_size matched, even though max_attempts was insufficient.\n\nFix: Changed idempotency check to `if self.batch_size == batch_size and required_attempts <= self.max_attempts`. Now scaling occurs even when batch_size is pre-set, if max_attempts is insufficient.\n\nAdded 3 tests in TestCaptionRetryBudgetEnsureScaled:\n1. test_ensure_scaled_after_checkpoint_restore_with_batch_size_set_but_max_attempts_default\n2. test_ensure_scaled_after_restore_200_videos_50_attempts_used (AC4)\n3. test_ensure_scaled_considers_remaining_budget_headroom (AC5)\n\nAll 265 tests in test_caption_retry_budget.py pass."
         },
         {
             "id": "US-42-005",
