@@ -131,9 +131,9 @@
                                 "Run: pytest tests/test_caption_retry_budget.py -v --tb=short",
                                 "Commit: feat: [US-43-008] Add diagnostic logging to ensure_scaled decision point"
                             ],
-                            "passes": false,
+                            "passes": true,
                             "priority": 43008,
-                            "notes": "Tier 2 (observability). File: src/caption/retry_budget.py. The logs showed '100/100' but no explanation of why scaling didn't trigger. Adding proactive logging helps future debugging."
+                            "notes": "Tier 2 (observability). Added INFO log at decision point BEFORE scaling logic: '[US-43-008] ensure_scaled: batch_size={batch_size}, required={required_attempts}, current_max={max_attempts}, will_scale={will_scale}'. Moved required_attempts calculation to top of method so it's available for the log. All 303 tests pass."
                         },
                         {
                             "id":  "US-43-009",

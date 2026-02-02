@@ -1138,6 +1138,18 @@ class CaptionRetryBudget:
             False
         """
         with self._lock:
+            # Calculate required attempts for this batch (needed for decision logging)
+            required_attempts = int(batch_size * self.attempts_per_video + 0.5)
+            will_scale = self.auto_scale and required_attempts > self.max_attempts
+
+            # US-43-008: Log decision point BEFORE the scaling decision
+            # This helps diagnose why scaling didn't trigger in production
+            logger.info(
+                f"[US-43-008] ensure_scaled: batch_size={batch_size}, "
+                f"required={required_attempts}, current_max={self.max_attempts}, "
+                f"will_scale={will_scale}"
+            )
+
             # Check if auto_scale is disabled
             if not self.auto_scale:
                 logger.debug(
@@ -1145,9 +1157,6 @@ class CaptionRetryBudget:
                     f"not scaling for batch_size={batch_size}"
                 )
                 return False
-
-            # Calculate required attempts for this batch
-            required_attempts = int(batch_size * self.attempts_per_video + 0.5)
 
             # US-42-004: Check if already scaled AND max_attempts is sufficient
             # Previously, we only checked batch_size match which caused a bug:
