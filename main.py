@@ -216,6 +216,10 @@ def main():
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True
 
+    # Apply --reset-budget flag (US-42-012)
+    if hasattr(args, 'reset_budget') and args.reset_budget:
+        config.download.reset_budget = True
+
     # Apply caption-first mode CLI flags (handle dict or object config - Rule 6)
     caption_first = config.download.caption_first
     if getattr(args, 'caption_first', False):

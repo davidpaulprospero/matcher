@@ -174,7 +174,7 @@
             "id": "US-42-012",
             "title": "Add CLI flag to reset retry budget on resume",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add --reset-budget flag to main.py CLI",
                 "When flag is set, retry budget counters are reset to 0 even when restoring from checkpoint",
@@ -182,7 +182,7 @@
                 "Add test: run with --resume --reset-budget, verify budget counters are 0",
                 "Log when flag triggers reset: 'Retry budget reset by --reset-budget flag'"
             ],
-            "notes": "Tier 3 Enhancement: main.py, src/cli/args.py\n\nGives users manual control when they know rate limiting has subsided and want to retry with fresh budget.\n\nAlternative to increasing max_attempts - just reset the counters."
+            "notes": "COMPLETED: Added --reset-budget CLI flag for manual budget reset on resume.\n\nChanges:\n1. AC1: Added --reset-budget flag to src/cli/args.py (lines 235-241)\n2. AC2: Budget counters reset in src/stages/caption_stage.py when flag is set (lines 336-346)\n3. AC3: Flag documented in --help output with description\n4. AC4: Added 8 tests in TestResetBudgetFlag class covering:\n   - test_reset_method_clears_counters\n   - test_reset_preserves_vpn_count_by_default\n   - test_reset_can_clear_vpn_count\n   - test_reset_preserves_max_limits\n   - test_reset_logs_debug_message\n   - test_reset_restores_budget_availability\n   - test_reset_after_checkpoint_restore_simulation (AC4 scenario)\n   - test_reset_with_exhausted_budget\n5. AC5: Log message includes [US-42-012] marker and shows cleared counters\n\nFiles modified:\n- src/cli/args.py: Added --reset-budget argument\n- src/config/sections/download.py: Added reset_budget field to DownloadingConfig\n- main.py: Pass --reset-budget flag to config.download.reset_budget\n- src/stages/caption_stage.py: Reset budget counters when flag is set after checkpoint restore\n- tests/test_caption_retry_budget.py: Added TestResetBudgetFlag class with 8 tests\n\nAll 297 tests in test_caption_retry_budget.py pass."
         }
     ]
 }

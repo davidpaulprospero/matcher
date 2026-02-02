@@ -5481,3 +5481,227 @@ class TestCaptionRetryBudgetGracefulDegradation:
         # 100 - 25 = 75 expected skips
         assert result["expected_skips"] == 75
         assert result["remaining_attempts"] == 50
+
+
+# ============================================================================
+# US-42-012: Add CLI flag to reset retry budget on resume
+# ============================================================================
+
+
+class TestResetBudgetFlag:
+    """Test --reset-budget CLI flag behavior (US-42-012).
+
+    Acceptance Criteria:
+    AC1: Add --reset-budget flag to main.py CLI
+    AC2: When flag is set, retry budget counters are reset to 0 even when restoring from checkpoint
+    AC3: Flag is documented in --help output
+    AC4: Test: run with --resume --reset-budget, verify budget counters are 0
+    AC5: Log when budget is reset with story ID format
+    """
+
+    @pytest.mark.fast
+    def test_reset_method_clears_counters(self):
+        """Test reset() method clears all usage counters.
+
+        US-42-012 AC2: Budget counters are reset to 0.
+        """
+        budget = CaptionRetryBudget()
+
+        # Simulate usage
+        budget.attempts = 50
+        budget.failures = 20
+        budget.successes = 30
+        budget.backoff_time_spent = 150.0
+        budget.videos_skipped = 10
+        budget.error_counts = {CaptionErrorCategory.NETWORK: 15, CaptionErrorCategory.TIMEOUT: 5}
+        budget.attempts_per_video_id = {"vid1": 3, "vid2": 5}
+        budget.circuit_breaker_trips = 2
+        budget.early_terminated = True
+        budget.early_termination_reason = "test reason"
+
+        # Reset with preserve_vpn_count=True (default for CLI --reset-budget)
+        budget.reset(preserve_vpn_count=True)
+
+        # All counters should be 0
+        assert budget.attempts == 0
+        assert budget.failures == 0
+        assert budget.successes == 0
+        assert budget.backoff_time_spent == 0.0
+        assert budget.videos_skipped == 0
+        assert budget.error_counts == {}
+        assert budget.attempts_per_video_id == {}
+        assert budget.circuit_breaker_trips == 0
+        assert budget.early_terminated is False
+        assert budget.early_termination_reason is None
+
+    @pytest.mark.fast
+    def test_reset_preserves_vpn_count_by_default(self):
+        """Test reset() preserves VPN reset count by default.
+
+        US-42-012: VPN count should persist across budget resets.
+        """
+        budget = CaptionRetryBudget()
+        budget.vpn_resets_used = 2
+        budget.max_vpn_resets = 3
+        budget.attempts = 50
+
+        budget.reset(preserve_vpn_count=True)
+
+        assert budget.vpn_resets_used == 2, "VPN reset count should be preserved"
+        assert budget.attempts == 0, "Attempts should be reset"
+
+    @pytest.mark.fast
+    def test_reset_can_clear_vpn_count(self):
+        """Test reset() can optionally clear VPN count.
+
+        US-42-012: Full session reset clears everything.
+        """
+        budget = CaptionRetryBudget()
+        budget.vpn_resets_used = 2
+        budget.attempts = 50
+
+        budget.reset(preserve_vpn_count=False)
+
+        assert budget.vpn_resets_used == 0, "VPN reset count should be cleared"
+        assert budget.attempts == 0
+
+    @pytest.mark.fast
+    def test_reset_preserves_max_limits(self):
+        """Test reset() preserves budget limit settings.
+
+        US-42-012: Only counters are reset, limits remain.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 200
+        budget.max_backoff_time = 600.0
+        budget.auto_scale = True
+        budget.attempts_per_video = 2.5
+        budget.attempts = 100
+
+        budget.reset(preserve_vpn_count=True)
+
+        assert budget.max_attempts == 200, "max_attempts should be preserved"
+        assert budget.max_backoff_time == 600.0, "max_backoff_time should be preserved"
+        assert budget.auto_scale is True, "auto_scale should be preserved"
+        assert budget.attempts_per_video == 2.5, "attempts_per_video should be preserved"
+        assert budget.attempts == 0, "attempts should be reset"
+
+    @pytest.mark.fast
+    def test_reset_logs_debug_message(self, caplog):
+        """Test reset() logs debug message.
+
+        US-42-012: Log when budget is reset.
+        """
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        budget = CaptionRetryBudget()
+        budget.attempts = 50
+        budget.vpn_resets_used = 1
+
+        budget.reset(preserve_vpn_count=True)
+
+        debug_logs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        assert len(debug_logs) >= 1
+        log_text = debug_logs[-1].message
+        assert "reset" in log_text.lower()
+        assert "vpn_resets preserved=True" in log_text
+
+    @pytest.mark.fast
+    def test_reset_restores_budget_availability(self):
+        """Test reset() makes full budget available again.
+
+        US-42-012: After reset, budget_exhausted() returns False.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.attempts = 100  # Exhausted
+
+        assert budget.budget_exhausted() is True
+
+        budget.reset(preserve_vpn_count=True)
+
+        assert budget.budget_exhausted() is False
+        assert budget.attempts_remaining() == 100
+
+    @pytest.mark.fast
+    def test_reset_after_checkpoint_restore_simulation(self):
+        """Test reset behavior after simulated checkpoint restore.
+
+        US-42-012 AC4: Simulate --resume --reset-budget flow.
+
+        This simulates what happens in caption_stage.py:
+        1. Create budget from config
+        2. Restore counters from checkpoint
+        3. Apply --reset-budget flag to reset counters
+        4. Verify counters are 0
+        """
+        # Step 1: Create budget from config (simulates from_config)
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 300.0
+
+        # Step 2: Restore from checkpoint (simulates from_dict merge)
+        checkpoint_data = {
+            "attempts": 80,
+            "failures": 30,
+            "successes": 50,
+            "backoff_time_spent": 200.0,
+            "videos_skipped": 5,
+            "vpn_resets_used": 1,
+        }
+        budget.attempts = checkpoint_data["attempts"]
+        budget.failures = checkpoint_data["failures"]
+        budget.successes = checkpoint_data["successes"]
+        budget.backoff_time_spent = checkpoint_data["backoff_time_spent"]
+        budget.videos_skipped = checkpoint_data["videos_skipped"]
+        budget.vpn_resets_used = checkpoint_data["vpn_resets_used"]
+
+        # Verify checkpoint data was applied
+        assert budget.attempts == 80
+        assert budget.budget_exhausted() is False  # 80 < 100
+
+        # Step 3: Apply --reset-budget flag
+        budget.reset(preserve_vpn_count=True)
+
+        # Step 4: Verify counters are 0
+        assert budget.attempts == 0
+        assert budget.failures == 0
+        assert budget.successes == 0
+        assert budget.backoff_time_spent == 0.0
+        assert budget.videos_skipped == 0
+        # VPN count preserved
+        assert budget.vpn_resets_used == 1
+
+        # Full budget available
+        assert budget.attempts_remaining() == 100
+
+    @pytest.mark.fast
+    def test_reset_with_exhausted_budget(self):
+        """Test reset() recovers from exhausted budget.
+
+        US-42-012: User wants to retry after rate limiting subsides.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 300.0
+
+        # Exhaust budget
+        for i in range(100):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}", CaptionErrorCategory.RATE_LIMIT)
+            budget.record_backoff(3.0, f"video_{i}")
+
+        assert budget.budget_exhausted() is True
+        assert budget.attempts == 100
+        assert budget.backoff_time_spent == 300.0
+
+        # Reset to retry
+        budget.reset(preserve_vpn_count=True)
+
+        # Budget fully available
+        assert budget.budget_exhausted() is False
+        assert budget.attempts == 0
+        assert budget.backoff_time_spent == 0.0
+        assert budget.attempts_remaining() == 100
+        assert budget.backoff_time_remaining() == 300.0

@@ -238,4 +238,13 @@ Examples:
              'Useful for previewing cleanup impact.'
     )
 
+    # Retry budget control (US-42-012)
+    parser.add_argument(
+        '--reset-budget',
+        action='store_true',
+        help='Reset retry budget counters when resuming from checkpoint. '
+             'Use with --resume when rate limiting has subsided and you want '
+             'to retry with a fresh budget instead of continuing from where it left off.'
+    )
+
     return parser.parse_args()

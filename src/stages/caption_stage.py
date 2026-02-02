@@ -333,6 +333,19 @@ class CaptionStage(Stage):
                             f"{retry_budget.attempts} attempts, {retry_budget.failures} failures, "
                             f"{retry_budget.videos_skipped} skipped"
                         )
+
+                        # US-42-012: Reset budget counters if --reset-budget flag is set
+                        reset_budget_flag = getattr(config.download, 'reset_budget', False)
+                        if reset_budget_flag:
+                            old_attempts = retry_budget.attempts
+                            old_failures = retry_budget.failures
+                            old_skipped = retry_budget.videos_skipped
+                            retry_budget.reset(preserve_vpn_count=True)
+                            logger.info(
+                                f"[US-42-012] Retry budget reset via --reset-budget flag: "
+                                f"cleared {old_attempts} attempts, {old_failures} failures, "
+                                f"{old_skipped} skipped"
+                            )
                 except Exception as e:
                     logger.debug(f"Could not restore retry budget from checkpoint: {e}")
 
