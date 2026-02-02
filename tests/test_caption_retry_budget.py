@@ -3883,18 +3883,66 @@ class TestCaptionRetryBudgetVerification:
 
 
 class TestCaptionRetryBudgetConfigValidation:
-    """Tests for US-41-004: Config validation in __post_init__.
+    """Tests for US-41-004 and US-41-011: Config validation in __post_init__.
 
-    Verifies that CaptionRetryBudgetConfig validates attempts_per_video > 0
-    at configuration load time.
+    Verifies that CaptionRetryBudgetConfig validates minimum values
+    at configuration load time to prevent misconfiguration.
+
+    US-41-004: attempts_per_video > 0 (updated to >= 1.0 in US-41-011)
+    US-41-011: min values for max_attempts, attempts_per_video, max_backoff_time_seconds
     """
 
-    @pytest.mark.fast
-    def test_config_validates_attempts_per_video_positive(self):
-        """Verify ValueError raised when attempts_per_video <= 0.
+    # ============================================================
+    # US-41-011: max_attempts validation (>= 10 or 0 for unlimited)
+    # ============================================================
 
-        US-41-004: Add config validation in __post_init__ for attempts_per_video > 0.
-        """
+    @pytest.mark.fast
+    def test_config_validates_max_attempts_minimum(self):
+        """Verify ValueError raised when max_attempts < 10 and != 0 (US-41-011 AC2)."""
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(max_attempts=5)
+
+        error_msg = str(exc_info.value)
+        assert "max_attempts" in error_msg
+        assert ">= 10" in error_msg
+        assert "config.yaml" in error_msg
+
+    @pytest.mark.fast
+    def test_config_accepts_max_attempts_unlimited(self):
+        """Verify max_attempts=0 (unlimited) is accepted (US-41-011 AC2)."""
+        config = ConfigCaptionRetryBudgetConfig(max_attempts=0)
+        assert config.max_attempts == 0
+
+    @pytest.mark.fast
+    def test_config_accepts_max_attempts_at_minimum(self):
+        """Verify max_attempts=10 (minimum) is accepted (US-41-011 AC2)."""
+        config = ConfigCaptionRetryBudgetConfig(max_attempts=10)
+        assert config.max_attempts == 10
+
+    @pytest.mark.fast
+    def test_config_accepts_max_attempts_above_minimum(self):
+        """Verify max_attempts > 10 is accepted."""
+        config = ConfigCaptionRetryBudgetConfig(max_attempts=100)
+        assert config.max_attempts == 100
+
+    # ============================================================
+    # US-41-011: attempts_per_video validation (>= 1.0)
+    # ============================================================
+
+    @pytest.mark.fast
+    def test_config_validates_attempts_per_video_minimum(self):
+        """Verify ValueError raised when attempts_per_video < 1.0 (US-41-011 AC3)."""
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(attempts_per_video=0.5)
+
+        error_msg = str(exc_info.value)
+        assert "attempts_per_video" in error_msg
+        assert ">= 1.0" in error_msg
+        assert "config.yaml" in error_msg
+
+    @pytest.mark.fast
+    def test_config_validates_attempts_per_video_zero(self):
+        """Verify ValueError raised when attempts_per_video = 0 (US-41-004/US-41-011)."""
         with pytest.raises(ValueError) as exc_info:
             ConfigCaptionRetryBudgetConfig(attempts_per_video=0)
 
@@ -3911,13 +3959,74 @@ class TestCaptionRetryBudgetConfigValidation:
         assert "attempts_per_video" in str(exc_info.value)
 
     @pytest.mark.fast
-    def test_config_accepts_positive_attempts_per_video(self):
-        """Verify positive attempts_per_video is accepted."""
-        config = ConfigCaptionRetryBudgetConfig(attempts_per_video=0.1)
-        assert config.attempts_per_video == 0.1
+    def test_config_accepts_attempts_per_video_at_minimum(self):
+        """Verify attempts_per_video=1.0 (minimum) is accepted (US-41-011 AC3)."""
+        config = ConfigCaptionRetryBudgetConfig(attempts_per_video=1.0)
+        assert config.attempts_per_video == 1.0
 
+    @pytest.mark.fast
+    def test_config_accepts_attempts_per_video_above_minimum(self):
+        """Verify attempts_per_video > 1.0 is accepted."""
         config = ConfigCaptionRetryBudgetConfig(attempts_per_video=2.0)
         assert config.attempts_per_video == 2.0
+
+        config = ConfigCaptionRetryBudgetConfig(attempts_per_video=3.5)
+        assert config.attempts_per_video == 3.5
+
+    # ============================================================
+    # US-41-011: max_backoff_time_seconds validation (>= 30.0 or 0)
+    # ============================================================
+
+    @pytest.mark.fast
+    def test_config_validates_max_backoff_time_minimum(self):
+        """Verify ValueError raised when max_backoff_time_seconds < 30.0 and != 0 (US-41-011 AC4)."""
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(max_backoff_time_seconds=10.0)
+
+        error_msg = str(exc_info.value)
+        assert "max_backoff_time_seconds" in error_msg
+        assert ">= 30.0" in error_msg
+        assert "config.yaml" in error_msg
+
+    @pytest.mark.fast
+    def test_config_accepts_max_backoff_time_unlimited(self):
+        """Verify max_backoff_time_seconds=0 (unlimited) is accepted (US-41-011 AC4)."""
+        config = ConfigCaptionRetryBudgetConfig(max_backoff_time_seconds=0)
+        assert config.max_backoff_time_seconds == 0
+
+    @pytest.mark.fast
+    def test_config_accepts_max_backoff_time_at_minimum(self):
+        """Verify max_backoff_time_seconds=30.0 (minimum) is accepted (US-41-011 AC4)."""
+        config = ConfigCaptionRetryBudgetConfig(max_backoff_time_seconds=30.0)
+        assert config.max_backoff_time_seconds == 30.0
+
+    @pytest.mark.fast
+    def test_config_accepts_max_backoff_time_above_minimum(self):
+        """Verify max_backoff_time_seconds > 30.0 is accepted."""
+        config = ConfigCaptionRetryBudgetConfig(max_backoff_time_seconds=300.0)
+        assert config.max_backoff_time_seconds == 300.0
+
+    # ============================================================
+    # US-41-011: Helpful error messages (AC5)
+    # ============================================================
+
+    @pytest.mark.fast
+    def test_error_message_includes_config_yaml_path(self):
+        """Verify all validation errors include config.yaml path info (US-41-011 AC5)."""
+        # Test max_attempts error message
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(max_attempts=1)
+        assert "download.caption_first.retry_budget.max_attempts" in str(exc_info.value)
+
+        # Test attempts_per_video error message
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(attempts_per_video=0.5)
+        assert "download.caption_first.retry_budget.attempts_per_video" in str(exc_info.value)
+
+        # Test max_backoff_time_seconds error message
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(max_backoff_time_seconds=5.0)
+        assert "download.caption_first.retry_budget.max_backoff_time_seconds" in str(exc_info.value)
 
 
 class TestCaptionRetryBudgetPerVideoAttemptTracking:
