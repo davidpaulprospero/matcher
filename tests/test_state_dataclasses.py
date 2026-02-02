@@ -1273,5 +1273,67 @@ class TestMatchBoundaryConfidence:
         assert match.confidence > 0.0
 
 
+@pytest.mark.fast
+class TestPipelineStateTextMetadata:
+    """Test PipelineState.text_metadata attribute (US-37-002)."""
+
+    def test_text_metadata_exists_on_new_instance(self):
+        """Verify new PipelineState instance has empty text_metadata list."""
+        state = PipelineState()
+        assert hasattr(state, 'text_metadata')
+        assert isinstance(state.text_metadata, list)
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_text_metadata_extend_works_without_error(self):
+        """Verify text_metadata.extend() works without AttributeError."""
+        state = PipelineState()
+        # This is the operation that was failing at caption_stage.py:1053
+        metadata = [
+            {'video_id': 'abc123', 'text': 'Test caption'},
+            {'video_id': 'def456', 'text': 'Another caption'}
+        ]
+        state.text_metadata.extend(metadata)
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['video_id'] == 'abc123'
+
+    @pytest.mark.fast
+    def test_text_metadata_append_works(self):
+        """Verify text_metadata.append() works for single items."""
+        state = PipelineState()
+        state.text_metadata.append({'video_id': 'xyz789', 'text': 'Single caption'})
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_id'] == 'xyz789'
+
+    @pytest.mark.fast
+    def test_text_metadata_no_shared_mutable_defaults(self):
+        """Verify text_metadata is not shared between instances."""
+        state1 = PipelineState()
+        state2 = PipelineState()
+
+        state1.text_metadata.append({'video_id': 'vid1', 'text': 'Text 1'})
+
+        # state2 should be unaffected
+        assert state2.text_metadata == []
+        assert len(state1.text_metadata) == 1
+
+    @pytest.mark.fast
+    def test_text_metadata_type_hint_compatible(self):
+        """Verify text_metadata accepts Dict[str, Any] items as expected."""
+        state = PipelineState()
+        # The type hint is List[Dict[str, Any]]
+        complex_metadata = {
+            'video_id': 'test123',
+            'text': 'Caption text',
+            'start_time': 0.5,
+            'end_time': 5.5,
+            'confidence': 0.95,
+            'extra_field': ['nested', 'list']
+        }
+        state.text_metadata.append(complex_metadata)
+        assert state.text_metadata[0]['confidence'] == 0.95
+        assert state.text_metadata[0]['extra_field'] == ['nested', 'list']
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
