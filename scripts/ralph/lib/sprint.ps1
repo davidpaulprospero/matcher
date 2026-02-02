@@ -516,12 +516,12 @@ function New-SeedPRD {
                 id = $seedStoryId
                 title = "Generate sprint stories for $FocusAreaId focus area"
                 acceptanceCriteria = @(
-                    "Read scripts/ralph/ralph-config.json to understand the '$FocusAreaId' focus area"
-                    "Read scripts/ralph/prompt.md for project context and architecture notes"
-                    "Read scripts/ralph/queue.json for interview details (story outline, architecture decisions, key files)"
+                    "Read scripts/ralph/config/ralph-config.json to understand the '$FocusAreaId' focus area"
+                    "Read scripts/ralph/session/prompt.md for project context and architecture notes"
+                    "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)"
                     "Read CLAUDE.md for project conventions and known issues"
                     "Analyze the codebase to find 8-12 specific improvements for '$FocusAreaId'"
-                    "Add stories US-$newSprint-002 through US-$newSprint-012 to scripts/ralph/prd.json (MUST use sprint-prefixed IDs)"
+                    "Add stories US-$newSprint-002 through US-$newSprint-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)"
                     "Each story MUST have 4-6 testable acceptance criteria"
                     "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code"
                     "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass"
