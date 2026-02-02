@@ -139,8 +139,8 @@
                 "Default to false to preserve existing behavior",
                 "Add test: ensure_scaled with reset_on_scale=true clears counters"
             ],
-            "passes": false,
-            "notes": "Tier: T3 (Enhancement). Files: src/caption/retry_budget.py:25-65, src/caption/retry_budget.py:780-842. If checkpoint restored with 50 attempts already used and batch needs 300, user may want to reset on scale-up."
+            "passes": true,
+            "notes": "Tier: T3 (Enhancement). FIXED: Added reset_on_scale: bool = False to both CaptionRetryBudgetConfig classes (retry_budget.py and download.py). Modified ensure_scaled() to clear all counters when scaling AND reset_on_scale=true. Logs INFO with attempts cleared count. Added 2 tests: test_ensure_scaled_with_reset_on_scale_clears_counters and test_ensure_scaled_without_reset_on_scale_preserves_counters. All 8 ensure_scaled tests pass."
         },
         {
             "id": "US-41-010",
@@ -153,8 +153,8 @@
                 "Include progress_percentage in get_summary() output",
                 "Add test: progress_percentage returns correct value"
             ],
-            "passes": false,
-            "notes": "Tier: T3 (UX). Files: src/caption/retry_budget.py:255-282. The current log shows 100/100 attempts but user needs to know it happened at 57% through the batch to understand severity."
+            "passes": true,
+            "notes": "Tier: T3 (UX). FIXED: Added get_progress_percentage() method returning percentage of batch processed (successes+failures/batch_size*100). Added get_videos_processed() helper. Updated budget_exhausted() EXHAUSTED log to include 'at X% progress (Y/Z videos processed)'. Added progress_percentage and videos_processed to get_summary(). Added 9 tests in TestCaptionRetryBudgetProgressPercentage class."
         },
         {
             "id": "US-41-011",

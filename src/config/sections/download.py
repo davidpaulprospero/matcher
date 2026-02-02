@@ -220,11 +220,35 @@ class CaptionRetryBudgetConfig:
     reset_on_scale: bool = False
 
     def __post_init__(self) -> None:
-        """US-41-004: Validate configuration values at load time."""
-        if self.attempts_per_video <= 0:
+        """Validate configuration values at load time.
+
+        US-41-004: Validate attempts_per_video > 0
+        US-41-011: Validate minimum values to prevent misconfiguration
+        """
+        # US-41-011: max_attempts must be >= 10 (or 0 for unlimited)
+        # Setting max_attempts=5 for 175 videos guarantees failure
+        if self.max_attempts != 0 and self.max_attempts < 10:
             raise ValueError(
-                f"CaptionRetryBudgetConfig.attempts_per_video must be > 0, got {self.attempts_per_video}. "
+                f"CaptionRetryBudgetConfig.max_attempts must be >= 10 (or 0 for unlimited), "
+                f"got {self.max_attempts}. A value like 5 for a batch of 175 videos guarantees failure. "
+                f"Check config.yaml under download.caption_first.retry_budget.max_attempts"
+            )
+
+        # US-41-011: attempts_per_video must be >= 1.0 (need at least 1 attempt per video)
+        if self.attempts_per_video < 1.0:
+            raise ValueError(
+                f"CaptionRetryBudgetConfig.attempts_per_video must be >= 1.0, got {self.attempts_per_video}. "
+                f"Values below 1.0 would allow fewer attempts than videos in the batch. "
                 f"Check config.yaml under download.caption_first.retry_budget.attempts_per_video"
+            )
+
+        # US-41-011: max_backoff_time_seconds must be >= 30.0 (or 0 for unlimited)
+        # 30s minimum gives enough time for reasonable retry delays
+        if self.max_backoff_time_seconds != 0 and self.max_backoff_time_seconds < 30.0:
+            raise ValueError(
+                f"CaptionRetryBudgetConfig.max_backoff_time_seconds must be >= 30.0 (or 0 for unlimited), "
+                f"got {self.max_backoff_time_seconds}. Values below 30s don't allow meaningful backoff delays. "
+                f"Check config.yaml under download.caption_first.retry_budget.max_backoff_time_seconds"
             )
 
 
