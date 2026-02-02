@@ -69,8 +69,8 @@
                 "Add unit test verifying budget_consumed_pct is included in callback details",
                 "Add unit test verifying progress format includes budget when >50%"
             ],
-            "passes": false,
-            "notes": "Tier 2 (diagnostic). Target: src/stages/caption_stage.py:515-553 (on_progress callback), src/caption_fetcher.py:3403-3500 (fetch_single). Helps users understand budget consumption in real-time."
+            "passes": true,
+            "notes": "Tier 2 (diagnostic). Added _get_budget_consumed_pct() helper to BatchProcessor._notify_progress that automatically includes budget_consumed_pct in all progress callbacks when retry_budget is available. Updated caption_stage.py progress display to show budget percentage when >50% consumed. Tests in TestBatchProcessorBudgetStatus (test_batch_processor.py) and TestBudgetStatusDisplay (test_stage_caption.py)."
         },
         {
             "id": "US-38-005",

@@ -640,3 +640,177 @@ class TestBatchProcessorProgressReporting:
 
         # Final checkpoint should have all results
         assert len(checkpoint.results) == 25
+
+
+class TestBatchProcessorBudgetStatus:
+    """Tests for budget status in progress callbacks (US-38-004)."""
+
+    def test_budget_consumed_pct_included_in_callback_details(self):
+        """progress_callback details include budget_consumed_pct when retry_budget provided (US-38-004)."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.retry_budget import CaptionRetryBudget
+        from typing import Dict, List
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Create retry budget with known max_attempts
+        retry_budget = CaptionRetryBudget()
+        retry_budget.max_attempts = 100
+
+        # Collect all progress events with their details
+        progress_events: List[Dict] = []
+
+        def on_progress(video_id: str, status: str, details: Dict):
+            if status in ('success', 'failed', 'fetching', 'skipped'):
+                progress_events.append({
+                    'video_id': video_id,
+                    'status': status,
+                    'details': details.copy()
+                })
+
+        videos = [f"vid{i:03d}" for i in range(5)]
+        processor.process(videos, retry_budget=retry_budget, progress_callback=on_progress)
+
+        # All success events should include budget_consumed_pct
+        success_events = [e for e in progress_events if e['status'] == 'success']
+        assert len(success_events) == 5
+
+        for event in success_events:
+            assert 'budget_consumed_pct' in event['details'], \
+                f"budget_consumed_pct missing from success event for {event['video_id']}"
+            # Should be a percentage value
+            pct = event['details']['budget_consumed_pct']
+            assert isinstance(pct, (int, float)), f"Expected number, got {type(pct)}"
+            assert 0 <= pct <= 100, f"Percentage out of range: {pct}"
+
+    def test_budget_consumed_pct_not_included_without_retry_budget(self):
+        """progress_callback details do NOT include budget_consumed_pct when no retry_budget (US-38-004)."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from typing import Dict, List
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Collect progress events
+        progress_events: List[Dict] = []
+
+        def on_progress(video_id: str, status: str, details: Dict):
+            if status == 'success':
+                progress_events.append(details.copy())
+
+        videos = ["vid001", "vid002"]
+        processor.process(videos, progress_callback=on_progress)
+
+        # Without retry_budget, budget_consumed_pct should not be added
+        for details in progress_events:
+            assert 'budget_consumed_pct' not in details, \
+                "budget_consumed_pct should not be present without retry_budget"
+
+    def test_budget_consumed_pct_increases_over_batch(self):
+        """budget_consumed_pct increases as batch progresses (US-38-004)."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.retry_budget import CaptionRetryBudget
+        from typing import Dict, List
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        # Single worker to ensure sequential processing
+        config = BatchProcessorConfig(max_workers=1)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Create retry budget with known max
+        retry_budget = CaptionRetryBudget()
+        retry_budget.max_attempts = 10  # 10 videos * 1 attempt each = 100%
+
+        # Collect budget percentages
+        budget_pcts: List[float] = []
+
+        def on_progress(video_id: str, status: str, details: Dict):
+            if status == 'success' and 'budget_consumed_pct' in details:
+                budget_pcts.append(details['budget_consumed_pct'])
+
+        videos = [f"vid{i:03d}" for i in range(10)]
+        processor.process(videos, retry_budget=retry_budget, progress_callback=on_progress)
+
+        # Budget should increase with each video
+        assert len(budget_pcts) == 10
+        # First video should be at ~10%, last at 100%
+        assert budget_pcts[0] > 0
+        assert budget_pcts[-1] == 100.0
+        # Should be monotonically increasing
+        for i in range(1, len(budget_pcts)):
+            assert budget_pcts[i] >= budget_pcts[i-1], \
+                f"Budget should increase: {budget_pcts[i-1]} -> {budget_pcts[i]}"
+
+    def test_budget_consumed_pct_included_in_failed_events(self):
+        """budget_consumed_pct included in failed status events (US-38-004)."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.retry_budget import CaptionRetryBudget
+        from src.caption.exceptions import CaptionFetchError
+        from typing import Dict, List
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        # Make some fetches fail
+        call_count = [0]
+
+        def mock_fetch(video_id, preferred_language=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise CaptionFetchError(video_id, "Test error")
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        retry_budget = CaptionRetryBudget()
+        retry_budget.max_attempts = 100
+
+        # Collect failed events
+        failed_events: List[Dict] = []
+
+        def on_progress(video_id: str, status: str, details: Dict):
+            if status == 'failed':
+                failed_events.append(details.copy())
+
+        videos = ["vid001", "vid002", "vid003"]
+        processor.process(videos, retry_budget=retry_budget, progress_callback=on_progress)
+
+        # Failed event should include budget_consumed_pct
+        assert len(failed_events) == 1
+        assert 'budget_consumed_pct' in failed_events[0], \
+            "budget_consumed_pct missing from failed event"
