@@ -21,6 +21,7 @@ from .vpn_manager import VPNManager
 
 if TYPE_CHECKING:
     from ..config.sections.download import VPNConfig
+    from .circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,11 @@ class MullvadVPN(VPNManager):
             logger.error(f"Mullvad disconnect error: {e}")
             return False
 
-    def rotate_server(self, country: Optional[str] = None) -> bool:
+    def rotate_server(
+        self,
+        country: Optional[str] = None,
+        circuit_breaker: Optional['CircuitBreaker'] = None,
+    ) -> bool:
         """
         Rotate to a new Mullvad server in a different country.
 
@@ -162,6 +167,9 @@ class MullvadVPN(VPNManager):
 
         Args:
             country: Optional 2-letter country code (e.g., "us", "de")
+            circuit_breaker: Optional CircuitBreaker to reset on successful rotation.
+                            When provided, the circuit breaker is reset after VPN
+                            rotation since a new IP has fresh rate limit budget.
 
         Returns:
             True if rotation was successful
@@ -221,6 +229,14 @@ class MullvadVPN(VPNManager):
             if self.config.verify_connection and not getattr(self.config, 'skip_verification', False):
                 if not self.verify_connection():
                     logger.warning("Mullvad verification failed, but continuing...")
+
+            # Reset circuit breaker if provided (new IP = fresh rate limit budget)
+            if circuit_breaker is not None:
+                circuit_breaker.reset()
+                logger.info(
+                    f"Circuit breaker reset due to VPN rotation to {country.upper()} "
+                    f"(new IP has fresh rate limit budget)"
+                )
 
             logger.info(f"Mullvad rotation successful to {country.upper()} (total: {self._switch_count})")
             return True

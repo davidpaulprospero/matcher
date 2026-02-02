@@ -92,8 +92,8 @@
             "id": "US-35-007",
             "title": "Add circuit breaker reset on VPN rotation",
             "priority": 7,
-            "passes": false,
-            "notes": "Tier 2 (Medium). When VPN rotates to new IP, circuit breaker should reset since new IP has fresh rate limit budget. Currently no integration between MullvadVPN.rotate_server() and CircuitBreaker.reset(). Source files: src/downloader/mullvad_vpn.py (lines 156-236, rotate_server method), src/downloader/circuit_breaker.py (CircuitBreaker.reset method).",
+            "passes": true,
+            "notes": "Tier 2 (Medium). Added optional circuit_breaker parameter to MullvadVPN.rotate_server() method. After successful VPN rotation, calls circuit_breaker.reset() with info logging that includes country and reason. Added 3 new tests: test_mullvad_rotate_server_resets_circuit_breaker, test_mullvad_rotate_server_no_circuit_breaker_reset_on_failure, test_mullvad_rotate_server_without_circuit_breaker. All 11 mullvad tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 18, 156-175 signature/docstring, lines 233-238 reset logic), tests/test_mullvad_vpn.py (TestMullvadVPNRotateServer class).",
             "acceptanceCriteria": [
                 "Add optional circuit_breaker parameter to MullvadVPN.rotate_server() method",
                 "Call circuit_breaker.reset() after successful VPN rotation",
