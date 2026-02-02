@@ -769,6 +769,10 @@ class CaptionStage(Stage):
                     # This raises ValueError if budget is insufficient, preventing wasted work
                     retry_budget.verify_budget_sufficient(batch_size)
 
+                    # US-42-010: Proactive health check - log budget state before processing
+                    # Helps users understand budget state after checkpoint restore
+                    retry_budget.log_health_check(batch_size)
+
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
                 # US-33-009: With circuit breaker for consecutive failure protection

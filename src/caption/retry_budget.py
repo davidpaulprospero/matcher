@@ -1212,6 +1212,37 @@ class CaptionRetryBudget:
                 f"are processed. Enable auto_scale in config.yaml or increase max_attempts."
             )
 
+    def log_health_check(self, batch_size: int) -> None:
+        """Log budget health check at batch start (US-42-010).
+
+        Proactive check helps users understand budget state before processing begins.
+        Logs appropriate level based on remaining budget vs batch size.
+
+        Args:
+            batch_size: Number of videos to process.
+        """
+        with self._lock:
+            remaining = self.max_attempts - self.attempts
+
+            # Log budget health status
+            logger.info(
+                f"[US-42-010] Budget health: {remaining}/{self.max_attempts} attempts "
+                f"available for {batch_size} videos"
+            )
+
+            # Check if remaining budget is critically low (< 50% of batch size)
+            if remaining < batch_size * 0.5:
+                logger.error(
+                    f"[US-42-010] Budget critically low - expect skipped videos "
+                    f"(remaining={remaining}, need ~{batch_size} for full batch)"
+                )
+            # Check if remaining budget may be insufficient (< batch size)
+            elif remaining < batch_size:
+                logger.warning(
+                    f"[US-42-010] Budget may be insufficient "
+                    f"(remaining={remaining}, batch_size={batch_size})"
+                )
+
     def scale_to_batch_size(self, batch_size: int, attempts_per_video: Optional[float] = None) -> int:
         """Scale max_attempts proportionally to batch size (US-37-003).
 
