@@ -154,8 +154,8 @@
                 "Call validation after retry_budget initialization, before batch fetch",
                 "Add unit test verifying WARNING is logged for insufficient budget"
             ],
-            "passes": false,
-            "notes": "Tier 2 (validation). Target: src/stages/caption_stage.py:220-237. Proactive warning helps users understand potential budget issues before they cause failures."
+            "passes": true,
+            "notes": "Tier 2 (validation). Added _validate_budget_for_batch() method to CaptionStage at src/stages/caption_stage.py. Called after batch_size is known, before auto_scale logic. Logs WARNING for both insufficient budget conditions. Added TestBudgetValidationWarnings class with 7 tests in tests/integration/test_caption_stage_budget.py verifying all warning scenarios."
         },
         {
             "id": "US-38-011",
