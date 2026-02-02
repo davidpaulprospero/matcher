@@ -272,15 +272,25 @@ class PipelineState:
             else:
                 state.voiceover_segments.append(seg)
 
+        # Copy video_ids directly if present (e.g., from test mocks or newer pipelines)
+        for vid_id in getattr(pipeline, 'video_ids', []):
+            if vid_id and vid_id not in state.video_ids:
+                state.video_ids.append(vid_id)
+
         # Migrate downloaded_videos to video_ids (extract video IDs from URLs)
-        for vid in getattr(pipeline, 'downloaded_videos', []):
-            url = vid.get('url', '') if isinstance(vid, dict) else getattr(vid, 'url', '')
-            if url and ('youtube.com' in url or 'youtu.be' in url):
-                match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
-                if match:
-                    video_id = match.group(1)
-                    if video_id not in state.video_ids:
-                        state.video_ids.append(video_id)
+        # Only if video_ids wasn't copied directly above
+        if not state.video_ids:
+            for vid in getattr(pipeline, 'downloaded_videos', []):
+                url = vid.get('url', '') if isinstance(vid, dict) else getattr(vid, 'url', '')
+                if url and ('youtube.com' in url or 'youtu.be' in url):
+                    match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
+                    if match:
+                        video_id = match.group(1)
+                        if video_id not in state.video_ids:
+                            state.video_ids.append(video_id)
+
+        # Copy video_search_results if present
+        state.video_search_results = list(getattr(pipeline, 'video_search_results', []))
 
         # Copy caption results
         state.caption_results = getattr(pipeline, 'caption_results', {})

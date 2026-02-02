@@ -755,6 +755,70 @@ class CaptionRetryBudget:
             f"(vpn_resets preserved={preserve_vpn_count}, count={self.vpn_resets_used})"
         )
 
+    def ensure_scaled(self, batch_size: int) -> bool:
+        """Convenience method to ensure budget is scaled for batch (US-39-010).
+
+        Makes it harder to forget to scale the budget by providing a single entry point
+        that handles the auto_scale check internally.
+
+        This method is idempotent - calling multiple times with the same batch_size
+        has no effect after the first call.
+
+        Args:
+            batch_size: Number of videos in the batch.
+
+        Returns:
+            True if scaling occurred, False if already scaled or auto_scale disabled.
+
+        Example:
+            >>> budget = CaptionRetryBudget()
+            >>> budget.ensure_scaled(200)  # Returns True, scales from 100 to 300
+            True
+            >>> budget.ensure_scaled(200)  # Returns False, already scaled
+            False
+            >>> budget.ensure_scaled(150)  # Returns False, already scaled to higher
+            False
+        """
+        with self._lock:
+            # Check if auto_scale is disabled
+            if not self.auto_scale:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: auto_scale disabled, "
+                    f"not scaling for batch_size={batch_size}"
+                )
+                return False
+
+            # Check if already scaled for this batch size
+            if self.batch_size == batch_size:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: already scaled for "
+                    f"batch_size={batch_size}, skipping"
+                )
+                return False
+
+            # Calculate required attempts for this batch
+            required_attempts = int(batch_size * self.attempts_per_video + 0.5)
+
+            # Only scale if required exceeds current max
+            if required_attempts <= self.max_attempts:
+                # Still record batch_size for tracking even if no scaling needed
+                self.batch_size = batch_size
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: max_attempts={self.max_attempts} "
+                    f"sufficient for batch_size={batch_size} (required={required_attempts})"
+                )
+                return False
+
+            # Perform scaling
+            old_max = self.max_attempts
+            self.max_attempts = required_attempts
+            self.batch_size = batch_size
+            logger.info(
+                f"CaptionRetryBudget.ensure_scaled: scaled max_attempts from {old_max} "
+                f"to {self.max_attempts} for batch of {batch_size} videos"
+            )
+            return True
+
     def scale_to_batch_size(self, batch_size: int, attempts_per_video: Optional[float] = None) -> int:
         """Scale max_attempts proportionally to batch size (US-37-003).
 

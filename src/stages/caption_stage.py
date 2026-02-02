@@ -612,14 +612,13 @@ class CaptionStage(Stage):
                 # Warns user if budget may be insufficient for the batch size
                 self._validate_budget_for_batch(batch_size, retry_budget)
 
+                # US-39-010: Use ensure_scaled() convenience method
+                # This handles auto_scale check, idempotency, and logging internally
                 if retry_budget:
-                    if retry_budget.auto_scale:
-                        logger.info(f"Retry budget auto_scale enabled, batch_size={batch_size}")
-                        old_max = retry_budget.max_attempts
-                        new_max = retry_budget.scale_to_batch_size(batch_size)
-                        if new_max != old_max:
-                            logger.info(f"Retry budget scaled: {old_max} -> {new_max} for {batch_size} videos")
-                    else:
+                    scaled = retry_budget.ensure_scaled(batch_size)
+                    if scaled:
+                        logger.info(f"Retry budget scaled for {batch_size} videos")
+                    elif not retry_budget.auto_scale:
                         # Warn if auto_scale disabled and batch is large enough to risk exhaustion
                         if batch_size > retry_budget.max_attempts:
                             logger.warning(
