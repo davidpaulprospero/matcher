@@ -21,6 +21,7 @@ from src.state import (
     Match,
     EntityImage,
     EntityVideo,
+    VideoSearchResult,
     PipelineState
 )
 
@@ -328,7 +329,7 @@ class TestPipelineState:
 
         assert state is not None
         assert state.voiceover_segments == []
-        assert state.downloaded_videos == []
+        assert state.downloaded_segments == []
         assert state.matches == []
 
     @pytest.mark.fast
@@ -350,10 +351,10 @@ class TestPipelineState:
         state = PipelineState()
 
         video = DownloadedVideo(file="/path/video.mp4")
-        state.downloaded_videos.append(video)
+        state.downloaded_segments.append(video)
 
-        assert len(state.downloaded_videos) == 1
-        assert state.downloaded_videos[0].file == "/path/video.mp4"
+        assert len(state.downloaded_segments) == 1
+        assert state.downloaded_segments[0].file == "/path/video.mp4"
 
     @pytest.mark.fast
     def test_pipeline_state_matching_fields(self):
@@ -381,9 +382,7 @@ class TestPipelineState:
         state.voiceover_segments.append(
             VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
         )
-        state.downloaded_videos.append(
-            DownloadedVideo(file="/path/video.mp4")
-        )
+        state.video_ids.append("abc123")  # video_ids used for get_video_count()
         state.matches.append(
             Match(segment_index=0, video_file="/path/video.mp4",
                   video_start=0.0, video_end=5.0, confidence=0.9)
@@ -394,37 +393,44 @@ class TestPipelineState:
         assert state.get_match_count() == 1
 
     @pytest.mark.fast
-    def test_pipeline_state_clear_downloads(self):
-        """Test clearing download state."""
+    def test_pipeline_state_clear_search(self):
+        """Test clearing search state."""
         state = PipelineState()
 
-        # Add downloads
-        state.downloaded_videos.append(
-            DownloadedVideo(file="/path/video.mp4")
+        # Add search results
+        state.video_ids.append("abc123")
+        state.video_search_results.append(
+            VideoSearchResult(video_id="abc123", title="Test Video")
         )
-        state.downloaded_audio.append(
-            AudioDownload(file="/path/audio.mp3", video_id="abc123")
-        )
+        state.search_failed_keywords.append("bad_keyword")
 
         # Clear
-        state.clear_downloads()
+        state.clear_search()
 
-        assert len(state.downloaded_videos) == 0
-        assert len(state.downloaded_audio) == 0
+        assert len(state.video_ids) == 0
+        assert len(state.video_search_results) == 0
+        assert len(state.search_failed_keywords) == 0
 
     @pytest.mark.fast
-    def test_pipeline_state_entity_media(self):
-        """Test entity media state."""
+    def test_pipeline_state_clear_matches(self):
+        """Test clearing match state."""
         state = PipelineState()
 
-        image = EntityImage(entity="Test", file="/path/image.jpg")
-        video = EntityVideo(entity="Test", file="/path/video.mp4")
+        # Add matches
+        state.matches.append(
+            Match(segment_index=0, video_file="/path/video.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.9)
+        )
+        state.alternatives[0] = [
+            Match(segment_index=0, video_file="/path/alt.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.8)
+        ]
 
-        state.entity_images["Test"] = image
-        state.entity_videos["Test"] = video
+        # Clear
+        state.clear_matches()
 
-        assert "Test" in state.entity_images
-        assert "Test" in state.entity_videos
+        assert len(state.matches) == 0
+        assert len(state.alternatives) == 0
 
     @pytest.mark.fast
     def test_pipeline_state_runtime_fields(self):
@@ -562,20 +568,17 @@ class TestPipelineStateFromLegacy:
         legacy.stage_timings = {"DOWNLOAD": 45.2, "TRANSCRIBE": 120.5}
         legacy.voiceover_segments = []
         legacy.downloaded_videos = []
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
         legacy.matches = []
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
         assert state.keywords == ["beach", "ocean", "sunset"]
         assert state.topic_context == "Travel Photography"
         assert len(state.extracted_entities) == 1
-        assert state.failed_keywords == ["mountain"]
+        assert state.search_failed_keywords == ["mountain"]
         assert state.face_preference == "more"
         assert state.stage_timings["DOWNLOAD"] == 45.2
 
@@ -594,13 +597,10 @@ class TestPipelineStateFromLegacy:
             {"index": 1, "start": 5.0, "end": 10.0, "text": "Second segment"}
         ]
         legacy.downloaded_videos = []
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
         legacy.matches = []
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
@@ -627,13 +627,10 @@ class TestPipelineStateFromLegacy:
         legacy.voiceover_segments = [seg]
 
         legacy.downloaded_videos = []
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
         legacy.matches = []
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
@@ -641,8 +638,8 @@ class TestPipelineStateFromLegacy:
         assert state.voiceover_segments[0] is seg
 
     @pytest.mark.fast
-    def test_from_legacy_downloaded_videos_dict(self):
-        """Test converting downloaded videos from dicts."""
+    def test_from_legacy_video_ids_migrated(self):
+        """Test that video IDs are migrated from downloaded_videos URLs."""
         legacy = Mock()
         legacy.keywords = []
         legacy.topic_context = ""
@@ -652,30 +649,24 @@ class TestPipelineStateFromLegacy:
         legacy.stage_timings = {}
         legacy.voiceover_segments = []
         legacy.downloaded_videos = [
-            {"file": "video1.mp4", "url": "https://example.com/1", "title": "Beach Video",
-             "channel": "TravelCh", "duration": 120.0, "duration_tier": "medium",
-             "keyword": "beach", "source": "download"},
-            {"path": "video2.mp4", "tier": "short"}  # Alt field names
+            {"file": "video1.mp4", "url": "https://www.youtube.com/watch?v=abc123def45", "title": "Beach Video"},
+            {"file": "video2.mp4", "url": "https://youtu.be/xyz789qwert", "title": "Ocean Video"},
         ]
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.video_ids = []  # Empty, should migrate from downloaded_videos URLs
+        legacy.video_search_results = []
+        legacy.caption_results = {}
         legacy.matches = []
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
-        assert len(state.downloaded_videos) == 2
-        assert state.downloaded_videos[0].file == "video1.mp4"
-        assert state.downloaded_videos[0].channel == "TravelCh"
-        assert state.downloaded_videos[1].file == "video2.mp4"  # 'path' -> 'file'
-        assert state.downloaded_videos[1].duration_tier == "short"  # 'tier' -> 'duration_tier'
+        # video_ids should be extracted from YouTube URLs
+        assert len(state.video_ids) == 2
+        assert "abc123def45" in state.video_ids
+        assert "xyz789qwert" in state.video_ids
 
     @pytest.mark.fast
-    def test_from_legacy_downloaded_videos_objects(self):
-        """Test converting downloaded videos when already objects."""
+    def test_from_legacy_video_ids_direct(self):
+        """Test that video_ids are used directly if present."""
         legacy = Mock()
         legacy.keywords = []
         legacy.topic_context = ""
@@ -684,22 +675,18 @@ class TestPipelineStateFromLegacy:
         legacy.face_preference = "neutral"
         legacy.stage_timings = {}
         legacy.voiceover_segments = []
-
-        video = DownloadedVideo(file="video.mp4", url="https://example.com", source="download")
-        legacy.downloaded_videos = [video]
-
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.downloaded_videos = []
+        legacy.video_ids = ["direct_id_1", "direct_id_2"]
+        legacy.video_search_results = []
+        legacy.caption_results = {}
         legacy.matches = []
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
-        assert len(state.downloaded_videos) == 1
-        assert state.downloaded_videos[0] is video
+        # video_ids should be taken directly
+        assert len(state.video_ids) == 2
+        assert "direct_id_1" in state.video_ids
+        assert "direct_id_2" in state.video_ids
 
     @pytest.mark.fast
     def test_from_legacy_matches_dict(self):
@@ -713,17 +700,14 @@ class TestPipelineStateFromLegacy:
         legacy.stage_timings = {}
         legacy.voiceover_segments = []
         legacy.downloaded_videos = []
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
         legacy.matches = [
             {"segment_index": 0, "video_file": "video.mp4", "video_start": 10.0,
              "video_end": 15.0, "confidence": 0.9, "strategy": "primary", "reason": "Good match"},
             {"vo_index": 1, "file": "video2.mp4", "start": 20.0, "end": 25.0, "confidence": 0.8}  # Alt field names
         ]
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
@@ -746,17 +730,13 @@ class TestPipelineStateFromLegacy:
         legacy.stage_timings = {}
         legacy.voiceover_segments = []
         legacy.downloaded_videos = []
-        legacy.transcripts = {}
-        legacy.embeddings = []
-        legacy.text_metadata = []
-        legacy.embedding_index = None
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
 
         match_obj = Match(segment_index=0, video_file="video.mp4",
                          video_start=0.0, video_end=5.0, confidence=0.9)
         legacy.matches = [match_obj]
-
-        legacy.entity_images = {}
-        legacy.entity_videos = {}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
@@ -775,34 +755,36 @@ class TestPipelineStateFromLegacy:
         legacy.stage_timings = {}
         legacy.voiceover_segments = []
         legacy.downloaded_videos = []
-        legacy.transcripts = {"video1": [{"text": "test"}]}
-        legacy.embeddings = [[0.1, 0.2, 0.3]]
-        legacy.text_metadata = [{"source": "video1"}]
-        legacy.embedding_index = Mock()
+        legacy.video_ids = ["abc123", "xyz456"]
+        legacy.video_search_results = []
+        legacy.caption_results = {"abc123": {"caption": "test"}}
         legacy.matches = []
-
-        img = EntityImage(entity="Tower", file="tower.jpg")
-        vid = EntityVideo(entity="Tower", file="tower.mp4", source="pexels")
-        legacy.entity_images = {"Tower": img}
-        legacy.entity_videos = {"Tower": vid}
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
-        assert "Tower" in state.entity_images
-        assert "Tower" in state.entity_videos
-        assert state.entity_images["Tower"] is img
-        assert state.entity_videos["Tower"] is vid
-        assert state.transcripts == {"video1": [{"text": "test"}]}
-        assert len(state.embeddings) == 1
-        assert state.embedding_index is legacy.embedding_index
+        # Check video_ids and caption_results are migrated
+        assert len(state.video_ids) == 2
+        assert "abc123" in state.video_ids
+        assert state.caption_results == {"abc123": {"caption": "test"}}
 
     @pytest.mark.fast
     def test_from_legacy_missing_attributes(self):
         """Test handling missing attributes gracefully."""
-        # Create minimal mock with getattr defaults
-        legacy = Mock(spec=[])  # Empty spec means no attributes
-        # Most attributes will return Mock objects when accessed
-        # The from_legacy_pipeline should use getattr with defaults
+        # Create minimal mock that returns defaults for all attributes via getattr
+        legacy = Mock()
+        # Set all required attributes to defaults
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
 
         state = PipelineState.from_legacy_pipeline(legacy)
 
@@ -841,9 +823,7 @@ class TestPipelineStateToCheckpointDict:
         state.voiceover_segments = [
             VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
         ]
-        state.downloaded_videos = [
-            DownloadedVideo(file="video.mp4")
-        ]
+        state.video_ids = ["abc123"]  # video_ids used for get_video_count()
         state.matches = [
             Match(segment_index=0, video_file="video.mp4",
                   video_start=0.0, video_end=5.0, confidence=0.9)
@@ -1108,32 +1088,25 @@ class TestPipelineStateDefaults:
     def test_list_fields_default_to_empty(self):
         """Verify all list fields default to empty lists."""
         state = PipelineState()
+        # Current simplified PipelineState list fields
         assert state.voiceover_segments == []
         assert state.keywords == []
-        assert state.downloaded_videos == []
-        assert state.downloaded_audio == []
-        assert state.failed_keywords == []
-        assert state.global_cache_videos == []
-        assert state.remix_files == []
-        assert state.embeddings == []
+        assert state.extracted_entities == []
+        assert state.video_ids == []
+        assert state.video_search_results == []
+        assert state.search_failed_keywords == []
         assert state.text_metadata == []
         assert state.matches == []
+        assert state.downloaded_segments == []
         assert state.output_files == []
         assert state.otio_files == []
-        assert state.broll_downloads == []
-        assert state.broll_matches == []
-        assert state.location_chapters == []
-        assert state.pending_streams == []
 
     @pytest.mark.fast
     def test_dict_fields_default_to_empty(self):
         """Verify all dict fields default to empty dicts."""
         state = PipelineState()
-        assert state.entity_images == {}
-        assert state.entity_videos == {}
+        # Current simplified PipelineState dict fields
         assert state.caption_results == {}
-        assert state.transcripts == {}
-        assert state.scene_data == {}
         assert state.alternatives == {}
         assert state.stage_timings == {}
 
@@ -1145,14 +1118,14 @@ class TestPipelineStateDefaults:
 
         # Mutate state1's lists
         state1.keywords.append("keyword1")
-        state1.downloaded_videos.append(DownloadedVideo(file="video.mp4"))
+        state1.video_ids.append("abc123")
         state1.matches.append(
             Match(segment_index=0, video_file="v.mp4", video_start=0.0, video_end=5.0, confidence=0.9)
         )
 
         # state2 should be unaffected
         assert state2.keywords == []
-        assert state2.downloaded_videos == []
+        assert state2.video_ids == []
         assert state2.matches == []
 
     @pytest.mark.fast
@@ -1162,14 +1135,14 @@ class TestPipelineStateDefaults:
         state2 = PipelineState()
 
         # Mutate state1's dicts
-        state1.entity_images["test"] = EntityImage(entity="test", file="test.jpg")
+        state1.caption_results["abc123"] = {"caption": "test"}
         state1.stage_timings["DOWNLOAD"] = 42.0
         state1.alternatives[0] = [
             Match(segment_index=0, video_file="v.mp4", video_start=0.0, video_end=5.0, confidence=0.8)
         ]
 
         # state2 should be unaffected
-        assert state2.entity_images == {}
+        assert state2.caption_results == {}
         assert state2.stage_timings == {}
         assert state2.alternatives == {}
 
@@ -1180,12 +1153,6 @@ class TestPipelineStateDefaults:
         assert state.voiceover_path == ""
         assert state.topic_context == ""
         assert state.face_preference == "neutral"
-
-    @pytest.mark.fast
-    def test_none_defaults(self):
-        """Verify embedding_index defaults to None."""
-        state = PipelineState()
-        assert state.embedding_index is None
 
 
 @pytest.mark.fast
@@ -1387,6 +1354,8 @@ class TestPipelineStatePostInit:
         legacy.stage_timings = {}
         legacy.voiceover_segments = []
         legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
         legacy.caption_results = {}
         legacy.matches = []
 
