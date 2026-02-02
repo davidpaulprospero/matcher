@@ -180,6 +180,26 @@ class CaptionRetryBudgetConfig:
     # Set to 0 for unlimited backoff
     max_backoff_time_seconds: float = 300.0
 
+    # Automatic scaling settings (US-37-004)
+    # When enabled, max_attempts scales up based on batch size
+    auto_scale: bool = True
+
+    # Attempts per video multiplier for auto-scaling
+    # e.g., 1.5 means budget = batch_size * 1.5
+    # Only scales UP when batch > max_attempts / attempts_per_video
+    attempts_per_video: float = 1.5
+
+    # VPN rotation on rate limit exhaustion (US-37-008)
+    # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
+    # This resets the budget and retries remaining videos with a new IP
+    # Only works if Mullvad VPN is enabled (download.mullvad.enabled: true)
+    trigger_vpn_rotation_on_rate_limit: bool = True
+
+    # Maximum VPN-triggered budget resets per session (US-37-008)
+    # Prevents infinite loops if VPN rotation doesn't help
+    # After this many resets, budget exhaustion is final
+    max_vpn_resets_per_session: int = 2
+
 
 @dataclass
 class CaptionFirstConfig:

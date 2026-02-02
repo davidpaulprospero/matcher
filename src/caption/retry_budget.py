@@ -49,6 +49,15 @@ class CaptionRetryBudgetConfig:
     # Only scales UP when batch > max_attempts / attempts_per_video
     attempts_per_video: float = 1.5
 
+    # VPN rotation on rate limit exhaustion (US-37-008)
+    # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
+    # This resets the budget and retries remaining videos with a new IP
+    trigger_vpn_rotation_on_rate_limit: bool = True
+
+    # Maximum VPN-triggered budget resets per session (US-37-008)
+    # Prevents infinite loops if VPN rotation doesn't help
+    max_vpn_resets_per_session: int = 2
+
 
 @dataclass
 class CaptionRetryBudget:
@@ -96,6 +105,11 @@ class CaptionRetryBudget:
     auto_scale: bool = True
     attempts_per_video: float = 1.5
 
+    # VPN rotation settings (US-37-008)
+    trigger_vpn_on_rate_limit: bool = True
+    max_vpn_resets: int = 2
+    vpn_resets_used: int = 0
+
     # Thread-safety lock
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
@@ -119,11 +133,17 @@ class CaptionRetryBudget:
             budget.max_backoff_time = float(config.get('max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(config.get('auto_scale', True))
             budget.attempts_per_video = float(config.get('attempts_per_video', 1.5))
+            # US-37-008: VPN rotation on rate limit exhaustion
+            budget.trigger_vpn_on_rate_limit = bool(config.get('trigger_vpn_rotation_on_rate_limit', True))
+            budget.max_vpn_resets = int(config.get('max_vpn_resets_per_session', 2))
         else:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(getattr(config, 'auto_scale', True))
             budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 1.5))
+            # US-37-008: VPN rotation on rate limit exhaustion
+            budget.trigger_vpn_on_rate_limit = bool(getattr(config, 'trigger_vpn_rotation_on_rate_limit', True))
+            budget.max_vpn_resets = int(getattr(config, 'max_vpn_resets_per_session', 2))
 
         logger.debug(
             f"CaptionRetryBudget initialized: max_attempts={budget.max_attempts}, "
@@ -259,6 +279,88 @@ class CaptionRetryBudget:
                 reverse=True
             )
             return sorted_errors[:limit]
+
+    def get_rate_limit_error_percentage(self) -> float:
+        """Get the percentage of failures that are RATE_LIMIT errors (US-37-008).
+
+        Used to determine whether VPN rotation should be triggered when
+        budget is exhausted. If >50% of failures are rate limit errors,
+        VPN rotation may help get a fresh IP.
+
+        Returns:
+            Percentage (0.0 to 100.0) of failures that are RATE_LIMIT category.
+            Returns 0.0 if no failures recorded.
+
+        Example:
+            >>> budget.get_rate_limit_error_percentage()
+            65.5  # 65.5% of failures were rate limits
+        """
+        with self._lock:
+            if self.failures == 0:
+                return 0.0
+            rate_limit_count = self.error_counts.get(CaptionErrorCategory.RATE_LIMIT, 0)
+            return round((rate_limit_count / self.failures) * 100, 1)
+
+    def should_trigger_vpn_rotation(self, rate_limit_threshold: float = 50.0) -> bool:
+        """Check if VPN rotation should be triggered due to rate limit exhaustion (US-37-008).
+
+        VPN rotation is triggered when:
+        1. Budget is exhausted
+        2. Rate limit errors account for >50% of failures
+        3. VPN rotation is enabled in config
+        4. VPN resets haven't been exhausted
+
+        Args:
+            rate_limit_threshold: Minimum percentage of rate limit errors to trigger.
+                                  Default 50.0 (>50% rate limit errors triggers VPN).
+
+        Returns:
+            True if VPN rotation should be triggered, False otherwise.
+        """
+        with self._lock:
+            # Check prerequisites
+            if not self.budget_exhausted():
+                return False
+            if not self.trigger_vpn_on_rate_limit:
+                return False
+            if self.vpn_resets_used >= self.max_vpn_resets:
+                logger.info(
+                    f"VPN rotation limit reached ({self.vpn_resets_used}/{self.max_vpn_resets}), "
+                    "cannot trigger more VPN rotations"
+                )
+                return False
+
+            # Check rate limit percentage
+            rate_limit_pct = self.get_rate_limit_error_percentage()
+            if rate_limit_pct > rate_limit_threshold:
+                logger.info(
+                    f"Budget exhausted with {rate_limit_pct:.1f}% rate limit errors, "
+                    f"rotating VPN ({self.vpn_resets_used + 1}/{self.max_vpn_resets})"
+                )
+                return True
+
+            return False
+
+    def record_vpn_reset(self) -> None:
+        """Record a VPN-triggered budget reset (US-37-008).
+
+        Called after successful VPN rotation to track reset count
+        and prevent infinite loops.
+        """
+        with self._lock:
+            self.vpn_resets_used += 1
+            logger.info(
+                f"CaptionRetryBudget: VPN reset recorded ({self.vpn_resets_used}/{self.max_vpn_resets})"
+            )
+
+    def can_vpn_reset(self) -> bool:
+        """Check if more VPN-triggered resets are available (US-37-008).
+
+        Returns:
+            True if vpn_resets_used < max_vpn_resets.
+        """
+        with self._lock:
+            return self.vpn_resets_used < self.max_vpn_resets
 
     def get_consumption_percentage(self) -> Dict[str, Optional[float]]:
         """Get percentage of budget consumed for each resource (US-37-005).
@@ -427,7 +529,8 @@ class CaptionRetryBudget:
         """Serialize budget state for checkpoint persistence.
 
         Returns:
-            Dict with all budget state data including error_counts (US-37-006).
+            Dict with all budget state data including error_counts (US-37-006)
+            and vpn_resets_used (US-37-008).
         """
         with self._lock:
             return {
@@ -439,6 +542,8 @@ class CaptionRetryBudget:
                 "max_attempts": self.max_attempts,
                 "max_backoff_time": self.max_backoff_time,
                 "error_counts": {cat.name: count for cat, count in self.error_counts.items()},  # US-37-006
+                "vpn_resets_used": self.vpn_resets_used,  # US-37-008
+                "max_vpn_resets": self.max_vpn_resets,  # US-37-008
             }
 
     @classmethod
@@ -474,10 +579,19 @@ class CaptionRetryBudget:
             except KeyError:
                 logger.warning(f"Unknown error category in checkpoint: {cat_name}")
 
+        # Restore VPN reset tracking (US-37-008)
+        budget.vpn_resets_used = data.get("vpn_resets_used", 0)
+        budget.max_vpn_resets = data.get("max_vpn_resets", 2)
+
         return budget
 
-    def reset(self) -> None:
-        """Reset budget state for a new batch."""
+    def reset(self, preserve_vpn_count: bool = True) -> None:
+        """Reset budget state for a new batch or after VPN rotation.
+
+        Args:
+            preserve_vpn_count: If True (default), preserve vpn_resets_used count.
+                              Set to False only for full session reset.
+        """
         with self._lock:
             self.attempts = 0
             self.failures = 0
@@ -485,7 +599,12 @@ class CaptionRetryBudget:
             self.backoff_time_spent = 0.0
             self.videos_skipped = 0
             self.error_counts.clear()  # US-37-006
-        logger.debug("CaptionRetryBudget: reset for new batch")
+            if not preserve_vpn_count:
+                self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
+        logger.debug(
+            f"CaptionRetryBudget: reset for new batch "
+            f"(vpn_resets preserved={preserve_vpn_count}, count={self.vpn_resets_used})"
+        )
 
     def scale_to_batch_size(self, batch_size: int, attempts_per_video: Optional[float] = None) -> int:
         """Scale max_attempts proportionally to batch size (US-37-003).
