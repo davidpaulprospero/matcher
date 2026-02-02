@@ -524,6 +524,10 @@ class CaptionStage(Stage):
                             auto_label = 'auto' if details.get('is_auto_generated') else 'human'
                             # Format: [32/100] abc123XYZ: en (auto, 45 segments, quality=medium)
                             line = f"  [{idx}/{total}] {video_id}: {lang} ({auto_label}, {segs} segments, quality={quality})"
+                            # US-38-004: Add budget status when >50% consumed
+                            budget_pct = details.get('budget_consumed_pct')
+                            if budget_pct is not None and budget_pct > 50:
+                                line += f" (budget: {budget_pct:.0f}%)"
                             if is_tty:
                                 # Clear fetching line and print final status
                                 padding = max(0, last_line_length - len(line))
@@ -539,6 +543,10 @@ class CaptionStage(Stage):
                             if len(str(error_msg)) > 50:
                                 error_msg = str(error_msg)[:47] + '...'
                             line = f"  [{idx}/{total}] {video_id}: FAILED ({error_msg})"
+                            # US-38-004: Add budget status when >50% consumed
+                            budget_pct = details.get('budget_consumed_pct')
+                            if budget_pct is not None and budget_pct > 50:
+                                line += f" (budget: {budget_pct:.0f}%)"
                             if is_tty:
                                 # Clear fetching line and print final status
                                 padding = max(0, last_line_length - len(line))
@@ -550,6 +558,10 @@ class CaptionStage(Stage):
                         elif status == 'skipped':
                             reason = details.get('reason', 'unknown')
                             line = f"  [{idx}/{total}] {video_id}: skipped ({reason})"
+                            # US-38-004: Add budget status when >50% consumed
+                            budget_pct = details.get('budget_consumed_pct')
+                            if budget_pct is not None and budget_pct > 50:
+                                line += f" (budget: {budget_pct:.0f}%)"
                             if is_tty:
                                 padding = max(0, last_line_length - len(line))
                                 print(f"\r{line}{' ' * padding}")

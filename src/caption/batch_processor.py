@@ -432,10 +432,24 @@ class BatchProcessor:
                 and hasattr(result, 'video_id')
             )
 
+        def _get_budget_consumed_pct() -> Optional[float]:
+            """Get current budget consumption percentage (US-38-004)."""
+            if retry_budget and retry_budget.max_attempts > 0:
+                consumption = retry_budget.get_consumption_percentage()
+                return consumption.get('attempts')
+            return None
+
         def _notify_progress(video_id: str, status: str, details: Dict) -> None:
-            """Safely call progress callback."""
+            """Safely call progress callback.
+
+            Automatically includes budget_consumed_pct in details if retry_budget is available (US-38-004).
+            """
             if progress_callback:
                 try:
+                    # US-38-004: Add budget consumption percentage to all progress callbacks
+                    budget_pct = _get_budget_consumed_pct()
+                    if budget_pct is not None:
+                        details['budget_consumed_pct'] = budget_pct
                     progress_callback(video_id, status, details)
                 except Exception as e:
                     logger.debug(f"Progress callback error: {e}")
