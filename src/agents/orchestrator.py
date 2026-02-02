@@ -1023,6 +1023,35 @@ class HealingOrchestrator:
         self._mullvad_vpn = mullvad_vpn
         logger.debug("Orchestrator: MullvadVPN instance stored for Tier 4 bypass wiring")
 
+    def get_vpn_status(self) -> Optional[Dict[str, Any]]:
+        """Get current VPN status if MullvadVPN is available (US-35-006).
+
+        Returns:
+            Dict with VPN status info if MullvadVPN is configured, None otherwise.
+            Dict keys:
+                - connected: bool - whether VPN is currently connected
+                - country: str or None - current connected country
+                - rotation_count: int - number of VPN rotations performed
+                - countries_used: List[str] - list of countries rotated through
+                - last_verified_ip: str or None - last verified exit IP
+        """
+        if self._mullvad_vpn is None:
+            return None
+
+        try:
+            # Get extended status from MullvadVPN
+            extended = self._mullvad_vpn.get_status_extended()
+            return {
+                'connected': extended.get('mullvad_connected', False),
+                'country': extended.get('current_country'),
+                'rotation_count': extended.get('switch_count', 0),
+                'countries_used': extended.get('used_countries', []),
+                'last_verified_ip': extended.get('last_verified_ip'),
+            }
+        except Exception as e:
+            logger.debug(f"Could not get VPN status: {e}")
+            return None
+
     def print_report(self):
         """Print healing summary report."""
         print("\n" + "=" * 60)
@@ -1135,6 +1164,9 @@ class HealingOrchestrator:
         # US-1-012: Tier-by-tier escalation breakdown
         self._print_tier_breakdown()
 
+        # US-35-006: VPN status section when VPN was used
+        self._print_vpn_status()
+
         print("=" * 60 + "\n")
 
     def _print_tier_breakdown(self) -> None:
@@ -1195,6 +1227,43 @@ class HealingOrchestrator:
                         print(f"    {', '.join(keywords)}")
                     else:
                         print(f"    {', '.join(keywords[:5])}... (+{keyword_count - 5} more)")
+
+    def _print_vpn_status(self) -> None:
+        """Print VPN status section when VPN was used during the run (US-35-006).
+
+        Only prints if MullvadVPN is configured and was used (rotation_count > 0).
+        """
+        vpn_status = self.get_vpn_status()
+        if vpn_status is None:
+            return
+
+        rotation_count = vpn_status.get('rotation_count', 0)
+        countries_used = vpn_status.get('countries_used', [])
+
+        # Only print section if VPN was actually used
+        if rotation_count == 0 and not countries_used:
+            return
+
+        print("\n" + "-" * 60)
+        print("VPN STATUS")
+        print("-" * 60)
+
+        connected = vpn_status.get('connected', False)
+        current_country = vpn_status.get('country')
+
+        print(f"Connected: {'Yes' if connected else 'No'}")
+        if current_country:
+            print(f"Current country: {current_country.upper()}")
+
+        print(f"Total rotations: {rotation_count}")
+
+        if countries_used:
+            countries_str = ', '.join(c.upper() for c in countries_used)
+            print(f"Countries used: {countries_str}")
+
+        last_ip = vpn_status.get('last_verified_ip')
+        if last_ip:
+            print(f"Last verified IP: {last_ip}")
 
     def reset(self):
         """Reset orchestrator state for new run."""

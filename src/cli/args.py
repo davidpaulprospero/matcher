@@ -93,6 +93,13 @@ Examples:
     )
 
     parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview pipeline execution plan without running stages. '
+             'Shows which stages would execute and validates inputs.'
+    )
+
+    parser.add_argument(
         '--force-rematch',
         action='store_true',
         help='Force rematch all videos, ignoring cached matches (delta matching)'

@@ -168,7 +168,11 @@ class DownloadVideoSegmentsStage(Stage):
         buffer_seconds: float,
         progress_callback
     ) -> List['DownloadedVideo']:
-        """Download video segments"""
+        """Download video segments using VideoDownloader's retry queue.
+
+        Uses the downloader's impersonation, escalation, and retry queue
+        infrastructure instead of raw yt-dlp calls.
+        """
         from ..state import DownloadedVideo
         import yt_dlp
 
@@ -193,7 +197,7 @@ class DownloadVideoSegmentsStage(Stage):
                 continue
 
             try:
-                # Download segment using yt-dlp
+                # Download segment using yt-dlp with downloader's infrastructure
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
                 ydl_opts = {
@@ -206,14 +210,13 @@ class DownloadVideoSegmentsStage(Stage):
                     'force_keyframes_at_cuts': True,
                 }
 
-                # Apply impersonation if available
-                try:
-                    from ..downloader.impersonation import ImpersonationManager
-                    imp_mgr = ImpersonationManager()
-                    imp_opts = imp_mgr.get_ydl_options(tier=1)
-                    ydl_opts.update(imp_opts)
-                except Exception:
-                    pass
+                # Apply impersonation from downloader if available
+                if self.downloader and self.downloader.impersonation_manager:
+                    try:
+                        imp_opts = self.downloader.impersonation_manager.get_ydl_options(tier=1)
+                        ydl_opts.update(imp_opts)
+                    except Exception:
+                        pass
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
@@ -229,13 +232,121 @@ class DownloadVideoSegmentsStage(Stage):
                     logger.warning(f"Download succeeded but file not found: {output_file}")
 
             except Exception as e:
-                logger.warning(f"Failed to download segment {video_id}: {e}")
+                error_msg = str(e)
+                logger.warning(f"Failed to download segment {video_id}: {error_msg}")
+
+                # Add failed download to retry queue for batch retry later
+                if self.downloader and self.downloader.retry_queue:
+                    self.downloader.retry_queue.add(
+                        video_id=f"{video_id}_{int(start)}_{int(end)}",
+                        keyword='segment',
+                        tier='segment',
+                        error_message=error_msg
+                    )
+                    logger.debug(f"Added {video_id} to retry queue")
 
             # Checkpoint progress
             if progress_callback:
                 progress_callback(idx, total, downloaded)
 
+        # Process retry queue if there are pending items
+        self._process_retry_queue(output_dir, buffer_seconds, downloaded, total, progress_callback)
+
         return downloaded
+
+    def _process_retry_queue(
+        self,
+        output_dir: Path,
+        buffer_seconds: float,
+        downloaded: List['DownloadedVideo'],
+        total: int,
+        progress_callback
+    ) -> None:
+        """Process any failed downloads in the retry queue.
+
+        Attempts to retry failed segment downloads using the downloader's
+        retry queue infrastructure.
+        """
+        from ..state import DownloadedVideo
+        import yt_dlp
+
+        if not self.downloader or not self.downloader.retry_queue:
+            return
+
+        retry_queue = self.downloader.retry_queue
+        if not retry_queue.has_pending():
+            return
+
+        pending = retry_queue.get_pending_items()
+        logger.info(f"Processing {len(pending)} items from retry queue")
+
+        # Start retry pass (applies configured delay)
+        retry_queue.start_retry_pass()
+
+        for item in pending:
+            # Parse video_id from the retry item (format: video_id_start_end)
+            parts = item.video_id.rsplit('_', 2)
+            if len(parts) < 3:
+                logger.warning(f"Invalid retry item format: {item.video_id}")
+                retry_queue.mark_failed(item.video_id)
+                continue
+
+            video_id = parts[0]
+            try:
+                start = int(parts[1])
+                end = int(parts[2])
+            except ValueError:
+                logger.warning(f"Invalid time range in retry item: {item.video_id}")
+                retry_queue.mark_failed(item.video_id)
+                continue
+
+            output_file = output_dir / f"{video_id}_{start}_{end}.mp4"
+
+            if output_file.exists():
+                retry_queue.mark_success(item.video_id)
+                continue
+
+            try:
+                url = f"https://www.youtube.com/watch?v={video_id}"
+
+                ydl_opts = {
+                    'format': 'best[height<=1080]',
+                    'outtmpl': str(output_file),
+                    'quiet': True,
+                    'no_warnings': True,
+                    'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
+                    'force_keyframes_at_cuts': True,
+                }
+
+                # Apply impersonation
+                if self.downloader.impersonation_manager:
+                    try:
+                        imp_opts = self.downloader.impersonation_manager.get_ydl_options(tier=1)
+                        ydl_opts.update(imp_opts)
+                    except Exception:
+                        pass
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+
+                if output_file.exists():
+                    downloaded.append(DownloadedVideo(
+                        file=str(output_file),
+                        url=url,
+                        source='segment_retry'
+                    ))
+                    retry_queue.mark_success(item.video_id)
+                    logger.info(f"Retry succeeded for {video_id}")
+                else:
+                    retry_queue.mark_failed(item.video_id)
+
+            except Exception as e:
+                logger.warning(f"Retry failed for {video_id}: {e}")
+                retry_queue.mark_failed(item.video_id)
+
+            # Update checkpoint with retry progress
+            if progress_callback:
+                progress_callback(len(downloaded), total, downloaded)
 
     def _update_matches_with_local_paths(
         self,
