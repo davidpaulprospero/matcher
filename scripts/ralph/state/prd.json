@@ -120,8 +120,8 @@
             "id": "US-35-009",
             "title": "Add Mullvad CLI availability check at startup",
             "priority": 9,
-            "passes": false,
-            "notes": "Tier 1 (Quick Win). MullvadVPN methods catch FileNotFoundError when mullvad CLI is missing but no upfront check exists. Add is_available() class method. Source files: src/downloader/mullvad_vpn.py (lines 107-109, FileNotFoundError catch), src/downloader/vpn_manager.py (base class).",
+            "passes": true,
+            "notes": "Tier 1 (Quick Win). Added MullvadVPN.is_available() static method that runs 'mullvad --version' and returns True if successful. Updated create_healing_pipeline() to check is_available() before instantiating MullvadVPN - logs warning if config.download.mullvad.enabled=true but CLI not available. Added 5 tests in TestMullvadVPNIsAvailable class. All 16 mullvad tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 44-98, is_available static method), src/pipeline.py (lines 658-671, availability check with warning), tests/test_mullvad_vpn.py (TestMullvadVPNIsAvailable class).",
             "acceptanceCriteria": [
                 "Add MullvadVPN.is_available() static method that checks if mullvad CLI exists",
                 "Method should run 'mullvad --version' and return True if successful",
