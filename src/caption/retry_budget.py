@@ -1069,6 +1069,17 @@ class CaptionRetryBudget:
         (US-42-004 fix: handles checkpoint restore where batch_size is set but
         max_attempts was reset to config default).
 
+        Counter Reset Behavior (US-42-007):
+            By default (reset_on_scale=False), scaling up the budget preserves usage
+            counters (attempts, failures, successes, etc.). This means if a checkpoint
+            had 80/100 attempts used and the budget scales to 200, only 120 attempts
+            remain available (200 - 80 = 120).
+
+            When reset_on_scale=True, scaling up also resets all usage counters to 0.
+            This is useful when restoring from checkpoint where prior attempts should
+            not count against the new batch's budget. In the same scenario (80 attempts
+            used, scale to 200), all 200 attempts would be available.
+
         Args:
             batch_size: Number of videos in the batch.
 
@@ -1135,7 +1146,10 @@ class CaptionRetryBudget:
                     f"({self.attempts} attempts already used), max_attempts {old_max} -> {self.max_attempts}"
                 )
 
-            # US-41-009: Reset counters on scale-up if configured
+            # US-41-009 / US-42-007: Reset counters on scale-up if configured
+            # When reset_on_scale=true, scaling up also clears usage counters.
+            # This is useful when restoring from checkpoint - prior attempts shouldn't
+            # count against the new batch's budget.
             if self.reset_on_scale:
                 cleared_attempts = self.attempts
                 self.attempts = 0
@@ -1148,9 +1162,10 @@ class CaptionRetryBudget:
                 self.circuit_breaker_trips = 0
                 self.early_terminated = False
                 self.early_termination_reason = None
+                # US-42-007: Log with specific format for easy grep-ability
                 logger.info(
-                    f"CaptionRetryBudget.ensure_scaled: Budget scaled and reset: "
-                    f"{cleared_attempts} attempts cleared (scaled from {old_max} to {self.max_attempts})"
+                    f"[US-42-007] Budget scaled and reset: attempts {cleared_attempts}->0 "
+                    f"(max_attempts {old_max}->{self.max_attempts} for batch_size={batch_size})"
                 )
             elif not was_checkpoint_restore:
                 logger.info(

@@ -1648,6 +1648,115 @@ class TestCaptionRetryBudgetEnsureScaled:
         remaining = budget.max_attempts - budget.attempts
         assert remaining >= 76 * 2.0, f"Should have headroom for 76 videos, got {remaining}"
 
+    @pytest.mark.fast
+    def test_ensure_scaled_from_checkpoint_80_attempts_preserves_counters_by_default(self):
+        """Test US-42-007: budget with 80 attempts used, scale up, preserves attempts.
+
+        AC3: Add test: budget has 80 attempts used, scale up, verify attempts counter
+        behavior based on reset_on_scale.
+
+        Scenario: Checkpoint has 80/100 attempts used. New batch needs 200 attempts.
+        With reset_on_scale=false (default), scale to 200 but attempts stay at 80.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # From checkpoint
+        budget.attempts_per_video = 2.0
+        budget.reset_on_scale = False  # Default - preserves counters
+
+        # Simulate checkpoint restore with 80 attempts used
+        budget.attempts = 80
+        budget.failures = 25
+        budget.successes = 55
+        budget.backoff_time_spent = 120.0
+
+        # Scale up for batch of 100 (needs 200 attempts)
+        result = budget.ensure_scaled(100)
+
+        # Should scale: 100 * 2.0 = 200 > 100
+        assert result is True
+        assert budget.max_attempts == 200
+
+        # With reset_on_scale=false, counters should be PRESERVED
+        assert budget.attempts == 80, "attempts should be preserved (default behavior)"
+        assert budget.failures == 25, "failures should be preserved"
+        assert budget.successes == 55, "successes should be preserved"
+        assert budget.backoff_time_spent == 120.0, "backoff should be preserved"
+
+        # Verify only 120 attempts remain (200 - 80 = 120)
+        remaining = budget.attempts_remaining()
+        assert remaining == 120, f"Should have 120 attempts remaining, got {remaining}"
+
+    @pytest.mark.fast
+    def test_ensure_scaled_from_checkpoint_80_attempts_resets_with_reset_on_scale(self):
+        """Test US-42-007: budget with 80 attempts used, scale up with reset_on_scale=true.
+
+        AC3: Add test: budget has 80 attempts used, scale up, verify attempts counter
+        behavior based on reset_on_scale.
+
+        Scenario: Checkpoint has 80/100 attempts used. New batch needs 200 attempts.
+        With reset_on_scale=true, scale to 200 AND reset attempts to 0.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # From checkpoint
+        budget.attempts_per_video = 2.0
+        budget.reset_on_scale = True  # Enable reset on scale-up
+
+        # Simulate checkpoint restore with 80 attempts used
+        budget.attempts = 80
+        budget.failures = 25
+        budget.successes = 55
+        budget.backoff_time_spent = 120.0
+        budget.videos_skipped = 3
+
+        # Scale up for batch of 100 (needs 200 attempts)
+        result = budget.ensure_scaled(100)
+
+        # Should scale: 100 * 2.0 = 200 > 100
+        assert result is True
+        assert budget.max_attempts == 200
+
+        # With reset_on_scale=true, counters should be RESET
+        assert budget.attempts == 0, "attempts should be reset to 0"
+        assert budget.failures == 0, "failures should be reset"
+        assert budget.successes == 0, "successes should be reset"
+        assert budget.backoff_time_spent == 0.0, "backoff should be reset"
+        assert budget.videos_skipped == 0, "skipped should be reset"
+
+        # All 200 attempts are now available
+        remaining = budget.attempts_remaining()
+        assert remaining == 200, f"Should have 200 attempts remaining, got {remaining}"
+
+    @pytest.mark.fast
+    def test_ensure_scaled_logs_reset_with_story_id(self, caplog):
+        """Test US-42-007 AC4: logging includes story ID format.
+
+        AC4: Log when scaling resets counters: '[US-42-007] Budget scaled and reset: attempts 80->0'
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0
+        budget.reset_on_scale = True
+
+        # Simulate 80 attempts used
+        budget.attempts = 80
+
+        # Scale up - should trigger reset with specific log format
+        budget.ensure_scaled(100)
+
+        # Check log contains required format
+        assert any("[US-42-007]" in record.message for record in caplog.records), \
+            "Log should contain [US-42-007] story ID"
+        assert any("Budget scaled and reset" in record.message for record in caplog.records), \
+            "Log should contain 'Budget scaled and reset'"
+        assert any("attempts 80->0" in record.message for record in caplog.records), \
+            "Log should contain 'attempts 80->0'"
+
 
 # ============================================================================
 # US-37-005: Detailed logging for retry budget consumption
