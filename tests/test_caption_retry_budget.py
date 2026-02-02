@@ -4024,3 +4024,145 @@ class TestCaptionRetryBudgetPerVideoAttemptTracking:
         # Should only have one warning message for this video
         warning_count = caplog.text.count("video_repeat")
         assert warning_count == 1, f"Expected 1 warning, got {warning_count}"
+
+
+class TestCaptionRetryBudgetCircuitBreakerTrips:
+    """Tests for US-41-006: Circuit breaker trip count in budget exhaustion logging.
+
+    These tests verify that circuit breaker trips are counted and included
+    in budget summaries to help distinguish rate-limiting from other failures.
+    """
+
+    @pytest.mark.fast
+    def test_initial_circuit_breaker_trips_is_zero(self):
+        """Verify circuit_breaker_trips starts at 0."""
+        budget = CaptionRetryBudget()
+        assert budget.circuit_breaker_trips == 0
+
+    @pytest.mark.fast
+    def test_record_circuit_trip_increments_counter(self):
+        """Verify record_circuit_trip() increments the counter."""
+        budget = CaptionRetryBudget()
+
+        budget.record_circuit_trip()
+        assert budget.circuit_breaker_trips == 1
+
+        budget.record_circuit_trip()
+        assert budget.circuit_breaker_trips == 2
+
+    @pytest.mark.fast
+    def test_get_summary_includes_circuit_breaker_trips(self):
+        """Verify get_summary includes circuit_breaker_trips field (US-41-006 AC3/AC5)."""
+        budget = CaptionRetryBudget()
+
+        # Record some trips
+        budget.record_circuit_trip()
+        budget.record_circuit_trip()
+        budget.record_circuit_trip()
+
+        summary = budget.get_summary()
+
+        assert "circuit_breaker_trips" in summary
+        assert summary["circuit_breaker_trips"] == 3
+
+    @pytest.mark.fast
+    def test_get_summary_circuit_breaker_trips_zero_when_no_trips(self):
+        """Verify circuit_breaker_trips is 0 when no trips recorded."""
+        budget = CaptionRetryBudget()
+
+        summary = budget.get_summary()
+
+        assert "circuit_breaker_trips" in summary
+        assert summary["circuit_breaker_trips"] == 0
+
+    @pytest.mark.fast
+    def test_circuit_breaker_trips_serialization(self):
+        """Verify circuit_breaker_trips is preserved in to_dict/from_dict."""
+        budget = CaptionRetryBudget()
+
+        # Record some trips
+        for _ in range(5):
+            budget.record_circuit_trip()
+
+        # Serialize
+        data = budget.to_dict()
+        assert "circuit_breaker_trips" in data
+        assert data["circuit_breaker_trips"] == 5
+
+        # Deserialize
+        restored = CaptionRetryBudget.from_dict(data)
+        assert restored.circuit_breaker_trips == 5
+
+    @pytest.mark.fast
+    def test_circuit_breaker_trips_reset(self):
+        """Verify circuit_breaker_trips is cleared on reset()."""
+        budget = CaptionRetryBudget()
+
+        for _ in range(3):
+            budget.record_circuit_trip()
+        assert budget.circuit_breaker_trips == 3
+
+        budget.reset()
+
+        assert budget.circuit_breaker_trips == 0
+
+    @pytest.mark.fast
+    def test_budget_exhausted_logs_trips_when_positive(self, caplog):
+        """Verify INFO log includes trips when budget exhausts with >0 trips (US-41-006 AC4)."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget(max_attempts=5)
+
+        # Record some trips
+        budget.record_circuit_trip()
+        budget.record_circuit_trip()
+
+        # Exhaust the budget
+        for _ in range(5):
+            budget.record_attempt("test_video")
+
+        # Check budget is exhausted (this logs the INFO messages)
+        assert budget.budget_exhausted() is True
+
+        # Check for the circuit breaker trip log message
+        assert "2 circuit breaker trip(s)" in caplog.text
+        assert "contributed to budget exhaustion" in caplog.text
+
+    @pytest.mark.fast
+    def test_budget_exhausted_no_trips_log_when_zero(self, caplog):
+        """Verify no trips log when budget exhausts with 0 trips."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget(max_attempts=5)
+
+        # Exhaust the budget without any circuit trips
+        for _ in range(5):
+            budget.record_attempt("test_video")
+
+        # Check budget is exhausted
+        assert budget.budget_exhausted() is True
+
+        # Should NOT have the trips message
+        assert "circuit breaker trip(s)" not in caplog.text
+
+    @pytest.mark.fast
+    def test_backoff_exhaustion_logs_trips(self, caplog):
+        """Verify INFO log includes trips when backoff budget exhausts with >0 trips."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget(max_attempts=0, max_backoff_time=10.0)
+
+        # Record a trip
+        budget.record_circuit_trip()
+
+        # Exhaust the backoff budget
+        budget.record_backoff(10.0, "test_video")
+
+        # Check budget is exhausted (this logs the INFO messages)
+        assert budget.budget_exhausted() is True
+
+        # Check for the circuit breaker trip log message
+        assert "1 circuit breaker trip(s)" in caplog.text
