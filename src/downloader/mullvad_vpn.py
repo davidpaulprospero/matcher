@@ -110,10 +110,15 @@ class MullvadVPN(VPNManager):
         self._last_verified_ip: Optional[str] = None
         # Initialize max rotations from config (MullvadConfig.max_rotations_per_session)
         self._max_rotations: int = getattr(config, 'max_rotations_per_session', 5)
+        # Track last rotation time for cooldown enforcement (US-35-012)
+        self._last_rotation_time: float = 0.0
+        # Rotation delay cooldown from config (seconds between rotations)
+        self._rotation_delay: float = float(getattr(config, 'rotation_delay_seconds', 5))
 
         if self.is_enabled:
             logger.info(
-                f"Mullvad VPN manager initialized (max_rotations={self._max_rotations})"
+                f"Mullvad VPN manager initialized (max_rotations={self._max_rotations}, "
+                f"rotation_delay={self._rotation_delay}s)"
             )
 
     def connect(self) -> bool:
@@ -223,6 +228,17 @@ class MullvadVPN(VPNManager):
             )
             return False
 
+        # Check rotation cooldown (US-35-012)
+        if self._rotation_delay > 0 and self._last_rotation_time > 0:
+            elapsed = time.time() - self._last_rotation_time
+            if elapsed < self._rotation_delay:
+                remaining = self._rotation_delay - elapsed
+                logger.warning(
+                    f"Mullvad rotation cooldown active ({remaining:.1f}s remaining). "
+                    f"Wait {self._rotation_delay}s between rotations."
+                )
+                return False
+
         if not self.can_switch():
             return False
 
@@ -266,6 +282,7 @@ class MullvadVPN(VPNManager):
             # Update tracking
             self._switch_count += 1
             self._last_switch_time = time.time()
+            self._last_rotation_time = time.time()  # For cooldown enforcement (US-35-012)
             self._current_country = country
             self._used_countries.append(country)
 
