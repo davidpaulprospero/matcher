@@ -275,6 +275,130 @@ class TestCaptionRetryBudgetExhaustion:
 
         assert budget.budget_exhausted() is True
 
+    @pytest.mark.fast
+    def test_budget_exhausted_logs_diagnostic_info(self, caplog):
+        """Test budget_exhausted() logs diagnostic info when exhausted (US-42-005).
+
+        Verifies AC4: diagnostic info is logged when budget exhausts including
+        auto_scale setting, batch_size, original_max, and top errors.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.original_max_attempts = 10
+        budget.batch_size = 50
+        budget.auto_scale = False
+
+        # Record some errors to track
+        budget.record_failure("video1", CaptionErrorCategory.RATE_LIMIT)
+        budget.record_failure("video2", CaptionErrorCategory.RATE_LIMIT)
+        budget.record_failure("video3", CaptionErrorCategory.TIMEOUT)
+
+        # Exhaust the budget by attempts
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+
+        # Trigger the exhausted log
+        caplog.clear()
+        assert budget.budget_exhausted() is True
+
+        # Verify diagnostic log contains required info
+        log_messages = [rec.message for rec in caplog.records]
+        combined = ' '.join(log_messages)
+
+        # AC1: Log includes auto_scale setting
+        assert 'auto_scale=False' in combined
+
+        # AC1: Log includes batch_size
+        assert 'batch_size=50' in combined
+
+        # AC1: Log includes config max_attempts (original_max)
+        assert 'original_max=10' in combined
+
+        # AC2: Shows why scaling didn't help (auto_scale=false)
+        assert 'auto_scale=false' in combined.lower()
+
+        # AC3: Include top error categories
+        assert 'RATE_LIMIT:2' in combined
+        assert 'TIMEOUT:1' in combined
+
+        # AC5: Uses INFO level and includes [US-42-005] marker
+        assert '[US-42-005]' in combined
+        # Verify INFO level (all our diagnostic logs should be INFO)
+        for rec in caplog.records:
+            if '[US-42-005]' in rec.message:
+                assert rec.levelno == logging.INFO
+
+    @pytest.mark.fast
+    def test_budget_exhausted_logs_scaling_not_triggered(self, caplog):
+        """Test diagnostic log shows 'scaling_not_triggered' when auto_scale=true but scaling didn't occur."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.original_max_attempts = 100  # Same as max_attempts - scaling not triggered
+        budget.batch_size = 30  # Small batch, doesn't require scaling
+        budget.auto_scale = True
+
+        # Exhaust the budget
+        for i in range(100):
+            budget.record_attempt(f"video_{i}")
+
+        caplog.clear()
+        assert budget.budget_exhausted() is True
+
+        combined = ' '.join(rec.message for rec in caplog.records)
+        assert 'scaling_not_triggered' in combined
+
+    @pytest.mark.fast
+    def test_budget_exhausted_logs_scaled_to_value(self, caplog):
+        """Test diagnostic log shows 'scaled_to=N' when scaling occurred."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 200  # Scaled value
+        budget.original_max_attempts = 100  # Original config value
+        budget.batch_size = 100
+        budget.auto_scale = True
+
+        # Exhaust the scaled budget
+        for i in range(200):
+            budget.record_attempt(f"video_{i}")
+
+        caplog.clear()
+        assert budget.budget_exhausted() is True
+
+        combined = ' '.join(rec.message for rec in caplog.records)
+        assert 'scaled_to=200' in combined
+        assert 'original_max=100' in combined
+
+    @pytest.mark.fast
+    def test_budget_exhausted_backoff_logs_diagnostic_info(self, caplog):
+        """Test diagnostic info is also logged when budget exhausts via backoff time."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.max_backoff_time = 10.0
+        budget.original_max_attempts = 100
+        budget.batch_size = 50
+        budget.auto_scale = True
+
+        # Exhaust via backoff, not attempts
+        budget.record_backoff(15.0, "video1")
+
+        caplog.clear()
+        assert budget.budget_exhausted() is True
+
+        combined = ' '.join(rec.message for rec in caplog.records)
+        # Should still have [US-42-005] marker for backoff exhaustion too
+        assert '[US-42-005]' in combined
+        assert 'batch_size=50' in combined
+
 
 class TestCaptionRetryBudgetRemainingMethods:
     """Test attempts_remaining() and backoff_time_remaining() methods."""
