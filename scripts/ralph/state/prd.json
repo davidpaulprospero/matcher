@@ -1,176 +1,188 @@
 {
-    "branchName": "ralph/sprint-35",
-    "sprintNumber": 35,
-    "focusArea": "architecture",
-    "projectContext": "Sprint 35 focuses on architecture improvements: (1) Mullvad VPN activation in the default pipeline flow, (2) Download system architectural enhancements, (3) Documentation of the 4-tier escalation architecture. Key files: src/pipeline.py, src/downloader/escalation_manager.py, src/downloader/mullvad_vpn.py, src/downloader/core.py, CLAUDE.md, README.md.",
+    "sprintNumber": 36,
+    "focusArea": "download",
+    "branchName": "ralph/sprint-36",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
     "userStories": [
         {
-            "id": "US-35-001",
-            "title": "Generate sprint stories for architecture focus area",
-            "priority": 1,
-            "passes": true,
-            "notes": "Meta-story for sprint generation. Sprint 35 focuses on architecture improvements around Mullvad VPN pipeline integration, download system enhancements, and documentation.",
+            "id": "US-36-001",
+            "title": "Generate sprint stories for download focus area",
             "acceptanceCriteria": [
-                "Read scripts/ralph/ralph-config.json to understand focus areas",
-                "Analyze codebase to find 8-12 specific architecture improvements",
-                "Add stories US-35-002 through US-35-012 to sprint.json",
-                "Each story has 4-6 testable acceptance criteria",
-                "Each story has notes with tier classification and source file paths"
-            ]
+                "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'download'",
+                "Add stories US-36-002 through US-36-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-36-NNN to be unique across sprints",
+                "Mark this story (US-36-001) as passes: true when done"
+            ],
+            "passes": true,
+            "priority": "high",
+            "notes": "Meta-story for sprint generation. Sprint 36 focuses on: (1) VPN-aware budget reset integration, (2) Download error handling improvements, (3) Documentation updates for Mullvad workflow. Sprint 35 completed the MullvadVPN architecture - Sprint 36 wires it into operational flow."
         },
         {
-            "id": "US-35-002",
-            "title": "Auto-activate Mullvad VPN in create_healing_pipeline",
+            "id": "US-36-002",
+            "title": "Add budget reset_on_ip_change call after VPN rotation in core.py",
+            "acceptanceCriteria": [
+                "Update core.py line ~2224 to call self.rate_limit_budget.reset_on_ip_change() after successful mullvad rotation",
+                "Add logging showing budget was reset after VPN IP change",
+                "Add test in tests/test_downloader_core.py verifying budget reset is called after VPN rotation",
+                "Run python -m py_compile src/downloader/core.py to verify syntax",
+                "Run pytest tests/test_downloader_core.py -v --tb=short -x to verify"
+            ],
+            "passes": true,
             "priority": 2,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Implemented auto-activation of MullvadVPN in create_healing_pipeline() when config.download.mullvad.enabled=true. Added set_mullvad_vpn() method to HealingOrchestrator to store the instance, and wire_escalation_manager() now also wires MullvadVPN to EscalationManager. Added 7 tests in tests/test_pipeline_orchestrator.py. Files modified: src/pipeline.py (lines 652-667), src/agents/orchestrator.py (lines 121, 1003-1021).",
-            "acceptanceCriteria": [
-                "Update create_healing_pipeline() to instantiate MullvadVPN when config.download.mullvad.enabled is true",
-                "Wire MullvadVPN into EscalationManager via set_mullvad_vpn() method",
-                "Add debug logging when Mullvad auto-activation occurs",
-                "Add test in tests/test_pipeline_orchestrator.py verifying MullvadVPN is wired when enabled",
-                "Run pytest tests/test_pipeline_orchestrator.py -v --tb=short to verify"
-            ]
+            "notes": "Tier 1 (Quick Win). COMPLETED: Code already existed in core.py:2226 from previous Sprint 35 implementation. Added TestVPNRotationBudgetReset test class with 2 tests to test_downloader_core.py verifying the integration. All tests pass."
         },
         {
-            "id": "US-35-003",
-            "title": "Add MullvadVPN factory method to EscalationManager",
-            "priority": 3,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Added EscalationManager.create_with_mullvad() factory method that instantiates both EscalationManager and MullvadVPN (if enabled), wiring them together automatically. Added 5 tests in TestCreateWithMullvad class. Files modified: src/downloader/escalation_manager.py (added create_with_mullvad classmethod at lines 821-873), tests/test_escalation_manager.py (added TestCreateWithMullvad test class).",
+            "id": "US-36-003",
+            "title": "Add budget reset_on_ip_change call to EscalationManager on_vpn_rotation callback",
             "acceptanceCriteria": [
-                "Add EscalationManager.create_with_mullvad(config, impersonation_manager, mullvad_config) class method",
-                "Factory method instantiates MullvadVPN from MullvadConfig if enabled",
-                "Factory method calls set_mullvad_vpn() internally to wire VPN",
-                "Add test verifying factory method creates properly configured EscalationManager",
-                "Run python -m py_compile src/downloader/escalation_manager.py to verify syntax"
-            ]
-        },
-        {
-            "id": "US-35-004",
-            "title": "Add VPN rotation metrics to _collect_escalation_metrics",
-            "priority": 4,
-            "passes": true,
-            "notes": "Tier 1 (Quick Win). Updated _collect_escalation_metrics to include all VPN status fields: mullvad_connected, vpn_current_country, vpn_countries_used, vpn_switch_count. Updated existing tests in TestCollectEscalationMetrics class to verify new fields. All 134 pipeline tests pass. Files modified: src/pipeline.py (lines 701-710), tests/test_pipeline_orchestrator.py (TestCollectEscalationMetrics class).",
-            "acceptanceCriteria": [
-                "Update _collect_escalation_metrics to include mullvad_connected status",
-                "Include current_country and used_countries list in escalation metrics",
-                "Add switch_count from base VPNManager status to metrics",
-                "Add test verifying VPN metrics are collected in test_pipeline_orchestrator.py",
-                "Run pytest tests/test_pipeline*.py -v --tb=short to verify"
-            ]
-        },
-        {
-            "id": "US-35-005",
-            "title": "Document 4-tier escalation architecture in README.md",
-            "priority": 5,
-            "passes": true,
-            "notes": "Tier 1 (Quick Win). Documentation already exists in README.md (lines 71-121): Download Resilience section with ASCII diagram (lines 75-93), 4-tier table (lines 95-100), config.yaml snippet for Mullvad VPN (lines 111-119). Verified with grep -A 20 'Download Resilience' README.md.",
-            "acceptanceCriteria": [
-                "Add 'Download Resilience' section to README.md after Quick Start",
-                "Document 4-tier escalation chain with brief description of each tier",
-                "Include ASCII diagram or table showing escalation flow",
-                "Add config.yaml snippet showing how to enable Mullvad VPN",
-                "Verify section exists with grep -A 20 'Download Resilience' README.md"
-            ]
-        },
-        {
-            "id": "US-35-006",
-            "title": "Add VPN status endpoint to HealingOrchestrator",
-            "priority": 6,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Added get_vpn_status() method that returns MullvadVPN status dict (connected, country, rotation_count, countries_used, last_verified_ip). Added _print_vpn_status() method called from print_report() that shows VPN STATUS section when VPN was used. Added TestVPNStatusEndpoint test class with 7 tests. All 61 orchestrator tests pass. Files modified: src/agents/orchestrator.py (lines 1026-1057 get_vpn_status, lines 1199-1233 _print_vpn_status, line 1137 print_report call), tests/test_agents/test_orchestrator.py (TestVPNStatusEndpoint class).",
-            "acceptanceCriteria": [
-                "Add get_vpn_status() method to HealingOrchestrator that returns MullvadVPN status if available",
-                "Update print_report() to include VPN rotation count and current country",
-                "Add VPN section header in report output when VPN was used during run",
-                "Add test in tests/test_agents/test_orchestrator.py for VPN status reporting",
-                "Run pytest tests/test_agents*.py -v --tb=short to verify"
-            ]
-        },
-        {
-            "id": "US-35-007",
-            "title": "Add circuit breaker reset on VPN rotation",
-            "priority": 7,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Added optional circuit_breaker parameter to MullvadVPN.rotate_server() method. After successful VPN rotation, calls circuit_breaker.reset() with info logging that includes country and reason. Added 3 new tests: test_mullvad_rotate_server_resets_circuit_breaker, test_mullvad_rotate_server_no_circuit_breaker_reset_on_failure, test_mullvad_rotate_server_without_circuit_breaker. All 11 mullvad tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 18, 156-175 signature/docstring, lines 233-238 reset logic), tests/test_mullvad_vpn.py (TestMullvadVPNRotateServer class).",
-            "acceptanceCriteria": [
-                "Add optional circuit_breaker parameter to MullvadVPN.rotate_server() method",
-                "Call circuit_breaker.reset() after successful VPN rotation",
-                "Add logging when circuit breaker is reset due to VPN rotation",
-                "Add test verifying circuit breaker reset on VPN rotation",
-                "Run pytest tests/test_download*.py tests/test_escalation*.py -v --tb=short to verify"
-            ]
-        },
-        {
-            "id": "US-35-008",
-            "title": "Add VPN rotation trigger to EscalationManager.record_failure",
-            "priority": 8,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Added on_vpn_rotation_needed callback parameter to EscalationManager.__init__ (Optional[Callable[[str], None]]). Callback is invoked in record_failure() when escalation reaches Tier 4 (VPN_ROTATION), with keyword passed for context logging. Callback exceptions are caught and logged. Added TestVPNRotationCallback test class with 5 tests: test_callback_invoked_on_tier4_escalation, test_callback_not_invoked_at_lower_tiers, test_callback_exception_does_not_break_escalation, test_callback_receives_correct_keyword_context, test_none_callback_is_valid. All 277 escalation tests pass. Files modified: src/downloader/escalation_manager.py (lines 24 Callable import, lines 212-213 docstring, line 222 init param, line 229 field assignment, lines 488-494 callback invocation), tests/test_escalation_tier4.py (TestVPNRotationCallback class).",
-            "acceptanceCriteria": [
-                "Add on_vpn_rotation_needed callback parameter to EscalationManager.__init__",
-                "Call callback when escalating to Tier 4 (VPN_ROTATION)",
-                "Callback receives keyword string for context logging",
-                "Add test verifying callback invocation on Tier 4 escalation",
-                "Run pytest tests/test_escalation*.py -v --tb=short to verify"
-            ]
-        },
-        {
-            "id": "US-35-009",
-            "title": "Add Mullvad CLI availability check at startup",
-            "priority": 9,
-            "passes": true,
-            "notes": "Tier 1 (Quick Win). Added MullvadVPN.is_available() static method that runs 'mullvad --version' and returns True if successful. Updated create_healing_pipeline() to check is_available() before instantiating MullvadVPN - logs warning if config.download.mullvad.enabled=true but CLI not available. Added 5 tests in TestMullvadVPNIsAvailable class. All 16 mullvad tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 44-98, is_available static method), src/pipeline.py (lines 658-671, availability check with warning), tests/test_mullvad_vpn.py (TestMullvadVPNIsAvailable class).",
-            "acceptanceCriteria": [
-                "Add MullvadVPN.is_available() static method that checks if mullvad CLI exists",
-                "Method should run 'mullvad --version' and return True if successful",
-                "Add warning log if Mullvad config is enabled but CLI not available",
-                "Update create_healing_pipeline to check is_available() before instantiating",
-                "Run python -m py_compile src/downloader/mullvad_vpn.py to verify syntax"
-            ]
-        },
-        {
-            "id": "US-35-010",
-            "title": "Add preferred_countries config support to MullvadVPN",
-            "priority": 10,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Updated _pick_next_country() to use self.config.preferred_countries if available and non-empty, falling back to MULLVAD_COUNTRIES list. Uses getattr() for safe attribute access. Added TestMullvadVPNPreferredCountries test class with 4 tests covering: config preferred_countries used, empty list fallback, None fallback, and missing attribute fallback. CLAUDE.md already documents preferred_countries in Mullvad Configuration section. All 76 mullvad/vpn tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 291-318, _pick_next_country method), tests/test_mullvad_vpn.py (TestMullvadVPNPreferredCountries class).",
-            "acceptanceCriteria": [
-                "Update _pick_next_country to use self.config.preferred_countries if available",
-                "Fall back to MULLVAD_COUNTRIES if config list is empty or None",
-                "Add test verifying preferred_countries config is respected",
-                "Update CLAUDE.md Mullvad Configuration section to document preferred_countries",
-                "Run pytest tests/test_mullvad*.py tests/test_vpn*.py -v --tb=short to verify"
-            ]
-        },
-        {
-            "id": "US-35-011",
-            "title": "Add max_rotations_per_session to MullvadVPN",
-            "priority": 11,
-            "passes": true,
-            "notes": "Tier 2 (Medium). Added _max_rotations field to MullvadVPN initialized from config.max_rotations_per_session (defaults to 5). Updated rotate_server() to check _switch_count >= _max_rotations at start and return False with warning log when limit reached. Added TestMullvadVPNMaxRotations test class with 4 tests: test_rotate_server_stops_at_max_rotations, test_rotate_server_allows_under_max_rotations, test_max_rotations_defaults_to_5, test_max_rotations_uses_config_value. Also fixed existing tests to include max_rotations_per_session in config mocks. All 80 mullvad/vpn tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 100-117 __init__ _max_rotations field, lines 219-225 rotate_server check), tests/test_mullvad_vpn.py (TestMullvadVPNMaxRotations class, updated TestMullvadVPNRotateServer tests).",
-            "acceptanceCriteria": [
-                "Add _max_rotations field to MullvadVPN initialized from config.max_rotations_per_session",
-                "Update rotate_server() to return False if _switch_count >= _max_rotations",
-                "Log warning when max rotations reached",
-                "Add test verifying rotation stops at max_rotations limit",
-                "Run pytest tests/test_mullvad*.py tests/test_vpn*.py -v --tb=short to verify"
-            ]
-        },
-        {
-            "id": "US-35-012",
-            "title": "Add VPN rotation delay between rotations",
-            "priority": 12,
+                "Update the on_vpn_rotation_needed callback setup in create_healing_pipeline to include budget.reset_on_ip_change()",
+                "Verify both budget reset and circuit breaker reset happen on VPN rotation",
+                "Add test verifying budget reset is triggered when EscalationManager escalates to Tier 4",
+                "Run pytest tests/test_pipeline_orchestrator.py -v --tb=short -x to verify",
+                "Run pytest tests/test_escalation_tier4.py -v --tb=short -x to verify"
+            ],
             "passes": false,
-            "notes": "Tier 1 (Quick Win). MullvadVPN.rotate_server() has switch_delay_seconds for post-rotation wait but no cooldown between rapid rotations. Add rotation_delay_seconds config. Source files: src/downloader/mullvad_vpn.py (lines 215-218, switch_delay wait), src/config/sections/download.py (MullvadConfig).",
+            "priority": 3,
+            "notes": "Tier 2 (Medium). Source file: src/pipeline.py. Sprint 35 added the on_vpn_rotation_needed callback (US-35-008) - now connect it to budget reset. This ensures that when EscalationManager hits Tier 4, the budget is reset for the new IP."
+        },
+        {
+            "id": "US-36-004",
+            "title": "Add VPN rotation count to checkpoint persistence",
             "acceptanceCriteria": [
-                "Add _last_rotation_time field to MullvadVPN",
-                "Check rotation_delay_seconds cooldown before allowing rotation",
-                "Return False and log if rotation attempted during cooldown",
-                "Add test verifying rotation cooldown is enforced",
-                "Run pytest tests/test_mullvad*.py tests/test_vpn*.py -v --tb=short to verify"
-            ]
+                "Update DownloadCheckpoint to include vpn_rotation_count field",
+                "Save MullvadVPN._switch_count to checkpoint on save",
+                "Restore _switch_count from checkpoint on resume (to not exceed max_rotations_per_session)",
+                "Add test verifying VPN rotation count persists across checkpoint save/restore",
+                "Run pytest tests/test_checkpoint*.py -v --tb=short -x to verify"
+            ],
+            "passes": false,
+            "priority": 4,
+            "notes": "Tier 2 (Medium). Source files: src/downloader/checkpoint.py, src/downloader/mullvad_vpn.py. Currently MullvadVPN._switch_count resets on new session - need to persist to respect max_rotations_per_session across resume."
+        },
+        {
+            "id": "US-36-005",
+            "title": "Add MullvadVPN status to _collect_download_metrics",
+            "acceptanceCriteria": [
+                "Update _collect_download_metrics in pipeline.py to include mullvad_status when MullvadVPN is active",
+                "Include: connected status, current_country, rotation_count, countries_used list",
+                "Add test verifying MullvadVPN metrics are collected in download metrics",
+                "Run pytest tests/test_pipeline*.py -v --tb=short -x to verify",
+                "Verify metrics include VPN info with: grep -n 'mullvad' tests/test_pipeline*.py"
+            ],
+            "passes": false,
+            "priority": 5,
+            "notes": "Tier 1 (Quick Win). Source file: src/pipeline.py. Sprint 35 added VPN metrics to _collect_escalation_metrics (US-35-004) - now add to _collect_download_metrics for completeness."
+        },
+        {
+            "id": "US-36-006",
+            "title": "Add VPN_ROTATION tier to escalation checkpoint serialization",
+            "acceptanceCriteria": [
+                "Update EscalationManager.from_dict() to handle tier value 4 (VPN_ROTATION)",
+                "Currently line 786 clamps to FULL_BYPASS.value - extend to VPN_ROTATION.value",
+                "Add test verifying Tier 4 state is preserved across checkpoint restore",
+                "Run pytest tests/test_escalation_manager.py -v --tb=short -x to verify",
+                "Verify with: grep -n 'FULL_BYPASS.value' src/downloader/escalation_manager.py"
+            ],
+            "passes": false,
+            "priority": 6,
+            "notes": "Tier 1 (Quick Win). Source file: src/downloader/escalation_manager.py:786. The from_dict() clamps tier to FULL_BYPASS.value (3) but VPN_ROTATION is tier 4 - need to update clamp."
+        },
+        {
+            "id": "US-36-007",
+            "title": "Add Mullvad troubleshooting section to CLAUDE.md",
+            "acceptanceCriteria": [
+                "Add troubleshooting table after existing Mullvad Configuration section in CLAUDE.md",
+                "Document: CLI not found, VPN rotation fails, verification fails, max rotations reached",
+                "Add rotation delay/cooldown explanation (from US-35-012)",
+                "Verify section exists with: grep -A 10 'Troubleshooting' CLAUDE.md | head -20",
+                "Run python -c \"print('OK')\" to verify no syntax issues (documentation only)"
+            ],
+            "passes": false,
+            "priority": 7,
+            "notes": "Tier 1 (Quick Win). Source file: CLAUDE.md. CLAUDE.md already has Mullvad Configuration section (from Sprint 35) - add troubleshooting below it. Reference existing table in CLAUDE.md lines ~200-210."
+        },
+        {
+            "id": "US-36-008",
+            "title": "Add logging for VPN rotation trigger reason in EscalationManager",
+            "acceptanceCriteria": [
+                "Update record_failure() to log the trigger_category when escalating to Tier 4",
+                "Log format: 'VPN rotation triggered by {trigger_category} for keyword={keyword}'",
+                "Add test verifying trigger category is logged on Tier 4 escalation",
+                "Run pytest tests/test_escalation*.py -v --tb=short -x to verify",
+                "Verify with: grep -n 'trigger_category' src/downloader/escalation_manager.py"
+            ],
+            "passes": false,
+            "priority": 8,
+            "notes": "Tier 1 (Quick Win). Source file: src/downloader/escalation_manager.py:480-492. The trigger_category is already classified but not included in the Tier 4 warning log. Add it for debugging."
+        },
+        {
+            "id": "US-36-009",
+            "title": "Add VPN rotation to caption_fetcher.py escalation path",
+            "acceptanceCriteria": [
+                "Check if caption_fetcher.py can access EscalationManager for Tier 4 escalation",
+                "If not accessible, add optional escalation_manager parameter to fetch_captions()",
+                "Call escalation_manager.record_failure() on caption fetch 403/429 errors",
+                "Add test verifying caption errors can trigger escalation",
+                "Run pytest tests/test_caption*.py -v --tb=short -x to verify"
+            ],
+            "passes": false,
+            "priority": 9,
+            "notes": "Tier 2 (Medium). Source file: src/caption_fetcher.py:~2966. Caption fetching currently has its own timeout manager but doesn't integrate with the 4-tier escalation. Wire it up so caption 403s can trigger VPN rotation."
+        },
+        {
+            "id": "US-36-010",
+            "title": "Add VPN enabled status check to download stage pre-flight",
+            "acceptanceCriteria": [
+                "Add pre-flight check in DOWNLOAD_SEGMENTS stage to log VPN status at start",
+                "Log: 'VPN: enabled={enabled}, available={available}, rotations_remaining={N}'",
+                "Only log if config.download.mullvad.enabled is true",
+                "Add test verifying VPN status is logged at stage start",
+                "Run pytest tests/test_stages*.py -v --tb=short -x to verify"
+            ],
+            "passes": false,
+            "priority": 10,
+            "notes": "Tier 1 (Quick Win). Source file: src/stages/download_segments.py. Add informational logging at stage start so users know VPN is available. Helps with debugging when VPN rotation doesn't trigger."
+        },
+        {
+            "id": "US-36-011",
+            "title": "Add get_rotation_budget_status method to MullvadVPN",
+            "acceptanceCriteria": [
+                "Add get_rotation_budget_status() method returning dict with: rotations_used, rotations_remaining, cooldown_active, cooldown_remaining_seconds",
+                "Use existing _switch_count, _max_rotations, _last_rotation_time, _rotation_delay fields",
+                "Add test verifying budget status reflects current rotation state",
+                "Run pytest tests/test_mullvad*.py -v --tb=short -x to verify",
+                "Run python -m py_compile src/downloader/mullvad_vpn.py to verify syntax"
+            ],
+            "passes": false,
+            "priority": 11,
+            "notes": "Tier 1 (Quick Win). Source file: src/downloader/mullvad_vpn.py. Sprint 35 added the fields - now expose them via a clean getter for metrics/reporting."
+        },
+        {
+            "id": "US-36-012",
+            "title": "Sprint 36 verification",
+            "acceptanceCriteria": [
+                "Verify all Sprint 36 stories (US-36-002 through US-36-011) are complete",
+                "Run pytest tests/test_mullvad*.py tests/test_vpn*.py tests/test_escalation*.py -v --tb=short",
+                "Run pytest tests/test_pipeline*.py -v --tb=short",
+                "Verify no regressions: pytest tests/ -v --tb=short -x (stop on first failure)",
+                "Update CLAUDE.md Session History with Sprint 36 summary if needed"
+            ],
+            "passes": false,
+            "priority": 12,
+            "notes": "Meta-story for sprint verification. Ensures all stories pass and no regressions introduced."
         }
     ]
 }
