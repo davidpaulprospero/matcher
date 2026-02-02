@@ -168,6 +168,18 @@ class IterativeMatchStage(Stage):
             self.name
         )
 
+        # US-40-009: Pre-check candidate pool size
+        candidate_count = len(state.text_metadata) if state.text_metadata else 0
+        logger.info(f"IterativeMatch starting with {candidate_count} candidates")
+
+        if candidate_count == 0:
+            logger.warning("No candidates available in text_metadata - skipping iterative matching")
+            return StageResult.ok({
+                'skipped': True,
+                'reason': 'no_candidates',
+                'candidate_count': 0
+            })
+
         warnings = []
 
         # Get config (with fallback defaults)

@@ -119,7 +119,11 @@ def mock_state_with_gaps(mock_voiceover_segments, mock_matches_with_gaps):
     state = PipelineState()
     state.voiceover_segments = mock_voiceover_segments
     state.matches = mock_matches_with_gaps
-    state.text_metadata = []
+    # US-40-009: Provide some text_metadata candidates so stage doesn't skip
+    state.text_metadata = [
+        {'text': f'caption {i}', 'video_path': f'vid_{i}', 'start_time': 0, 'end_time': 5}
+        for i in range(10)
+    ]
     state.embeddings = None
     state.embedding_index = None
     state.extracted_entities = []
@@ -157,7 +161,11 @@ def mock_state_all_high_confidence():
         matches.append(match)
 
     state.matches = matches
-    state.text_metadata = []
+    # US-40-009: Provide some text_metadata candidates so stage doesn't skip
+    state.text_metadata = [
+        {'text': f'caption {i}', 'video_path': f'vid_{i}', 'start_time': 0, 'end_time': 5}
+        for i in range(5)
+    ]
     state.embeddings = None
     state.extracted_entities = []
     state.voiceover_path = "/tmp/test/voiceover.srt"
@@ -727,6 +735,8 @@ class TestDisabledStage:
         state = PipelineState()
         state.matches = []
         state.voiceover_segments = [MagicMock()]
+        # US-40-009: Need text_metadata to avoid 'no_candidates' check first
+        state.text_metadata = [{'text': 'caption', 'video_path': 'vid'}]
 
         result = stage.run(state, mock_config, mock_checkpoint)
 
@@ -865,3 +875,132 @@ class TestIterativeMatchIntegration:
             assert 'total_duration_seconds' in data
             assert 'matches' in data
             assert 'pass_metrics' in data
+
+
+# ============================================================================
+# Empty Candidate Pool Pre-Check Tests (US-40-009)
+# ============================================================================
+
+class TestEmptyCandidatePoolPreCheck:
+    """Test pre-check for empty candidate pool at stage entry.
+
+    US-40-009: IterativeMatchStage should check candidate pool size
+    at entry and return early if no candidates are available.
+    """
+
+    def test_early_return_when_no_candidates_available(
+        self, stage, mock_config, mock_checkpoint
+    ):
+        """Stage returns early with skipped=True when text_metadata is empty.
+
+        AC: Add unit test verifying early return when no candidates available
+        """
+        state = PipelineState()
+        state.voiceover_segments = [MagicMock()]
+        state.matches = [MagicMock()]
+        state.text_metadata = []  # Empty candidate pool
+        state.embeddings = None
+        state.extracted_entities = []
+        state.voiceover_path = "/tmp/test/voiceover.srt"
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skipped') is True
+        assert result.data.get('reason') == 'no_candidates'
+        assert result.data.get('candidate_count') == 0
+
+    def test_early_return_when_text_metadata_is_none(
+        self, stage, mock_config, mock_checkpoint
+    ):
+        """Stage returns early when text_metadata is None.
+
+        Handles edge case where text_metadata attribute exists but is None.
+        """
+        state = PipelineState()
+        state.voiceover_segments = [MagicMock()]
+        state.matches = [MagicMock()]
+        state.text_metadata = None  # None instead of empty list
+        state.embeddings = None
+        state.extracted_entities = []
+        state.voiceover_path = "/tmp/test/voiceover.srt"
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data.get('skipped') is True
+        assert result.data.get('reason') == 'no_candidates'
+
+    def test_normal_flow_when_candidates_exist(
+        self, stage, mock_state_with_gaps, mock_config, mock_checkpoint
+    ):
+        """Stage proceeds normally when candidates exist in text_metadata.
+
+        AC: Add unit test verifying normal flow when candidates exist
+        """
+        # Add some candidates to text_metadata
+        mock_state_with_gaps.text_metadata = [
+            {'text': 'caption 1', 'video_path': 'vid1', 'start_time': 0, 'end_time': 5},
+            {'text': 'caption 2', 'video_path': 'vid2', 'start_time': 0, 'end_time': 5},
+        ]
+        mock_config.iterative_matching.max_iterations = 1
+
+        with patch.object(stage, '_search_youtube_for_videos', return_value=[]), \
+             patch.object(stage, '_fetch_captions_for_videos', return_value=[]):
+
+            result = stage.run(mock_state_with_gaps, mock_config, mock_checkpoint)
+
+        # Should NOT be skipped due to no_candidates
+        assert result.success is True
+        assert result.data.get('reason') != 'no_candidates'
+        # Should have processed (passes_completed indicates normal flow)
+        assert 'passes_completed' in result.data
+
+    def test_logs_candidate_count_at_entry(
+        self, stage, mock_state_with_gaps, mock_config, mock_checkpoint, caplog
+    ):
+        """Stage logs INFO with candidate count at entry.
+
+        AC: Log INFO with candidate pool size at stage entry
+        """
+        import logging
+
+        # Add candidates
+        mock_state_with_gaps.text_metadata = [
+            {'text': f'caption {i}', 'video_path': f'vid{i}'} for i in range(5)
+        ]
+        mock_config.iterative_matching.max_iterations = 1
+
+        with patch.object(stage, '_search_youtube_for_videos', return_value=[]), \
+             patch.object(stage, '_fetch_captions_for_videos', return_value=[]), \
+             caplog.at_level(logging.INFO, logger='src.stages.iterative_match'):
+
+            stage.run(mock_state_with_gaps, mock_config, mock_checkpoint)
+
+        # Check that candidate count was logged
+        assert any('IterativeMatch starting with 5 candidates' in record.message
+                   for record in caplog.records)
+
+    def test_logs_warning_when_no_candidates(
+        self, stage, mock_config, mock_checkpoint, caplog
+    ):
+        """Stage logs WARNING when no candidates available.
+
+        AC: If candidate pool is 0, log WARNING
+        """
+        import logging
+
+        state = PipelineState()
+        state.voiceover_segments = [MagicMock()]
+        state.matches = [MagicMock()]
+        state.text_metadata = []
+        state.embeddings = None
+        state.extracted_entities = []
+        state.voiceover_path = "/tmp/test/voiceover.srt"
+
+        with caplog.at_level(logging.WARNING, logger='src.stages.iterative_match'):
+            stage.run(state, mock_config, mock_checkpoint)
+
+        # Check that warning was logged
+        assert any('No candidates available' in record.message
+                   for record in caplog.records)
