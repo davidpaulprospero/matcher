@@ -2818,3 +2818,90 @@ class TestCaptionRetryBudgetEarlyTerminationIntegration:
         top_errors = budget.get_top_errors()
         assert len(top_errors) == 2
         # Both RATE_LIMIT and NETWORK have 8 errors each
+
+
+# ============================================================================
+# US-38-009: Batch size in retry budget summary logging
+# ============================================================================
+
+
+class TestCaptionRetryBudgetBatchSizeTracking:
+    """Test batch_size tracking in CaptionRetryBudget (US-38-009)."""
+
+    @pytest.mark.fast
+    def test_batch_size_field_exists(self):
+        """Test batch_size field is initialized as None."""
+        budget = CaptionRetryBudget()
+        assert hasattr(budget, 'batch_size')
+        assert budget.batch_size is None
+
+    @pytest.mark.fast
+    def test_scale_to_batch_size_sets_batch_size(self):
+        """Test scale_to_batch_size() sets the batch_size field."""
+        budget = CaptionRetryBudget()
+        assert budget.batch_size is None
+
+        budget.scale_to_batch_size(175)
+        assert budget.batch_size == 175
+
+    @pytest.mark.fast
+    def test_batch_size_in_get_summary(self):
+        """Test batch_size is included in get_summary() output (US-38-009 main criterion)."""
+        budget = CaptionRetryBudget()
+        budget.scale_to_batch_size(200)
+
+        summary = budget.get_summary()
+
+        assert 'batch_size' in summary
+        assert summary['batch_size'] == 200
+
+    @pytest.mark.fast
+    def test_batch_size_in_get_summary_when_not_set(self):
+        """Test batch_size is None in summary when scale_to_batch_size not called."""
+        budget = CaptionRetryBudget()
+        summary = budget.get_summary()
+
+        assert 'batch_size' in summary
+        assert summary['batch_size'] is None
+
+    @pytest.mark.fast
+    def test_batch_size_in_to_dict(self):
+        """Test batch_size is included in to_dict() for checkpoint persistence."""
+        budget = CaptionRetryBudget()
+        budget.scale_to_batch_size(150)
+
+        data = budget.to_dict()
+
+        assert 'batch_size' in data
+        assert data['batch_size'] == 150
+
+    @pytest.mark.fast
+    def test_batch_size_restored_from_dict(self):
+        """Test batch_size is restored from checkpoint data."""
+        # Simulate checkpoint data
+        checkpoint_data = {
+            "attempts": 50,
+            "failures": 10,
+            "successes": 40,
+            "batch_size": 175,
+        }
+
+        budget = CaptionRetryBudget.from_dict(checkpoint_data)
+
+        assert budget.batch_size == 175
+
+    @pytest.mark.fast
+    def test_batch_size_roundtrip(self):
+        """Test batch_size survives to_dict/from_dict roundtrip."""
+        budget = CaptionRetryBudget()
+        budget.scale_to_batch_size(225)
+        budget.record_attempt("vid1")
+        budget.record_success("vid1")
+
+        # Serialize and restore
+        data = budget.to_dict()
+        restored = CaptionRetryBudget.from_dict(data)
+
+        assert restored.batch_size == 225
+        assert restored.attempts == 1
+        assert restored.successes == 1

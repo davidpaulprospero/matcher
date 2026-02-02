@@ -99,6 +99,9 @@ class CaptionRetryBudget:
     backoff_time_spent: float = 0.0
     videos_skipped: int = 0
 
+    # Batch size tracking (US-38-009)
+    batch_size: Optional[int] = None
+
     # Error category tracking (US-37-006)
     error_counts: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
 
@@ -633,6 +636,7 @@ class CaptionRetryBudget:
                 "early_terminated": self.early_terminated,  # US-37-009
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
                 "error_breakdown": error_breakdown,  # US-37-006
+                "batch_size": self.batch_size,  # US-38-009
             }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -656,6 +660,7 @@ class CaptionRetryBudget:
                 "max_vpn_resets": self.max_vpn_resets,  # US-37-008
                 "early_terminated": self.early_terminated,  # US-37-009
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
+                "batch_size": self.batch_size,  # US-38-009
             }
 
     @classmethod
@@ -698,6 +703,9 @@ class CaptionRetryBudget:
         # Restore early termination state (US-37-009)
         budget.early_terminated = data.get("early_terminated", False)
         budget.early_termination_reason = data.get("early_termination_reason")
+
+        # Restore batch size (US-38-009)
+        budget.batch_size = data.get("batch_size")
 
         return budget
 
@@ -750,6 +758,9 @@ class CaptionRetryBudget:
 
             # Calculate required attempts for this batch
             required_attempts = int(batch_size * multiplier + 0.5)  # Round up
+
+            # Track batch size for summary logging (US-38-009)
+            self.batch_size = batch_size
 
             # Only scale UP, never reduce below default
             if required_attempts > self.max_attempts:
