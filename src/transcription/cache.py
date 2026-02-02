@@ -13,6 +13,7 @@ and dynamic index building by scanning cache directory.
 import json
 import hashlib
 import logging
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -268,6 +269,42 @@ class TranscriptCache:
 
         if removed > 0:
             logger.info(f"Cleaned up {removed} orphaned transcript cache entries")
+            # Rebuild source map after cleanup
+            self._source_map.clear()
+            self._video_id_map.clear()
+            self._build_source_map()
+
+        return removed
+
+    def cleanup_stale_entries(self, max_age_days: int = 30) -> int:
+        """
+        Remove cache entries older than max_age_days.
+
+        Args:
+            max_age_days: Maximum age in days before an entry is considered stale
+
+        Returns:
+            Number of entries removed
+        """
+        removed = 0
+        cutoff_time = time.time() - (max_age_days * 24 * 60 * 60)
+
+        for folder in [self.cache_dir, self.alt_cache_dir]:
+            if not folder or not folder.exists():
+                continue
+
+            for cache_file in list(folder.glob("*.json")):
+                try:
+                    # Check file modification time
+                    mtime = cache_file.stat().st_mtime
+                    if mtime < cutoff_time:
+                        cache_file.unlink()
+                        removed += 1
+                except Exception:
+                    continue
+
+        if removed > 0:
+            logger.info(f"Cleaned up {removed} stale transcript cache entries (older than {max_age_days} days)")
             # Rebuild source map after cleanup
             self._source_map.clear()
             self._video_id_map.clear()
