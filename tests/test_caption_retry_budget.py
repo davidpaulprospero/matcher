@@ -5256,3 +5256,228 @@ class TestCaptionRetryBudgetIntegrityCheck:
         assert restore_info["batch_size_changed"] is True
         assert restore_info["force_rescaled"] is False
         assert budget.max_attempts == 500  # Preserved
+
+
+class TestCaptionRetryBudgetGracefulDegradation:
+    """Tests for US-42-011: Graceful degradation when budget insufficient for batch.
+
+    Verifies that verify_budget_sufficient() can continue with warning instead of
+    failing when budget is insufficient, logging expected skips and tracking
+    actual vs expected skips in summary.
+    """
+
+    @pytest.mark.fast
+    def test_graceful_degradation_continues_with_warning(self, caplog):
+        """Verify budget has 50 remaining, batch of 100, continues and logs expected skips.
+
+        US-42-011 AC1: When budget insufficient, offer option to continue with warning.
+        US-42-011 AC3: Log expected number of videos that will be skipped.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 50  # Only 50 attempts available
+        budget.attempts = 0
+        budget.attempts_per_video = 2.0  # Need 200 for batch of 100
+
+        # With graceful_degradation=True, should NOT raise ValueError
+        result = budget.verify_budget_sufficient(100, graceful_degradation=True)
+
+        # Should return degradation info dict
+        assert result is not None
+        assert "expected_skips" in result
+        assert result["expected_skips"] > 0  # Some videos will be skipped
+        assert result["remaining_attempts"] == 50
+        assert result["budget_covers_pct"] < 100
+
+        # Should log warnings
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 2  # At least 2 warnings (insufficient + expected skips)
+
+        log_text = " ".join(r.message for r in warning_logs)
+        assert "insufficient" in log_text.lower()
+        assert "Expected" in log_text
+        assert "skipped" in log_text.lower()
+        assert "US-42-011" in log_text
+
+    @pytest.mark.fast
+    def test_graceful_degradation_false_raises_valueerror(self):
+        """Verify graceful_degradation=False still raises ValueError.
+
+        US-42-011: Default behavior unchanged - ValueError when budget insufficient.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 50
+        budget.attempts = 0
+        budget.attempts_per_video = 2.0
+
+        with pytest.raises(ValueError) as exc_info:
+            budget.verify_budget_sufficient(100, graceful_degradation=False)
+
+        assert "insufficient" in str(exc_info.value).lower()
+
+    @pytest.mark.fast
+    def test_graceful_degradation_calculates_expected_skips_correctly(self):
+        """Verify expected_skips calculation is mathematically correct.
+
+        US-42-011 AC3: Expected ~{n} videos to be skipped.
+        With 50 remaining attempts and 2.0 attempts_per_video:
+        - Budget can cover 50 / 2.0 = 25 videos
+        - Expected skips = 100 - 25 = 75
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 50
+        budget.attempts = 0  # 50 remaining
+        budget.attempts_per_video = 2.0
+
+        result = budget.verify_budget_sufficient(100, graceful_degradation=True)
+
+        # 50 / 2.0 = 25 videos can be covered
+        # 100 - 25 = 75 expected skips
+        assert result["expected_skips"] == 75
+        assert result["remaining_attempts"] == 50
+        assert result["budget_covers_pct"] == 25.0  # 25/100 = 25%
+
+    @pytest.mark.fast
+    def test_graceful_degradation_stores_expected_skips(self):
+        """Verify expected_skips stored for later comparison.
+
+        US-42-011 AC4: Track actual vs expected skips in summary log.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 50
+        budget.attempts = 0
+        budget.attempts_per_video = 2.0
+
+        # Before graceful degradation, _expected_skips should be None
+        assert budget._expected_skips is None
+
+        budget.verify_budget_sufficient(100, graceful_degradation=True)
+
+        # After graceful degradation, _expected_skips should be set
+        assert budget._expected_skips == 75
+
+    @pytest.mark.fast
+    def test_log_skip_comparison_exact_match(self, caplog):
+        """Verify log_skip_comparison logs when actual == expected.
+
+        US-42-011 AC4: Track actual vs expected skips.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget._expected_skips = 75
+        budget.videos_skipped = 75  # Exact match
+
+        budget.log_skip_comparison()
+
+        info_logs = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert len(info_logs) >= 1
+
+        log_text = info_logs[0].message
+        assert "actual=75" in log_text
+        assert "expected=75" in log_text
+        assert "exact match" in log_text.lower()
+        assert "US-42-011" in log_text
+
+    @pytest.mark.fast
+    def test_log_skip_comparison_fewer_skips(self, caplog):
+        """Verify log_skip_comparison logs when actual < expected.
+
+        US-42-011 AC4: Better than predicted outcome.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget._expected_skips = 75
+        budget.videos_skipped = 60  # Better than expected
+
+        budget.log_skip_comparison()
+
+        info_logs = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert len(info_logs) >= 1
+
+        log_text = info_logs[0].message
+        assert "actual=60" in log_text
+        assert "expected=75" in log_text
+        assert "better" in log_text.lower() or "fewer" in log_text.lower()
+        assert "15 fewer" in log_text  # 75 - 60 = 15
+
+    @pytest.mark.fast
+    def test_log_skip_comparison_more_skips(self, caplog):
+        """Verify log_skip_comparison logs WARNING when actual > expected.
+
+        US-42-011 AC4: Worse than predicted outcome.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        budget = CaptionRetryBudget()
+        budget._expected_skips = 75
+        budget.videos_skipped = 90  # Worse than expected
+
+        budget.log_skip_comparison()
+
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1
+
+        log_text = warning_logs[0].message
+        assert "actual=90" in log_text
+        assert "expected=75" in log_text
+        assert "worse" in log_text.lower()
+        assert "15 more" in log_text  # 90 - 75 = 15
+
+    @pytest.mark.fast
+    def test_log_skip_comparison_no_log_without_expected(self, caplog):
+        """Verify log_skip_comparison does nothing when _expected_skips is None.
+
+        US-42-011: Only log comparison if graceful degradation was used.
+        """
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        budget = CaptionRetryBudget()
+        budget._expected_skips = None  # Not set (graceful degradation not used)
+        budget.videos_skipped = 50
+
+        budget.log_skip_comparison()
+
+        # Should not log anything
+        assert len(caplog.records) == 0
+
+    @pytest.mark.fast
+    def test_graceful_degradation_returns_none_when_sufficient(self):
+        """Verify verify_budget_sufficient returns None when budget is sufficient.
+
+        US-42-011: Only return degradation info when budget is actually insufficient.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 300
+        budget.attempts = 0
+        budget.attempts_per_video = 2.0
+
+        # 300 >= 100 * 2.0 = 200, so budget is sufficient
+        result = budget.verify_budget_sufficient(100, graceful_degradation=True)
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_graceful_degradation_with_prior_attempts(self):
+        """Verify graceful degradation considers prior attempts when calculating skips.
+
+        US-42-011 AC5: budget has 50 remaining means max_attempts - attempts = 50.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.attempts = 50  # Only 50 remaining
+        budget.attempts_per_video = 2.0
+
+        result = budget.verify_budget_sufficient(100, graceful_degradation=True)
+
+        # 50 remaining / 2.0 = 25 videos can be covered
+        # 100 - 25 = 75 expected skips
+        assert result["expected_skips"] == 75
+        assert result["remaining_attempts"] == 50
