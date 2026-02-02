@@ -1397,5 +1397,177 @@ class TestPipelineStatePostInit:
         assert isinstance(state.text_metadata, list)
 
 
+@pytest.mark.fast
+class TestPipelineStateDeserializeMissingFields:
+    """Test PipelineState deserialization with missing fields (US-43-006).
+
+    When checkpoint data is restored, older checkpoints may lack certain fields.
+    This tests that PipelineState handles missing fields gracefully, ensuring
+    text_metadata (and other required fields) are always [] or {} after
+    deserialization, never None or missing.
+    """
+
+    def test_pipeline_state_deserialize_missing_text_metadata(self):
+        """Test deserializing checkpoint data that lacks 'text_metadata' key.
+
+        Simulates restoring from an old checkpoint where text_metadata wasn't saved.
+        Verifies that state.text_metadata is [] after deserialization, not None.
+        """
+        # Simulate checkpoint data WITHOUT text_metadata key (older checkpoint format)
+        checkpoint_data = {
+            'voiceover_path': '/path/to/voiceover.srt',
+            'keywords': ['keyword1', 'keyword2'],
+            'topic_context': 'Test Topic',
+            'voiceover_segments': [],
+            'video_ids': ['abc123', 'def456'],
+            'caption_results': {'abc123': {'text': 'Caption text'}},
+            'matches': [],
+            'alternatives': {},
+            'downloaded_segments': [],
+            'output_files': [],
+            'otio_files': [],
+            'face_preference': 'neutral',
+            'stage_timings': {},
+            # NOTE: text_metadata is intentionally MISSING
+        }
+
+        # Create PipelineState from dict-like data (simulating checkpoint restore)
+        # This mimics what happens when checkpoint data is loaded
+        state = PipelineState(**{k: v for k, v in checkpoint_data.items()
+                                 if k in PipelineState.__dataclass_fields__})
+
+        # CRITICAL: text_metadata must be [] (empty list), not None, not missing
+        assert hasattr(state, 'text_metadata'), "text_metadata attribute should exist"
+        assert state.text_metadata is not None, "text_metadata should not be None"
+        assert isinstance(state.text_metadata, list), "text_metadata should be a list"
+        assert state.text_metadata == [], "text_metadata should be empty list"
+
+        # Verify we can use text_metadata operations without AttributeError
+        state.text_metadata.extend([{'video_id': 'test', 'text': 'Test'}])
+        assert len(state.text_metadata) == 1
+
+    @pytest.mark.fast
+    def test_pipeline_state_deserialize_text_metadata_none(self):
+        """Test deserializing checkpoint data where text_metadata is explicitly None.
+
+        This can happen with corrupted checkpoints or manual JSON editing.
+        __post_init__ should convert None to [].
+        """
+        # Simulate checkpoint data with text_metadata=None
+        checkpoint_data = {
+            'voiceover_path': '/path/to/voiceover.srt',
+            'keywords': [],
+            'text_metadata': None,  # Explicitly None
+        }
+
+        # Create PipelineState with only the fields it accepts
+        state = PipelineState(**{k: v for k, v in checkpoint_data.items()
+                                 if k in PipelineState.__dataclass_fields__})
+
+        # __post_init__ should have converted None to []
+        assert state.text_metadata is not None, "text_metadata should not be None after __post_init__"
+        assert state.text_metadata == [], "text_metadata should be converted to []"
+
+    @pytest.mark.fast
+    def test_pipeline_state_validate_state_attributes_after_restore(self):
+        """Test validate_state_attributes() fixes missing fields after checkpoint restore.
+
+        This tests the checkpoint restore path that calls validate_state_attributes().
+        """
+        # Create state and manually break it (simulating incomplete checkpoint)
+        state = PipelineState()
+        state.text_metadata = None  # Simulate missing/None after checkpoint load
+        state.caption_results = None
+        state.video_ids = None
+
+        # Call validate_state_attributes (what checkpoint restore does)
+        initialized_fields = state.validate_state_attributes()
+
+        # All three should have been initialized
+        assert 'text_metadata' in initialized_fields
+        assert 'caption_results' in initialized_fields
+        assert 'video_ids' in initialized_fields
+
+        # Verify they're proper defaults
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.video_ids == []
+
+    @pytest.mark.fast
+    def test_checkpoint_restore_state_initializes_missing_fields(self):
+        """Test CheckpointManager.restore_state() initializes missing fields.
+
+        This is the actual checkpoint restore path used in production.
+        """
+        from src.checkpoint import CheckpointManager
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create checkpoint manager
+            manager = CheckpointManager(Path(tmpdir))
+
+            # Create a state with broken text_metadata
+            state = PipelineState()
+            state.text_metadata = None  # Simulate corruption
+
+            # restore_state should fix it
+            restored = manager.restore_state(state)
+
+            # text_metadata should now be []
+            assert restored.text_metadata is not None
+            assert restored.text_metadata == []
+
+    @pytest.mark.fast
+    def test_from_dict_pattern_preserves_existing_data(self):
+        """Test that deserializing with existing text_metadata preserves it.
+
+        Ensures the fix for missing fields doesn't accidentally clear valid data.
+        """
+        checkpoint_data = {
+            'voiceover_path': '/test.srt',
+            'text_metadata': [
+                {'video_id': 'vid1', 'text': 'Caption 1'},
+                {'video_id': 'vid2', 'text': 'Caption 2'},
+            ],
+        }
+
+        state = PipelineState(**{k: v for k, v in checkpoint_data.items()
+                                 if k in PipelineState.__dataclass_fields__})
+
+        # Existing data should be preserved
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['video_id'] == 'vid1'
+        assert state.text_metadata[1]['text'] == 'Caption 2'
+
+    @pytest.mark.fast
+    def test_direct_construction_vs_checkpoint_restore_parity(self):
+        """Test that direct construction and checkpoint restore give same result.
+
+        Both paths should result in text_metadata = [] when not provided.
+        """
+        # Path 1: Direct construction
+        direct_state = PipelineState()
+
+        # Path 2: Simulated checkpoint restore (empty data)
+        from src.checkpoint import CheckpointManager
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = CheckpointManager(Path(tmpdir))
+            restored_state = manager.restore_state()  # Creates new state
+
+            # Both should have text_metadata = []
+            assert direct_state.text_metadata == restored_state.text_metadata == []
+
+            # Both should allow extend() without error
+            direct_state.text_metadata.extend([{'video_id': 'test'}])
+            restored_state.text_metadata.extend([{'video_id': 'test'}])
+
+            assert len(direct_state.text_metadata) == 1
+            assert len(restored_state.text_metadata) == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
