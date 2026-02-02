@@ -200,6 +200,19 @@ class CaptionRetryBudgetConfig:
     # After this many resets, budget exhaustion is final
     max_vpn_resets_per_session: int = 2
 
+    # Early termination settings (US-37-009)
+    # When success rate drops below threshold after min_sample videos,
+    # terminate early to save time instead of continuing to fail
+
+    # Minimum success rate threshold (0.0 to 1.0)
+    # If success rate falls below this, terminate early
+    # 0.3 = terminate if less than 30% of videos succeed
+    min_success_rate: float = 0.3
+
+    # Minimum videos processed before checking success rate
+    # Prevents premature termination on small samples
+    min_sample_for_early_termination: int = 20
+
 
 @dataclass
 class CaptionFirstConfig:

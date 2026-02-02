@@ -1431,6 +1431,91 @@ if ($queueInfo.exists -and $queueInfo.incompleteCount -gt 0 -and -not $Resume) {
 }
 
 # ============================================================================
+# MULTI-LINE INPUT HELPER
+# ============================================================================
+
+function Read-MultiLineInput {
+    <#
+    .SYNOPSIS
+        Reads multi-line input until user enters a blank line
+    .RETURNS
+        Combined string of all entered lines
+    #>
+    $lines = @()
+    Write-Host "  (Enter a blank line when done)" -ForegroundColor DarkGray
+    Write-Host ""
+
+    while ($true) {
+        $line = Read-Host "  "
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            break
+        }
+        $lines += $line
+    }
+
+    return ($lines -join "`n")
+}
+
+function Read-SmartInput {
+    <#
+    .SYNOPSIS
+        Smart input that supports single-line, multi-line, clipboard, and file input
+    .DESCRIPTION
+        Special prefixes:
+        - "paste" or "clip": Read from clipboard
+        - "file:<path>": Read from file
+        - "...": Enter multi-line mode (end with blank line)
+        - Otherwise: Single line input
+    .RETURNS
+        User's input string
+    #>
+    param([string]$Prompt = "  ")
+
+    $firstLine = Read-Host $Prompt
+
+    # Check for special prefixes
+    switch -Regex ($firstLine.Trim().ToLower()) {
+        "^(paste|clip|clipboard)$" {
+            # Read from clipboard
+            try {
+                $clipContent = Get-Clipboard -Raw
+                if ([string]::IsNullOrWhiteSpace($clipContent)) {
+                    Write-Host "  Clipboard is empty" -ForegroundColor Yellow
+                    return ""
+                }
+                $lineCount = ($clipContent -split "`n").Count
+                Write-Host "  Read $lineCount lines from clipboard" -ForegroundColor Green
+                return $clipContent.Trim()
+            } catch {
+                Write-Host "  Failed to read clipboard: $_" -ForegroundColor Red
+                return ""
+            }
+        }
+        "^file:(.+)$" {
+            # Read from file
+            $filePath = $Matches[1].Trim()
+            if (Test-Path $filePath) {
+                $content = Get-Content $filePath -Raw
+                $lineCount = ($content -split "`n").Count
+                Write-Host "  Read $lineCount lines from file" -ForegroundColor Green
+                return $content.Trim()
+            } else {
+                Write-Host "  File not found: $filePath" -ForegroundColor Red
+                return ""
+            }
+        }
+        "^\.\.\.?$" {
+            # Multi-line mode
+            return Read-MultiLineInput
+        }
+        default {
+            # Single line - return as-is
+            return $firstLine
+        }
+    }
+}
+
+# ============================================================================
 # MAIN INTERVIEW FLOW
 # ============================================================================
 
@@ -1438,9 +1523,9 @@ if (-not $script:ResumeMode) {
     # Simplified flow: just ask what they want to do
     Write-Host ""
     Write-Host "  What do you want to work on?" -ForegroundColor Cyan
-    Write-Host "  (Press Enter to use Ralph's Choice)" -ForegroundColor DarkGray
+    Write-Host "  (Press Enter for Ralph's Choice | 'paste' for clipboard | '...' for multi-line)" -ForegroundColor DarkGray
     Write-Host ""
-    $userInput = Read-Host "  "
+    $userInput = Read-SmartInput -Prompt "  "
     Write-InterviewLog "User input: $userInput"
 
     # Create context

@@ -58,6 +58,11 @@ class CaptionRetryBudgetConfig:
     # Prevents infinite loops if VPN rotation doesn't help
     max_vpn_resets_per_session: int = 2
 
+    # Early termination settings (US-37-009)
+    # When success rate drops below threshold, terminate early
+    min_success_rate: float = 0.3  # 30% minimum success rate
+    min_sample_for_early_termination: int = 20  # Check after 20 videos
+
 
 @dataclass
 class CaptionRetryBudget:
@@ -110,6 +115,12 @@ class CaptionRetryBudget:
     max_vpn_resets: int = 2
     vpn_resets_used: int = 0
 
+    # Early termination settings (US-37-009)
+    min_success_rate: float = 0.3  # 30% minimum
+    min_sample_for_early_termination: int = 20  # Check after 20 videos
+    early_terminated: bool = False
+    early_termination_reason: Optional[str] = None
+
     # Thread-safety lock
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
@@ -136,6 +147,9 @@ class CaptionRetryBudget:
             # US-37-008: VPN rotation on rate limit exhaustion
             budget.trigger_vpn_on_rate_limit = bool(config.get('trigger_vpn_rotation_on_rate_limit', True))
             budget.max_vpn_resets = int(config.get('max_vpn_resets_per_session', 2))
+            # US-37-009: Early termination on low success rate
+            budget.min_success_rate = float(config.get('min_success_rate', 0.3))
+            budget.min_sample_for_early_termination = int(config.get('min_sample_for_early_termination', 20))
         else:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
@@ -144,6 +158,9 @@ class CaptionRetryBudget:
             # US-37-008: VPN rotation on rate limit exhaustion
             budget.trigger_vpn_on_rate_limit = bool(getattr(config, 'trigger_vpn_rotation_on_rate_limit', True))
             budget.max_vpn_resets = int(getattr(config, 'max_vpn_resets_per_session', 2))
+            # US-37-009: Early termination on low success rate
+            budget.min_success_rate = float(getattr(config, 'min_success_rate', 0.3))
+            budget.min_sample_for_early_termination = int(getattr(config, 'min_sample_for_early_termination', 20))
 
         logger.debug(
             f"CaptionRetryBudget initialized: max_attempts={budget.max_attempts}, "
@@ -362,6 +379,95 @@ class CaptionRetryBudget:
         with self._lock:
             return self.vpn_resets_used < self.max_vpn_resets
 
+    def get_success_rate(self) -> float:
+        """Get current success rate (US-37-009).
+
+        Returns:
+            Success rate as float (0.0 to 1.0).
+            Returns 1.0 if no videos processed (no data to judge).
+
+        Example:
+            >>> budget.get_success_rate()
+            0.25  # 25% success rate
+        """
+        with self._lock:
+            total_processed = self.successes + self.failures
+            if total_processed == 0:
+                return 1.0  # No data = assume OK
+            return self.successes / total_processed
+
+    def should_terminate_early(self) -> bool:
+        """Check if batch should terminate early due to low success rate (US-37-009).
+
+        Early termination triggers when:
+        1. At least min_sample_for_early_termination videos processed
+        2. Success rate is below min_success_rate threshold
+        3. Not already terminated
+
+        Returns:
+            True if early termination should occur.
+
+        Example:
+            >>> budget.should_terminate_early()
+            True  # When 20+ videos processed and success rate < 30%
+        """
+        with self._lock:
+            # Don't double-terminate
+            if self.early_terminated:
+                return False
+
+            # Need sufficient sample
+            total_processed = self.successes + self.failures
+            if total_processed < self.min_sample_for_early_termination:
+                return False
+
+            # Check success rate
+            success_rate = self.get_success_rate()
+            if success_rate < self.min_success_rate:
+                return True
+
+            return False
+
+    def check_and_terminate_early(self) -> bool:
+        """Check if early termination should occur and mark as terminated (US-37-009).
+
+        This method combines the check and action to ensure atomic operation.
+        Call this after each video is processed to check if batch should stop.
+
+        Returns:
+            True if early termination was triggered (first time),
+            False if already terminated or conditions not met.
+
+        Side effects:
+            Sets early_terminated = True and early_termination_reason if triggered.
+        """
+        with self._lock:
+            if not self.should_terminate_early():
+                return False
+
+            # Calculate and store the termination reason
+            success_rate = self.get_success_rate()
+            total_processed = self.successes + self.failures
+            self.early_terminated = True
+            self.early_termination_reason = (
+                f"Success rate {success_rate:.1%} below threshold {self.min_success_rate:.1%} "
+                f"after {total_processed} videos ({self.successes} succeeded, {self.failures} failed)"
+            )
+
+            logger.warning(
+                f"CaptionRetryBudget: EARLY TERMINATION - {self.early_termination_reason}"
+            )
+            return True
+
+    def is_early_terminated(self) -> bool:
+        """Check if budget was early-terminated (US-37-009).
+
+        Returns:
+            True if early_terminated flag is set.
+        """
+        with self._lock:
+            return self.early_terminated
+
     def get_consumption_percentage(self) -> Dict[str, Optional[float]]:
         """Get percentage of budget consumed for each resource (US-37-005).
 
@@ -503,7 +609,8 @@ class CaptionRetryBudget:
         """Get a summary of budget usage for reporting.
 
         Returns:
-            Dict with budget usage statistics including error breakdown (US-37-006).
+            Dict with budget usage statistics including error breakdown (US-37-006)
+            and early termination state (US-37-009).
         """
         with self._lock:
             # Build error breakdown (category name -> count)
@@ -514,6 +621,7 @@ class CaptionRetryBudget:
                 "attempts_remaining": self.attempts_remaining(),
                 "successes": self.successes,
                 "failures": self.failures,
+                "success_rate": round(self.get_success_rate(), 3),  # US-37-009
                 "backoff_time_spent": round(self.backoff_time_spent, 1),
                 "backoff_time_remaining": (
                     round(self.backoff_time_remaining(), 1)
@@ -522,6 +630,8 @@ class CaptionRetryBudget:
                 ),
                 "videos_skipped": self.videos_skipped,
                 "is_exhausted": self.budget_exhausted(),
+                "early_terminated": self.early_terminated,  # US-37-009
+                "early_termination_reason": self.early_termination_reason,  # US-37-009
                 "error_breakdown": error_breakdown,  # US-37-006
             }
 
@@ -529,8 +639,8 @@ class CaptionRetryBudget:
         """Serialize budget state for checkpoint persistence.
 
         Returns:
-            Dict with all budget state data including error_counts (US-37-006)
-            and vpn_resets_used (US-37-008).
+            Dict with all budget state data including error_counts (US-37-006),
+            vpn_resets_used (US-37-008), and early termination state (US-37-009).
         """
         with self._lock:
             return {
@@ -544,6 +654,8 @@ class CaptionRetryBudget:
                 "error_counts": {cat.name: count for cat, count in self.error_counts.items()},  # US-37-006
                 "vpn_resets_used": self.vpn_resets_used,  # US-37-008
                 "max_vpn_resets": self.max_vpn_resets,  # US-37-008
+                "early_terminated": self.early_terminated,  # US-37-009
+                "early_termination_reason": self.early_termination_reason,  # US-37-009
             }
 
     @classmethod
@@ -583,6 +695,10 @@ class CaptionRetryBudget:
         budget.vpn_resets_used = data.get("vpn_resets_used", 0)
         budget.max_vpn_resets = data.get("max_vpn_resets", 2)
 
+        # Restore early termination state (US-37-009)
+        budget.early_terminated = data.get("early_terminated", False)
+        budget.early_termination_reason = data.get("early_termination_reason")
+
         return budget
 
     def reset(self, preserve_vpn_count: bool = True) -> None:
@@ -601,6 +717,9 @@ class CaptionRetryBudget:
             self.error_counts.clear()  # US-37-006
             if not preserve_vpn_count:
                 self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
+            # US-37-009: Reset early termination state
+            self.early_terminated = False
+            self.early_termination_reason = None
         logger.debug(
             f"CaptionRetryBudget: reset for new batch "
             f"(vpn_resets preserved={preserve_vpn_count}, count={self.vpn_resets_used})"

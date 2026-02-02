@@ -278,6 +278,18 @@ class EscalationManager:
         """
         self._mullvad_vpn = mullvad_vpn
 
+    def set_vpn_rotation_callback(self, callback: Callable[[str], None]) -> None:
+        """Set or replace the on_vpn_rotation_needed callback (US-36-003).
+
+        This allows the pipeline to wire up budget reset logic after
+        the EscalationManager is instantiated. Called by HealingOrchestrator
+        to ensure budget.reset_on_ip_change() is invoked on Tier 4 escalation.
+
+        Args:
+            callback: Callable taking keyword (str) to invoke on VPN rotation.
+        """
+        self._on_vpn_rotation_needed = callback
+
     @property
     def keyword_states(self) -> Dict[str, EscalationState]:
         """Read-only access to keyword states (for metrics/debugging)."""

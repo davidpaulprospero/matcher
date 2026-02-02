@@ -68,6 +68,8 @@ class BatchProcessorConfig:
     prioritize_by_channel: bool = True
     stuck_worker_threshold: float = 60.0
     slow_threshold_ratio: float = 0.8  # 80% of timeout = slow
+    # US-37-011: Batch progress reporting interval
+    progress_report_interval: int = 25  # Log progress every N videos
 
 
 @dataclass
@@ -81,6 +83,9 @@ class BatchResult:
     aborted: bool = False
     abort_reason: Optional[str] = None
     pattern_detected: Optional['ErrorPatternResult'] = None
+    # Early termination when success rate drops below threshold (US-37-009)
+    early_terminated: bool = False
+    early_termination_reason: Optional[str] = None
 
 
 class BatchProcessor:
@@ -443,9 +448,74 @@ class BatchProcessor:
                 except Exception as e:
                     logger.debug(f"on_video_complete callback error: {e}")
 
+        def _format_eta(eta_seconds: float) -> str:
+            """Format ETA as human-readable string."""
+            if eta_seconds <= 0:
+                return "calculating..."
+            elif eta_seconds < 60:
+                return f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                mins = int(eta_seconds // 60)
+                secs = int(eta_seconds % 60)
+                return f"{mins}m {secs}s"
+            else:
+                hours = int(eta_seconds // 3600)
+                mins = int((eta_seconds % 3600) // 60)
+                return f"{hours}h {mins}m"
+
+        def _log_batch_progress(
+            processed: int,
+            success_count: int,
+            error_count: int,
+            skipped_count: int,
+        ) -> None:
+            """Log batch-level progress at INFO level (US-37-011).
+
+            Logs progress every progress_report_interval videos with:
+            - Current position: [50/175]
+            - Counts: 45 success, 3 failed, 2 skipped
+            - Budget consumption: (budget: 67/263 attempts used)
+            - ETA: ~2m 30s remaining
+            """
+            # Get ETA from worker tracker
+            eta_seconds = worker_tracker.calculate_eta()
+            eta_str = _format_eta(eta_seconds)
+
+            # Build progress message
+            progress_msg = (
+                f"[{processed}/{total_videos}] "
+                f"{success_count} success, {error_count} failed, {skipped_count} skipped"
+            )
+
+            # Add budget consumption if retry_budget is available
+            if retry_budget:
+                attempts_used = retry_budget.attempts
+                max_attempts = retry_budget.max_attempts
+                if max_attempts > 0:
+                    progress_msg += f" (budget: {attempts_used}/{max_attempts} attempts used)"
+
+            # Add ETA
+            progress_msg += f" | ETA: {eta_str}"
+
+            logger.info(f"Batch progress: {progress_msg}")
+
+            # Also fire progress callback for batch-level progress
+            _notify_progress('', 'batch_progress', {
+                'processed': processed,
+                'total': total_videos,
+                'success_count': success_count,
+                'error_count': error_count,
+                'skipped_count': skipped_count,
+                'budget_attempts': retry_budget.attempts if retry_budget else None,
+                'budget_max_attempts': retry_budget.max_attempts if retry_budget else None,
+                'eta_seconds': eta_seconds,
+            })
+
         # Track pattern handling
         pattern_handled = False
         batch_result = BatchResult()
+        # US-37-011: Track last progress log for interval checking
+        last_progress_log_count = 0
 
         # Execute fetches in parallel
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
@@ -468,6 +538,22 @@ class BatchProcessor:
                         batch_result.skipped_count += 1
                     else:
                         batch_result.error_count += 1
+
+                    # US-37-011: Log batch progress at intervals
+                    processed_count = (
+                        batch_result.success_count +
+                        batch_result.error_count +
+                        batch_result.skipped_count
+                    )
+                    if (processed_count - last_progress_log_count >=
+                            self.config.progress_report_interval):
+                        _log_batch_progress(
+                            processed=processed_count,
+                            success_count=batch_result.success_count,
+                            error_count=batch_result.error_count,
+                            skipped_count=batch_result.skipped_count,
+                        )
+                        last_progress_log_count = processed_count
 
                     # Notify on_video_complete callback
                     _notify_complete(vid, result)
