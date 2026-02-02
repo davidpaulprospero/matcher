@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .enums import CaptionErrorCategory, DEFAULT_RETRY_BUDGETS
 
@@ -891,6 +891,100 @@ class CaptionRetryBudget:
         budget.circuit_breaker_trips = data.get("circuit_breaker_trips", 0)
 
         return budget
+
+    @classmethod
+    def restore_with_integrity_check(
+        cls,
+        data: Optional[Dict],
+        current_batch_size: int,
+        auto_scale: bool = True,
+        attempts_per_video: float = 1.5,
+    ) -> Tuple["CaptionRetryBudget", Dict[str, Any]]:
+        """Restore budget from checkpoint with batch_size integrity check (US-41-012).
+
+        When restoring from checkpoint, compares the stored batch_size with the current
+        batch_size to detect mismatches that could lead to undersized budgets.
+
+        Args:
+            data: Checkpoint data dict (may be None for new sessions).
+            current_batch_size: The batch size for the current run.
+            auto_scale: Whether auto-scaling is enabled.
+            attempts_per_video: Attempts per video ratio for scaling.
+
+        Returns:
+            Tuple of (restored_budget, restore_info) where restore_info contains:
+                - batch_size_changed: bool - True if batch_size differs
+                - restored_batch_size: Optional[int] - Batch size from checkpoint
+                - current_batch_size: int - Current batch size
+                - force_rescaled: bool - True if re-scaling was forced due to mismatch
+                - scaled_max_attempts: Optional[int] - New max_attempts after scaling
+
+        Example:
+            >>> budget, info = CaptionRetryBudget.restore_with_integrity_check(
+            ...     checkpoint_data, current_batch_size=175
+            ... )
+            >>> if info['batch_size_changed']:
+            ...     logger.warning(f"Batch size changed from {info['restored_batch_size']} to 175")
+        """
+        # Start with basic from_dict restoration
+        budget = cls.from_dict(data)
+
+        # Build restore info
+        restore_info: Dict[str, Any] = {
+            "batch_size_changed": False,
+            "restored_batch_size": None,
+            "current_batch_size": current_batch_size,
+            "force_rescaled": False,
+            "scaled_max_attempts": None,
+        }
+
+        if not data:
+            # No checkpoint data - just set batch_size and return
+            budget.batch_size = current_batch_size
+            return budget, restore_info
+
+        # Get the stored batch_size from checkpoint
+        restored_batch_size = data.get("batch_size")
+        restore_info["restored_batch_size"] = restored_batch_size
+
+        # Check for batch_size mismatch
+        if restored_batch_size is not None and restored_batch_size != current_batch_size:
+            restore_info["batch_size_changed"] = True
+
+            # Log warning about the mismatch
+            logger.warning(
+                f"[US-41-012] Checkpoint batch_size ({restored_batch_size}) differs from "
+                f"current ({current_batch_size})"
+            )
+
+            # If current batch is larger, force re-scale even if already scaled
+            if current_batch_size > restored_batch_size and auto_scale:
+                # Calculate required attempts for current batch
+                required_attempts = int(current_batch_size * attempts_per_video + 0.5)
+                old_max = budget.max_attempts
+
+                # Force re-scale if current batch needs more attempts
+                if required_attempts > old_max:
+                    budget.max_attempts = required_attempts
+                    budget.batch_size = current_batch_size
+                    restore_info["force_rescaled"] = True
+                    restore_info["scaled_max_attempts"] = required_attempts
+
+                    logger.info(
+                        f"[US-41-012] Force re-scaled budget: max_attempts {old_max} -> "
+                        f"{required_attempts} for larger batch ({restored_batch_size} -> {current_batch_size})"
+                    )
+                else:
+                    # Max attempts sufficient, just update batch_size
+                    budget.batch_size = current_batch_size
+            else:
+                # Current batch smaller or equal, just update batch_size
+                budget.batch_size = current_batch_size
+        else:
+            # No mismatch, ensure batch_size is set
+            budget.batch_size = current_batch_size
+
+        return budget, restore_info
 
     def reset(self, preserve_vpn_count: bool = True) -> None:
         """Reset budget state for a new batch or after VPN rotation.
