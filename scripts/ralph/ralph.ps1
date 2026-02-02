@@ -86,6 +86,8 @@ $script:State = @{
     CurrentStoryId          = ''           # Active story being worked on
     CurrentFocusArea        = ''           # Active focus area
     CurrentSprintNumber     = 0            # Current sprint number
+    # Branch tracking
+    LastEnsuredBranch       = ''           # Track which branch we've ensured exists
 }
 
 # Ensure logs directory exists
@@ -744,6 +746,13 @@ function Get-SprintStatus {
     $prd = Get-Sprint
     if (-not $prd) {
         return @{ passed = 0; failed = 0; total = 0; nextStory = $null; complete = $true }
+    }
+
+    # Ensure we're on the correct branch (once per sprint)
+    $targetBranch = $prd.branchName
+    if ($targetBranch -and $targetBranch -ne $script:State.LastEnsuredBranch) {
+        Ensure-SprintBranch | Out-Null
+        $script:State.LastEnsuredBranch = $targetBranch
     }
 
     $passed = 0
