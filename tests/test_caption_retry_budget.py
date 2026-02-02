@@ -3177,6 +3177,171 @@ class TestCaptionRetryBudgetAutoScaleSufficiency:
         assert debug_logs, "Expected DEBUG log about budget being sufficient"
 
 
+class TestCaptionRetryBudgetLargeBatchScaling:
+    """Tests for US-41-003: Verify retry budget scales correctly for large batches.
+
+    These tests verify:
+    1. Batch of 175 with auto_scale=true should scale to 175*2.0=350 max_attempts
+    2. Budget exhaustion doesn't occur before video 100 for batch of 175
+    3. Logs show 'scaled max_attempts from 100 to 350' for batch of 175 videos
+    """
+
+    @pytest.mark.fast
+    def test_batch_175_scales_to_350_max_attempts(self):
+        """Verify batch of 175 videos with auto_scale=true scales to 350 max_attempts.
+
+        US-41-003: The logs show 100/100 exhaustion for 175 videos, indicating
+        ensure_scaled() may not be called or auto_scale is false.
+
+        Expected: 175 * 2.0 = 350 max_attempts
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # Default
+        budget.attempts_per_video = 2.0  # Default
+
+        # Call ensure_scaled with 175 videos
+        scaled = budget.ensure_scaled(175)
+
+        # Verify scaling occurred
+        assert scaled is True
+        assert budget.max_attempts == 350, (
+            f"Expected max_attempts=350 (175*2.0), got {budget.max_attempts}"
+        )
+        assert budget.batch_size == 175
+
+    @pytest.mark.fast
+    def test_batch_175_no_exhaustion_before_video_100(self):
+        """Verify budget exhaustion doesn't occur before video 100 for batch of 175.
+
+        US-41-003: Without scaling, budget exhausts at video 101, skipping 74 videos.
+        With scaling, all 175 videos should be processable (assuming 1 attempt each).
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # Default
+        budget.attempts_per_video = 2.0
+
+        # Scale budget for batch of 175
+        budget.ensure_scaled(175)
+
+        # Process first 100 videos - should NOT exhaust
+        for i in range(100):
+            assert not budget.budget_exhausted(), (
+                f"Budget exhausted at video {i}, but max_attempts={budget.max_attempts}"
+            )
+            budget.record_attempt(f"vid_{i}")
+            budget.record_success(f"vid_{i}")
+
+        # Verify budget is NOT exhausted after 100 videos
+        assert not budget.budget_exhausted(), (
+            f"Budget exhausted after 100 attempts with max_attempts={budget.max_attempts}"
+        )
+        assert budget.attempts == 100
+        assert budget.successes == 100
+
+    @pytest.mark.fast
+    def test_batch_175_can_process_all_videos(self):
+        """Verify all 175 videos can be processed with scaled budget.
+
+        US-41-003: With scaling (350 max_attempts), processing 175 videos
+        at 1 attempt each should complete without exhaustion.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0
+
+        # Scale budget
+        budget.ensure_scaled(175)
+
+        # Process all 175 videos (1 attempt each = 175 total)
+        for i in range(175):
+            assert not budget.budget_exhausted(), (
+                f"Budget exhausted at video {i}"
+            )
+            budget.record_attempt(f"vid_{i}")
+            budget.record_success(f"vid_{i}")
+
+        # All 175 should have been processed
+        assert budget.attempts == 175
+        assert budget.successes == 175
+        assert not budget.budget_exhausted()
+
+    @pytest.mark.fast
+    def test_batch_175_scaling_log_message(self, caplog):
+        """Verify logs show 'scaled max_attempts from 100 to 350' for batch of 175.
+
+        US-41-003: Logs must show the scaling occurred with specific values.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0
+
+        # Scale budget for 175 videos
+        budget.ensure_scaled(175)
+
+        # Verify INFO log shows scaling
+        scaling_logs = [
+            record.message for record in caplog.records
+            if "scaled" in record.message.lower() and "350" in record.message
+        ]
+        assert len(scaling_logs) >= 1, (
+            f"Expected log with 'scaled...350', got: {[r.message for r in caplog.records]}"
+        )
+
+        # Verify the log message content
+        log_msg = scaling_logs[0]
+        assert "100" in log_msg, "Log should mention original max_attempts=100"
+        assert "350" in log_msg, "Log should mention scaled max_attempts=350"
+        assert "175" in log_msg, "Log should mention batch_size=175"
+
+    @pytest.mark.fast
+    def test_scaling_only_occurs_once_for_same_batch(self):
+        """Verify ensure_scaled() is idempotent for batch of 175.
+
+        US-41-003: Calling ensure_scaled() multiple times with the same batch_size
+        should not scale beyond 350.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+
+        # First call - should scale
+        result1 = budget.ensure_scaled(175)
+        assert result1 is True
+        assert budget.max_attempts == 350
+
+        # Second call - should NOT scale again
+        result2 = budget.ensure_scaled(175)
+        assert result2 is False
+        assert budget.max_attempts == 350  # Still 350, not doubled
+
+    @pytest.mark.fast
+    def test_auto_scale_false_does_not_scale_for_175(self):
+        """Verify auto_scale=false does NOT scale for batch of 175.
+
+        US-41-003: This confirms the bug scenario - when auto_scale is disabled,
+        budget stays at 100 and will exhaust at video 101.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = False  # Bug condition
+        budget.max_attempts = 100
+
+        # Attempt to scale
+        result = budget.ensure_scaled(175)
+
+        # Should NOT scale
+        assert result is False
+        assert budget.max_attempts == 100, (
+            "With auto_scale=False, max_attempts should remain 100"
+        )
+
+
 class TestCaptionRetryBudgetFormattedSummary:
     """Tests for US-39-005: Budget consumption summary logging at stage completion.
 

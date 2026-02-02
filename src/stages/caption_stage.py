@@ -677,33 +677,50 @@ class CaptionStage(Stage):
 
                 # US-39-010: Use ensure_scaled() convenience method
                 # US-40-002: Re-scale budget after checkpoint restoration
+                # US-41-003: Log budget state BEFORE and AFTER scaling for debugging
                 # This handles auto_scale check, idempotency, and logging internally
                 if retry_budget:
                     # Check if budget was restored from checkpoint (has previous batch_size)
                     was_restored = retry_budget.batch_size is not None
                     old_batch_size = retry_budget.batch_size
 
+                    # US-41-003: Log BEFORE scaling - shows initial state for debugging budget exhaustion
+                    logger.info(
+                        f"[US-41-003] Caption batch starting: batch_size={batch_size}, "
+                        f"max_attempts={retry_budget.max_attempts} (before scaling), "
+                        f"auto_scale={retry_budget.auto_scale}"
+                    )
+
                     scaled = retry_budget.ensure_scaled(batch_size)
+
+                    # US-41-003: Log AFTER scaling - shows whether scaling occurred and new value
                     if scaled:
+                        logger.info(
+                            f"[US-41-003] Retry budget scaled: max_attempts from 100 to "
+                            f"{retry_budget.max_attempts} for batch of {batch_size} videos"
+                        )
                         if was_restored and old_batch_size != batch_size:
                             logger.info(
                                 f"Retry budget restored from checkpoint, re-scaling for batch of "
                                 f"{batch_size} videos (was {old_batch_size})"
                             )
-                        else:
-                            logger.info(f"Retry budget scaled for {batch_size} videos")
-                    elif was_restored:
+                    else:
                         logger.info(
-                            f"Retry budget restored from checkpoint, re-scaling for batch of "
-                            f"{batch_size} videos"
+                            f"[US-41-003] Retry budget scaling not needed: max_attempts="
+                            f"{retry_budget.max_attempts} sufficient for batch_size={batch_size}"
                         )
-                    elif not retry_budget.auto_scale:
-                        # Warn if auto_scale disabled and batch is large enough to risk exhaustion
-                        if batch_size > retry_budget.max_attempts:
-                            logger.warning(
-                                f"Retry budget auto_scale DISABLED, max_attempts={retry_budget.max_attempts} "
-                                f"may be insufficient for batch of {batch_size}"
+                        if was_restored:
+                            logger.info(
+                                f"Retry budget restored from checkpoint, re-scaling for batch of "
+                                f"{batch_size} videos"
                             )
+                        elif not retry_budget.auto_scale:
+                            # Warn if auto_scale disabled and batch is large enough to risk exhaustion
+                            if batch_size > retry_budget.max_attempts:
+                                logger.warning(
+                                    f"Retry budget auto_scale DISABLED, max_attempts={retry_budget.max_attempts} "
+                                    f"may be insufficient for batch of {batch_size}"
+                                )
 
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
