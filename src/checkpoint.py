@@ -210,6 +210,14 @@ class CheckpointManager:
                 logger.warning(f"Checkpoint is not a dict: {path}")
                 return None
 
+            # US-40-010: Validate checkpoint integrity - check required top-level keys
+            # Required keys: last_completed_stage, timestamp (created_at or updated_at)
+            # The "state" is distributed across stage fields (analyze, video_search, etc.)
+            missing_keys = self._validate_checkpoint_structure(data)
+            if missing_keys:
+                for key in missing_keys:
+                    logger.warning(f"Checkpoint missing required key: {key}")
+
             # Migrate checkpoint if needed
             return self._migrate_checkpoint_if_needed(data)
 
@@ -219,6 +227,40 @@ class CheckpointManager:
         except Exception as e:
             logger.warning(f"Failed to load checkpoint from {path}: {e}")
             return None
+
+    def _validate_checkpoint_structure(self, data: dict) -> List[str]:
+        """
+        Validate checkpoint has required top-level structure (US-40-010).
+
+        Checks for:
+        - last_completed_stage: To know where to resume from
+        - timestamp: created_at or updated_at for staleness checks
+        - version: For migration compatibility
+
+        Returns list of missing keys (empty if all present).
+        Does NOT fail on missing keys - just logs warnings and uses defaults.
+        """
+        missing = []
+
+        # Check for last_completed_stage (required to know resume point)
+        if 'last_completed_stage' not in data:
+            missing.append('last_completed_stage')
+            data['last_completed_stage'] = ''  # Initialize to default
+
+        # Check for timestamp (created_at or updated_at)
+        has_timestamp = data.get('created_at') or data.get('updated_at')
+        if not has_timestamp:
+            missing.append('timestamp (created_at/updated_at)')
+            # Initialize with current time
+            data['created_at'] = datetime.now().isoformat()
+            data['updated_at'] = datetime.now().isoformat()
+
+        # Check for version (needed for migration decisions)
+        if 'version' not in data:
+            missing.append('version')
+            data['version'] = '0.9'  # Assume oldest version for migration
+
+        return missing
 
     def _migrate_checkpoint_if_needed(self, data: dict) -> CheckpointData:
         """
