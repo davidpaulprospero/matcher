@@ -139,6 +139,8 @@ class ResilientRunner:
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
                 if not stage.restore(pipeline.state, pipeline.checkpoint, pipeline.config):
                     logger.warning(f"Failed to restore {stage_name} from checkpoint")
+                # Validate state attributes after stage restoration
+                pipeline.state.validate_state_attributes()
                 continue
 
             # Validate inputs

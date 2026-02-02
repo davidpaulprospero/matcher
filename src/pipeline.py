@@ -110,6 +110,12 @@ class PipelineOrchestrator:
                 "Consider using --fresh to start a new run."
             )
 
+        # Validate and restore any missing state attributes after checkpoint load
+        # This handles incomplete state data from older checkpoints or corrupted files
+        initialized = self.state.validate_state_attributes()
+        if initialized:
+            logger.info(f"Initialized {len(initialized)} missing state attribute(s) after checkpoint restoration")
+
         self.resume_mode = True
         return True
 
@@ -182,6 +188,8 @@ class PipelineOrchestrator:
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
                 if not stage.restore(self.state, self.checkpoint, self.config):
                     logger.warning(f"Failed to restore {stage_name} from checkpoint")
+                # Validate state attributes after stage restoration
+                self.state.validate_state_attributes()
                 continue
 
             # Check if this stage should run in parallel with others

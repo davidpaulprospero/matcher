@@ -12,12 +12,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Try to import numpy for type hints
+import logging
+
+# Try to import numpy for type hints
 try:
     import numpy as np
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
     np = None
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -170,6 +175,36 @@ class PipelineState:
         # This guards against edge cases like deserialization or manual construction
         if self.text_metadata is None:
             self.text_metadata = []
+
+    def validate_state_attributes(self) -> List[str]:
+        """
+        Validate and initialize required state attributes after checkpoint restoration.
+
+        Ensures all required fields exist with proper default values. This is called
+        after checkpoint restoration to handle incomplete state data from older
+        checkpoints or corrupted files.
+
+        Returns:
+            List of field names that were initialized (empty list if all were valid)
+        """
+        initialized_fields = []
+
+        # Required fields with their default values
+        required_fields = {
+            'text_metadata': [],
+            'caption_results': {},
+            'video_ids': [],
+        }
+
+        for field_name, default_value in required_fields.items():
+            # Check if field is missing or None
+            current_value = getattr(self, field_name, None)
+            if current_value is None:
+                setattr(self, field_name, default_value)
+                logger.warning(f"Restored missing {field_name} after checkpoint load")
+                initialized_fields.append(field_name)
+
+        return initialized_fields
 
     def get_video_count(self) -> int:
         """Get total number of video IDs from search"""
