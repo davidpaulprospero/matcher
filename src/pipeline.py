@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .state import PipelineState
@@ -101,6 +102,14 @@ class PipelineOrchestrator:
         for warning in validation['warnings']:
             logger.warning(f"Checkpoint warning: {warning}")
 
+        # Check for stale checkpoint (older than 24 hours)
+        if self.checkpoint.is_stale(max_age_hours=24.0):
+            age_hours = self.checkpoint.get_age_hours()
+            logger.warning(
+                f"Checkpoint is stale (age: {age_hours:.1f} hours). "
+                "Consider using --fresh to start a new run."
+            )
+
         self.resume_mode = True
         return True
 
@@ -110,7 +119,9 @@ class PipelineOrchestrator:
         skip_stages: List[str] = None,
         only_stages: List[str] = None,
         on_stage_start: StageStartCallback = None,
-        on_stage_complete: StageCompleteCallback = None
+        on_stage_complete: StageCompleteCallback = None,
+        parallel_stages: List[Tuple[str, ...]] = None,
+        dry_run: bool = False
     ) -> bool:
         """
         Run the pipeline.
@@ -122,16 +133,36 @@ class PipelineOrchestrator:
             on_stage_start: Callback invoked when a stage starts (receives stage_name)
             on_stage_complete: Callback invoked when a stage completes
                                (receives stage_name, result, elapsed_seconds)
+            parallel_stages: List of tuples specifying stages to run in parallel.
+                            Each tuple contains stage names that can execute concurrently.
+                            E.g., [("entity_images", "entity_videos")] runs those two in parallel.
+                            Checkpoint saves maintain stage order even for parallel stages.
+            dry_run: If True, log stage names and validation results without executing.
+                    Useful for previewing what the pipeline would do.
 
         Returns:
-            True if pipeline completed successfully
+            True if pipeline completed successfully (or dry-run validation passed)
         """
         skip_stages = set(skip_stages or [])
         only_stages = set(only_stages) if only_stages else None
 
+        # Dry-run mode: log stages and validate without executing
+        if dry_run:
+            return self._run_dry_run(skip_stages, only_stages)
+
+        # Build parallel stage lookup: stage_name -> tuple of parallel stage names
+        parallel_groups: Dict[str, Tuple[str, ...]] = {}
+        if parallel_stages:
+            for group in parallel_stages:
+                for stage_name in group:
+                    parallel_groups[stage_name] = group
+
         # Try to load checkpoint if resuming
         if resume:
             self.load_checkpoint()
+
+        # Track processed parallel groups to avoid running same group twice
+        processed_parallel_groups: set = set()
 
         # Run each stage
         for stage in self.stages:
@@ -151,6 +182,26 @@ class PipelineOrchestrator:
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
                 if not stage.restore(self.state, self.checkpoint, self.config):
                     logger.warning(f"Failed to restore {stage_name} from checkpoint")
+                continue
+
+            # Check if this stage should run in parallel with others
+            if stage_name in parallel_groups:
+                group = parallel_groups[stage_name]
+                group_key = tuple(sorted(group))
+
+                # Skip if we already processed this parallel group
+                if group_key in processed_parallel_groups:
+                    continue
+
+                processed_parallel_groups.add(group_key)
+
+                # Run parallel stages
+                success = self._run_parallel_stages(
+                    group, skip_stages, only_stages,
+                    on_stage_start, on_stage_complete
+                )
+                if not success:
+                    return False
                 continue
 
             # Validate inputs
@@ -213,13 +264,195 @@ class PipelineOrchestrator:
         self.current_stage = None
         return True
 
+    def _run_dry_run(
+        self,
+        skip_stages: set,
+        only_stages: Optional[set]
+    ) -> bool:
+        """
+        Run pipeline in dry-run mode: log stages and validate without executing.
+
+        Args:
+            skip_stages: Set of stage names to skip
+            only_stages: If set, only include these stages
+
+        Returns:
+            True if all validations pass, False if any validation fails
+        """
+        logger.info("=" * 60)
+        logger.info("DRY-RUN MODE: Previewing pipeline execution plan")
+        logger.info("=" * 60)
+
+        all_valid = True
+        stages_to_run = []
+
+        for stage in self.stages:
+            stage_name = stage.name
+
+            # Filter stages
+            if stage_name in skip_stages:
+                logger.info(f"  [SKIP] {stage_name} (skip_stages)")
+                continue
+
+            if only_stages and stage_name not in only_stages:
+                logger.info(f"  [SKIP] {stage_name} (not in only_stages)")
+                continue
+
+            stages_to_run.append(stage)
+
+        logger.info(f"\nStages to execute ({len(stages_to_run)}):")
+        for i, stage in enumerate(stages_to_run, 1):
+            logger.info(f"  {i}. {stage.name}")
+
+        logger.info("\nValidating stage inputs:")
+        for stage in stages_to_run:
+            validation_error = stage.validate_inputs(self.state, self.config)
+            if validation_error:
+                logger.error(f"  [FAIL] {stage.name}: {validation_error}")
+                all_valid = False
+            else:
+                logger.info(f"  [OK]   {stage.name}: inputs valid")
+
+        logger.info("=" * 60)
+        if all_valid:
+            logger.info("DRY-RUN COMPLETE: All validations passed")
+        else:
+            logger.error("DRY-RUN COMPLETE: Validation errors found")
+        logger.info("=" * 60)
+
+        return all_valid
+
+    def _run_parallel_stages(
+        self,
+        group: Tuple[str, ...],
+        skip_stages: set,
+        only_stages: Optional[set],
+        on_stage_start: StageStartCallback,
+        on_stage_complete: StageCompleteCallback
+    ) -> bool:
+        """
+        Run a group of stages in parallel using ThreadPoolExecutor.
+
+        Args:
+            group: Tuple of stage names to run in parallel
+            skip_stages: Set of stage names to skip
+            only_stages: If set, only run these stages
+            on_stage_start: Callback for stage start
+            on_stage_complete: Callback for stage completion
+
+        Returns:
+            True if all parallel stages succeeded, False otherwise
+        """
+        # Get stage objects for this group
+        stages_to_run = []
+        for stage in self.stages:
+            if stage.name in group:
+                # Apply filtering
+                if stage.name in skip_stages:
+                    logger.info(f"Skipping parallel stage {stage.name} (skip_stages)")
+                    continue
+                if only_stages and stage.name not in only_stages:
+                    logger.info(f"Skipping parallel stage {stage.name} (not in only_stages)")
+                    continue
+                # Check checkpoint skip
+                if self.resume_mode and stage.can_skip(self.state, self.checkpoint):
+                    logger.info(f"Skipping parallel stage {stage.name} (checkpoint resume)")
+                    if not stage.restore(self.state, self.checkpoint, self.config):
+                        logger.warning(f"Failed to restore {stage.name} from checkpoint")
+                    continue
+                stages_to_run.append(stage)
+
+        if not stages_to_run:
+            return True
+
+        # Validate all stages first (sequential to avoid race conditions)
+        for stage in stages_to_run:
+            validation_error = stage.validate_inputs(self.state, self.config)
+            if validation_error:
+                logger.error(f"Stage {stage.name} validation failed: {validation_error}")
+                return False
+
+        # Results collected from parallel execution
+        results: Dict[str, Tuple[StageResult, float]] = {}
+
+        def run_stage(stage: Stage) -> Tuple[str, StageResult, float]:
+            """Execute a single stage and return results."""
+            start_time = time.time()
+            if on_stage_start:
+                try:
+                    on_stage_start(stage.name)
+                except Exception as e:
+                    logger.warning(f"on_stage_start callback failed for {stage.name}: {e}")
+
+            logger.info(f"Running parallel stage: {stage.name}")
+            result = stage.run(self.state, self.config, self.checkpoint)
+            elapsed = time.time() - start_time
+            return (stage.name, result, elapsed)
+
+        # Run stages in parallel
+        logger.info(f"Running {len(stages_to_run)} stages in parallel: {[s.name for s in stages_to_run]}")
+        with ThreadPoolExecutor(max_workers=len(stages_to_run)) as executor:
+            futures = {executor.submit(run_stage, stage): stage for stage in stages_to_run}
+            for future in as_completed(futures):
+                stage_name, result, elapsed = future.result()
+                results[stage_name] = (result, elapsed)
+
+        # Process results in original stage order (for checkpoint consistency)
+        # Sort by the order stages appear in self.stages
+        stage_order = {s.name: i for i, s in enumerate(self.stages)}
+        ordered_names = sorted(results.keys(), key=lambda n: stage_order.get(n, 999))
+
+        for stage_name in ordered_names:
+            result, elapsed = results[stage_name]
+
+            # Record timing
+            self.stage_timings[stage_name] = elapsed
+            self.state.stage_timings[stage_name] = elapsed
+
+            # Store metrics
+            if result.metrics:
+                result.metrics.duration_seconds = elapsed
+                self.stage_metrics[stage_name] = result.metrics
+            else:
+                self.stage_metrics[stage_name] = StageMetrics(duration_seconds=elapsed)
+
+            # Invoke callback
+            if on_stage_complete:
+                try:
+                    on_stage_complete(stage_name, result, elapsed)
+                except Exception as e:
+                    logger.warning(f"on_stage_complete callback failed for {stage_name}: {e}")
+
+            # Handle failure
+            if not result.success:
+                logger.error(f"Parallel stage {stage_name} failed: {result.error}")
+                for warning in result.warnings:
+                    logger.warning(f"  Warning: {warning}")
+                return False
+
+            # Log warnings
+            for warning in result.warnings:
+                logger.warning(f"Stage {stage_name}: {warning}")
+
+            # Save checkpoint (in stage order)
+            if result.data:
+                self.checkpoint.save(stage_name, result.data)
+
+            logger.info(f"Parallel stage {stage_name} completed in {elapsed:.1f}s")
+
+        return True
+
     def get_summary(self) -> dict:
-        """Get pipeline execution summary"""
+        """Get pipeline execution summary including aggregated metrics"""
+        metrics = self.get_metrics()
         return {
             'stages_run': list(self.stage_timings.keys()),
             'total_time': sum(self.stage_timings.values()),
             'stage_timings': self.stage_timings,
             'state': self.state.to_checkpoint_dict(),
+            'items_processed': metrics['total_items_processed'],
+            'items_failed': metrics['total_items_failed'],
+            'metrics': metrics,
         }
 
     def get_metrics(self) -> dict:
@@ -417,6 +650,18 @@ def create_healing_pipeline(
 
     logger.info(f"Self-healing enabled: strategy={strategy_name}, max_attempts={strategy.max_attempts_per_stage}")
 
+    # US-35-002: Auto-activate Mullvad VPN when enabled in config
+    # Instantiate MullvadVPN early so it can be wired into EscalationManager
+    # when stages create their downloaders
+    download_config = getattr(config, 'download', None)
+    mullvad_config = getattr(download_config, 'mullvad', None) if download_config else None
+    if mullvad_config and getattr(mullvad_config, 'enabled', False):
+        from .downloader.mullvad_vpn import MullvadVPN
+        mullvad_vpn = MullvadVPN(mullvad_config)
+        orchestrator.set_mullvad_vpn(mullvad_vpn)
+        logger.debug("Mullvad VPN auto-activated in create_healing_pipeline (config.download.mullvad.enabled=true)")
+        logger.info("Mullvad VPN enabled for Tier 4 IP rotation bypass")
+
     return pipeline, orchestrator, runner
 
 
@@ -429,6 +674,8 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
 
     Also wires the shared EscalationManager into the DownloadHealer so it
     uses the same escalation state instead of a duplicate CookieRotator.
+
+    US-1-012: Now also collects VPN rotation count from MullvadVPN if available.
     """
     try:
         from src.downloader.rate_limit_metrics import RateLimitMetricsAggregator
@@ -447,8 +694,19 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
                     circuit_breaker=getattr(downloader, '_circuit_breaker', None),
                 )
                 orchestrator.set_aggregated_metrics(aggregator)
-                # Also keep backward-compat escalation metrics
-                orchestrator.set_escalation_metrics(esc_mgr.get_metrics())
+
+                # Collect escalation metrics with VPN rotation count (US-1-012)
+                esc_metrics = esc_mgr.get_metrics()
+
+                # Add VPN rotation count from MullvadVPN if available
+                mullvad_vpn = getattr(esc_mgr, '_mullvad_vpn', None)
+                if mullvad_vpn is not None:
+                    vpn_status = mullvad_vpn.get_status_extended() if hasattr(mullvad_vpn, 'get_status_extended') else mullvad_vpn.get_status()
+                    esc_metrics['vpn_rotation_count'] = vpn_status.get('switch_count', vpn_status.get('switches', 0))
+                    esc_metrics['vpn_countries_used'] = vpn_status.get('used_countries', [])
+
+                orchestrator.set_escalation_metrics(esc_metrics)
+
                 # Wire shared EscalationManager into DownloadHealer
                 if hasattr(orchestrator, 'wire_escalation_manager'):
                     orchestrator.wire_escalation_manager(esc_mgr)

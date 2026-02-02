@@ -119,6 +119,10 @@ class HealingOrchestrator:
         # Unified aggregated metrics (set via set_aggregated_metrics)
         self._aggregated_metrics = None
 
+        # MullvadVPN instance for Tier 4 bypass (US-35-002)
+        # Set via set_mullvad_vpn() when config.download.mullvad.enabled=true
+        self._mullvad_vpn = None
+
         # Cross-healer state
         self._healer_state: Dict[str, Any] = {}
 
@@ -1001,6 +1005,24 @@ class HealingOrchestrator:
             healer.escalation_manager = escalation_manager
             logger.info("Orchestrator: Wired shared EscalationManager into DownloadHealer")
 
+        # US-35-002: Wire pre-instantiated MullvadVPN into EscalationManager
+        if self._mullvad_vpn is not None and hasattr(escalation_manager, 'set_mullvad_vpn'):
+            escalation_manager.set_mullvad_vpn(self._mullvad_vpn)
+            logger.debug("Orchestrator: Wired MullvadVPN into EscalationManager for Tier 4 bypass")
+
+    def set_mullvad_vpn(self, mullvad_vpn) -> None:
+        """Store MullvadVPN instance for wiring into EscalationManager (US-35-002).
+
+        Called by create_healing_pipeline() when config.download.mullvad.enabled=true.
+        The stored MullvadVPN is wired into EscalationManager later when
+        wire_escalation_manager() is called after stage downloader initialization.
+
+        Args:
+            mullvad_vpn: MullvadVPN instance from create_healing_pipeline()
+        """
+        self._mullvad_vpn = mullvad_vpn
+        logger.debug("Orchestrator: MullvadVPN instance stored for Tier 4 bypass wiring")
+
     def print_report(self):
         """Print healing summary report."""
         print("\n" + "=" * 60)
@@ -1101,7 +1123,78 @@ class HealingOrchestrator:
                     for tier_name, keywords in kw_tiers.items():
                         print(f"  {tier_name}: {len(keywords)} keywords")
 
+                # US-1-012: VPN rotation metrics
+                vpn_rotations = m.get('vpn_rotation_count', 0)
+                vpn_countries = m.get('vpn_countries_used', [])
+                if vpn_rotations > 0 or vpn_countries:
+                    print(f"\nVPN Rotation:")
+                    print(f"  Total rotations: {vpn_rotations}")
+                    if vpn_countries:
+                        print(f"  Countries used: {', '.join(vpn_countries)}")
+
+        # US-1-012: Tier-by-tier escalation breakdown
+        self._print_tier_breakdown()
+
         print("=" * 60 + "\n")
+
+    def _print_tier_breakdown(self) -> None:
+        """Print detailed tier-by-tier escalation breakdown (US-1-012).
+
+        Shows which tiers were reached and how often, helping users understand
+        escalation patterns and effectiveness.
+        """
+        # Try aggregated metrics first, then escalation metrics
+        esc_data = None
+        if self._aggregated_metrics is not None:
+            try:
+                agg = self._aggregated_metrics.aggregate()
+                esc_data = agg.get('escalation', {})
+            except Exception:
+                pass
+
+        if esc_data is None and self._escalation_metrics:
+            esc_data = self._escalation_metrics
+
+        if not esc_data:
+            return
+
+        per_tier = esc_data.get('escalations_per_tier', {})
+        kw_tiers = esc_data.get('keywords_at_each_tier', {})
+
+        # Only print if there's meaningful data
+        if not per_tier and not kw_tiers:
+            return
+
+        # Define tier order for consistent display
+        tier_order = ['IMPERSONATE_ONLY', 'EXTRACTOR_ARGS', 'FULL_BYPASS', 'VPN_ROTATION']
+        tier_labels = {
+            'IMPERSONATE_ONLY': 'Tier 1 (Impersonate)',
+            'EXTRACTOR_ARGS': 'Tier 2 (Extractor Args)',
+            'FULL_BYPASS': 'Tier 3 (Full Bypass)',
+            'VPN_ROTATION': 'Tier 4 (VPN Rotation)',
+        }
+
+        print("\n" + "-" * 60)
+        print("TIER-BY-TIER BREAKDOWN")
+        print("-" * 60)
+
+        for tier_name in tier_order:
+            label = tier_labels.get(tier_name, tier_name)
+            escalations = per_tier.get(tier_name, 0)
+            keywords = kw_tiers.get(tier_name, [])
+            keyword_count = len(keywords) if keywords else 0
+
+            if escalations > 0 or keyword_count > 0:
+                print(f"{label}:")
+                if escalations > 0:
+                    print(f"  Escalations to this tier: {escalations}")
+                if keyword_count > 0:
+                    print(f"  Keywords currently at this tier: {keyword_count}")
+                    # Show first 5 keywords if any
+                    if keyword_count <= 5:
+                        print(f"    {', '.join(keywords)}")
+                    else:
+                        print(f"    {', '.join(keywords[:5])}... (+{keyword_count - 5} more)")
 
     def reset(self):
         """Reset orchestrator state for new run."""
