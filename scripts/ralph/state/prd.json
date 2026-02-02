@@ -119,7 +119,7 @@
             "id": "US-40-008",
             "title": "Add state attribute existence check at each stage entry",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Create utility function validate_required_state_attrs(state, required_attrs, stage_name)",
                 "Function initializes missing attrs to defaults and logs WARNING for each",
@@ -128,7 +128,7 @@
                 "Add unit test verifying missing attribute is initialized and warning logged",
                 "Add unit test verifying existing attribute is not modified"
             ],
-            "notes": "Tier 2 (Defensive Programming). Files: src/stages/__init__.py (add utility function), src/stages/match.py, src/stages/iterative_match.py. Prevents AttributeError crashes when checkpoint restoration fails to initialize all fields."
+            "notes": "Tier 2 (Defensive Programming). COMPLETE: Added validate_required_state_attrs() utility function at src/stages/__init__.py:250-293. Function uses _STATE_ATTR_DEFAULTS dict for sensible defaults. Integrated into MatchStage.run() with ['text_metadata', 'caption_results', 'voiceover_segments'] and IterativeMatchStage.run() with ['matches', 'text_metadata']. Added 5 unit tests in tests/test_stages_init_coverage.py (TestValidateRequiredStateAttrs class). All 174 tests pass (169 match/iterative tests + 5 new tests)."
         },
         {
             "id": "US-40-009",
