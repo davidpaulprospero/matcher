@@ -386,3 +386,103 @@ class TestMullvadVPNGetStatus:
             status = vpn.get_status()
 
             assert status["connected"] is False
+
+
+class TestMullvadVPNPreferredCountries:
+    """Tests for MullvadVPN._pick_next_country() with preferred_countries config (US-35-010)."""
+
+    def test_pick_next_country_uses_config_preferred_countries(self):
+        """Test that _pick_next_country uses config.preferred_countries when set."""
+        from src.downloader.mullvad_vpn import MULLVAD_COUNTRIES, MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        # Set custom preferred countries
+        config.preferred_countries = ['fr', 'it', 'es']
+
+        vpn = MullvadVPN(config)
+
+        # Pick countries multiple times to verify they come from config
+        picked_countries = set()
+        for _ in range(20):
+            vpn._used_countries = []  # Reset to get fresh picks
+            country = vpn._pick_next_country()
+            picked_countries.add(country)
+
+        # All picked countries should be from config.preferred_countries
+        assert picked_countries.issubset({'fr', 'it', 'es'})
+        # Should NOT include countries from hardcoded list that aren't in config
+        assert not picked_countries.intersection({'us', 'gb', 'de', 'nl', 'se', 'ch', 'ca', 'au', 'jp', 'sg'} - {'fr', 'it', 'es'})
+
+    def test_pick_next_country_falls_back_when_config_empty(self):
+        """Test that _pick_next_country falls back to MULLVAD_COUNTRIES when config.preferred_countries is empty."""
+        from src.downloader.mullvad_vpn import MULLVAD_COUNTRIES, MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        # Empty list should fall back to default
+        config.preferred_countries = []
+
+        vpn = MullvadVPN(config)
+
+        picked_countries = set()
+        for _ in range(30):
+            vpn._used_countries = []
+            country = vpn._pick_next_country()
+            picked_countries.add(country)
+
+        # All picked countries should be from hardcoded MULLVAD_COUNTRIES
+        assert picked_countries.issubset(set(MULLVAD_COUNTRIES))
+
+    def test_pick_next_country_falls_back_when_config_none(self):
+        """Test that _pick_next_country falls back to MULLVAD_COUNTRIES when config.preferred_countries is None."""
+        from src.downloader.mullvad_vpn import MULLVAD_COUNTRIES, MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        # None should fall back to default
+        config.preferred_countries = None
+
+        vpn = MullvadVPN(config)
+
+        picked_countries = set()
+        for _ in range(30):
+            vpn._used_countries = []
+            country = vpn._pick_next_country()
+            picked_countries.add(country)
+
+        # All picked countries should be from hardcoded MULLVAD_COUNTRIES
+        assert picked_countries.issubset(set(MULLVAD_COUNTRIES))
+
+    def test_pick_next_country_falls_back_when_config_missing(self):
+        """Test that _pick_next_country falls back when preferred_countries attribute is missing."""
+        from src.downloader.mullvad_vpn import MULLVAD_COUNTRIES, MullvadVPN
+
+        # Use spec to ensure preferred_countries attribute doesn't exist
+        config = MagicMock(spec=['enabled', 'max_vpn_switches', 'switch_delay_seconds', 'min_switch_interval', 'switch_command'])
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.switch_command = ""  # Required by VPNManager.is_enabled
+        # Don't set preferred_countries at all - MagicMock with spec won't have it
+
+        vpn = MullvadVPN(config)
+
+        picked_countries = set()
+        for _ in range(30):
+            vpn._used_countries = []
+            country = vpn._pick_next_country()
+            picked_countries.add(country)
+
+        # All picked countries should be from hardcoded MULLVAD_COUNTRIES
+        assert picked_countries.issubset(set(MULLVAD_COUNTRIES))
