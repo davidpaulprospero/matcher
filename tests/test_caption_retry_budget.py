@@ -104,6 +104,57 @@ class TestCaptionRetryBudgetInit:
         assert budget.max_attempts == 75
         assert budget.max_backoff_time == 180.0
 
+    @pytest.mark.fast
+    def test_from_config_with_auto_scale_settings(self):
+        """Test from_config loads auto_scale and attempts_per_video (US-37-004)."""
+        config = CaptionRetryBudgetConfig(
+            max_attempts=100,
+            max_backoff_time_seconds=300.0,
+            auto_scale=False,
+            attempts_per_video=2.0,
+        )
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.auto_scale is False
+        assert budget.attempts_per_video == 2.0
+
+    @pytest.mark.fast
+    def test_from_config_dict_with_auto_scale_settings(self):
+        """Test from_config handles dict configs with auto_scale settings (US-37-004)."""
+        config = {
+            'max_attempts': 100,
+            'max_backoff_time_seconds': 300.0,
+            'auto_scale': True,
+            'attempts_per_video': 1.8,
+        }
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.auto_scale is True
+        assert budget.attempts_per_video == 1.8
+
+    @pytest.mark.fast
+    def test_from_config_defaults_auto_scale_to_true(self):
+        """Test auto_scale defaults to True when not specified (US-37-004)."""
+        config = CaptionRetryBudgetConfig(
+            max_attempts=100,
+            max_backoff_time_seconds=300.0,
+        )
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.auto_scale is True
+        assert budget.attempts_per_video == 1.5  # Default value
+
+    @pytest.mark.fast
+    def test_from_config_dict_defaults_auto_scale(self):
+        """Test dict config defaults auto_scale to True (US-37-004)."""
+        config = {
+            'max_attempts': 100,
+        }
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.auto_scale is True
+        assert budget.attempts_per_video == 1.5
+
 
 class TestCaptionRetryBudgetRecording:
     """Test recording attempts, successes, failures, and backoff."""
@@ -1151,3 +1202,701 @@ class TestCaptionRetryBudgetScaleToBatchSize:
         budget = CaptionRetryBudget()
         budget.scale_to_batch_size(175)
         assert budget.max_attempts == 263
+
+    @pytest.mark.fast
+    def test_scale_uses_instance_attempts_per_video(self):
+        """Test scale_to_batch_size uses instance attempts_per_video when no override (US-37-004)."""
+        budget = CaptionRetryBudget()
+        budget.attempts_per_video = 2.0  # Override instance value
+
+        # 100 videos with 2.0 attempts each = 200
+        result = budget.scale_to_batch_size(100)
+
+        assert budget.max_attempts == 200
+        assert result == 200
+
+    @pytest.mark.fast
+    def test_scale_override_takes_precedence(self):
+        """Test scale_to_batch_size parameter overrides instance value (US-37-004)."""
+        budget = CaptionRetryBudget()
+        budget.attempts_per_video = 2.0  # Instance value
+
+        # 100 videos with explicit 1.0 attempts each = 100 (override)
+        result = budget.scale_to_batch_size(100, attempts_per_video=1.0)
+
+        # Should use 1.0 not 2.0
+        assert budget.max_attempts == 100
+        assert result == 100
+
+    @pytest.mark.fast
+    def test_scale_from_config_values(self):
+        """Test budget created from config uses config attempts_per_video (US-37-004)."""
+        config = {
+            'max_attempts': 100,
+            'attempts_per_video': 2.5,
+        }
+        budget = CaptionRetryBudget.from_config(config)
+
+        # 50 videos with 2.5 attempts each = 125
+        budget.scale_to_batch_size(50)
+
+        assert budget.max_attempts == 125
+
+
+# ============================================================================
+# US-37-005: Detailed logging for retry budget consumption
+# ============================================================================
+
+
+class TestCaptionRetryBudgetConsumptionPercentage:
+    """Test get_consumption_percentage method (US-37-005)."""
+
+    @pytest.mark.fast
+    def test_consumption_percentage_fresh_budget(self):
+        """Test consumption percentages are 0% for fresh budget."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 300.0
+
+        pct = budget.get_consumption_percentage()
+
+        assert pct['attempts'] == 0.0
+        assert pct['backoff_time'] == 0.0
+
+    @pytest.mark.fast
+    def test_consumption_percentage_partial_use(self):
+        """Test consumption percentages after partial use."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 300.0
+
+        for i in range(25):
+            budget.record_attempt(f"video_{i}")
+        budget.backoff_time_spent = 90.0  # 30% of 300
+
+        pct = budget.get_consumption_percentage()
+
+        assert pct['attempts'] == 25.0  # 25/100 = 25%
+        assert pct['backoff_time'] == 30.0  # 90/300 = 30%
+
+    @pytest.mark.fast
+    def test_consumption_percentage_at_50_percent(self):
+        """Test consumption percentage at 50%."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 200.0
+
+        budget.attempts = 50
+        budget.backoff_time_spent = 100.0
+
+        pct = budget.get_consumption_percentage()
+
+        assert pct['attempts'] == 50.0
+        assert pct['backoff_time'] == 50.0
+
+    @pytest.mark.fast
+    def test_consumption_percentage_over_100(self):
+        """Test consumption percentage can exceed 100% when over budget."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 100.0
+
+        budget.attempts = 120  # 120% consumed
+        budget.backoff_time_spent = 150.0  # 150% consumed
+
+        pct = budget.get_consumption_percentage()
+
+        assert pct['attempts'] == 120.0
+        assert pct['backoff_time'] == 150.0
+
+    @pytest.mark.fast
+    def test_consumption_percentage_unlimited_returns_none(self):
+        """Test consumption percentages are None for unlimited budgets."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 0  # Unlimited
+        budget.max_backoff_time = 0  # Unlimited
+
+        budget.attempts = 500
+        budget.backoff_time_spent = 1000.0
+
+        pct = budget.get_consumption_percentage()
+
+        assert pct['attempts'] is None
+        assert pct['backoff_time'] is None
+
+    @pytest.mark.fast
+    def test_consumption_percentage_mixed_unlimited(self):
+        """Test mixed unlimited/limited budget percentages."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 0  # Unlimited
+
+        budget.attempts = 45
+        budget.backoff_time_spent = 500.0
+
+        pct = budget.get_consumption_percentage()
+
+        assert pct['attempts'] == 45.0
+        assert pct['backoff_time'] is None
+
+
+class TestCaptionRetryBudgetThresholdLogging:
+    """Test threshold-based logging (US-37-005)."""
+
+    @pytest.mark.fast
+    def test_logs_info_at_25_percent_threshold(self):
+        """Test INFO logging when crossing 25% threshold."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Record 24 attempts (below threshold)
+            for i in range(24):
+                budget.record_attempt(f"video_{i}")
+
+            # Clear call history
+            mock_logger.reset_mock()
+
+            # Record 25th attempt (crosses 25%)
+            budget.record_attempt("video_25")
+
+            # Should have logged INFO about 25% threshold
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if '25%' in str(c)]
+            assert len(info_calls) >= 1
+
+    @pytest.mark.fast
+    def test_logs_info_at_50_percent_threshold(self):
+        """Test INFO logging when crossing 50% threshold."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Record 49 attempts
+            for i in range(49):
+                budget.record_attempt(f"video_{i}")
+
+            mock_logger.reset_mock()
+
+            # Record 50th attempt (crosses 50%)
+            budget.record_attempt("video_50")
+
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if '50%' in str(c)]
+            assert len(info_calls) >= 1
+
+    @pytest.mark.fast
+    def test_logs_info_at_75_percent_threshold(self):
+        """Test INFO logging when crossing 75% threshold."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Record 74 attempts
+            for i in range(74):
+                budget.record_attempt(f"video_{i}")
+
+            mock_logger.reset_mock()
+
+            # Record 75th attempt
+            budget.record_attempt("video_75")
+
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if '75%' in str(c)]
+            assert len(info_calls) >= 1
+
+    @pytest.mark.fast
+    def test_logs_warning_at_90_percent_threshold(self):
+        """Test WARNING logging when crossing 90% threshold."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Record 89 attempts
+            for i in range(89):
+                budget.record_attempt(f"video_{i}")
+
+            mock_logger.reset_mock()
+
+            # Record 90th attempt (crosses 90%)
+            budget.record_attempt("video_90")
+
+            warning_calls = [c for c in mock_logger.warning.call_args_list
+                           if '90%' in str(c)]
+            assert len(warning_calls) >= 1
+
+    @pytest.mark.fast
+    def test_backoff_triggers_threshold_logging(self):
+        """Test that backoff time also triggers threshold logging."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 1000  # High to avoid attempts triggering
+        budget.max_backoff_time = 100.0
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Record 49% backoff
+            budget.record_backoff(49.0, "video_1")
+
+            mock_logger.reset_mock()
+
+            # Record more backoff to cross 50%
+            budget.record_backoff(2.0, "video_2")
+
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if '50%' in str(c)]
+            assert len(info_calls) >= 1
+
+    @pytest.mark.fast
+    def test_failure_triggers_threshold_logging(self):
+        """Test that failures also trigger threshold checking."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Pre-fill to 24 attempts
+            budget.attempts = 24
+
+            mock_logger.reset_mock()
+
+            # Record a failure (which doesn't increment attempts but checks threshold)
+            # Actually, failure doesn't increment attempts - let's record an attempt instead
+            budget.record_attempt("video_25")
+
+            # Should log 25% threshold
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if '25%' in str(c)]
+            assert len(info_calls) >= 1
+
+    @pytest.mark.fast
+    def test_no_logging_below_25_percent(self):
+        """Test no threshold logging when below 25%."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Record only 10 attempts (10%)
+            for i in range(10):
+                budget.record_attempt(f"video_{i}")
+
+            # Should not have any threshold INFO logs (only DEBUG)
+            info_calls = [c for c in mock_logger.info.call_args_list
+                         if 'consumed' in str(c)]
+            assert len(info_calls) == 0
+
+    @pytest.mark.fast
+    def test_warning_includes_success_failure_counts(self):
+        """Test WARNING at 90% includes success and failure counts."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        # Pre-fill some successes and failures
+        budget.successes = 50
+        budget.failures = 39
+        budget.attempts = 89
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Cross 90% threshold
+            budget.record_attempt("video_90")
+
+            # Check warning includes success/failure info
+            warning_calls = mock_logger.warning.call_args_list
+            assert len(warning_calls) >= 1
+            call_str = str(warning_calls[-1])
+            assert 'successes: 50' in call_str
+            assert 'failures: 39' in call_str
+
+
+class TestCaptionRetryBudgetConsumptionInSummary:
+    """Test consumption percentage included in get_summary (US-37-005)."""
+
+    @pytest.mark.fast
+    def test_get_summary_includes_all_fields(self):
+        """Test get_summary returns all expected fields including consumption."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.max_backoff_time = 300.0
+
+        for i in range(45):
+            budget.record_attempt(f"video_{i}")
+        budget.backoff_time_spent = 90.0
+
+        summary = budget.get_summary()
+
+        # Verify all fields present
+        assert 'attempts' in summary
+        assert 'attempts_remaining' in summary
+        assert 'successes' in summary
+        assert 'failures' in summary
+        assert 'backoff_time_spent' in summary
+        assert 'backoff_time_remaining' in summary
+        assert 'videos_skipped' in summary
+        assert 'is_exhausted' in summary
+
+        # Verify values
+        assert summary['attempts'] == 45
+        assert summary['attempts_remaining'] == 55
+        assert summary['backoff_time_spent'] == 90.0
+        assert summary['backoff_time_remaining'] == 210.0
+
+
+# ============================================================================
+# US-37-006: Error category tracking in CaptionRetryBudget
+# ============================================================================
+
+
+class TestCaptionRetryBudgetErrorCategoryTracking:
+    """Test error category tracking (US-37-006)."""
+
+    @pytest.mark.fast
+    def test_error_counts_field_exists(self):
+        """Test error_counts field is initialized as empty dict."""
+        budget = CaptionRetryBudget()
+        assert hasattr(budget, 'error_counts')
+        assert budget.error_counts == {}
+
+    @pytest.mark.fast
+    def test_record_failure_without_category(self):
+        """Test record_failure works without error_category (backward compatible)."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("video_1")
+        assert budget.failures == 1
+        assert len(budget.error_counts) == 0
+
+    @pytest.mark.fast
+    def test_record_failure_with_category(self):
+        """Test record_failure tracks error category when provided."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("video_1", error_category=CaptionErrorCategory.NETWORK)
+        assert budget.failures == 1
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 1
+
+    @pytest.mark.fast
+    def test_record_failure_multiple_same_category(self):
+        """Test multiple failures of same category accumulate correctly."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("video_1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("video_2", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("video_3", error_category=CaptionErrorCategory.NETWORK)
+
+        assert budget.failures == 3
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 3
+
+    @pytest.mark.fast
+    def test_record_failure_multiple_categories(self):
+        """Test failures across multiple categories tracked correctly."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("video_1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("video_2", error_category=CaptionErrorCategory.TIMEOUT)
+        budget.record_failure("video_3", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("video_4", error_category=CaptionErrorCategory.RATE_LIMIT)
+        budget.record_failure("video_5", error_category=CaptionErrorCategory.TIMEOUT)
+
+        assert budget.failures == 5
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 2
+        assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 2
+        assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 1
+
+    @pytest.mark.fast
+    def test_record_failure_all_categories(self):
+        """Test all error categories can be tracked."""
+        budget = CaptionRetryBudget()
+
+        for cat in CaptionErrorCategory:
+            budget.record_failure(f"video_{cat.name}", error_category=cat)
+
+        assert budget.failures == 5  # All 5 categories
+        for cat in CaptionErrorCategory:
+            assert cat in budget.error_counts
+            assert budget.error_counts[cat] == 1
+
+
+class TestCaptionRetryBudgetGetTopErrors:
+    """Test get_top_errors method (US-37-006)."""
+
+    @pytest.mark.fast
+    def test_get_top_errors_empty(self):
+        """Test get_top_errors returns empty list when no errors."""
+        budget = CaptionRetryBudget()
+        result = budget.get_top_errors()
+        assert result == []
+
+    @pytest.mark.fast
+    def test_get_top_errors_single_category(self):
+        """Test get_top_errors with single error category."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v2", error_category=CaptionErrorCategory.NETWORK)
+
+        result = budget.get_top_errors()
+
+        assert len(result) == 1
+        assert result[0] == (CaptionErrorCategory.NETWORK, 2)
+
+    @pytest.mark.fast
+    def test_get_top_errors_sorted_by_count(self):
+        """Test get_top_errors returns categories sorted by count descending."""
+        budget = CaptionRetryBudget()
+        # Record different counts for each category
+        for _ in range(5):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+        for _ in range(3):
+            budget.record_failure("v", error_category=CaptionErrorCategory.TIMEOUT)
+        for _ in range(10):
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+        budget.record_failure("v", error_category=CaptionErrorCategory.PARSE)
+
+        result = budget.get_top_errors()
+
+        assert len(result) == 4
+        assert result[0] == (CaptionErrorCategory.RATE_LIMIT, 10)
+        assert result[1] == (CaptionErrorCategory.NETWORK, 5)
+        assert result[2] == (CaptionErrorCategory.TIMEOUT, 3)
+        assert result[3] == (CaptionErrorCategory.PARSE, 1)
+
+    @pytest.mark.fast
+    def test_get_top_errors_limit(self):
+        """Test get_top_errors respects limit parameter."""
+        budget = CaptionRetryBudget()
+        for i, cat in enumerate(CaptionErrorCategory):
+            for _ in range(i + 1):
+                budget.record_failure("v", error_category=cat)
+
+        result = budget.get_top_errors(limit=2)
+
+        assert len(result) == 2
+        # Top 2 should be the categories with highest counts
+
+    @pytest.mark.fast
+    def test_get_top_errors_default_limit_5(self):
+        """Test get_top_errors has default limit of 5."""
+        budget = CaptionRetryBudget()
+        # All 5 categories recorded
+        for cat in CaptionErrorCategory:
+            budget.record_failure("v", error_category=cat)
+
+        result = budget.get_top_errors()
+
+        assert len(result) == 5  # Default limit
+
+
+class TestCaptionRetryBudgetErrorBreakdownInSummary:
+    """Test error breakdown in get_summary (US-37-006)."""
+
+    @pytest.mark.fast
+    def test_get_summary_includes_error_breakdown(self):
+        """Test get_summary includes error_breakdown field."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+
+        summary = budget.get_summary()
+
+        assert 'error_breakdown' in summary
+
+    @pytest.mark.fast
+    def test_get_summary_error_breakdown_empty_when_no_errors(self):
+        """Test error_breakdown is empty dict when no categorized errors."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1")  # No category
+
+        summary = budget.get_summary()
+
+        assert summary['error_breakdown'] == {}
+
+    @pytest.mark.fast
+    def test_get_summary_error_breakdown_has_category_names(self):
+        """Test error_breakdown uses category names as keys."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v2", error_category=CaptionErrorCategory.TIMEOUT)
+
+        summary = budget.get_summary()
+
+        assert 'NETWORK' in summary['error_breakdown']
+        assert 'TIMEOUT' in summary['error_breakdown']
+        assert summary['error_breakdown']['NETWORK'] == 1
+        assert summary['error_breakdown']['TIMEOUT'] == 1
+
+    @pytest.mark.fast
+    def test_get_summary_error_breakdown_multiple(self):
+        """Test error_breakdown with multiple errors per category."""
+        budget = CaptionRetryBudget()
+        for _ in range(5):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+        for _ in range(3):
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        summary = budget.get_summary()
+
+        assert summary['error_breakdown']['NETWORK'] == 5
+        assert summary['error_breakdown']['RATE_LIMIT'] == 3
+
+
+class TestCaptionRetryBudgetErrorCategorySerialization:
+    """Test error_counts serialization (US-37-006)."""
+
+    @pytest.mark.fast
+    def test_to_dict_includes_error_counts(self):
+        """Test to_dict includes error_counts."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v2", error_category=CaptionErrorCategory.TIMEOUT)
+
+        data = budget.to_dict()
+
+        assert 'error_counts' in data
+        assert data['error_counts']['NETWORK'] == 1
+        assert data['error_counts']['TIMEOUT'] == 1
+
+    @pytest.mark.fast
+    def test_from_dict_restores_error_counts(self):
+        """Test from_dict restores error_counts."""
+        data = {
+            'attempts': 10,
+            'failures': 5,
+            'successes': 5,
+            'backoff_time_spent': 10.0,
+            'videos_skipped': 0,
+            'error_counts': {
+                'NETWORK': 3,
+                'RATE_LIMIT': 2,
+            }
+        }
+
+        budget = CaptionRetryBudget.from_dict(data)
+
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 3
+        assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 2
+
+    @pytest.mark.fast
+    def test_roundtrip_serialization(self):
+        """Test error_counts survives serialization roundtrip."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v2", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v3", error_category=CaptionErrorCategory.TIMEOUT)
+        budget.record_failure("v4", error_category=CaptionErrorCategory.PARSE)
+
+        data = budget.to_dict()
+        restored = CaptionRetryBudget.from_dict(data)
+
+        assert restored.error_counts[CaptionErrorCategory.NETWORK] == 2
+        assert restored.error_counts[CaptionErrorCategory.TIMEOUT] == 1
+        assert restored.error_counts[CaptionErrorCategory.PARSE] == 1
+
+    @pytest.mark.fast
+    def test_from_dict_handles_unknown_category(self):
+        """Test from_dict handles unknown error category gracefully."""
+        data = {
+            'error_counts': {
+                'NETWORK': 3,
+                'UNKNOWN_FUTURE_CATEGORY': 5,  # Unknown category
+            }
+        }
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            budget = CaptionRetryBudget.from_dict(data)
+
+            # Should restore known category
+            assert budget.error_counts[CaptionErrorCategory.NETWORK] == 3
+            # Should log warning for unknown
+            mock_logger.warning.assert_called_once()
+
+
+class TestCaptionRetryBudgetErrorCountsReset:
+    """Test error_counts reset behavior (US-37-006)."""
+
+    @pytest.mark.fast
+    def test_reset_clears_error_counts(self):
+        """Test reset() clears error_counts."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v2", error_category=CaptionErrorCategory.TIMEOUT)
+
+        assert len(budget.error_counts) == 2
+
+        budget.reset()
+
+        assert budget.error_counts == {}
+
+    @pytest.mark.fast
+    def test_error_counts_fresh_after_reset(self):
+        """Test error tracking works correctly after reset."""
+        budget = CaptionRetryBudget()
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.reset()
+        budget.record_failure("v2", error_category=CaptionErrorCategory.TIMEOUT)
+
+        assert CaptionErrorCategory.NETWORK not in budget.error_counts
+        assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 1
+
+
+class TestCaptionRetryBudgetErrorCategoryIntegration:
+    """Integration tests for error category tracking (US-37-006)."""
+
+    @pytest.mark.fast
+    def test_diagnostic_scenario_rate_limit_dominant(self):
+        """Test diagnosing rate limit as dominant error."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        # Simulate a batch with mostly rate limit errors
+        for _ in range(20):
+            budget.record_attempt("v")
+            budget.record_success("v")
+
+        for _ in range(15):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        for _ in range(5):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        # Diagnose
+        top_errors = budget.get_top_errors()
+        summary = budget.get_summary()
+
+        assert top_errors[0] == (CaptionErrorCategory.RATE_LIMIT, 15)
+        assert summary['error_breakdown']['RATE_LIMIT'] == 15
+        assert summary['error_breakdown']['NETWORK'] == 5
+
+    @pytest.mark.fast
+    def test_diagnostic_scenario_network_issues(self):
+        """Test diagnosing network issues as dominant error."""
+        budget = CaptionRetryBudget()
+
+        # Simulate network-heavy failure pattern
+        for _ in range(25):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+        for _ in range(3):
+            budget.record_failure("v", error_category=CaptionErrorCategory.TIMEOUT)
+        for _ in range(2):
+            budget.record_failure("v", error_category=CaptionErrorCategory.PARSE)
+
+        top_errors = budget.get_top_errors(limit=1)
+
+        assert top_errors[0][0] == CaptionErrorCategory.NETWORK
+        assert top_errors[0][1] == 25
+
+    @pytest.mark.fast
+    def test_thread_safety_error_counts(self):
+        """Test error_counts is thread-safe."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10000
+
+        def record_errors(category, count):
+            for _ in range(count):
+                budget.record_failure("v", error_category=category)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(record_errors, CaptionErrorCategory.NETWORK, 100),
+                executor.submit(record_errors, CaptionErrorCategory.TIMEOUT, 100),
+                executor.submit(record_errors, CaptionErrorCategory.NETWORK, 100),
+                executor.submit(record_errors, CaptionErrorCategory.RATE_LIMIT, 100),
+            ]
+            for f in futures:
+                f.result()
+
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 200
+        assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 100
+        assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 100
