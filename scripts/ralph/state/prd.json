@@ -162,20 +162,20 @@
             "id": "US-40-011",
             "title": "Add circuit breaker state to CaptionRetryBudget summary",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add circuit_breaker_state field to CaptionRetryBudget.get_summary() output",
                 "Include in get_formatted_summary() as 'circuit_breaker={open|closed}'",
                 "Add unit test verifying circuit breaker state appears in summary",
                 "Add unit test verifying summary works when circuit breaker is None"
             ],
-            "notes": "Tier 3 (Observability). Files: src/caption/retry_budget.py lines 611-641 (get_summary), lines 643-662 (get_formatted_summary). Circuit breaker may be open, causing rapid failures - need visibility."
+            "notes": "Tier 3 (Observability). COMPLETE: Added optional circuit_breaker field to CaptionRetryBudget dataclass at retry_budget.py:131-133. Added _get_circuit_breaker_state() helper method at lines 645-660 returning 'open'/'closed'/None. Updated get_summary() at line 642 to include circuit_breaker_state. Updated get_formatted_summary() at lines 680-684 to append ', circuit_breaker={state}' when set. Added 9 unit tests in TestCaptionRetryBudgetCircuitBreakerState class covering all acceptance criteria. All tests pass."
         },
         {
             "id": "US-40-012",
             "title": "Document CaptionRetryBudget scaling behavior in CLAUDE.md",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add section to CLAUDE.md explaining retry budget scaling",
                 "Include: default max_attempts=100, auto_scale=true, attempts_per_video=2.0",
@@ -183,7 +183,7 @@
                 "Add troubleshooting entry for 'budget_exhausted' skipped videos",
                 "Add config.yaml snippet showing retry_budget configuration options"
             ],
-            "notes": "Tier 3 (Documentation). Files: CLAUDE.md (Troubleshooting section), config.yaml (comments). The retry budget behavior is not documented, making debugging harder."
+            "notes": "Tier 3 (Documentation). COMPLETE: Added 'Caption Retry Budget' section to CLAUDE.md under Configuration with defaults, config.yaml snippet, auto-scaling behavior explanation, and debugging guide. Added troubleshooting entry for 'Videos skipped (budget_exhausted)' in Common Issues table. config.yaml already has the retry_budget snippet with inline comments."
         }
     ]
 }
