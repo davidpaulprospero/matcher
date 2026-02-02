@@ -83,26 +83,57 @@ class CaptionStage(Stage):
 
         This follows the pattern established in PipelineState.from_legacy_pipeline()
         where attributes are copied with getattr() defaults.
+
+        Note: This method is called by _preflight_check() which provides consolidated logging.
         """
         # Ensure text_metadata exists (required by _populate_text_metadata)
         if not hasattr(state, 'text_metadata'):
             setattr(state, 'text_metadata', [])
-            logger.info("Initialized missing text_metadata on state object")
 
         # Ensure caption_results exists (stores caption data by video_id)
         if not hasattr(state, 'caption_results'):
             setattr(state, 'caption_results', {})
-            logger.info("Initialized missing caption_results on state object")
 
         # Ensure video_ids exists (input from VIDEO_SEARCH stage)
         if not hasattr(state, 'video_ids'):
             setattr(state, 'video_ids', [])
-            logger.info("Initialized missing video_ids on state object")
 
         # Ensure video_search_results exists (full search metadata)
         if not hasattr(state, 'video_search_results'):
             setattr(state, 'video_search_results', [])
-            logger.info("Initialized missing video_search_results on state object")
+
+    def _preflight_check(self, state: 'PipelineState') -> None:
+        """Validate state has all required attributes before processing.
+
+        US-39-011: Consolidates defensive checks into single method for clarity
+        and testability. Called at stage entry before main processing loop.
+
+        Required attributes:
+        - video_ids (list): Input from VIDEO_SEARCH stage
+        - caption_results (dict): Stores caption data by video_id
+        - text_metadata (list): Required by _populate_text_metadata
+
+        Logs INFO listing which attributes were initialized if any were missing.
+
+        Args:
+            state: PipelineState object to validate.
+        """
+        # Track which attributes need initialization
+        required_attrs = {
+            'video_ids': [],
+            'caption_results': {},
+            'text_metadata': [],
+        }
+
+        initialized = []
+        for attr, default in required_attrs.items():
+            if not hasattr(state, attr):
+                setattr(state, attr, default)
+                initialized.append(attr)
+
+        # Log consolidated message if any attributes were initialized
+        if initialized:
+            logger.info(f"Pre-flight: initialized {len(initialized)} missing attributes: {', '.join(initialized)}")
 
     def run(
         self,
@@ -128,8 +159,8 @@ class CaptionStage(Stage):
             # US-39-009: Validate state type at stage entry
             state = self._validate_state_type(state)
 
-            # US-37-010: Ensure state has required attributes (defensive initialization)
-            self._ensure_state_attributes(state)
+            # US-39-011: Pre-flight check validates state completeness before processing
+            self._preflight_check(state)
 
             # Get caption config (caption fetching is always enabled)
             caption_config = getattr(config.download, 'caption_first', None)
