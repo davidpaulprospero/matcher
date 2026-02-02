@@ -76,7 +76,7 @@
             "id": "US-42-005",
             "title": "Add diagnostic logging when budget exhausts before batch completes",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When budget_exhausted() returns True, log includes: auto_scale setting, batch_size, config max_attempts, scaled max_attempts",
                 "Log shows why scaling didn't help (e.g., 'auto_scale=false' or 'scaling not triggered')",
@@ -84,7 +84,7 @@
                 "Add test that verifies diagnostic info is logged when budget exhausts",
                 "Diagnostic log uses INFO level and includes [US-42-005] marker"
             ],
-            "notes": "Tier 2 Enhancement: src/caption/retry_budget.py budget_exhausted() method (lines 297-342)\n\nThe current EXHAUSTED log only shows attempts/max_attempts. Adding diagnostic context helps users understand why budget was insufficient.\n\nLog format: 'CaptionRetryBudget: EXHAUSTED (attempts: 100/100) [US-42-005] auto_scale=false, batch_size=175, original_max=100, top_errors=[RATE_LIMIT:45, TIMEOUT:30]'"
+            "notes": "COMPLETED: Added _get_diagnostic_info() helper method and diagnostic logging to budget_exhausted().\n\nChanges:\n1. Added original_max_attempts field to track config value before scaling (US-42-005)\n2. Added _get_diagnostic_info() method that builds diagnostic string with:\n   - auto_scale setting\n   - batch_size\n   - original_max_attempts (config value)\n   - scaling status: 'auto_scale=false', 'scaling_not_triggered', or 'scaled_to=N'\n   - top 3 errors from error_counts\n3. budget_exhausted() now calls _get_diagnostic_info() and logs at INFO level with [US-42-005] marker\n4. Added 4 tests in TestCaptionRetryBudgetExhaustion class\n\nAll 269 tests in test_caption_retry_budget.py pass."
         },
         {
             "id": "US-42-006",

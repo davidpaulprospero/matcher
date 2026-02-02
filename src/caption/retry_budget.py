@@ -114,6 +114,9 @@ class CaptionRetryBudget:
     max_attempts: int = 100
     max_backoff_time: float = 300.0  # 5 minutes total backoff budget
 
+    # Original config max_attempts (before scaling) for diagnostic logging (US-42-005)
+    original_max_attempts: int = 100
+
     # Auto-scaling settings (US-37-004)
     auto_scale: bool = True
     attempts_per_video: float = 2.0
@@ -164,6 +167,7 @@ class CaptionRetryBudget:
         # Handle both dict and dataclass config
         if isinstance(config, dict):
             budget.max_attempts = int(config.get('max_attempts', 100))
+            budget.original_max_attempts = budget.max_attempts  # US-42-005
             budget.max_backoff_time = float(config.get('max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(config.get('auto_scale', True))
             budget.attempts_per_video = float(config.get('attempts_per_video', 2.0))
@@ -177,6 +181,7 @@ class CaptionRetryBudget:
             budget.reset_on_scale = bool(config.get('reset_on_scale', False))
         else:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
+            budget.original_max_attempts = budget.max_attempts  # US-42-005
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(getattr(config, 'auto_scale', True))
             budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 2.0))
@@ -294,6 +299,41 @@ class CaptionRetryBudget:
             trips = self.circuit_breaker_trips
         logger.debug(f"CaptionRetryBudget: circuit breaker tripped (total trips: {trips})")
 
+    def _get_diagnostic_info(self) -> str:
+        """Build diagnostic info string for exhaustion logging (US-42-005).
+
+        Returns a formatted string with:
+        - auto_scale setting
+        - batch_size
+        - original_max_attempts (from config)
+        - Whether scaling was triggered
+        - Top 3 error categories
+
+        Must be called while holding the lock.
+        """
+        # Determine if scaling was triggered
+        scaling_status = ""
+        if self.auto_scale:
+            if self.max_attempts > self.original_max_attempts:
+                scaling_status = f"scaled_to={self.max_attempts}"
+            else:
+                scaling_status = "scaling_not_triggered"
+        else:
+            scaling_status = "auto_scale=false"
+
+        # Format top 3 errors
+        top_errors = self.get_top_errors(limit=3)
+        if top_errors:
+            error_parts = [f"{cat.name}:{count}" for cat, count in top_errors]
+            errors_str = f"top_errors=[{', '.join(error_parts)}]"
+        else:
+            errors_str = "top_errors=[]"
+
+        return (
+            f"[US-42-005] auto_scale={self.auto_scale}, batch_size={self.batch_size or 0}, "
+            f"original_max={self.original_max_attempts}, {scaling_status}, {errors_str}"
+        )
+
     def budget_exhausted(self) -> bool:
         """Check if the retry budget is exhausted.
 
@@ -317,6 +357,8 @@ class CaptionRetryBudget:
                 logger.info(
                     f"CaptionRetryBudget: EXHAUSTED (attempts: {self.attempts}/{self.max_attempts}){progress_suffix}"
                 )
+                # US-42-005: Log diagnostic info at INFO level
+                logger.info(f"CaptionRetryBudget: {self._get_diagnostic_info()}")
                 # US-41-006: Log circuit breaker trips if any occurred
                 if self.circuit_breaker_trips > 0:
                     logger.info(
@@ -331,6 +373,8 @@ class CaptionRetryBudget:
                     f"CaptionRetryBudget: EXHAUSTED (backoff: {self.backoff_time_spent:.1f}s/"
                     f"{self.max_backoff_time}s){progress_suffix}"
                 )
+                # US-42-005: Log diagnostic info at INFO level
+                logger.info(f"CaptionRetryBudget: {self._get_diagnostic_info()}")
                 # US-41-006: Log circuit breaker trips if any occurred
                 if self.circuit_breaker_trips > 0:
                     logger.info(
@@ -829,6 +873,7 @@ class CaptionRetryBudget:
                 "backoff_time_spent": self.backoff_time_spent,
                 "videos_skipped": self.videos_skipped,
                 "max_attempts": self.max_attempts,
+                "original_max_attempts": self.original_max_attempts,  # US-42-005
                 "max_backoff_time": self.max_backoff_time,
                 "error_counts": {cat.name: count for cat, count in self.error_counts.items()},  # US-37-006
                 "vpn_resets_used": self.vpn_resets_used,  # US-37-008
@@ -863,6 +908,7 @@ class CaptionRetryBudget:
 
         # Restore budget limits
         budget.max_attempts = data.get("max_attempts", 100)
+        budget.original_max_attempts = data.get("original_max_attempts", budget.max_attempts)  # US-42-005
         budget.max_backoff_time = data.get("max_backoff_time", 300.0)
 
         # Restore error counts (US-37-006)
