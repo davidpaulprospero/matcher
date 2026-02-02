@@ -822,6 +822,155 @@ class TestBudgetValidationWarnings:
 
 
 # =============================================================================
+# Integration Tests: Budget Insufficient Warning (US-39-006)
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestBudgetInsufficientWarning:
+    """Integration tests for US-39-006: Proactive warning when budget may be insufficient."""
+
+    def test_warning_logged_when_auto_scale_false_and_batch_exceeds_budget(self, caplog):
+        """Test WARNING logged when auto_scale=false and batch_size * attempts_per_video > max_attempts.
+
+        US-39-006: Verifies warning is logged with exact format:
+        'Budget may be insufficient: {max_attempts} attempts for {batch_size} videos'
+        and includes recommendation.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with auto_scale=False
+        # max_attempts=100, attempts_per_video=1.5
+        # For 100 videos: required = 100 * 1.5 = 150 > 100
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=100,
+            auto_scale=False,
+            attempts_per_video=1.5,
+        ))
+
+        # Call validation with batch that requires more than max_attempts
+        stage._validate_budget_for_batch(100, budget)
+
+        # Check warning message format
+        warning_found = False
+        for record in caplog.records:
+            if record.levelno >= logging.WARNING:
+                if "Budget may be insufficient: 100 attempts for 100 videos" in record.message:
+                    warning_found = True
+                    # Also verify recommendation is included
+                    assert "Consider enabling auto_scale" in record.message or \
+                           "increasing max_attempts" in record.message, \
+                        f"Expected recommendation in warning, got: {record.message}"
+                    break
+
+        assert warning_found, (
+            f"Expected warning 'Budget may be insufficient: 100 attempts for 100 videos', "
+            f"got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_no_warning_when_auto_scale_true(self, caplog):
+        """Test NO warning when auto_scale=true, even if batch would exceed budget.
+
+        US-39-006: auto_scale=true means budget will be scaled up automatically,
+        so no warning needed.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with auto_scale=True
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=50,
+            auto_scale=True,  # Auto-scale enabled
+            attempts_per_video=1.5,
+        ))
+
+        # Call validation with large batch
+        stage._validate_budget_for_batch(200, budget)
+
+        # Check that "Budget may be insufficient" warning was NOT logged
+        insufficient_warning_found = any(
+            "Budget may be insufficient:" in record.message
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+        )
+
+        assert not insufficient_warning_found, (
+            f"Should NOT warn about insufficient budget when auto_scale=true, "
+            f"got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_warning_includes_recommendation(self, caplog):
+        """Test warning includes actionable recommendation text.
+
+        US-39-006: Warning must include 'Consider enabling auto_scale in config or increasing max_attempts'.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=50,
+            auto_scale=False,
+            attempts_per_video=1.5,
+        ))
+
+        # batch_size=50 requires 75 attempts (50 * 1.5), exceeds max_attempts=50
+        stage._validate_budget_for_batch(50, budget)
+
+        # Find the warning and verify it contains recommendation
+        recommendation_found = False
+        for record in caplog.records:
+            if record.levelno >= logging.WARNING and "Budget may be insufficient" in record.message:
+                if "Consider enabling auto_scale in config or increasing max_attempts" in record.message:
+                    recommendation_found = True
+                    break
+
+        assert recommendation_found, (
+            f"Expected warning to include 'Consider enabling auto_scale in config or increasing max_attempts', "
+            f"got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_no_warning_when_budget_sufficient(self, caplog):
+        """Test NO warning when max_attempts >= required budget."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget where max_attempts >= batch_size * attempts_per_video
+        # 200 >= 50 * 1.5 = 75
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=200,
+            auto_scale=False,
+            attempts_per_video=1.5,
+        ))
+
+        stage._validate_budget_for_batch(50, budget)
+
+        # No "Budget may be insufficient" warning
+        insufficient_warning_found = any(
+            "Budget may be insufficient:" in record.message
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+        )
+
+        assert not insufficient_warning_found, (
+            f"Should NOT warn when budget is sufficient, "
+            f"got: {[r.message for r in caplog.records]}"
+        )
+
+
+# =============================================================================
 # Integration Tests: Caption Results Preservation (US-38-011)
 # =============================================================================
 

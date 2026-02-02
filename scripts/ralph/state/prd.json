@@ -76,7 +76,7 @@
             "id": "US-39-005",
             "title": "Add budget consumption summary logging at stage completion",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Log INFO at end of caption stage with budget summary: attempts, successes, failures, skipped",
                 "Include batch_size in summary log message",
@@ -84,13 +84,13 @@
                 "Add unit test verifying summary is logged with all required fields",
                 "Summary format: 'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts, {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N})'"
             ],
-            "notes": "Tier 2: Observability improvement. Files: src/stages/caption_stage.py (end of run method), src/caption/retry_budget.py (get_summary method). This helps diagnose budget exhaustion issues by providing clear visibility into actual vs expected budget usage."
+            "notes": "COMPLETED: 1) Added get_formatted_summary() method to CaptionRetryBudget that returns exact format with batch_size. 2) Called logger.info(retry_budget.get_formatted_summary()) at line 822 in caption_stage.py. 3) Added 5 tests in TestCaptionRetryBudgetFormattedSummary class verifying all fields. Commit: f5108f6"
         },
         {
             "id": "US-39-006",
             "title": "Add warning when budget may be insufficient before processing",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Before processing starts, calculate required budget: batch_size * attempts_per_video",
                 "Log WARNING if required > max_attempts AND auto_scale is disabled: 'Budget may be insufficient: {max_attempts} attempts for {batch_size} videos'",
@@ -98,7 +98,7 @@
                 "Add unit test verifying warning is logged when auto_scale=false and batch_size > max_attempts",
                 "Add unit test verifying NO warning when auto_scale=true"
             ],
-            "notes": "Tier 2: Proactive warning. Files: src/stages/caption_stage.py (before main processing loop), src/caption/retry_budget.py. Feature implemented in US-38-010 but may need verification or adjustment."
+            "notes": "COMPLETED: 1) Updated _validate_budget_for_batch() in caption_stage.py to calculate required_budget = batch_size * attempts_per_video. 2) Added WARNING with exact format 'Budget may be insufficient: {max_attempts} attempts for {batch_size} videos'. 3) Warning includes recommendation 'Consider enabling auto_scale in config or increasing max_attempts'. 4) Added TestBudgetInsufficientWarning class with 4 tests: test_warning_logged_when_auto_scale_false_and_batch_exceeds_budget, test_no_warning_when_auto_scale_true, test_warning_includes_recommendation, test_no_warning_when_budget_sufficient. All 37 tests in test_caption_stage_budget.py pass."
         },
         {
             "id": "US-39-007",
