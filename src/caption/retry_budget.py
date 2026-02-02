@@ -150,6 +150,10 @@ class CaptionRetryBudget:
     # Counts how many times the circuit breaker tripped during this budget's lifetime
     circuit_breaker_trips: int = 0
 
+    # Graceful degradation tracking (US-42-011)
+    # Expected skips calculated when budget is insufficient but continuing anyway
+    _expected_skips: Optional[int] = field(default=None, repr=False, compare=False)
+
     @classmethod
     def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
         """Create a CaptionRetryBudget from config.
@@ -857,6 +861,37 @@ class CaptionRetryBudget:
                 f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{cb_suffix})"
             )
 
+    def log_skip_comparison(self) -> None:
+        """Log comparison of actual vs expected skips (US-42-011).
+
+        Called at batch completion when graceful degradation was used.
+        Logs INFO-level message comparing the actual skipped count to
+        the expected value predicted when budget was insufficient.
+
+        Only logs if expected_skips was set (via graceful degradation).
+        """
+        with self._lock:
+            if self._expected_skips is None:
+                return  # Graceful degradation wasn't used
+
+            actual = self.videos_skipped
+            expected = self._expected_skips
+
+            if actual == expected:
+                logger.info(
+                    f"[US-42-011] Skip comparison: actual={actual}, expected={expected} (exact match)"
+                )
+            elif actual < expected:
+                logger.info(
+                    f"[US-42-011] Skip comparison: actual={actual}, expected={expected} "
+                    f"(better than predicted, {expected - actual} fewer skips)"
+                )
+            else:
+                logger.warning(
+                    f"[US-42-011] Skip comparison: actual={actual}, expected={expected} "
+                    f"(worse than predicted, {actual - expected} more skips)"
+                )
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize budget state for checkpoint persistence.
 
@@ -1181,28 +1216,69 @@ class CaptionRetryBudget:
                 )
             return True
 
-    def verify_budget_sufficient(self, batch_size: int) -> None:
-        """Verify budget is mathematically sufficient for batch (US-41-004).
+    def verify_budget_sufficient(
+        self,
+        batch_size: int,
+        graceful_degradation: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """Verify budget is mathematically sufficient for batch (US-41-004, US-42-011).
 
         Fail-fast verification after ensure_scaled() to catch configuration errors
-        before processing begins. Raises ValueError if budget is insufficient.
+        before processing begins.
 
         Args:
             batch_size: Number of videos to process.
+            graceful_degradation: If True, continue with warning instead of failing
+                when budget is insufficient (US-42-011). Returns dict with info
+                about expected skips instead of raising ValueError.
+
+        Returns:
+            None if budget is sufficient.
+            If graceful_degradation=True and budget is insufficient, returns dict:
+                - expected_skips: int - estimated videos that will be skipped
+                - remaining_attempts: int - attempts available before exhaustion
+                - budget_covers_pct: float - percentage of batch budget can cover
 
         Raises:
             ValueError: If max_attempts < batch_size * attempts_per_video
+                       AND graceful_degradation is False.
         """
         required_attempts = int(batch_size * self.attempts_per_video + 0.5)
 
         if self.max_attempts < required_attempts:
-            raise ValueError(
-                f"Retry budget insufficient: max_attempts={self.max_attempts} < required "
-                f"{required_attempts} (batch_size={batch_size} × attempts_per_video="
-                f"{self.attempts_per_video}). Either enable auto_scale=true in "
-                f"config.yaml under download.caption_first.retry_budget, or increase "
-                f"max_attempts to at least {required_attempts}."
-            )
+            # US-42-011: Calculate expected skips for logging/tracking
+            remaining = self.attempts_remaining() or 0
+            # Each video needs ~attempts_per_video attempts on average
+            videos_budget_can_cover = int(remaining / self.attempts_per_video)
+            expected_skips = max(0, batch_size - videos_budget_can_cover)
+            budget_covers_pct = (videos_budget_can_cover / batch_size * 100) if batch_size > 0 else 0.0
+
+            if graceful_degradation:
+                # US-42-011: Store expected skips for later comparison with actual
+                self._expected_skips = expected_skips
+
+                logger.warning(
+                    f"[US-42-011] Budget insufficient for batch: max_attempts={self.max_attempts} "
+                    f"< required {required_attempts}. Continuing with partial results."
+                )
+                logger.warning(
+                    f"[US-42-011] Expected ~{expected_skips} videos to be skipped due to budget "
+                    f"(budget covers ~{budget_covers_pct:.0f}% of batch)"
+                )
+
+                return {
+                    "expected_skips": expected_skips,
+                    "remaining_attempts": remaining,
+                    "budget_covers_pct": budget_covers_pct,
+                }
+            else:
+                raise ValueError(
+                    f"Retry budget insufficient: max_attempts={self.max_attempts} < required "
+                    f"{required_attempts} (batch_size={batch_size} × attempts_per_video="
+                    f"{self.attempts_per_video}). Either enable auto_scale=true in "
+                    f"config.yaml under download.caption_first.retry_budget, or increase "
+                    f"max_attempts to at least {required_attempts}."
+                )
 
         # Warn if auto_scale is disabled and batch exceeds original max_attempts
         if not self.auto_scale and batch_size > self.max_attempts:
@@ -1211,6 +1287,8 @@ class CaptionRetryBudget:
                 f"max_attempts={self.max_attempts}. Budget may exhaust before all videos "
                 f"are processed. Enable auto_scale in config.yaml or increase max_attempts."
             )
+
+        return None
 
     def log_health_check(self, batch_size: int) -> None:
         """Log budget health check at batch start (US-42-010).

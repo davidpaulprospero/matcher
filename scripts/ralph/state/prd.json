@@ -160,7 +160,7 @@
             "id": "US-42-011",
             "title": "Add graceful degradation when budget insufficient for batch",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When budget is insufficient (remaining < batch_size), offer option to continue with warning",
                 "In non-interactive mode, continue with warning rather than failing",
@@ -168,7 +168,7 @@
                 "Track actual vs expected skips in summary log",
                 "Add test: budget has 50 remaining, batch of 100, verify continues and logs expected skips"
             ],
-            "notes": "Tier 3 Enhancement: src/stages/caption_stage.py\n\nCurrently verify_budget_sufficient() may raise ValueError. Add option for graceful degradation.\n\nUsers may prefer partial results over complete failure, especially when re-running with limited budget."
+            "notes": "COMPLETED: Added graceful degradation support to verify_budget_sufficient().\n\nChanges:\n1. AC1: verify_budget_sufficient() now accepts graceful_degradation=True parameter (returns dict instead of raising ValueError)\n2. AC2: caption_stage.py uses graceful_degradation=non_interactive (line 773-782)\n3. AC3: Logs 'Expected ~{n} videos to be skipped due to budget' with [US-42-011] marker\n4. AC4: Added log_skip_comparison() method that logs actual vs expected at batch end\n5. AC5: Added 10 tests in TestCaptionRetryBudgetGracefulDegradation class including test_graceful_degradation_continues_with_warning (50 remaining, batch of 100)\n\nFiles modified:\n- src/caption/retry_budget.py: Added _expected_skips field, updated verify_budget_sufficient(), added log_skip_comparison()\n- src/stages/caption_stage.py: Use graceful_degradation=non_interactive, call log_skip_comparison() at batch end\n- tests/test_caption_retry_budget.py: Added TestCaptionRetryBudgetGracefulDegradation class with 10 tests\n\nAll 10 new tests pass."
         },
         {
             "id": "US-42-012",

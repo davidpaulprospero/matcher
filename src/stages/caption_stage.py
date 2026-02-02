@@ -766,8 +766,19 @@ class CaptionStage(Stage):
                                 )
 
                     # US-41-004: Fail-fast verification - catch math errors before processing
-                    # This raises ValueError if budget is insufficient, preventing wasted work
-                    retry_budget.verify_budget_sufficient(batch_size)
+                    # US-42-011: Use graceful degradation in non-interactive mode
+                    # In non-interactive mode, continue with warning rather than failing
+                    non_interactive = getattr(config.download, 'non_interactive', False)
+                    degradation_info = retry_budget.verify_budget_sufficient(
+                        batch_size,
+                        graceful_degradation=non_interactive
+                    )
+                    if degradation_info:
+                        # Budget is insufficient but we're continuing (graceful degradation)
+                        warnings.append(
+                            f"Budget insufficient: expected ~{degradation_info['expected_skips']} "
+                            f"videos to be skipped (budget covers ~{degradation_info['budget_covers_pct']:.0f}%)"
+                        )
 
                     # US-42-010: Proactive health check - log budget state before processing
                     # Helps users understand budget state after checkpoint restore
@@ -988,6 +999,9 @@ class CaptionStage(Stage):
                 # US-40-004: Log INFO with formatted budget summary
                 logger.info(retry_budget.get_formatted_summary())
 
+                # US-42-011: Log comparison of actual vs expected skips (if graceful degradation was used)
+                retry_budget.log_skip_comparison()
+
                 # US-40-004: Log WARNING if any videos were skipped due to budget exhaustion
                 if rb_summary['videos_skipped'] > 0:
                     logger.warning(
@@ -1036,6 +1050,8 @@ class CaptionStage(Stage):
             # US-40-004: Log retry budget summary even when stage fails
             if retry_budget is not None:
                 logger.info(retry_budget.get_formatted_summary())
+                # US-42-011: Log comparison of actual vs expected skips
+                retry_budget.log_skip_comparison()
                 rb_summary = retry_budget.get_summary()
                 if rb_summary['videos_skipped'] > 0:
                     logger.warning(
