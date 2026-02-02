@@ -714,13 +714,10 @@ class CaptionStage(Stage):
                                 f"Retry budget restored from checkpoint, re-scaling for batch of "
                                 f"{batch_size} videos"
                             )
-                        elif not retry_budget.auto_scale:
-                            # Warn if auto_scale disabled and batch is large enough to risk exhaustion
-                            if batch_size > retry_budget.max_attempts:
-                                logger.warning(
-                                    f"Retry budget auto_scale DISABLED, max_attempts={retry_budget.max_attempts} "
-                                    f"may be insufficient for batch of {batch_size}"
-                                )
+
+                    # US-41-004: Fail-fast verification - catch math errors before processing
+                    # This raises ValueError if budget is insufficient, preventing wasted work
+                    retry_budget.verify_budget_sufficient(batch_size)
 
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
