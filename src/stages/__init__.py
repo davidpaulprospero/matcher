@@ -7,6 +7,7 @@ and the StageResult type for returning success/failure with data.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
     from ..config import Config
     from ..checkpoint import CheckpointManager
     from .state import PipelineState
+
+_stages_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -179,6 +182,44 @@ class Stage(ABC):
             Error message if validation fails, None if valid
         """
         return None
+
+    def _validate_state_type(self, state: Any) -> 'PipelineState':
+        """
+        Validate that state is a PipelineState instance.
+
+        US-39-009: Ensures type safety at stage entry points. Legacy pipeline
+        objects may not have all required attributes.
+
+        If state is not a PipelineState instance:
+        - Logs a WARNING with the actual state type
+        - Attempts to convert using PipelineState.from_legacy_pipeline()
+        - Returns the converted (or original) state
+
+        Args:
+            state: The state object passed to run()
+
+        Returns:
+            PipelineState instance (original if valid, converted if legacy)
+        """
+        # Import here to avoid circular imports
+        from ..state import PipelineState
+
+        if isinstance(state, PipelineState):
+            return state
+
+        # Non-standard state object - log warning
+        state_type = type(state).__name__
+        _stages_logger.warning(f"Non-standard state object: {state_type}")
+
+        # Attempt to convert from legacy pipeline
+        try:
+            converted = PipelineState.from_legacy_pipeline(state)
+            _stages_logger.info(f"Converted {state_type} to PipelineState")
+            return converted
+        except Exception as e:
+            _stages_logger.error(f"Failed to convert {state_type} to PipelineState: {e}")
+            # Return original state - stage will handle missing attributes
+            return state
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} name='{self.name}'>"
