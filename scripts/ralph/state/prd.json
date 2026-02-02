@@ -84,8 +84,8 @@
                 "Test verifies early termination when success_rate < 30%",
                 "All tests marked with @pytest.mark.integration"
             ],
-            "passes": false,
-            "notes": "Tier 2 (testing). New file: tests/integration/test_caption_stage_budget.py. Complements existing test_caption_stage_large_batch.py with focus on budget edge cases."
+            "passes": true,
+            "notes": "Tier 2 (testing). Created tests/integration/test_caption_stage_budget.py with 22 tests in 5 test classes: TestRetryBudgetFallback (4 tests), TestBudgetScalingLargeBatch (4 tests), TestVPNRotationOnRateLimitExhaustion (5 tests), TestEarlyTerminationLowSuccessRate (6 tests), TestCombinedBudgetScenarios (3 tests). All tests marked with @pytest.mark.integration and passing."
         },
         {
             "id": "US-38-006",
@@ -98,8 +98,8 @@
                 "Add unit test verifying stale entries are removed",
                 "Add unit test verifying recent entries are preserved"
             ],
-            "passes": false,
-            "notes": "Tier 3 (enhancement). Target: src/transcription/cache.py. Cache can grow unbounded over time. Pattern from src/cache/base.py cleanup methods."
+            "passes": true,
+            "notes": "Tier 3 (enhancement). Added cleanup_stale_entries() method to src/transcription/cache.py that removes cache files older than max_age_days based on file modification time. Rebuilds source maps after cleanup. Added 6 tests in TestCleanupStaleEntries class verifying stale entries are removed while recent entries are preserved."
         },
         {
             "id": "US-38-007",

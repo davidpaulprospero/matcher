@@ -729,3 +729,160 @@ class TestTranscriptCacheUncoveredLines:
         with patch('builtins.open', side_effect=PermissionError("Permission denied")):
             # Should not raise
             cache.set(video_path, segments)
+
+
+class TestCleanupStaleEntries:
+    """Tests for cleanup_stale_entries method"""
+
+    @pytest.mark.fast
+    def test_cleanup_stale_entries_removes_old_files(self, tmp_cache_dir):
+        """Test that stale entries older than max_age_days are removed"""
+        import os
+        import time
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a cache file
+        cache_file = transcriptions_dir / "old_entry.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Old", "source_file": "/old.mp4"}]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+
+        # Set file modification time to 60 days ago
+        old_time = time.time() - (60 * 24 * 60 * 60)
+        os.utime(cache_file, (old_time, old_time))
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # Should have the entry initially
+        assert cache_file.exists()
+
+        # Cleanup with 30-day max age
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+
+        # Should have removed the old entry
+        assert removed == 1
+        assert not cache_file.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_stale_entries_preserves_recent_files(self, tmp_cache_dir):
+        """Test that recent entries are preserved during cleanup"""
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a recent cache file (mtime is now by default)
+        cache_file = transcriptions_dir / "recent_entry.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Recent", "source_file": "/recent.mp4"}]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # Cleanup with 30-day max age
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+
+        # Should not have removed the recent entry
+        assert removed == 0
+        assert cache_file.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_stale_entries_mixed_ages(self, tmp_cache_dir):
+        """Test cleanup with mix of old and recent entries"""
+        import os
+        import time
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create an old cache file
+        old_file = transcriptions_dir / "old_entry.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Old", "source_file": "/old.mp4"}]
+        with open(old_file, 'w') as f:
+            json.dump(data, f)
+        old_time = time.time() - (45 * 24 * 60 * 60)
+        os.utime(old_file, (old_time, old_time))
+
+        # Create a recent cache file
+        recent_file = transcriptions_dir / "recent_entry.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Recent", "source_file": "/recent.mp4"}]
+        with open(recent_file, 'w') as f:
+            json.dump(data, f)
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # Cleanup with 30-day max age
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+
+        # Should have removed only the old entry
+        assert removed == 1
+        assert not old_file.exists()
+        assert recent_file.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_stale_entries_rebuilds_source_map(self, tmp_cache_dir):
+        """Test that source map is rebuilt after cleanup"""
+        import os
+        import time
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create an old cache file
+        old_file = transcriptions_dir / "old_entry.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Old", "source_file": "/old.mp4"}]
+        with open(old_file, 'w') as f:
+            json.dump(data, f)
+        old_time = time.time() - (60 * 24 * 60 * 60)
+        os.utime(old_file, (old_time, old_time))
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # Source map should have the entry initially
+        initial_map_size = len(cache._source_map)
+        assert initial_map_size > 0
+
+        # Cleanup
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+        assert removed == 1
+
+        # Source map should be rebuilt and now be empty
+        assert len(cache._source_map) == 0
+
+    @pytest.mark.fast
+    def test_cleanup_stale_entries_returns_count(self, tmp_cache_dir):
+        """Test that cleanup returns correct count of removed entries"""
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # With no stale entries
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+        assert removed == 0
+
+    @pytest.mark.fast
+    def test_cleanup_stale_entries_custom_max_age(self, tmp_cache_dir):
+        """Test cleanup with custom max_age_days"""
+        import os
+        import time
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a cache file 10 days old
+        cache_file = transcriptions_dir / "ten_days_old.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Test", "source_file": "/test.mp4"}]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        os.utime(cache_file, (old_time, old_time))
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # With 30-day max age, should not remove
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+        assert removed == 0
+        assert cache_file.exists()
+
+        # With 7-day max age, should remove
+        removed = cache.cleanup_stale_entries(max_age_days=7)
+        assert removed == 1
+        assert not cache_file.exists()
