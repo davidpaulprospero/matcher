@@ -4446,7 +4446,12 @@ class TestCaptionStageDefensiveInitialization:
 
     @pytest.mark.fast
     def test_ensure_state_attributes_logs_initialization(self, caplog):
-        """Test _ensure_state_attributes logs INFO when initializing missing attributes (US-39-003)."""
+        """Test _preflight_check logs INFO when initializing missing attributes (US-39-003, US-39-011).
+
+        Note: As of US-39-011, logging is consolidated in _preflight_check() instead of
+        _ensure_state_attributes() to provide a single, clear message listing all
+        initialized attributes.
+        """
         import logging
         stage = CaptionStage()
 
@@ -4457,12 +4462,12 @@ class TestCaptionStageDefensiveInitialization:
 
         # Capture logs at INFO level
         with caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
-            stage._ensure_state_attributes(state)
+            stage._preflight_check(state)
 
-        # Verify INFO log messages contain expected text
+        # Verify INFO log message contains expected consolidated format (US-39-011)
         log_messages = [record.message for record in caplog.records]
-        assert any('Initialized missing text_metadata on state object' in msg for msg in log_messages), \
-            f"Expected log message not found. Got: {log_messages}"
+        assert any('Pre-flight: initialized' in msg and 'missing attributes' in msg for msg in log_messages), \
+            f"Expected preflight log message not found. Got: {log_messages}"
 
 
 @pytest.mark.fast
@@ -4996,3 +5001,149 @@ class TestBudgetStatusDisplay:
         line = format_skipped_line("abc123XYZ", "budget_exhausted", 100.0)
         assert "(budget: 100%)" in line
         assert "skipped (budget_exhausted)" in line
+
+
+# ============================================================================
+# Test _preflight_check() State Completeness (US-39-011)
+# ============================================================================
+
+@pytest.mark.fast
+class TestPreflightCheck:
+    """Test _preflight_check() consolidates defensive checks (US-39-011).
+
+    Validates that _preflight_check ensures all required attributes are present
+    on state before main processing loop begins.
+    """
+
+    def test_preflight_check_initializes_all_required_attributes(self):
+        """Test _preflight_check initializes all required attributes on bare state."""
+        stage = CaptionStage()
+
+        # Create minimal state without required attributes
+        class BareState:
+            pass
+
+        state = BareState()
+
+        # Verify attributes are missing before preflight
+        assert not hasattr(state, 'video_ids')
+        assert not hasattr(state, 'caption_results')
+        assert not hasattr(state, 'text_metadata')
+
+        # Run preflight check
+        stage._preflight_check(state)
+
+        # All required attributes should now exist with correct types
+        assert hasattr(state, 'video_ids')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'text_metadata')
+        assert isinstance(state.video_ids, list)
+        assert isinstance(state.caption_results, dict)
+        assert isinstance(state.text_metadata, list)
+
+    def test_preflight_check_preserves_existing_attributes(self):
+        """Test _preflight_check does not overwrite existing data."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        # Pre-populate with data
+        state.video_ids = ['vid1', 'vid2']
+        state.caption_results = {'vid1': {'text': 'existing'}}
+        state.text_metadata = [{'video_id': 'vid1', 'text': 'data'}]
+
+        # Run preflight check
+        stage._preflight_check(state)
+
+        # Existing data should be preserved
+        assert state.video_ids == ['vid1', 'vid2']
+        assert 'vid1' in state.caption_results
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_id'] == 'vid1'
+
+    def test_preflight_check_logs_initialized_count(self, caplog):
+        """Test _preflight_check logs INFO with count of initialized attributes."""
+        import logging
+        stage = CaptionStage()
+
+        # Create state missing all required attributes
+        class BareState:
+            pass
+
+        state = BareState()
+
+        with caplog.at_level(logging.INFO):
+            stage._preflight_check(state)
+
+        # Check that consolidated log message was produced
+        log_messages = [record.message for record in caplog.records]
+        found_preflight_log = False
+        for msg in log_messages:
+            if 'Pre-flight: initialized' in msg and 'missing attributes' in msg:
+                found_preflight_log = True
+                # Should mention count of initialized attributes
+                assert '3 missing attributes' in msg, f"Expected '3 missing attributes' in: {msg}"
+                break
+
+        assert found_preflight_log, f"Expected preflight log not found. Got: {log_messages}"
+
+    def test_preflight_check_logs_attribute_names(self, caplog):
+        """Test _preflight_check logs which attributes were initialized."""
+        import logging
+        stage = CaptionStage()
+
+        # Create state missing only text_metadata
+        class PartialState:
+            def __init__(self):
+                self.video_ids = ['vid1']
+                self.caption_results = {}
+
+        state = PartialState()
+
+        with caplog.at_level(logging.INFO):
+            stage._preflight_check(state)
+
+        # Should log only the missing attribute
+        log_messages = [record.message for record in caplog.records]
+        found_log = any(
+            'Pre-flight: initialized 1 missing attributes: text_metadata' in msg
+            for msg in log_messages
+        )
+        assert found_log, f"Expected 'text_metadata' in preflight log. Got: {log_messages}"
+
+    def test_preflight_check_no_log_when_all_present(self, caplog):
+        """Test _preflight_check does not log when all attributes already exist."""
+        import logging
+        stage = CaptionStage()
+
+        # Create state with all required attributes
+        state = PipelineState()
+        # PipelineState should already have these attributes
+        assert hasattr(state, 'video_ids')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'text_metadata')
+
+        with caplog.at_level(logging.INFO):
+            stage._preflight_check(state)
+
+        # Should not log any preflight initialization message
+        log_messages = [record.message for record in caplog.records]
+        preflight_logs = [msg for msg in log_messages if 'Pre-flight:' in msg]
+        assert len(preflight_logs) == 0, f"Unexpected preflight logs: {preflight_logs}"
+
+    def test_preflight_check_handles_simple_namespace(self):
+        """Test _preflight_check works with SimpleNamespace objects."""
+        from types import SimpleNamespace
+        stage = CaptionStage()
+
+        # SimpleNamespace with no attributes
+        state = SimpleNamespace()
+
+        stage._preflight_check(state)
+
+        # Should now have all required attributes
+        assert hasattr(state, 'video_ids')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'text_metadata')
+        assert state.video_ids == []
+        assert state.caption_results == {}
+        assert state.text_metadata == []
