@@ -956,3 +956,404 @@ class TestCaptionStageRetryBudgetCheckpointRestoration:
         # 100 videos * 1.5 = 150 max_attempts (scaled up from 75)
         assert budget_at_fetch_time['max_attempts'] == 150
         assert budget_at_fetch_time['batch_size'] == 100
+
+
+# =============================================================================
+# US-41-008: Retry Budget Checkpoint Restore Logging
+# =============================================================================
+
+
+class TestRetryBudgetCheckpointRestoreLogging:
+    """Test logging of retry budget state before and after checkpoint restore (US-41-008).
+
+    Acceptance criteria:
+    1. Log INFO before checkpoint restore: 'Retry budget before restore: max_attempts=X, batch_size=Y'
+    2. Log INFO after checkpoint restore: 'Retry budget after restore: max_attempts=X, batch_size=Y, attempts_used=Z'
+    3. Log WARNING if restored budget has attempts > 0 but batch_size is None (indicates old checkpoint)
+    4. Include these logs in caption_stage.py initialization block
+    5. Add test: checkpoint restore logging shows expected values
+    """
+
+    @pytest.mark.fast
+    def test_logs_retry_budget_before_restore(self):
+        """Test INFO log before checkpoint restore shows max_attempts and batch_size.
+
+        AC1: Log INFO before checkpoint restore: 'Retry budget before restore: max_attempts=X, batch_size=Y'
+        """
+        import logging
+
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+            }
+        )
+
+        video_ids_list = [f"vid{i:08d}" for i in range(10)]
+        state = MockPipelineState(
+            downloaded_videos=[MockDownloadedVideo(vid) for vid in video_ids_list]
+        )
+        state.video_ids = video_ids_list
+
+        # Checkpoint with retry budget data
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 20,
+                        'failures': 5,
+                        'successes': 15,
+                        'backoff_time_spent': 10.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 100,
+                        'max_backoff_time': 300.0,
+                        'batch_size': 50,
+                    }
+                }
+            }
+        )
+
+        log_messages = []
+
+        def capture_log(record):
+            log_messages.append(record.getMessage())
+            return True
+
+        # Capture logger output
+        logger = logging.getLogger('src.stages.caption_stage')
+        handler = logging.Handler()
+        handler.emit = lambda record: log_messages.append(record.getMessage())
+        handler.filter = capture_log
+        logger.addHandler(handler)
+        original_level = logger.level
+        logger.setLevel(logging.INFO)
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        try:
+            with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+                with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                    with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                        with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                            stage.run(state, config, checkpoint)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+
+        # Verify "before restore" log was emitted
+        before_restore_logs = [msg for msg in log_messages if '[US-41-008] Retry budget before restore' in msg]
+        assert len(before_restore_logs) >= 1, f"Missing 'before restore' log. Got: {log_messages}"
+        # Verify it contains max_attempts and batch_size
+        assert 'max_attempts=' in before_restore_logs[0]
+        assert 'batch_size=' in before_restore_logs[0]
+
+    @pytest.mark.fast
+    def test_logs_retry_budget_after_restore(self):
+        """Test INFO log after checkpoint restore shows max_attempts, batch_size, and attempts_used.
+
+        AC2: Log INFO after checkpoint restore: 'Retry budget after restore: max_attempts=X, batch_size=Y, attempts_used=Z'
+        """
+        import logging
+
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+            }
+        )
+
+        video_ids_list = [f"vid{i:08d}" for i in range(10)]
+        state = MockPipelineState(
+            downloaded_videos=[MockDownloadedVideo(vid) for vid in video_ids_list]
+        )
+        state.video_ids = video_ids_list
+
+        # Checkpoint with retry budget data
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 25,
+                        'failures': 5,
+                        'successes': 20,
+                        'backoff_time_spent': 15.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 100,
+                        'max_backoff_time': 300.0,
+                        'batch_size': 50,
+                    }
+                }
+            }
+        )
+
+        log_messages = []
+
+        # Capture logger output
+        logger = logging.getLogger('src.stages.caption_stage')
+        handler = logging.Handler()
+        handler.emit = lambda record: log_messages.append(record.getMessage())
+        logger.addHandler(handler)
+        original_level = logger.level
+        logger.setLevel(logging.INFO)
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        try:
+            with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+                with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                    with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                        with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                            stage.run(state, config, checkpoint)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+
+        # Verify "after restore" log was emitted
+        after_restore_logs = [msg for msg in log_messages if '[US-41-008] Retry budget after restore' in msg]
+        assert len(after_restore_logs) >= 1, f"Missing 'after restore' log. Got: {log_messages}"
+        # Verify it contains max_attempts, batch_size, and attempts_used
+        assert 'max_attempts=' in after_restore_logs[0]
+        assert 'batch_size=' in after_restore_logs[0]
+        assert 'attempts_used=' in after_restore_logs[0]
+
+    @pytest.mark.fast
+    def test_warns_on_old_checkpoint_format(self):
+        """Test WARNING log when restored budget has attempts > 0 but batch_size is None.
+
+        AC3: Log WARNING if restored budget has attempts > 0 but batch_size is None (indicates old checkpoint)
+        """
+        import logging
+
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+            }
+        )
+
+        video_ids_list = [f"vid{i:08d}" for i in range(10)]
+        state = MockPipelineState(
+            downloaded_videos=[MockDownloadedVideo(vid) for vid in video_ids_list]
+        )
+        state.video_ids = video_ids_list
+
+        # Checkpoint with OLD format - has attempts but NO batch_size (simulates old checkpoint)
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 30,  # Has attempts used
+                        'failures': 5,
+                        'successes': 25,
+                        'backoff_time_spent': 10.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 100,
+                        'max_backoff_time': 300.0,
+                        'batch_size': None,  # OLD checkpoint - missing batch_size
+                    }
+                }
+            }
+        )
+
+        log_messages = []
+        log_levels = []
+
+        # Capture logger output with levels
+        logger = logging.getLogger('src.stages.caption_stage')
+        original_handlers = logger.handlers[:]
+
+        class TestHandler(logging.Handler):
+            def emit(self, record):
+                log_messages.append(record.getMessage())
+                log_levels.append(record.levelno)
+
+        handler = TestHandler()
+        logger.addHandler(handler)
+        original_level = logger.level
+        logger.setLevel(logging.DEBUG)  # Capture all levels
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        try:
+            with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+                with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                    with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                        with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                            stage.run(state, config, checkpoint)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+
+        # Verify WARNING about old checkpoint format was emitted
+        old_checkpoint_warnings = [
+            (msg, level) for msg, level in zip(log_messages, log_levels)
+            if '[US-41-008]' in msg and 'batch_size is None' in msg
+        ]
+        assert len(old_checkpoint_warnings) >= 1, f"Missing 'old checkpoint' warning. Got: {log_messages}"
+        # Verify it was a WARNING level
+        assert old_checkpoint_warnings[0][1] == logging.WARNING
+
+    @pytest.mark.fast
+    def test_no_warning_when_batch_size_present(self):
+        """Test no WARNING when restored budget has proper batch_size (not old checkpoint)."""
+        import logging
+
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+            }
+        )
+
+        video_ids_list = [f"vid{i:08d}" for i in range(10)]
+        state = MockPipelineState(
+            downloaded_videos=[MockDownloadedVideo(vid) for vid in video_ids_list]
+        )
+        state.video_ids = video_ids_list
+
+        # Checkpoint with proper batch_size
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 30,
+                        'failures': 5,
+                        'successes': 25,
+                        'backoff_time_spent': 10.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 100,
+                        'max_backoff_time': 300.0,
+                        'batch_size': 50,  # Proper batch_size present
+                    }
+                }
+            }
+        )
+
+        log_messages = []
+        log_levels = []
+
+        logger = logging.getLogger('src.stages.caption_stage')
+
+        class TestHandler(logging.Handler):
+            def emit(self, record):
+                log_messages.append(record.getMessage())
+                log_levels.append(record.levelno)
+
+        handler = TestHandler()
+        logger.addHandler(handler)
+        original_level = logger.level
+        logger.setLevel(logging.DEBUG)
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        try:
+            with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+                with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                    with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                        with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                            stage.run(state, config, checkpoint)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+
+        # Verify NO warning about old checkpoint format
+        old_checkpoint_warnings = [
+            msg for msg in log_messages
+            if 'batch_size is None' in msg
+        ]
+        assert len(old_checkpoint_warnings) == 0, f"Unexpected 'old checkpoint' warning: {old_checkpoint_warnings}"
+
+    @pytest.mark.fast
+    def test_checkpoint_restore_logging_shows_expected_values(self):
+        """Test checkpoint restore logging shows the expected values (comprehensive AC5 test).
+
+        AC5: Add test: checkpoint restore logging shows expected values
+        """
+        import logging
+
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+            }
+        )
+
+        video_ids_list = [f"vid{i:08d}" for i in range(10)]
+        state = MockPipelineState(
+            downloaded_videos=[MockDownloadedVideo(vid) for vid in video_ids_list]
+        )
+        state.video_ids = video_ids_list
+
+        # Checkpoint with specific values we expect to see in logs
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 42,  # Specific value to verify
+                        'failures': 7,
+                        'successes': 35,
+                        'backoff_time_spent': 25.0,
+                        'videos_skipped': 2,
+                        'max_attempts': 100,
+                        'max_backoff_time': 300.0,
+                        'batch_size': 75,  # Specific value to verify
+                    }
+                }
+            }
+        )
+
+        log_messages = []
+
+        logger = logging.getLogger('src.stages.caption_stage')
+
+        class TestHandler(logging.Handler):
+            def emit(self, record):
+                log_messages.append(record.getMessage())
+
+        handler = TestHandler()
+        logger.addHandler(handler)
+        original_level = logger.level
+        logger.setLevel(logging.INFO)
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        try:
+            with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+                with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                    with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                        with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                            stage.run(state, config, checkpoint)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+
+        # Verify "after restore" log contains the specific checkpoint values
+        after_restore_logs = [msg for msg in log_messages if '[US-41-008] Retry budget after restore' in msg]
+        assert len(after_restore_logs) >= 1, f"Missing 'after restore' log. Got: {log_messages}"
+
+        # Verify the log contains the expected restored values
+        after_log = after_restore_logs[0]
+        # Batch size should be restored to 75 from checkpoint
+        assert 'batch_size=75' in after_log, f"Expected batch_size=75 in log: {after_log}"
+        # Attempts used should be 42 from checkpoint
+        assert 'attempts_used=42' in after_log, f"Expected attempts_used=42 in log: {after_log}"

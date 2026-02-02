@@ -125,8 +125,8 @@
                 "Include these logs in caption_stage.py initialization block",
                 "Add test: checkpoint restore logging shows expected values"
             ],
-            "passes": false,
-            "notes": "Tier: T2 (Observability). Files: src/stages/caption_stage.py:286-310. The logs from user show 100/100 exhaustion but no scaling, suggesting checkpoint restored an unscaled budget. More logging helps diagnose."
+            "passes": true,
+            "notes": "Tier: T2 (Observability). FIXED: Added US-41-008 INFO logs in caption_stage.py:289-292 (before restore) and :313-316 (after restore). Added WARNING in :319-323 when restored budget has attempts > 0 but batch_size is None (indicates old checkpoint format). Added TestRetryBudgetCheckpointRestoreLogging class with 5 tests in test_caption_stage_integration.py. All 5 tests pass."
         },
         {
             "id": "US-41-009",
