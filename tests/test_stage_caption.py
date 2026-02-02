@@ -5147,3 +5147,353 @@ class TestPreflightCheck:
         assert state.video_ids == []
         assert state.caption_results == {}
         assert state.text_metadata == []
+
+
+# ============================================================================
+# Test Retry Budget Summary Logging at Stage Completion (US-40-004)
+# ============================================================================
+
+@pytest.mark.fast
+class TestRetryBudgetSummaryLogging:
+    """Test CaptionRetryBudget summary logging at stage completion (US-40-004).
+
+    Acceptance Criteria:
+    - AC1: At end of CaptionStage.run(), log INFO with retry_budget.get_formatted_summary()
+    - AC2: Include batch_size, max_attempts (scaled), attempts, successes, failures, skipped
+    - AC3: Log WARNING if videos_skipped > 0 with specific count
+    - AC4: Add unit test verifying summary is logged on successful completion
+    - AC5: Add unit test verifying summary is logged even when stage fails
+    """
+
+    @pytest.fixture
+    def basic_caption_config(self):
+        """Create a basic config for caption stage tests."""
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.prefer_human_captions = True
+        config.download.caption_first.fallback_to_transcription = True
+        config.download.caption_first.timeout = 30
+        config.download.caption_first.cache_captions = True
+        config.download.caption_first.skip_live_streams = False
+        config.download.caption_first.max_parallel_fetches = 4
+        config.download.caption_first.min_coverage_threshold = 0.5
+        config.download.caption_first.pre_check_availability = False
+        config.download.caption_first.max_cache_age_days = 30
+        config.download.caption_first.cache_dir = '~/.matcher_caption_cache'
+        config.download.caption_first.cache_validation = 'warn'
+        config.download.caption_first.cache_validation_tolerance = 0.2
+        config.download.caption_first.retry_budget = None  # Use default
+        config.download.caption_first.circuit_breaker = None
+        config.download.cookies_from_browser = ""
+        config.download.cookies_path = ""
+        config.download.impersonation = None
+        return config
+
+    @pytest.fixture
+    def state_with_video_ids(self):
+        """Create state with video IDs for caption fetch."""
+        state = PipelineState()
+        state.video_ids = ['abc123XYZ_0', 'def456ABC_1', 'ghi789JKL_2']
+        state.video_search_results = []
+        return state
+
+    def test_summary_logged_on_successful_completion(
+        self, basic_caption_config, state_with_video_ids, mock_checkpoint, caplog
+    ):
+        """AC4: Verify summary is logged on successful completion.
+
+        US-40-004: At end of run(), log INFO with get_formatted_summary()
+        """
+        import logging
+        from src.caption_fetcher import CaptionResult, CaptionSegment
+
+        stage = CaptionStage()
+
+        # Create mock caption results (success for all videos)
+        mock_results = {}
+        for i, vid in enumerate(state_with_video_ids.video_ids):
+            result = CaptionResult(
+                video_id=vid,
+                segments=[CaptionSegment(
+                    index=0,
+                    start_time=0.0,
+                    end_time=1.0,
+                    text='Test caption',
+                    source_file=vid,
+                )],
+                language='en',
+                is_auto_generated=False,
+                format_source='json3',
+            )
+            mock_results[vid] = result
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             patch('src.caption_fetcher.CaptionMetrics') as mock_metrics_class, \
+             patch('src.caption_fetcher.CaptionCache') as mock_cache_class, \
+             caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+
+            # Setup mocks
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = mock_results
+            mock_fetcher._using_adaptive_order = False
+            mock_fetcher_class.return_value = mock_fetcher
+
+            mock_metrics = MagicMock()
+            mock_metrics.summary.return_value = "Metrics: 3 videos processed"
+            mock_metrics.format_success_counts = {}
+            mock_metrics.low_coverage_videos = []
+            mock_metrics.get_slowest_videos.return_value = []
+            mock_metrics_class.return_value = mock_metrics
+
+            mock_cache = MagicMock()
+            mock_cache.enabled = False
+            mock_cache_class.return_value = mock_cache
+
+            # Run stage
+            result = stage.run(state_with_video_ids, basic_caption_config, mock_checkpoint)
+
+        # Verify stage succeeded
+        assert result.success, f"Stage failed: {result.error}"
+
+        # AC1/AC4: Verify INFO log with get_formatted_summary() content
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        summary_logged = any(
+            'CaptionRetryBudget summary:' in msg and
+            'attempts' in msg and
+            'succeeded' in msg and
+            'failed' in msg and
+            'skipped' in msg
+            for msg in info_messages
+        )
+        assert summary_logged, (
+            f"Expected summary log with CaptionRetryBudget summary. "
+            f"INFO messages: {info_messages}"
+        )
+
+    def test_warning_logged_when_videos_skipped(
+        self, basic_caption_config, state_with_video_ids, mock_checkpoint, caplog
+    ):
+        """AC3: Verify WARNING is logged when videos_skipped > 0.
+
+        US-40-004: Log WARNING if videos were skipped due to budget exhaustion.
+        """
+        import logging
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Create a budget that has skipped videos
+        mock_budget = MagicMock(spec=CaptionRetryBudget)
+        mock_budget.auto_scale = True
+        mock_budget.max_attempts = 100
+        mock_budget.batch_size = None
+        mock_budget.attempts_per_video = 1.5
+        mock_budget.ensure_scaled.return_value = True
+        mock_budget.get_formatted_summary.return_value = (
+            "CaptionRetryBudget summary: 50/100 attempts, "
+            "45 succeeded, 3 failed, 2 skipped (batch_size=50)"
+        )
+        mock_budget.get_summary.return_value = {
+            'attempts': 50,
+            'max_attempts': 100,
+            'successes': 45,
+            'failures': 3,
+            'videos_skipped': 2,  # Key: videos were skipped
+            'backoff_time_spent': 1.5,
+            'is_exhausted': False,
+        }
+        mock_budget.to_dict.return_value = {'attempts': 50}
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             patch('src.caption_fetcher.CaptionMetrics') as mock_metrics_class, \
+             patch('src.caption_fetcher.CaptionCache') as mock_cache_class, \
+             patch('src.caption.retry_budget.CaptionRetryBudget.from_config', return_value=mock_budget), \
+             caplog.at_level(logging.WARNING, logger='src.stages.caption_stage'):
+
+            # Setup mocks
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher._using_adaptive_order = False
+            mock_fetcher_class.return_value = mock_fetcher
+
+            mock_metrics = MagicMock()
+            mock_metrics.summary.return_value = "Metrics: 0 videos"
+            mock_metrics.format_success_counts = {}
+            mock_metrics.low_coverage_videos = []
+            mock_metrics.get_slowest_videos.return_value = []
+            mock_metrics_class.return_value = mock_metrics
+
+            mock_cache = MagicMock()
+            mock_cache.enabled = False
+            mock_cache_class.return_value = mock_cache
+
+            # Run stage
+            result = stage.run(state_with_video_ids, basic_caption_config, mock_checkpoint)
+
+        # Verify stage succeeded
+        assert result.success, f"Stage failed: {result.error}"
+
+        # AC3: Verify WARNING log when videos_skipped > 0
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        skipped_warning_logged = any(
+            '2 videos skipped' in msg and 'budget exhaustion' in msg
+            for msg in warning_messages
+        )
+        assert skipped_warning_logged, (
+            f"Expected WARNING about 2 videos skipped due to budget exhaustion. "
+            f"WARNING messages: {warning_messages}"
+        )
+
+    def test_summary_logged_even_when_stage_fails(
+        self, basic_caption_config, state_with_video_ids, mock_checkpoint, caplog
+    ):
+        """AC5: Verify summary is logged even when stage fails.
+
+        US-40-004: Summary should be logged in except block on failure.
+        """
+        import logging
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Create a budget to verify it gets logged
+        mock_budget = MagicMock(spec=CaptionRetryBudget)
+        mock_budget.auto_scale = True
+        mock_budget.max_attempts = 100
+        mock_budget.batch_size = None
+        mock_budget.attempts_per_video = 1.5
+        mock_budget.ensure_scaled.return_value = True
+        mock_budget.get_formatted_summary.return_value = (
+            "CaptionRetryBudget summary: 25/100 attempts, "
+            "20 succeeded, 5 failed, 0 skipped (batch_size=50)"
+        )
+        mock_budget.get_summary.return_value = {
+            'attempts': 25,
+            'max_attempts': 100,
+            'successes': 20,
+            'failures': 5,
+            'videos_skipped': 0,
+            'backoff_time_spent': 1.0,
+            'is_exhausted': False,
+        }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             patch('src.caption_fetcher.CaptionMetrics') as mock_metrics_class, \
+             patch('src.caption_fetcher.CaptionCache') as mock_cache_class, \
+             patch('src.caption.retry_budget.CaptionRetryBudget.from_config', return_value=mock_budget), \
+             caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+
+            # Setup mocks - fetcher raises exception during batch fetch
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.side_effect = RuntimeError("Network error during fetch")
+            mock_fetcher._using_adaptive_order = False
+            mock_fetcher_class.return_value = mock_fetcher
+
+            mock_metrics = MagicMock()
+            mock_metrics_class.return_value = mock_metrics
+
+            mock_cache = MagicMock()
+            mock_cache.enabled = False
+            mock_cache_class.return_value = mock_cache
+
+            # Run stage (should fail)
+            result = stage.run(state_with_video_ids, basic_caption_config, mock_checkpoint)
+
+        # Verify stage failed
+        assert not result.success, "Stage should have failed"
+        assert "Network error" in result.error
+
+        # AC5: Verify INFO log with summary even on failure
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        summary_logged = any(
+            'CaptionRetryBudget summary:' in msg
+            for msg in info_messages
+        )
+        assert summary_logged, (
+            f"Expected summary log even after failure. "
+            f"INFO messages: {info_messages}"
+        )
+
+    def test_summary_includes_required_fields(
+        self, basic_caption_config, state_with_video_ids, mock_checkpoint, caplog
+    ):
+        """AC2: Verify summary includes all required fields.
+
+        US-40-004: Summary must include batch_size, max_attempts (scaled value),
+        attempts used, successes, failures, skipped.
+        """
+        import logging
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Create a budget with specific values to verify
+        mock_budget = MagicMock(spec=CaptionRetryBudget)
+        mock_budget.auto_scale = True
+        mock_budget.max_attempts = 150  # Scaled value
+        mock_budget.batch_size = None
+        mock_budget.attempts_per_video = 1.5
+        mock_budget.ensure_scaled.return_value = True
+        mock_budget.get_formatted_summary.return_value = (
+            "CaptionRetryBudget summary: 75/150 attempts, "  # max_attempts=150 (scaled)
+            "60 succeeded, 10 failed, 5 skipped (batch_size=100)"  # batch_size=100
+        )
+        mock_budget.get_summary.return_value = {
+            'attempts': 75,
+            'max_attempts': 150,  # Scaled value
+            'successes': 60,
+            'failures': 10,
+            'videos_skipped': 5,
+            'backoff_time_spent': 2.5,
+            'is_exhausted': False,
+        }
+        mock_budget.to_dict.return_value = {'attempts': 75}
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             patch('src.caption_fetcher.CaptionMetrics') as mock_metrics_class, \
+             patch('src.caption_fetcher.CaptionCache') as mock_cache_class, \
+             patch('src.caption.retry_budget.CaptionRetryBudget.from_config', return_value=mock_budget), \
+             caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+
+            # Setup mocks
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher._using_adaptive_order = False
+            mock_fetcher_class.return_value = mock_fetcher
+
+            mock_metrics = MagicMock()
+            mock_metrics.summary.return_value = "Metrics: 0 videos"
+            mock_metrics.format_success_counts = {}
+            mock_metrics.low_coverage_videos = []
+            mock_metrics.get_slowest_videos.return_value = []
+            mock_metrics_class.return_value = mock_metrics
+
+            mock_cache = MagicMock()
+            mock_cache.enabled = False
+            mock_cache_class.return_value = mock_cache
+
+            # Run stage
+            result = stage.run(state_with_video_ids, basic_caption_config, mock_checkpoint)
+
+        # Find the summary log
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        summary_log = next(
+            (msg for msg in info_messages if 'CaptionRetryBudget summary:' in msg),
+            None
+        )
+        assert summary_log is not None, f"Summary not logged. INFO messages: {info_messages}"
+
+        # AC2: Verify all required fields are present
+        # Check max_attempts (scaled value)
+        assert '150' in summary_log, f"max_attempts (150) not in summary: {summary_log}"
+        # Check batch_size
+        assert 'batch_size=100' in summary_log, f"batch_size not in summary: {summary_log}"
+        # Check attempts
+        assert '75' in summary_log, f"attempts (75) not in summary: {summary_log}"
+        # Check succeeded
+        assert '60 succeeded' in summary_log, f"successes not in summary: {summary_log}"
+        # Check failed
+        assert '10 failed' in summary_log, f"failures not in summary: {summary_log}"
+        # Check skipped
+        assert '5 skipped' in summary_log, f"skipped not in summary: {summary_log}"

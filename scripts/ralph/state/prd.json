@@ -62,7 +62,7 @@
             "id": "US-40-004",
             "title": "Add CaptionRetryBudget summary logging at stage completion",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "At end of CaptionStage.run(), log INFO with retry_budget.get_formatted_summary()",
                 "Include batch_size, max_attempts (scaled value), attempts used, successes, failures, skipped",
@@ -70,7 +70,7 @@
                 "Add unit test verifying summary is logged on successful completion",
                 "Add unit test verifying summary is logged even when stage fails"
             ],
-            "notes": "Tier 2 (Observability). Files: src/stages/caption_stage.py (end of run() method), src/caption/retry_budget.py lines 643-662 (get_formatted_summary already exists). This helps diagnose why budget exhausted for 74 videos."
+            "notes": "Tier 2 (Observability). COMPLETE: Added INFO logging with get_formatted_summary() at caption_stage.py:916-923. Added WARNING logging when videos_skipped > 0 at caption_stage.py:920-923. Added summary logging in except block at caption_stage.py:973-978 for failure cases. Added 4 unit tests in tests/test_stage_caption.py (TestRetryBudgetSummaryLogging class). All tests pass."
         },
         {
             "id": "US-40-005",
