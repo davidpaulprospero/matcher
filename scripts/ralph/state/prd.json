@@ -76,7 +76,7 @@
             "id": "US-40-005",
             "title": "Add per-video retry logging to diagnose budget consumption",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In caption fetcher, log DEBUG for each retry attempt with video_id, attempt_number, error_reason",
                 "Log INFO when budget reaches 50%, 75%, 90% thresholds (already exists via _check_and_log_threshold)",
@@ -84,7 +84,7 @@
                 "Add unit test verifying retry attempt is logged with error reason",
                 "Add unit test verifying threshold crossing is logged with correct percentage"
             ],
-            "notes": "Tier 2 (Observability). Files: src/caption_fetcher.py (fetch retry logic), src/caption/retry_budget.py lines 550-573 (_check_and_log_threshold). Need to trace why 100 attempts were consumed by first 100 videos."
+            "notes": "Tier 2 (Observability). COMPLETE: Added DEBUG logging at src/caption_fetcher.py:3050-3054 and 3105-3109 for retry attempts with video_id, attempt, category, and error_reason. Threshold logging with percentage already existed at src/caption/retry_budget.py:500-548 (_log_consumption_status). Added 3 tests in tests/test_caption_fetcher.py (TestCaptionRetryDebugLogging) and 3 tests in tests/test_caption_retry_budget.py (TestCaptionRetryBudgetPerVideoLogging). All 6 new tests pass."
         },
         {
             "id": "US-40-006",
