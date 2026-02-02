@@ -134,8 +134,8 @@
             "id": "US-35-010",
             "title": "Add preferred_countries config support to MullvadVPN",
             "priority": 10,
-            "passes": false,
-            "notes": "Tier 2 (Medium). MullvadVPN._pick_next_country uses hardcoded MULLVAD_COUNTRIES list. Should use config.download.mullvad.preferred_countries if set. Source files: src/downloader/mullvad_vpn.py (lines 238-259, _pick_next_country method), src/config/sections/download.py (MullvadConfig dataclass).",
+            "passes": true,
+            "notes": "Tier 2 (Medium). Updated _pick_next_country() to use self.config.preferred_countries if available and non-empty, falling back to MULLVAD_COUNTRIES list. Uses getattr() for safe attribute access. Added TestMullvadVPNPreferredCountries test class with 4 tests covering: config preferred_countries used, empty list fallback, None fallback, and missing attribute fallback. CLAUDE.md already documents preferred_countries in Mullvad Configuration section. All 76 mullvad/vpn tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 291-318, _pick_next_country method), tests/test_mullvad_vpn.py (TestMullvadVPNPreferredCountries class).",
             "acceptanceCriteria": [
                 "Update _pick_next_country to use self.config.preferred_countries if available",
                 "Fall back to MULLVAD_COUNTRIES if config list is empty or None",
@@ -148,8 +148,8 @@
             "id": "US-35-011",
             "title": "Add max_rotations_per_session to MullvadVPN",
             "priority": 11,
-            "passes": false,
-            "notes": "Tier 2 (Medium). MullvadVPN has no limit on rotations per session. Add max_rotations from config to prevent infinite rotation loops. Source files: src/downloader/mullvad_vpn.py (lines 156-236, rotate_server method), src/downloader/vpn_manager.py (VPNManager base class).",
+            "passes": true,
+            "notes": "Tier 2 (Medium). Added _max_rotations field to MullvadVPN initialized from config.max_rotations_per_session (defaults to 5). Updated rotate_server() to check _switch_count >= _max_rotations at start and return False with warning log when limit reached. Added TestMullvadVPNMaxRotations test class with 4 tests: test_rotate_server_stops_at_max_rotations, test_rotate_server_allows_under_max_rotations, test_max_rotations_defaults_to_5, test_max_rotations_uses_config_value. Also fixed existing tests to include max_rotations_per_session in config mocks. All 80 mullvad/vpn tests pass. Files modified: src/downloader/mullvad_vpn.py (lines 100-117 __init__ _max_rotations field, lines 219-225 rotate_server check), tests/test_mullvad_vpn.py (TestMullvadVPNMaxRotations class, updated TestMullvadVPNRotateServer tests).",
             "acceptanceCriteria": [
                 "Add _max_rotations field to MullvadVPN initialized from config.max_rotations_per_session",
                 "Update rotate_server() to return False if _switch_count >= _max_rotations",

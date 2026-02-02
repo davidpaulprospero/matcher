@@ -231,6 +231,7 @@ class TestMullvadVPNRotateServer:
         config.min_switch_interval = 0
         config.verify_connection = False
         config.max_switches_per_session = 10  # Required by can_switch()
+        config.max_rotations_per_session = 10  # Required by MullvadVPN
 
         vpn = MullvadVPN(config)
 
@@ -258,6 +259,7 @@ class TestMullvadVPNRotateServer:
         config.min_switch_interval = 0
         config.verify_connection = False
         config.max_switches_per_session = 10
+        config.max_rotations_per_session = 10  # Required by MullvadVPN
 
         vpn = MullvadVPN(config)
 
@@ -293,6 +295,7 @@ class TestMullvadVPNRotateServer:
         config.min_switch_interval = 0
         config.verify_connection = False
         config.max_switches_per_session = 10
+        config.max_rotations_per_session = 10  # Required by MullvadVPN
 
         vpn = MullvadVPN(config)
 
@@ -327,6 +330,7 @@ class TestMullvadVPNRotateServer:
         config.min_switch_interval = 0
         config.verify_connection = False
         config.max_switches_per_session = 10
+        config.max_rotations_per_session = 10  # Required by MullvadVPN
 
         vpn = MullvadVPN(config)
 
@@ -486,3 +490,92 @@ class TestMullvadVPNPreferredCountries:
 
         # All picked countries should be from hardcoded MULLVAD_COUNTRIES
         assert picked_countries.issubset(set(MULLVAD_COUNTRIES))
+
+
+class TestMullvadVPNMaxRotations:
+    """Tests for MullvadVPN max_rotations_per_session limit (US-35-011)."""
+
+    def test_rotate_server_stops_at_max_rotations(self):
+        """Test that rotate_server() returns False when max_rotations_per_session is reached."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10  # Base class limit (high)
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 2  # Mullvad-specific limit (low)
+        config.preferred_countries = ['us', 'de']
+
+        vpn = MullvadVPN(config)
+
+        # Simulate having already used max rotations
+        vpn._switch_count = 2
+
+        # rotate_server should return False since max_rotations reached
+        result = vpn.rotate_server()
+        assert result is False
+
+    def test_rotate_server_allows_under_max_rotations(self):
+        """Test that rotate_server() allows rotation when under max_rotations limit."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 5
+        config.max_switches_per_session = 10  # Required by can_switch()
+        config.preferred_countries = ['us', 'de']
+
+        vpn = MullvadVPN(config)
+
+        # Simulate having used some but not all rotations
+        vpn._switch_count = 3
+
+        # Mock the subprocess calls to succeed
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            result = vpn.rotate_server()
+
+        # Should succeed and increment switch_count
+        assert result is True
+        assert vpn._switch_count == 4
+
+    def test_max_rotations_defaults_to_5(self):
+        """Test that _max_rotations defaults to 5 if config attribute is missing."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        # Config without max_rotations_per_session attribute
+        config = MagicMock(spec=['enabled', 'max_vpn_switches', 'switch_delay_seconds', 'min_switch_interval', 'switch_command'])
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.switch_command = ""
+
+        vpn = MullvadVPN(config)
+
+        # Should default to 5
+        assert vpn._max_rotations == 5
+
+    def test_max_rotations_uses_config_value(self):
+        """Test that _max_rotations uses config.max_rotations_per_session when set."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.max_rotations_per_session = 3
+
+        vpn = MullvadVPN(config)
+
+        # Should use config value
+        assert vpn._max_rotations == 3
