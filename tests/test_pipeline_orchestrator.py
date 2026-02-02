@@ -15,6 +15,7 @@ import pytest
 import tempfile
 import shutil
 import json
+import time
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
@@ -235,6 +236,56 @@ class TestLoadCheckpoint:
         assert pipeline.resume_mode is True
         # Should log both warnings
         assert mock_logger.warning.call_count == 2
+
+    @pytest.mark.fast
+    def test_load_checkpoint_stale_warning(self, temp_project_dir, mock_config):
+        """Test load_checkpoint() logs warning for stale checkpoints (>24 hours old)."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        pipeline.checkpoint.exists = Mock(return_value=True)
+        pipeline.checkpoint.load = Mock(return_value={'data': 'test'})
+        pipeline.checkpoint.validate = Mock(return_value={
+            'valid': True,
+            'errors': [],
+            'warnings': []
+        })
+        # Mock stale checkpoint (older than 24 hours)
+        pipeline.checkpoint.is_stale = Mock(return_value=True)
+        pipeline.checkpoint.get_age_hours = Mock(return_value=48.5)
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.load_checkpoint()
+
+        assert result is True
+        assert pipeline.resume_mode is True
+        # Should log stale checkpoint warning
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert 'stale' in warning_msg.lower()
+        assert '48.5' in warning_msg
+
+    @pytest.mark.fast
+    def test_load_checkpoint_not_stale_no_warning(self, temp_project_dir, mock_config):
+        """Test load_checkpoint() does not warn for fresh checkpoints."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        pipeline.checkpoint.exists = Mock(return_value=True)
+        pipeline.checkpoint.load = Mock(return_value={'data': 'test'})
+        pipeline.checkpoint.validate = Mock(return_value={
+            'valid': True,
+            'errors': [],
+            'warnings': []
+        })
+        # Mock fresh checkpoint (not stale)
+        pipeline.checkpoint.is_stale = Mock(return_value=False)
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.load_checkpoint()
+
+        assert result is True
+        assert pipeline.resume_mode is True
+        # Should not log any warnings
+        mock_logger.warning.assert_not_called()
 
 
 @pytest.mark.fast
@@ -581,6 +632,10 @@ class TestEdgeCases:
         assert summary['stages_run'] == []
         assert summary['total_time'] == 0
         assert 'state' in summary
+        # Metrics should be present even for empty pipeline
+        assert summary['items_processed'] == 0
+        assert summary['items_failed'] == 0
+        assert 'metrics' in summary
 
     @pytest.mark.fast
     def test_get_summary_after_run(self, temp_project_dir, mock_config):
@@ -594,6 +649,25 @@ class TestEdgeCases:
         assert summary['stages_run'] == ["A", "B"]
         assert summary['total_time'] >= 0
         assert len(summary['stage_timings']) == 2
+
+    @pytest.mark.fast
+    def test_get_summary_includes_metrics(self, temp_project_dir, mock_config):
+        """Test get_summary() includes stage metrics aggregation."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", items_processed=5, items_failed=1))
+        pipeline.add_stage(MockStage("B", items_processed=10, items_failed=2))
+
+        pipeline.run(resume=False)
+        summary = pipeline.get_summary()
+
+        # Aggregated counts should be in summary
+        assert summary['items_processed'] == 15  # 5 + 10
+        assert summary['items_failed'] == 3  # 1 + 2
+        # Full metrics dict should be included
+        assert 'metrics' in summary
+        assert summary['metrics']['total_items_processed'] == 15
+        assert summary['metrics']['total_items_failed'] == 3
+        assert 'stages' in summary['metrics']
 
 
 @pytest.mark.fast
@@ -1246,3 +1320,749 @@ class TestResumeLogic:
         assert results[0]['name'] == "ANALYZE"
         assert results[0]['success'] is True
         assert results[0]['elapsed'] >= 0
+
+
+@pytest.mark.fast
+class TestParallelStageExecution:
+    """
+    US-1-008 (Sprint 34): Parallel stage execution tests.
+
+    Tests for ThreadPoolExecutor-based parallel stage execution:
+    - parallel_stages parameter accepts list of stage name tuples
+    - Stages in same tuple run concurrently
+    - Checkpoint saves maintain stage order even for parallel stages
+    - Failures in parallel stages halt pipeline
+    """
+
+    @pytest.mark.fast
+    def test_parallel_stages_run_concurrently(self, temp_project_dir, mock_config):
+        """Test that stages specified in parallel_stages run in parallel."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        # Add stages with a delay to verify parallelism
+        stage_a = MockStage("A", run_delay=0.05)
+        stage_b = MockStage("B", run_delay=0.05)
+        stage_c = MockStage("C")  # Sequential stage
+        pipeline.add_stage(stage_a).add_stage(stage_b).add_stage(stage_c)
+
+        start_time = time.time()
+        result = pipeline.run(resume=False, parallel_stages=[("A", "B")])
+        elapsed = time.time() - start_time
+
+        assert result is True
+        assert stage_a._run_called is True
+        assert stage_b._run_called is True
+        assert stage_c._run_called is True
+        # If run sequentially, would take ~0.1s (0.05 + 0.05)
+        # If parallel, should take ~0.05s for A and B combined
+        # Allow some overhead, but should be less than sequential
+        assert elapsed < 0.15, f"Expected parallel execution but took {elapsed:.3f}s"
+
+    @pytest.mark.fast
+    def test_parallel_stages_checkpoint_order_maintained(self, temp_project_dir, mock_config):
+        """Test that checkpoint saves maintain stage order for parallel stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B")).add_stage(MockStage("C"))
+
+        checkpoint_saves = []
+        original_save = pipeline.checkpoint.save
+
+        def track_save(stage_name, data):
+            checkpoint_saves.append(stage_name)
+            return original_save(stage_name, data)
+
+        pipeline.checkpoint.save = track_save
+
+        pipeline.run(resume=False, parallel_stages=[("A", "B")])
+
+        # Checkpoint saves should be in original stage order
+        assert checkpoint_saves == ["A", "B", "C"]
+
+    @pytest.mark.fast
+    def test_parallel_stages_failure_halts_pipeline(self, temp_project_dir, mock_config):
+        """Test that failure in a parallel stage halts the pipeline."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A")
+        stage_b = MockStage("B", should_fail=True)
+        stage_c = MockStage("C")
+        pipeline.add_stage(stage_a).add_stage(stage_b).add_stage(stage_c)
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, parallel_stages=[("A", "B")])
+
+        assert result is False
+        # Both A and B ran (in parallel), but C should not run
+        assert stage_a._run_called is True
+        assert stage_b._run_called is True
+        assert stage_c._run_called is False
+
+    @pytest.mark.fast
+    def test_parallel_stages_callbacks_called(self, temp_project_dir, mock_config):
+        """Test that stage callbacks are called for parallel stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A")).add_stage(MockStage("B"))
+
+        started = []
+        completed = []
+
+        def on_start(name):
+            started.append(name)
+
+        def on_complete(name, result, elapsed):
+            completed.append(name)
+
+        pipeline.run(
+            resume=False,
+            parallel_stages=[("A", "B")],
+            on_stage_start=on_start,
+            on_stage_complete=on_complete
+        )
+
+        # Both stages should have callbacks called
+        assert set(started) == {"A", "B"}
+        assert set(completed) == {"A", "B"}
+
+    @pytest.mark.fast
+    def test_parallel_stages_metrics_collected(self, temp_project_dir, mock_config):
+        """Test that metrics are collected for parallel stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", items_processed=5, items_failed=1))
+        pipeline.add_stage(MockStage("B", items_processed=10, items_failed=2))
+
+        pipeline.run(resume=False, parallel_stages=[("A", "B")])
+
+        assert "A" in pipeline.stage_metrics
+        assert "B" in pipeline.stage_metrics
+        assert pipeline.stage_metrics["A"].items_processed == 5
+        assert pipeline.stage_metrics["B"].items_processed == 10
+
+        metrics = pipeline.get_metrics()
+        assert metrics['total_items_processed'] == 15
+        assert metrics['total_items_failed'] == 3
+
+    @pytest.mark.fast
+    def test_parallel_stages_skip_stages_respected(self, temp_project_dir, mock_config):
+        """Test that skip_stages is respected for parallel stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A")
+        stage_b = MockStage("B")
+        stage_c = MockStage("C")
+        pipeline.add_stage(stage_a).add_stage(stage_b).add_stage(stage_c)
+
+        result = pipeline.run(
+            resume=False,
+            parallel_stages=[("A", "B")],
+            skip_stages=["B"]
+        )
+
+        assert result is True
+        assert stage_a._run_called is True
+        assert stage_b._run_called is False  # Skipped
+        assert stage_c._run_called is True
+
+    @pytest.mark.fast
+    def test_parallel_stages_checkpoint_resume_respected(self, temp_project_dir, mock_config):
+        """Test that checkpoint resume is respected for parallel stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A", can_skip_value=True)
+        stage_b = MockStage("B", can_skip_value=False)
+        pipeline.add_stage(stage_a).add_stage(stage_b)
+        pipeline.resume_mode = True
+
+        result = pipeline.run(resume=False, parallel_stages=[("A", "B")])
+
+        assert result is True
+        assert stage_a._run_called is False  # Skipped via checkpoint
+        assert stage_a._restore_called is True
+        assert stage_b._run_called is True
+
+    @pytest.mark.fast
+    def test_parallel_stages_timings_recorded(self, temp_project_dir, mock_config):
+        """Test that stage timings are recorded for parallel stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A", run_delay=0.02))
+        pipeline.add_stage(MockStage("B", run_delay=0.02))
+
+        pipeline.run(resume=False, parallel_stages=[("A", "B")])
+
+        assert "A" in pipeline.stage_timings
+        assert "B" in pipeline.stage_timings
+        assert pipeline.stage_timings["A"] >= 0.02
+        assert pipeline.stage_timings["B"] >= 0.02
+
+    @pytest.mark.fast
+    def test_parallel_stages_multiple_groups(self, temp_project_dir, mock_config):
+        """Test multiple parallel stage groups in a single pipeline run."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stages = [MockStage(name) for name in ["A", "B", "C", "D", "E"]]
+        for s in stages:
+            pipeline.add_stage(s)
+
+        result = pipeline.run(
+            resume=False,
+            parallel_stages=[("A", "B"), ("D", "E")]  # Two parallel groups
+        )
+
+        assert result is True
+        for s in stages:
+            assert s._run_called is True
+
+    @pytest.mark.fast
+    def test_parallel_stages_empty_group_handled(self, temp_project_dir, mock_config):
+        """Test that empty parallel_stages list works like sequential execution."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A")
+        stage_b = MockStage("B")
+        pipeline.add_stage(stage_a).add_stage(stage_b)
+
+        result = pipeline.run(resume=False, parallel_stages=[])
+
+        assert result is True
+        assert stage_a._run_called is True
+        assert stage_b._run_called is True
+
+    @pytest.mark.fast
+    def test_parallel_stages_none_handled(self, temp_project_dir, mock_config):
+        """Test that parallel_stages=None works like sequential execution."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A")
+        stage_b = MockStage("B")
+        pipeline.add_stage(stage_a).add_stage(stage_b)
+
+        result = pipeline.run(resume=False, parallel_stages=None)
+
+        assert result is True
+        assert stage_a._run_called is True
+        assert stage_b._run_called is True
+
+    @pytest.mark.fast
+    def test_parallel_stages_validation_failure(self, temp_project_dir, mock_config):
+        """Test that validation failure in a parallel stage halts pipeline."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A")
+        stage_b = MockStage("B", validation_error="Missing input")
+        stage_c = MockStage("C")
+        pipeline.add_stage(stage_a).add_stage(stage_b).add_stage(stage_c)
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, parallel_stages=[("A", "B")])
+
+        assert result is False
+        # Validation happens before parallel execution, so neither A nor B should run
+        assert stage_a._run_called is False
+        assert stage_b._run_called is False
+        assert stage_c._run_called is False
+
+
+@pytest.mark.fast
+class TestDryRunMode:
+    """
+    US-1-009 (Sprint 34): Dry-run mode tests.
+
+    Tests for pipeline dry-run mode:
+    - dry_run=True logs stage names without executing
+    - Validation results are logged
+    - Stages are not executed in dry-run mode
+    - Returns True if all validations pass
+    - Returns False if any validation fails
+    """
+
+    @pytest.mark.fast
+    def test_dry_run_does_not_execute_stages(self, temp_project_dir, mock_config):
+        """Test that dry_run=True does not execute any stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage_a = MockStage("A")
+        stage_b = MockStage("B")
+        stage_c = MockStage("C")
+        pipeline.add_stage(stage_a).add_stage(stage_b).add_stage(stage_c)
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, dry_run=True)
+
+        assert result is True
+        assert stage_a._run_called is False
+        assert stage_b._run_called is False
+        assert stage_c._run_called is False
+
+    @pytest.mark.fast
+    def test_dry_run_logs_stage_names(self, temp_project_dir, mock_config):
+        """Test that dry_run logs stage names that would execute."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("DOWNLOAD"))
+        pipeline.add_stage(MockStage("OUTPUT"))
+
+        with patch('src.pipeline.logger') as mock_logger:
+            pipeline.run(resume=False, dry_run=True)
+
+        # Check that stage names are logged
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        assert any("ANALYZE" in call for call in info_calls)
+        assert any("DOWNLOAD" in call for call in info_calls)
+        assert any("OUTPUT" in call for call in info_calls)
+
+    @pytest.mark.fast
+    def test_dry_run_logs_validation_results(self, temp_project_dir, mock_config):
+        """Test that dry_run logs validation results for each stage."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B", validation_error="Missing input"))
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.run(resume=False, dry_run=True)
+
+        assert result is False
+        # Check for validation error logging
+        error_calls = [str(call) for call in mock_logger.error.call_args_list]
+        assert any("Missing input" in call for call in error_calls)
+        assert any("B" in call for call in error_calls)
+
+    @pytest.mark.fast
+    def test_dry_run_returns_true_all_valid(self, temp_project_dir, mock_config):
+        """Test that dry_run returns True when all validations pass."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B"))
+        pipeline.add_stage(MockStage("C"))
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, dry_run=True)
+
+        assert result is True
+
+    @pytest.mark.fast
+    def test_dry_run_returns_false_validation_fails(self, temp_project_dir, mock_config):
+        """Test that dry_run returns False when any validation fails."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B", validation_error="Missing required field"))
+        pipeline.add_stage(MockStage("C"))
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, dry_run=True)
+
+        assert result is False
+
+    @pytest.mark.fast
+    def test_dry_run_respects_skip_stages(self, temp_project_dir, mock_config):
+        """Test that dry_run respects skip_stages parameter."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B"))
+        pipeline.add_stage(MockStage("C"))
+
+        with patch('src.pipeline.logger') as mock_logger:
+            pipeline.run(resume=False, dry_run=True, skip_stages=["B"])
+
+        # Check that B is logged as skipped
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        assert any("SKIP" in call and "B" in call for call in info_calls)
+
+    @pytest.mark.fast
+    def test_dry_run_respects_only_stages(self, temp_project_dir, mock_config):
+        """Test that dry_run respects only_stages parameter."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B"))
+        pipeline.add_stage(MockStage("C"))
+
+        with patch('src.pipeline.logger') as mock_logger:
+            pipeline.run(resume=False, dry_run=True, only_stages=["B"])
+
+        # Check that A and C are logged as skipped
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        assert any("SKIP" in call and "A" in call for call in info_calls)
+        assert any("SKIP" in call and "C" in call for call in info_calls)
+
+    @pytest.mark.fast
+    def test_dry_run_empty_pipeline(self, temp_project_dir, mock_config):
+        """Test that dry_run handles empty pipeline gracefully."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False, dry_run=True)
+
+        assert result is True
+
+    @pytest.mark.fast
+    def test_dry_run_does_not_call_callbacks(self, temp_project_dir, mock_config):
+        """Test that dry_run does not invoke stage callbacks."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+
+        started = []
+        completed = []
+
+        def on_start(name):
+            started.append(name)
+
+        def on_complete(name, result, elapsed):
+            completed.append(name)
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(
+                resume=False,
+                dry_run=True,
+                on_stage_start=on_start,
+                on_stage_complete=on_complete
+            )
+
+        assert started == []
+        assert completed == []
+
+    @pytest.mark.fast
+    def test_dry_run_does_not_modify_state(self, temp_project_dir, mock_config):
+        """Test that dry_run does not modify pipeline state."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+        pipeline.add_stage(MockStage("B"))
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False, dry_run=True)
+
+        # No stage timings recorded
+        assert pipeline.stage_timings == {}
+        # No stage metrics recorded
+        assert pipeline.stage_metrics == {}
+
+    @pytest.mark.fast
+    def test_dry_run_logs_dry_run_header(self, temp_project_dir, mock_config):
+        """Test that dry_run logs a clear header indicating dry-run mode."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("A"))
+
+        with patch('src.pipeline.logger') as mock_logger:
+            pipeline.run(resume=False, dry_run=True)
+
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        assert any("DRY-RUN" in call for call in info_calls)
+
+
+@pytest.mark.fast
+class TestCollectEscalationMetrics:
+    """
+    US-1-012: Tests for _collect_escalation_metrics VPN data inclusion.
+
+    Tests that the _collect_escalation_metrics function collects VPN rotation
+    count from MullvadVPN and passes it to the orchestrator.
+    """
+
+    @pytest.mark.fast
+    def test_collect_escalation_metrics_includes_vpn_rotation(
+        self, temp_project_dir, mock_config
+    ):
+        """Test that VPN rotation count is collected from MullvadVPN."""
+        from src.pipeline import _collect_escalation_metrics
+
+        # Create mock pipeline with download stage
+        pipeline = Mock()
+        mock_downloader = Mock()
+        mock_esc_mgr = Mock()
+
+        # Setup escalation manager metrics
+        mock_esc_mgr.get_metrics.return_value = {
+            'total_escalations': 3,
+            'total_403s': 10,
+            'total_successes': 50,
+            'average_tier': 2.0,
+            'escalations_per_tier': {'IMPERSONATE_ONLY': 1, 'VPN_ROTATION': 2},
+            'keywords_at_each_tier': {},
+        }
+
+        # Setup MullvadVPN with rotation count
+        mock_mullvad = Mock()
+        mock_mullvad.get_status_extended.return_value = {
+            'switch_count': 3,
+            'used_countries': ['us', 'de', 'gb'],
+        }
+        mock_esc_mgr._mullvad_vpn = mock_mullvad
+
+        mock_downloader.escalation_manager = mock_esc_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader._rate_limit_budget = None
+        mock_downloader._circuit_breaker = None
+
+        mock_stage = Mock()
+        mock_stage.downloader = mock_downloader
+        pipeline.stages = [mock_stage]
+
+        # Create mock orchestrator
+        orchestrator = Mock()
+
+        # Run the function
+        _collect_escalation_metrics(pipeline, orchestrator)
+
+        # Verify VPN data was added to escalation metrics
+        esc_call = orchestrator.set_escalation_metrics.call_args[0][0]
+        assert 'vpn_rotation_count' in esc_call
+        assert esc_call['vpn_rotation_count'] == 3
+        assert 'vpn_countries_used' in esc_call
+        assert esc_call['vpn_countries_used'] == ['us', 'de', 'gb']
+
+    @pytest.mark.fast
+    def test_collect_escalation_metrics_without_mullvad(
+        self, temp_project_dir, mock_config
+    ):
+        """Test that metrics collection works when MullvadVPN is not configured."""
+        from src.pipeline import _collect_escalation_metrics
+
+        # Create mock pipeline with download stage
+        pipeline = Mock()
+        mock_downloader = Mock()
+        mock_esc_mgr = Mock()
+
+        # Setup escalation manager metrics without MullvadVPN
+        mock_esc_mgr.get_metrics.return_value = {
+            'total_escalations': 2,
+            'total_403s': 5,
+            'total_successes': 30,
+            'average_tier': 1.5,
+            'escalations_per_tier': {'IMPERSONATE_ONLY': 1, 'EXTRACTOR_ARGS': 1},
+            'keywords_at_each_tier': {},
+        }
+        mock_esc_mgr._mullvad_vpn = None  # No VPN configured
+
+        mock_downloader.escalation_manager = mock_esc_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader._rate_limit_budget = None
+        mock_downloader._circuit_breaker = None
+
+        mock_stage = Mock()
+        mock_stage.downloader = mock_downloader
+        pipeline.stages = [mock_stage]
+
+        # Create mock orchestrator
+        orchestrator = Mock()
+
+        # Run the function
+        _collect_escalation_metrics(pipeline, orchestrator)
+
+        # Verify escalation metrics were set but without VPN data
+        esc_call = orchestrator.set_escalation_metrics.call_args[0][0]
+        assert 'vpn_rotation_count' not in esc_call
+        assert 'vpn_countries_used' not in esc_call
+
+    @pytest.mark.fast
+    def test_collect_escalation_metrics_uses_get_status_fallback(
+        self, temp_project_dir, mock_config
+    ):
+        """Test fallback to get_status when get_status_extended not available."""
+        from src.pipeline import _collect_escalation_metrics
+
+        # Create mock pipeline with download stage
+        pipeline = Mock()
+        mock_downloader = Mock()
+        mock_esc_mgr = Mock()
+
+        mock_esc_mgr.get_metrics.return_value = {
+            'total_escalations': 1,
+            'total_403s': 3,
+            'escalations_per_tier': {},
+            'keywords_at_each_tier': {},
+        }
+
+        # Setup MullvadVPN without get_status_extended (only get_status)
+        mock_mullvad = Mock(spec=['get_status'])  # Only has get_status, not get_status_extended
+        mock_mullvad.get_status.return_value = {
+            'switches': 2,
+            # get_status doesn't include used_countries
+        }
+        mock_esc_mgr._mullvad_vpn = mock_mullvad
+
+        mock_downloader.escalation_manager = mock_esc_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader._rate_limit_budget = None
+        mock_downloader._circuit_breaker = None
+
+        mock_stage = Mock()
+        mock_stage.downloader = mock_downloader
+        pipeline.stages = [mock_stage]
+
+        orchestrator = Mock()
+
+        _collect_escalation_metrics(pipeline, orchestrator)
+
+        # Should still collect vpn_rotation_count using fallback
+        esc_call = orchestrator.set_escalation_metrics.call_args[0][0]
+        assert 'vpn_rotation_count' in esc_call
+        assert esc_call['vpn_rotation_count'] == 2
+
+
+@pytest.mark.fast
+class TestMullvadVPNAutoActivation:
+    """
+    US-35-002: Tests for auto-activating Mullvad VPN in create_healing_pipeline.
+
+    Tests that:
+    - MullvadVPN is instantiated when config.download.mullvad.enabled=true
+    - MullvadVPN is wired into EscalationManager via orchestrator
+    - Debug logging occurs when auto-activation happens
+    """
+
+    @pytest.mark.fast
+    def test_mullvad_instantiated_when_enabled(self, temp_project_dir, mock_config):
+        """Test MullvadVPN is instantiated in create_healing_pipeline when enabled."""
+        from src.pipeline import create_healing_pipeline
+
+        # Setup config with mullvad enabled
+        mock_config.healing = Mock(enabled=True, strategy='conservative')
+        mock_config.download.mullvad = Mock(enabled=True, preferred_countries=['us', 'de'])
+
+        with patch('src.pipeline.create_default_pipeline') as mock_default:
+            mock_default.return_value = Mock(stages=[])
+            with patch('src.agents.orchestrator.HealingOrchestrator') as mock_orchestrator_cls:
+                mock_orchestrator = Mock()
+                mock_orchestrator._mullvad_vpn = None
+                mock_orchestrator_cls.return_value = mock_orchestrator
+
+                with patch('src.downloader.mullvad_vpn.MullvadVPN') as mock_mullvad_cls:
+                    mock_mullvad_instance = Mock()
+                    mock_mullvad_cls.return_value = mock_mullvad_instance
+
+                    pipeline, orchestrator, runner = create_healing_pipeline(
+                        mock_config, temp_project_dir
+                    )
+
+                    # MullvadVPN should be instantiated with the mullvad config
+                    mock_mullvad_cls.assert_called_once_with(mock_config.download.mullvad)
+
+                    # set_mullvad_vpn should be called on orchestrator
+                    orchestrator.set_mullvad_vpn.assert_called_once_with(mock_mullvad_instance)
+
+    @pytest.mark.fast
+    def test_mullvad_not_instantiated_when_disabled(self, temp_project_dir, mock_config):
+        """Test MullvadVPN is NOT instantiated when mullvad.enabled=false."""
+        from src.pipeline import create_healing_pipeline
+
+        # Setup config with mullvad disabled
+        mock_config.healing = Mock(enabled=True, strategy='conservative')
+        mock_config.download.mullvad = Mock(enabled=False)
+
+        with patch('src.pipeline.create_default_pipeline') as mock_default:
+            mock_default.return_value = Mock(stages=[])
+            with patch('src.agents.orchestrator.HealingOrchestrator') as mock_orchestrator_cls:
+                mock_orchestrator = Mock()
+                mock_orchestrator._mullvad_vpn = None
+                mock_orchestrator_cls.return_value = mock_orchestrator
+
+                with patch('src.downloader.mullvad_vpn.MullvadVPN') as mock_mullvad_cls:
+                    pipeline, orchestrator, runner = create_healing_pipeline(
+                        mock_config, temp_project_dir
+                    )
+
+                    # MullvadVPN should NOT be instantiated
+                    mock_mullvad_cls.assert_not_called()
+
+                    # set_mullvad_vpn should NOT be called
+                    orchestrator.set_mullvad_vpn.assert_not_called()
+
+    @pytest.mark.fast
+    def test_mullvad_not_instantiated_when_no_mullvad_config(self, temp_project_dir, mock_config):
+        """Test MullvadVPN is NOT instantiated when mullvad config is missing."""
+        from src.pipeline import create_healing_pipeline
+
+        # Setup config without mullvad config
+        mock_config.healing = Mock(enabled=True, strategy='conservative')
+        mock_config.download.mullvad = None
+
+        with patch('src.pipeline.create_default_pipeline') as mock_default:
+            mock_default.return_value = Mock(stages=[])
+            with patch('src.agents.orchestrator.HealingOrchestrator') as mock_orchestrator_cls:
+                mock_orchestrator = Mock()
+                mock_orchestrator_cls.return_value = mock_orchestrator
+
+                with patch('src.downloader.mullvad_vpn.MullvadVPN') as mock_mullvad_cls:
+                    pipeline, orchestrator, runner = create_healing_pipeline(
+                        mock_config, temp_project_dir
+                    )
+
+                    # MullvadVPN should NOT be instantiated
+                    mock_mullvad_cls.assert_not_called()
+
+    @pytest.mark.fast
+    def test_mullvad_logging_on_activation(self, temp_project_dir, mock_config):
+        """Test that debug logging occurs when Mullvad is auto-activated."""
+        from src.pipeline import create_healing_pipeline
+
+        mock_config.healing = Mock(enabled=True, strategy='conservative')
+        mock_config.download.mullvad = Mock(enabled=True, preferred_countries=['us'])
+
+        with patch('src.pipeline.create_default_pipeline') as mock_default:
+            mock_default.return_value = Mock(stages=[])
+            with patch('src.agents.orchestrator.HealingOrchestrator') as mock_orchestrator_cls:
+                mock_orchestrator = Mock()
+                mock_orchestrator_cls.return_value = mock_orchestrator
+
+                with patch('src.downloader.mullvad_vpn.MullvadVPN'):
+                    with patch('src.pipeline.logger') as mock_logger:
+                        create_healing_pipeline(mock_config, temp_project_dir)
+
+                        # Check for debug log about auto-activation
+                        debug_calls = [str(call) for call in mock_logger.debug.call_args_list]
+                        assert any('auto-activate' in call.lower() or 'mullvad' in call.lower()
+                                   for call in debug_calls), f"Expected Mullvad debug log, got: {debug_calls}"
+
+                        # Check for info log about Mullvad enabled
+                        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+                        assert any('mullvad' in call.lower() for call in info_calls), \
+                            f"Expected Mullvad info log, got: {info_calls}"
+
+    @pytest.mark.fast
+    def test_orchestrator_set_mullvad_vpn_method(self, temp_project_dir, mock_config):
+        """Test that HealingOrchestrator.set_mullvad_vpn stores the instance."""
+        from src.agents.orchestrator import HealingOrchestrator
+        from src.agents.strategy import HealingStrategy
+
+        # Create orchestrator
+        strategy = HealingStrategy.conservative()
+        orchestrator = HealingOrchestrator(mock_config, temp_project_dir, strategy)
+
+        # Initially no mullvad_vpn
+        assert orchestrator._mullvad_vpn is None
+
+        # Set mullvad_vpn
+        mock_mullvad = Mock()
+        orchestrator.set_mullvad_vpn(mock_mullvad)
+
+        # Should be stored
+        assert orchestrator._mullvad_vpn is mock_mullvad
+
+    @pytest.mark.fast
+    def test_wire_escalation_manager_wires_mullvad(self, temp_project_dir, mock_config):
+        """Test that wire_escalation_manager also wires MullvadVPN to EscalationManager."""
+        from src.agents.orchestrator import HealingOrchestrator
+        from src.agents.strategy import HealingStrategy
+
+        # Create orchestrator with mullvad_vpn set
+        strategy = HealingStrategy.conservative()
+        orchestrator = HealingOrchestrator(mock_config, temp_project_dir, strategy)
+
+        mock_mullvad = Mock()
+        orchestrator.set_mullvad_vpn(mock_mullvad)
+
+        # Create mock escalation manager
+        mock_esc_mgr = Mock()
+
+        # Wire escalation manager
+        orchestrator.wire_escalation_manager(mock_esc_mgr)
+
+        # MullvadVPN should be wired into escalation manager
+        mock_esc_mgr.set_mullvad_vpn.assert_called_once_with(mock_mullvad)
+
+    @pytest.mark.fast
+    def test_wire_escalation_manager_without_mullvad(self, temp_project_dir, mock_config):
+        """Test that wire_escalation_manager works when MullvadVPN is not set."""
+        from src.agents.orchestrator import HealingOrchestrator
+        from src.agents.strategy import HealingStrategy
+
+        # Create orchestrator without mullvad_vpn
+        strategy = HealingStrategy.conservative()
+        orchestrator = HealingOrchestrator(mock_config, temp_project_dir, strategy)
+
+        # Create mock escalation manager
+        mock_esc_mgr = Mock()
+
+        # Wire escalation manager - should not fail
+        orchestrator.wire_escalation_manager(mock_esc_mgr)
+
+        # set_mullvad_vpn should NOT be called
+        mock_esc_mgr.set_mullvad_vpn.assert_not_called()
