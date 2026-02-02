@@ -121,8 +121,8 @@ class TestInputValidation:
         assert "voiceover" in error.lower()
 
     @pytest.mark.fast
-    def test_validate_no_embeddings(self, mock_config, mock_voiceover_segments):
-        """Test validation fails when no embeddings"""
+    def test_validate_no_embeddings_allowed(self, mock_config, mock_voiceover_segments):
+        """Test validation passes when no embeddings but text_metadata exists (caption-first mode)"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -131,8 +131,8 @@ class TestInputValidation:
 
         error = stage.validate_inputs(state, mock_config)
 
-        assert error is not None
-        assert "embedding" in error.lower()
+        # In caption-first mode, embeddings are optional - text matching works without them
+        assert error is None
 
     @pytest.mark.fast
     def test_validate_success(self, mock_config, mock_voiceover_segments):
@@ -149,11 +149,11 @@ class TestInputValidation:
 
 
 class TestInputValidationErrorMessages:
-    """Test validation error messages contain specific field names and suggestions"""
+    """Test validation error messages contain specific field names and suggestions (caption-first mode)"""
 
     @pytest.mark.fast
-    def test_validate_error_contains_field_name_voiceover_segments(self, mock_config):
-        """Test error message contains 'voiceover_segments' field name"""
+    def test_validate_error_missing_voiceover_segments(self, mock_config):
+        """Test error message when voiceover_segments missing"""
         stage = MatchStage()
         state = PipelineState()
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
@@ -164,11 +164,11 @@ class TestInputValidationErrorMessages:
 
         assert error is not None
         assert "voiceover_segments" in error
-        assert "Missing required fields" in error
+        assert "ANALYZE" in error
 
     @pytest.mark.fast
-    def test_validate_error_contains_field_name_embeddings(self, mock_config, mock_voiceover_segments):
-        """Test error message contains 'embeddings' field name"""
+    def test_validate_embeddings_optional_with_text_metadata(self, mock_config, mock_voiceover_segments):
+        """Test embeddings are optional when text_metadata exists (caption-first mode)"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -177,41 +177,39 @@ class TestInputValidationErrorMessages:
 
         error = stage.validate_inputs(state, mock_config)
 
-        assert error is not None
-        assert "embeddings" in error
-        assert "Missing required fields" in error
+        # In caption-first mode, embeddings are optional
+        assert error is None
 
     @pytest.mark.fast
-    def test_validate_error_contains_field_name_text_metadata(self, mock_config, mock_voiceover_segments):
-        """Test error message contains 'text_metadata' field name"""
+    def test_validate_error_missing_text_metadata(self, mock_config, mock_voiceover_segments):
+        """Test error message when text_metadata and caption_results missing"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
         state.text_metadata = []
+        # No caption_results either
 
         error = stage.validate_inputs(state, mock_config)
 
         assert error is not None
         assert "text_metadata" in error
-        assert "Missing required fields" in error
+        assert "CAPTION" in error
 
     @pytest.mark.fast
-    def test_validate_error_contains_multiple_field_names(self, mock_config):
-        """Test error message contains multiple missing field names"""
+    def test_validate_caption_results_fallback(self, mock_config, mock_voiceover_segments):
+        """Test validation passes when text_metadata empty but caption_results exists"""
         stage = MatchStage()
         state = PipelineState()
-        state.voiceover_segments = []
+        state.voiceover_segments = mock_voiceover_segments
         state.embeddings = None
         state.text_metadata = []
+        state.caption_results = {'video123': {'segments': [{'text': 'test'}]}}
 
         error = stage.validate_inputs(state, mock_config)
 
-        assert error is not None
-        assert "voiceover_segments" in error
-        assert "embeddings" in error
-        assert "text_metadata" in error
-        assert "Missing required fields" in error
+        # caption_results can be used as fallback
+        assert error is None
 
     @pytest.mark.fast
     def test_validate_error_suggests_analyze_stage(self, mock_config):
@@ -225,12 +223,12 @@ class TestInputValidationErrorMessages:
         error = stage.validate_inputs(state, mock_config)
 
         assert error is not None
-        assert "Suggestion:" in error
+        assert "Suggestion" in error
         assert "ANALYZE" in error
 
     @pytest.mark.fast
-    def test_validate_error_suggests_transcribe_stage(self, mock_config, mock_voiceover_segments):
-        """Test error suggests running TRANSCRIBE stage for embeddings"""
+    def test_validate_error_suggests_caption_stage(self, mock_config, mock_voiceover_segments):
+        """Test error suggests running CAPTION stage for text_metadata"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -240,12 +238,12 @@ class TestInputValidationErrorMessages:
         error = stage.validate_inputs(state, mock_config)
 
         assert error is not None
-        assert "Suggestion:" in error
-        assert "TRANSCRIBE" in error
+        assert "Suggestion" in error
+        assert "CAPTION" in error
 
     @pytest.mark.fast
-    def test_validate_error_suggests_multiple_stages(self, mock_config):
-        """Test error suggests multiple stages when multiple fields missing"""
+    def test_validate_voiceover_checked_first(self, mock_config):
+        """Test voiceover_segments is checked before text_metadata"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = []
@@ -254,10 +252,10 @@ class TestInputValidationErrorMessages:
 
         error = stage.validate_inputs(state, mock_config)
 
+        # voiceover_segments error should come first
         assert error is not None
-        assert "Suggestion:" in error
+        assert "voiceover_segments" in error
         assert "ANALYZE" in error
-        assert "TRANSCRIBE" in error
 
 
 # ============================================================================
@@ -486,7 +484,7 @@ class TestMatchStageExecution:
 
     @pytest.mark.fast
     def test_run_no_video_data(self, mock_config, mock_checkpoint, mock_voiceover_segments):
-        """Test running with no video data"""
+        """Test running with no video data returns error (US-40-007)"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -495,9 +493,9 @@ class TestMatchStageExecution:
 
         result = stage.run(state, mock_config, mock_checkpoint)
 
-        assert result.success is True
-        assert len(result.warnings) > 0
-        assert "video" in result.warnings[0].lower() or "embedding" in result.warnings[0].lower()
+        # US-40-007: Should return error when both text_metadata and caption_results unavailable
+        assert result.success is False
+        assert "No captions available" in result.error
 
     @patch('src.matching.match_all_segments')
     @patch('src.embeddings.compute_embeddings')
@@ -854,6 +852,7 @@ class TestConfidenceCalculation:
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
         state.embedding_index = Mock()
         state.face_preference = 'neutral'
+        state.location_chapters = []
 
         mock_compute.return_value = np.array([[0.2, 0.3, 0.4]])
         mock_provider.return_value = Mock()
@@ -891,6 +890,7 @@ class TestConfidenceCalculation:
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
         state.embedding_index = Mock()
         state.face_preference = 'neutral'
+        state.location_chapters = []
 
         mock_compute.return_value = np.array([[0.2, 0.3, 0.4]])
         mock_provider.return_value = Mock()
@@ -918,7 +918,7 @@ class TestMatchEdgeCases:
 
     @pytest.mark.fast
     def test_empty_text_metadata(self, mock_config, mock_checkpoint, mock_voiceover_segments):
-        """Test handling empty text_metadata"""
+        """Test handling empty text_metadata returns error (US-40-007)"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -927,8 +927,9 @@ class TestMatchEdgeCases:
 
         result = stage.run(state, mock_config, mock_checkpoint)
 
-        assert result.success is True
-        assert len(result.warnings) > 0
+        # US-40-007: Should return error when both text_metadata and caption_results unavailable
+        assert result.success is False
+        assert "No captions available" in result.error
 
     @pytest.mark.fast
     def test_no_matches_returned(self, mock_config, mock_checkpoint, mock_voiceover_segments,
@@ -940,6 +941,8 @@ class TestMatchEdgeCases:
         state.text_metadata = mock_text_metadata
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
         state.embedding_index = Mock()
+        state.face_preference = 'neutral'
+        state.location_chapters = []
 
         with patch('src.matching.match_all_segments', return_value=[]):
             with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
@@ -978,6 +981,8 @@ class TestMatchEdgeCases:
         state.text_metadata = mock_text_metadata
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
         state.embedding_index = Mock()
+        state.face_preference = 'neutral'
+        state.location_chapters = []
 
         # Mock matches without proper attributes
         mock_matches = [Mock(spec=[])]  # No confidence attribute
@@ -1029,6 +1034,8 @@ class TestMatchEdgeCases:
         state.text_metadata = mock_text_metadata
         state.embeddings = np.array([[0.1, 0.2, 0.3]])
         state.embedding_index = Mock()
+        state.face_preference = 'neutral'
+        state.location_chapters = []
 
         with patch('src.matching.match_all_segments', return_value=[]) as mock_match:
             with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
@@ -1653,8 +1660,8 @@ class TestTextMetadataFallback:
                     with patch('src.utils.CacheManager', return_value=Mock()):
                         result = stage.run(state, mock_config, mock_checkpoint)
 
-        # Recovery should have been triggered
-        assert "Attempting recovery from caption_results" in caplog.text
+        # Recovery should have been triggered (US-40-007 log message)
+        assert "text_metadata empty, attempting recovery from caption_results" in caplog.text
         # text_metadata should be populated from caption_results
         assert len(state.text_metadata) == 3
         # Result should include warning about recovery
@@ -1663,7 +1670,7 @@ class TestTextMetadataFallback:
     @pytest.mark.fast
     def test_match_stage_run_fails_when_both_missing(self, mock_config, mock_checkpoint,
                                                       mock_voiceover_segments):
-        """Test that MatchStage.run() returns appropriate result when both text_metadata and caption_results missing"""
+        """Test that MatchStage.run() returns error when both text_metadata and caption_results missing (US-40-007)"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -1672,15 +1679,15 @@ class TestTextMetadataFallback:
 
         result = stage.run(state, mock_config, mock_checkpoint)
 
-        # Should succeed but with warning and empty matches
-        assert result.success is True
-        assert result.data.get('matches') == []
-        assert any("video" in w.lower() or "metadata" in w.lower() for w in result.warnings)
+        # US-40-007: Should return error when both text_metadata and caption_results unavailable
+        assert result.success is False
+        assert "No captions available" in result.error
+        assert "text_metadata empty" in result.error
 
     @pytest.mark.fast
     def test_match_stage_run_no_caption_results_attribute(self, mock_config, mock_checkpoint,
                                                            mock_voiceover_segments):
-        """Test that MatchStage.run() handles state without caption_results attribute"""
+        """Test that MatchStage.run() returns error when state has no caption_results attribute (US-40-007)"""
         stage = MatchStage()
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
@@ -1689,9 +1696,9 @@ class TestTextMetadataFallback:
 
         result = stage.run(state, mock_config, mock_checkpoint)
 
-        # Should succeed but with warning and empty matches
-        assert result.success is True
-        assert result.data.get('matches') == []
+        # US-40-007: Should return error when both text_metadata and caption_results unavailable
+        assert result.success is False
+        assert "No captions available" in result.error
 
     @pytest.mark.fast
     def test_recover_metadata_includes_all_fields(self, mock_voiceover_segments):
