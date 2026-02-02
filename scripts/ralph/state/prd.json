@@ -48,7 +48,7 @@
             "id": "US-39-003",
             "title": "Add defensive text_metadata initialization in CaptionStage _ensure_state_attributes",
             "priority": "critical",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Verify _ensure_state_attributes() is called at the START of CaptionStage.run()",
                 "Add explicit setattr(state, 'text_metadata', []) if hasattr returns False",
@@ -56,7 +56,7 @@
                 "Add unit test with mock state object missing text_metadata attribute",
                 "Add unit test verifying _ensure_state_attributes handles state objects created via object() or SimpleNamespace"
             ],
-            "notes": "Tier 1: Critical bug fix. Files: src/stages/caption_stage.py (lines 78-97 _ensure_state_attributes, line 1193-1195 _populate_text_metadata). The defensive check exists but may not execute before the error path. Traceback shows line 1053 (old code) vs current line 1198."
+            "notes": "COMPLETED: 1) Verified _ensure_state_attributes() IS called at line 123 in run(). 2) Changed direct assignment to explicit setattr(). 3) Changed logging from DEBUG to INFO with exact message 'Initialized missing text_metadata on state object'. 4) Existing test test_ensure_state_attributes_on_legacy_object_missing_text_metadata covers mock state. 5) Added 3 new tests: test_ensure_state_attributes_handles_simple_namespace, test_ensure_state_attributes_handles_object_subclass, test_ensure_state_attributes_logs_initialization. All 11 defensive initialization tests pass."
         },
         {
             "id": "US-39-004",
