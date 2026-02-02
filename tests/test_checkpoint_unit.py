@@ -609,5 +609,164 @@ class TestCheckpointManagerRestoreState:
         assert result.video_ids == ['video1', 'video2']
 
 
+class TestCheckpointIntegrityValidation:
+    """Test checkpoint integrity validation on load (US-40-010)."""
+
+    @pytest.mark.fast
+    def test_corrupt_checkpoint_handled_gracefully(self, tmp_path):
+        """AC4: Test corrupt checkpoint returns None without crashing."""
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Write completely invalid JSON that would crash json.loads
+        checkpoint_path.write_text("{this is not valid json at all!!!")
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        result = manager.load()
+
+        # Should return None, not raise exception
+        assert result is None
+        assert manager.data is None
+
+    @pytest.mark.fast
+    def test_corrupt_json_array_handled(self, tmp_path):
+        """Test checkpoint that's valid JSON but wrong type returns None."""
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Valid JSON, but not a dict - should be handled gracefully
+        checkpoint_path.write_text('["array", "not", "dict", "structure"]')
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        result = manager.load()
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_partial_checkpoint_initializes_missing_last_completed_stage(self, tmp_path, caplog):
+        """AC5: Test partial checkpoint with missing last_completed_stage gets default."""
+        import logging
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Valid checkpoint structure but missing last_completed_stage
+        checkpoint_data = {
+            "version": "2.0",
+            "created_at": "2026-01-20T10:00:00",
+            "updated_at": "2026-01-20T10:00:00",
+            "analyze": {"keywords": ["test"]}
+        }
+        checkpoint_path.write_text(json.dumps(checkpoint_data))
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        with caplog.at_level(logging.WARNING):
+            result = manager.load()
+
+        # Should log warning about missing key
+        assert "missing required key: last_completed_stage" in caplog.text
+        # Should still return a valid CheckpointData
+        assert result is not None
+        # last_completed_stage should be initialized to default empty string
+        assert result.last_completed_stage == ""
+
+    @pytest.mark.fast
+    def test_partial_checkpoint_initializes_missing_timestamp(self, tmp_path, caplog):
+        """AC5: Test partial checkpoint with missing timestamps gets defaults."""
+        import logging
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Valid checkpoint but missing created_at and updated_at
+        checkpoint_data = {
+            "version": "2.0",
+            "last_completed_stage": "ANALYZE",
+            "analyze": {"keywords": ["test"]}
+        }
+        checkpoint_path.write_text(json.dumps(checkpoint_data))
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        with caplog.at_level(logging.WARNING):
+            result = manager.load()
+
+        # Should log warning about missing timestamp
+        assert "missing required key: timestamp" in caplog.text
+        # Should still return a valid CheckpointData with timestamps
+        assert result is not None
+        assert result.created_at != ""
+        assert result.updated_at != ""
+
+    @pytest.mark.fast
+    def test_partial_checkpoint_initializes_missing_version(self, tmp_path, caplog):
+        """AC5: Test partial checkpoint with missing version gets default."""
+        import logging
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Valid checkpoint but missing version
+        checkpoint_data = {
+            "created_at": "2026-01-20T10:00:00",
+            "updated_at": "2026-01-20T10:00:00",
+            "last_completed_stage": "ANALYZE"
+        }
+        checkpoint_path.write_text(json.dumps(checkpoint_data))
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        with caplog.at_level(logging.WARNING):
+            result = manager.load()
+
+        # Should log warning about missing version
+        assert "missing required key: version" in caplog.text
+        # Should still return valid data
+        assert result is not None
+
+    @pytest.mark.fast
+    def test_complete_checkpoint_no_warnings(self, tmp_path, caplog):
+        """Test complete checkpoint doesn't log missing key warnings."""
+        import logging
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Complete checkpoint with all required fields
+        checkpoint_data = {
+            "version": "2.0",
+            "created_at": "2026-01-20T10:00:00",
+            "updated_at": "2026-01-20T12:00:00",
+            "last_completed_stage": "MATCH",
+            "config_hash": "abc123",
+            "voiceover_path": "/project/vo.srt",
+            "voiceover_hash": "hash123",
+            "analyze": {"keywords": ["test"]},
+            "video_search": {"video_ids": ["vid1"]},
+            "caption": {},
+            "match": {"match_count": 5},
+            "iterative_match": {},
+            "download_segments": {}
+        }
+        checkpoint_path.write_text(json.dumps(checkpoint_data))
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        with caplog.at_level(logging.WARNING):
+            result = manager.load()
+
+        # Should NOT have any "missing required key" warnings
+        assert "missing required key" not in caplog.text
+        assert result is not None
+        assert result.last_completed_stage == "MATCH"
+
+    @pytest.mark.fast
+    def test_checkpoint_missing_all_required_keys_still_loads(self, tmp_path, caplog):
+        """Test checkpoint missing all required keys still loads with defaults."""
+        import logging
+        checkpoint_path = tmp_path / "checkpoint.json"
+        # Minimal checkpoint - just has stage data, nothing else
+        checkpoint_data = {
+            "analyze": {"keywords": ["minimal"]},
+            "video_search": {"video_ids": []}
+        }
+        checkpoint_path.write_text(json.dumps(checkpoint_data))
+
+        manager = CheckpointManager(project_dir=tmp_path)
+        with caplog.at_level(logging.WARNING):
+            result = manager.load()
+
+        # Should log warnings for all missing keys
+        assert "missing required key: last_completed_stage" in caplog.text
+        assert "missing required key: timestamp" in caplog.text
+        assert "missing required key: version" in caplog.text
+        # Should still return a valid CheckpointData
+        assert result is not None
+        # Data should have been initialized to defaults
+        assert result.last_completed_stage == ""
+        assert result.created_at != ""
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
