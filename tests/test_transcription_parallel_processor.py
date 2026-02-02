@@ -939,3 +939,178 @@ class TestGetTranscriptSegments:
         mock_transcribe.assert_called_once()
         call_args = mock_transcribe.call_args[0]
         assert call_args[0] == "/video.mp4"
+
+
+class TestTranscriptionRetry:
+    """Test retry logic for transient transcription errors (US-38-012)"""
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.time.sleep')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_retry_on_transient_cuda_error(
+        self, mock_unlink, mock_sleep, mock_extract, MockWhisperClient,
+        sample_raw_segments
+    ):
+        """Test retry occurs on transient CUDA error (US-38-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        # Mock extraction
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: fail first two times with CUDA error, succeed third
+        mock_whisper = MockWhisperClient.return_value
+        call_count = [0]
+
+        def transcribe_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise RuntimeError("CUDA out of memory")
+            return sample_raw_segments
+
+        mock_whisper.transcribe.side_effect = transcribe_side_effect
+
+        result = transcribe_video(
+            "/video1.mp4", mock_cache,
+            max_retries=2, base_delay=1.0
+        )
+
+        # Should have retried and succeeded
+        assert len(result) == 3
+        assert mock_whisper.transcribe.call_count == 3
+
+        # Should have slept twice with exponential backoff (1s, 2s)
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_any_call(1.0)  # First retry: 1.0 * 2^0 = 1.0
+        mock_sleep.assert_any_call(2.0)  # Second retry: 1.0 * 2^1 = 2.0
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.logger')
+    @patch('src.transcription.parallel_processor.time.sleep')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_retry_logs_warning_on_each_retry(
+        self, mock_unlink, mock_sleep, mock_logger, mock_extract, MockWhisperClient,
+        sample_raw_segments
+    ):
+        """Test WARNING is logged on each retry with video_id and error (US-38-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: fail once with memory error, then succeed
+        mock_whisper = MockWhisperClient.return_value
+        call_count = [0]
+
+        def transcribe_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("GPU memory pressure detected")
+            return sample_raw_segments
+
+        mock_whisper.transcribe.side_effect = transcribe_side_effect
+
+        result = transcribe_video("/path/to/abc123.mp4", mock_cache, max_retries=2)
+
+        # Should have logged WARNING with video_id and error message
+        warning_calls = [c for c in mock_logger.warning.call_args_list]
+        assert len(warning_calls) >= 1
+        warning_msg = str(warning_calls[0])
+        assert "abc123" in warning_msg, f"Expected 'abc123' in warning: {warning_msg}"
+        assert "GPU memory pressure" in warning_msg, f"Expected error in warning: {warning_msg}"
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.logger')
+    @patch('src.transcription.parallel_processor.time.sleep')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_no_retry_on_file_not_found(
+        self, mock_unlink, mock_sleep, mock_logger, mock_extract, MockWhisperClient
+    ):
+        """Test NO retry on FileNotFoundError (US-38-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: fail with FileNotFoundError
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.side_effect = FileNotFoundError("Audio file not found")
+
+        result = transcribe_video("/video1.mp4", mock_cache, max_retries=2)
+
+        # Should return empty - no retry
+        assert result == []
+
+        # Should only have called transcribe once (no retry)
+        assert mock_whisper.transcribe.call_count == 1
+
+        # Should NOT have slept (no retry)
+        mock_sleep.assert_not_called()
+
+        # Should have logged error (not warning)
+        assert mock_logger.error.called
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.logger')
+    @patch('src.transcription.parallel_processor.time.sleep')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_no_retry_on_permission_error(
+        self, mock_unlink, mock_sleep, mock_logger, mock_extract, MockWhisperClient
+    ):
+        """Test NO retry on PermissionError (US-38-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: fail with PermissionError
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.side_effect = PermissionError("Access denied")
+
+        result = transcribe_video("/video1.mp4", mock_cache, max_retries=2)
+
+        # Should return empty - no retry
+        assert result == []
+
+        # Should only have called transcribe once (no retry)
+        assert mock_whisper.transcribe.call_count == 1
+
+        # Should NOT have slept (no retry)
+        mock_sleep.assert_not_called()
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.time.sleep')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_all_retries_exhausted_returns_empty(
+        self, mock_unlink, mock_sleep, mock_extract, MockWhisperClient
+    ):
+        """Test returns empty when all retries exhausted (US-38-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: always fail with CUDA error
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.side_effect = RuntimeError("CUDA device unavailable")
+
+        result = transcribe_video("/video1.mp4", mock_cache, max_retries=2)
+
+        # Should return empty after exhausting retries
+        assert result == []
+
+        # Should have attempted 3 times (initial + 2 retries)
+        assert mock_whisper.transcribe.call_count == 3
+
+        # Should have slept twice
+        assert mock_sleep.call_count == 2

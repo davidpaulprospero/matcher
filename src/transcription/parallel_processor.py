@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .whisper_client import WhisperClient
 from .cache import TranscriptCache
 from .utils import extract_audio, write_srt
+from .exceptions import is_transient_error
 from src.state import TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -248,11 +249,16 @@ def transcribe_video(
     temp_dir: str = None,
     vad_filter: bool = False,  # Default False - VAD too aggressive for YouTube
     min_silence_duration_ms: int = 200,
-    speech_pad_ms: int = 10
+    speech_pad_ms: int = 10,
+    max_retries: int = 2,
+    base_delay: float = 1.0
 ) -> List[TranscriptSegment]:
     """
-    Transcribe a single video file.
+    Transcribe a single video file with retry logic for transient errors.
+
     Uses cache if available, otherwise transcribes with shared model.
+    Retries up to max_retries times with exponential backoff on transient errors
+    (e.g., GPU memory pressure). Does NOT retry on file not found or permission errors.
 
     Args:
         video_path: Path to video file
@@ -264,9 +270,12 @@ def transcribe_video(
         vad_filter: Whether to apply Voice Activity Detection
         min_silence_duration_ms: Minimum silence duration to split segments
         speech_pad_ms: Padding around detected speech
+        max_retries: Maximum retry attempts for transient errors (default 2)
+        base_delay: Base delay for exponential backoff in seconds (default 1.0)
     """
     video_path = str(video_path)
     video_name = Path(video_path).name
+    video_id = Path(video_path).stem  # For logging
 
     # Check cache first
     cached = cache.get(video_path)
@@ -288,17 +297,51 @@ def transcribe_video(
         logger.warning(f"  Could not extract audio: {video_name}")
         return []
 
-    # Transcribe with WhisperClient (GPU-locked)
-    try:
-        whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
-        raw_segments = whisper_client.transcribe(
-            audio_path,
-            language=language,
-            vad_filter=vad_filter,
-            min_silence_duration_ms=min_silence_duration_ms,
-            speech_pad_ms=speech_pad_ms
-        )
+    # Transcribe with WhisperClient (GPU-locked) - with retry for transient errors
+    whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
+    raw_segments = None
+    last_error = None
 
+    for attempt in range(max_retries + 1):  # +1 for initial attempt
+        try:
+            raw_segments = whisper_client.transcribe(
+                audio_path,
+                language=language,
+                vad_filter=vad_filter,
+                min_silence_duration_ms=min_silence_duration_ms,
+                speech_pad_ms=speech_pad_ms
+            )
+            break  # Success, exit retry loop
+
+        except Exception as e:
+            last_error = e
+
+            # Check if error is transient (worth retrying)
+            if not is_transient_error(e):
+                # Permanent error - don't retry
+                logger.error(f"  Transcription failed for {video_name} (permanent error): {e}")
+                # Clean up audio file
+                try:
+                    Path(audio_path).unlink()
+                except (OSError, IOError):
+                    pass
+                return []
+
+            # Transient error - retry if attempts remain
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s
+                logger.warning(
+                    f"Retrying transcription for {video_id} after {e}"
+                )
+                time.sleep(delay)
+            else:
+                # All retries exhausted
+                logger.error(
+                    f"  Transcription failed for {video_name} after {max_retries + 1} attempts: {e}"
+                )
+
+    # Process result if we have segments
+    if raw_segments is not None:
         # Cache the result
         cache.set(video_path, raw_segments)
 
@@ -320,9 +363,13 @@ def transcribe_video(
             for i, seg in enumerate(raw_segments)
         ]
 
-    except Exception as e:
-        logger.error(f"  Transcription failed for {video_name}: {e}")
-        return []
+    # Clean up audio file on failure
+    try:
+        Path(audio_path).unlink()
+    except (OSError, IOError):
+        pass
+
+    return []
 
 
 def transcribe_voiceover_audio(
