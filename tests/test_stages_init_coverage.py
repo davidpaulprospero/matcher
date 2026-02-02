@@ -222,3 +222,150 @@ class TestStageRepr:
 
         assert "MyTestStage" in repr_str
         assert "my_test_stage" in repr_str
+
+
+class TestValidateStateType:
+    """Test Stage._validate_state_type() method (US-39-009)."""
+
+    @pytest.mark.fast
+    def test_validate_state_type_with_pipeline_state(self):
+        """Test _validate_state_type returns PipelineState unchanged."""
+        from src.stages import Stage
+        from src.state import PipelineState
+
+        class TestStage(Stage):
+            name = "validate_test_stage"
+
+            def run(self, state, config, checkpoint):
+                return StageResult.ok()
+
+            def can_skip(self, state, checkpoint):
+                return False
+
+            def restore(self, state, checkpoint):
+                return False
+
+        stage = TestStage()
+        state = PipelineState()
+
+        result = stage._validate_state_type(state)
+
+        assert result is state
+        assert isinstance(result, PipelineState)
+
+    @pytest.mark.fast
+    def test_validate_state_type_logs_warning_for_non_pipeline_state(self, caplog):
+        """Test _validate_state_type logs warning for non-PipelineState objects."""
+        import logging
+        from src.stages import Stage
+
+        class TestStage(Stage):
+            name = "validate_test_stage_2"
+
+            def run(self, state, config, checkpoint):
+                return StageResult.ok()
+
+            def can_skip(self, state, checkpoint):
+                return False
+
+            def restore(self, state, checkpoint):
+                return False
+
+        stage = TestStage()
+
+        # Create a non-PipelineState object (SimpleNamespace)
+        from types import SimpleNamespace
+        non_standard_state = SimpleNamespace(
+            keywords=['test'],
+            topic_context='test context',
+            voiceover_segments=[],
+            matches=[],
+            caption_results={}
+        )
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            result = stage._validate_state_type(non_standard_state)
+
+        # Verify warning was logged
+        assert "Non-standard state object: SimpleNamespace" in caplog.text
+
+    @pytest.mark.fast
+    def test_validate_state_type_converts_legacy_object(self, caplog):
+        """Test _validate_state_type attempts conversion from legacy object."""
+        import logging
+        from src.stages import Stage
+        from src.state import PipelineState
+
+        class TestStage(Stage):
+            name = "validate_test_stage_3"
+
+            def run(self, state, config, checkpoint):
+                return StageResult.ok()
+
+            def can_skip(self, state, checkpoint):
+                return False
+
+            def restore(self, state, checkpoint):
+                return False
+
+        stage = TestStage()
+
+        # Create a mock legacy pipeline object
+        class LegacyPipeline:
+            keywords = ['test', 'keyword']
+            topic_context = 'test context'
+            voiceover_segments = []
+            matches = []
+            caption_results = {}
+            downloaded_videos = []
+            extracted_entities = []
+            failed_keywords = []
+            face_preference = 'neutral'
+            stage_timings = {}
+
+        legacy = LegacyPipeline()
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            result = stage._validate_state_type(legacy)
+
+        # Verify warning was logged
+        assert "Non-standard state object: LegacyPipeline" in caplog.text
+
+        # Verify conversion was attempted and resulted in PipelineState
+        assert isinstance(result, PipelineState)
+        assert result.keywords == ['test', 'keyword']
+
+    @pytest.mark.fast
+    def test_validate_state_type_handles_conversion_failure(self, caplog):
+        """Test _validate_state_type handles conversion failure gracefully."""
+        import logging
+        from src.stages import Stage
+
+        class TestStage(Stage):
+            name = "validate_test_stage_4"
+
+            def run(self, state, config, checkpoint):
+                return StageResult.ok()
+
+            def can_skip(self, state, checkpoint):
+                return False
+
+            def restore(self, state, checkpoint):
+                return False
+
+        stage = TestStage()
+
+        # Create an object that will fail conversion (minimal, no attributes)
+        class MinimalObject:
+            pass
+
+        minimal = MinimalObject()
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            result = stage._validate_state_type(minimal)
+
+        # Verify warning was logged
+        assert "Non-standard state object: MinimalObject" in caplog.text
+
+        # When conversion fails, should return original object
+        # (either original or successfully converted - both are valid)

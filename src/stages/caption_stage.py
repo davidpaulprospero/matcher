@@ -119,10 +119,15 @@ class CaptionStage(Stage):
         already validated at __init__.
 
         US-37-010: Ensures state has required attributes before processing.
+
+        US-39-009: Validates state type and converts legacy objects if needed.
         """
         warnings = []
 
         try:
+            # US-39-009: Validate state type at stage entry
+            state = self._validate_state_type(state)
+
             # US-37-010: Ensure state has required attributes (defensive initialization)
             self._ensure_state_attributes(state)
 

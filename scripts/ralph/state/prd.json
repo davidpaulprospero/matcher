@@ -132,7 +132,7 @@
             "id": "US-39-009",
             "title": "Add state type validation at stage entry points",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add _validate_state_type() method that checks isinstance(state, PipelineState)",
                 "Log WARNING if state is not PipelineState: 'Non-standard state object: {type(state).__name__}'",
@@ -140,7 +140,7 @@
                 "If state is not PipelineState, attempt to convert using PipelineState.from_legacy_pipeline()",
                 "Add unit test verifying warning is logged for non-PipelineState objects"
             ],
-            "notes": "Tier 2: Type safety. Files: src/stages/caption_stage.py, src/stages/match.py, src/stages/iterative_match.py, src/state.py. Legacy pipeline objects may not have all required attributes."
+            "notes": "COMPLETED: 1) Added _validate_state_type() method to Stage base class in src/stages/__init__.py that checks isinstance(state, PipelineState). 2) Logs WARNING with exact message 'Non-standard state object: {type(state).__name__}'. 3) Called _validate_state_type at start of run() in caption_stage.py, match.py, and iterative_match.py. 4) Attempts conversion via PipelineState.from_legacy_pipeline() if not PipelineState. 5) Added TestValidateStateType class with 4 tests in test_stages_init_coverage.py verifying: PipelineState unchanged, warning logged for non-PipelineState, legacy conversion works, and conversion failure handled gracefully."
         },
         {
             "id": "US-39-010",

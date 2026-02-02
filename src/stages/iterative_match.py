@@ -153,7 +153,13 @@ class IterativeMatchStage(Stage):
         config: 'Config',
         checkpoint: 'CheckpointManager'
     ) -> StageResult:
-        """Execute the iterative matching stage."""
+        """Execute the iterative matching stage.
+
+        US-39-009: Validates state type and converts legacy objects if needed.
+        """
+        # US-39-009: Validate state type at stage entry
+        state = self._validate_state_type(state)
+
         warnings = []
 
         # Get config (with fallback defaults)
