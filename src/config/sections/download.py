@@ -213,6 +213,14 @@ class CaptionRetryBudgetConfig:
     # Prevents premature termination on small samples
     min_sample_for_early_termination: int = 20
 
+    def __post_init__(self) -> None:
+        """US-41-004: Validate configuration values at load time."""
+        if self.attempts_per_video <= 0:
+            raise ValueError(
+                f"CaptionRetryBudgetConfig.attempts_per_video must be > 0, got {self.attempts_per_video}. "
+                f"Check config.yaml under download.caption_first.retry_budget.attempts_per_video"
+            )
+
 
 @dataclass
 class CaptionFirstConfig:

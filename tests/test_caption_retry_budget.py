@@ -3676,3 +3676,164 @@ class TestCaptionRetryBudgetCircuitBreakerState:
 
         summary = budget.get_summary()
         assert summary['circuit_breaker_state'] is None
+
+
+class TestCaptionRetryBudgetVerification:
+    """Tests for US-41-004: Fail-fast budget verification after scaling.
+
+    Verifies that verify_budget_sufficient() catches configuration errors
+    before processing begins, preventing wasted work when budget is
+    mathematically insufficient.
+    """
+
+    @pytest.mark.fast
+    def test_verify_budget_sufficient_passes_when_scaled(self):
+        """Verify verification passes after proper scaling.
+
+        US-41-004: After ensure_scaled() with auto_scale=true,
+        verification should always pass.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0
+
+        # Scale for batch
+        budget.ensure_scaled(175)
+
+        # Should not raise
+        budget.verify_budget_sufficient(175)
+
+        # Verify budget is actually sufficient
+        assert budget.max_attempts >= 175 * 2.0
+
+    @pytest.mark.fast
+    def test_verify_budget_raises_valueerror_when_insufficient(self):
+        """Verify ValueError raised when scaling math is wrong.
+
+        US-41-004: If max_attempts < batch_size * attempts_per_video,
+        raise ValueError with actionable message.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = False  # Prevent scaling
+        budget.max_attempts = 100
+        budget.attempts_per_video = 2.0
+
+        # Try to verify for batch that needs 350 attempts
+        with pytest.raises(ValueError) as exc_info:
+            budget.verify_budget_sufficient(175)
+
+        error_msg = str(exc_info.value)
+        assert "insufficient" in error_msg.lower()
+        assert "100" in error_msg  # Current max_attempts
+        assert "350" in error_msg  # Required attempts
+        assert "175" in error_msg  # batch_size
+        assert "config.yaml" in error_msg  # Actionable config path
+
+    @pytest.mark.fast
+    def test_verify_budget_warns_when_autoscale_disabled(self, caplog):
+        """Verify WARNING logged when auto_scale disabled and batch > max.
+
+        US-41-004: Log WARNING if auto_scale=false and batch_size > max_attempts.
+        """
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        budget = CaptionRetryBudget()
+        budget.auto_scale = False
+        budget.max_attempts = 200
+        budget.attempts_per_video = 1.0  # Low to avoid ValueError
+
+        # batch_size > max_attempts but still mathematically ok
+        # (300 videos with 1.0 per video = 300, but max_attempts = 200)
+        # This WILL raise ValueError because 300 > 200
+
+        # Let's test a case where it's borderline: max=200, batch=150, attempts_per_video=1.0
+        # 150 * 1.0 = 150 <= 200, should NOT raise ValueError
+        budget.max_attempts = 100  # Make batch > max_attempts but verify still passes
+        budget.attempts_per_video = 0.5  # 150 * 0.5 = 75 <= 100
+
+        budget.verify_budget_sufficient(150)
+
+        # Should log warning because batch_size (150) > max_attempts (100)
+        warning_logs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_logs) >= 1, (
+            f"Expected WARNING log for batch > max_attempts, got: {[r.message for r in caplog.records]}"
+        )
+
+        log_msg = warning_logs[0].message
+        assert "auto_scale" in log_msg.lower() or "DISABLED" in log_msg
+        assert "150" in log_msg  # batch_size
+        assert "100" in log_msg  # max_attempts
+
+    @pytest.mark.fast
+    def test_verify_budget_passes_with_exact_match(self):
+        """Verify passes when max_attempts exactly equals required.
+
+        US-41-004: max_attempts >= batch_size * attempts_per_video.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = False
+        budget.max_attempts = 350  # Exactly 175 * 2.0
+        budget.attempts_per_video = 2.0
+
+        # Should not raise
+        budget.verify_budget_sufficient(175)
+
+    @pytest.mark.fast
+    def test_verify_budget_error_message_includes_config_path(self):
+        """Verify error message includes actionable config.yaml path.
+
+        US-41-004: ValueError message must include config path for fix.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = False
+        budget.max_attempts = 50
+        budget.attempts_per_video = 2.0
+
+        with pytest.raises(ValueError) as exc_info:
+            budget.verify_budget_sufficient(100)  # Needs 200
+
+        error_msg = str(exc_info.value)
+        # Must mention how to fix
+        assert "auto_scale" in error_msg
+        assert "config.yaml" in error_msg
+        assert "max_attempts" in error_msg
+
+
+class TestCaptionRetryBudgetConfigValidation:
+    """Tests for US-41-004: Config validation in __post_init__.
+
+    Verifies that CaptionRetryBudgetConfig validates attempts_per_video > 0
+    at configuration load time.
+    """
+
+    @pytest.mark.fast
+    def test_config_validates_attempts_per_video_positive(self):
+        """Verify ValueError raised when attempts_per_video <= 0.
+
+        US-41-004: Add config validation in __post_init__ for attempts_per_video > 0.
+        """
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(attempts_per_video=0)
+
+        error_msg = str(exc_info.value)
+        assert "attempts_per_video" in error_msg
+        assert "config.yaml" in error_msg
+
+    @pytest.mark.fast
+    def test_config_validates_attempts_per_video_negative(self):
+        """Verify ValueError raised for negative attempts_per_video."""
+        with pytest.raises(ValueError) as exc_info:
+            ConfigCaptionRetryBudgetConfig(attempts_per_video=-1.0)
+
+        assert "attempts_per_video" in str(exc_info.value)
+
+    @pytest.mark.fast
+    def test_config_accepts_positive_attempts_per_video(self):
+        """Verify positive attempts_per_video is accepted."""
+        config = ConfigCaptionRetryBudgetConfig(attempts_per_video=0.1)
+        assert config.attempts_per_video == 0.1
+
+        config = ConfigCaptionRetryBudgetConfig(attempts_per_video=2.0)
+        assert config.attempts_per_video == 2.0

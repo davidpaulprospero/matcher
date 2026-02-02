@@ -841,6 +841,37 @@ class CaptionRetryBudget:
             )
             return True
 
+    def verify_budget_sufficient(self, batch_size: int) -> None:
+        """Verify budget is mathematically sufficient for batch (US-41-004).
+
+        Fail-fast verification after ensure_scaled() to catch configuration errors
+        before processing begins. Raises ValueError if budget is insufficient.
+
+        Args:
+            batch_size: Number of videos to process.
+
+        Raises:
+            ValueError: If max_attempts < batch_size * attempts_per_video
+        """
+        required_attempts = int(batch_size * self.attempts_per_video + 0.5)
+
+        if self.max_attempts < required_attempts:
+            raise ValueError(
+                f"Retry budget insufficient: max_attempts={self.max_attempts} < required "
+                f"{required_attempts} (batch_size={batch_size} × attempts_per_video="
+                f"{self.attempts_per_video}). Either enable auto_scale=true in "
+                f"config.yaml under download.caption_first.retry_budget, or increase "
+                f"max_attempts to at least {required_attempts}."
+            )
+
+        # Warn if auto_scale is disabled and batch exceeds original max_attempts
+        if not self.auto_scale and batch_size > self.max_attempts:
+            logger.warning(
+                f"[US-41-004] Retry budget auto_scale DISABLED: batch_size={batch_size} > "
+                f"max_attempts={self.max_attempts}. Budget may exhaust before all videos "
+                f"are processed. Enable auto_scale in config.yaml or increase max_attempts."
+            )
+
     def scale_to_batch_size(self, batch_size: int, attempts_per_video: Optional[float] = None) -> int:
         """Scale max_attempts proportionally to batch size (US-37-003).
 
