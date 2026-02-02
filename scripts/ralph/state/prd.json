@@ -106,8 +106,8 @@
             "id": "US-35-008",
             "title": "Add VPN rotation trigger to EscalationManager.record_failure",
             "priority": 8,
-            "passes": false,
-            "notes": "Tier 2 (Medium). When EscalationManager escalates to Tier 4, it sets rotate_vpn=True flag but doesn't actually trigger rotation. Caller must handle. Add optional callback pattern. Source files: src/downloader/escalation_manager.py (lines 397-476, record_failure method), src/downloader/core.py (download handling).",
+            "passes": true,
+            "notes": "Tier 2 (Medium). Added on_vpn_rotation_needed callback parameter to EscalationManager.__init__ (Optional[Callable[[str], None]]). Callback is invoked in record_failure() when escalation reaches Tier 4 (VPN_ROTATION), with keyword passed for context logging. Callback exceptions are caught and logged. Added TestVPNRotationCallback test class with 5 tests: test_callback_invoked_on_tier4_escalation, test_callback_not_invoked_at_lower_tiers, test_callback_exception_does_not_break_escalation, test_callback_receives_correct_keyword_context, test_none_callback_is_valid. All 277 escalation tests pass. Files modified: src/downloader/escalation_manager.py (lines 24 Callable import, lines 212-213 docstring, line 222 init param, line 229 field assignment, lines 488-494 callback invocation), tests/test_escalation_tier4.py (TestVPNRotationCallback class).",
             "acceptanceCriteria": [
                 "Add on_vpn_rotation_needed callback parameter to EscalationManager.__init__",
                 "Call callback when escalating to Tier 4 (VPN_ROTATION)",
