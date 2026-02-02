@@ -1429,6 +1429,101 @@ class TestCaptionRetryBudgetEnsureScaled:
         assert budget.successes == 30, "successes should be preserved"
         assert budget.backoff_time_spent == 45.0, "backoff_time_spent should be preserved"
 
+    @pytest.mark.fast
+    def test_ensure_scaled_after_checkpoint_restore_with_batch_size_set_but_max_attempts_default(self):
+        """Test US-42-004: ensure_scaled scales even when batch_size is already set.
+
+        Bug scenario:
+        1. First run: 175 videos, ensure_scaled(175) scales max_attempts from 100 to 350
+        2. Checkpoint saves: batch_size=175, max_attempts=350
+        3. Checkpoint restore: from_dict restores batch_size=175, but in caption_stage.py
+           we DON'T copy max_attempts from checkpoint (line 316: "Keep max_attempts from config")
+        4. So after restore: batch_size=175, max_attempts=100 (from config)
+        5. ensure_scaled(175) is called
+        6. OLD BUG: batch_size==175 matches, returns False without scaling!
+        7. FIX: Also check if max_attempts >= required_attempts before skipping
+
+        This test simulates the checkpoint restore scenario.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # From config (NOT restored from checkpoint)
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore setting batch_size but NOT max_attempts
+        # (This is what happens in caption_stage.py lines 302-316)
+        budget.batch_size = 175  # From checkpoint
+        budget.attempts = 50  # Prior attempts from checkpoint
+
+        # Before fix: ensure_scaled would see batch_size==175 and skip scaling
+        # After fix: should detect max_attempts (100) < required (350) and scale
+        result = budget.ensure_scaled(175)
+
+        # Must scale because 175 * 2.0 = 350 > 100
+        assert result is True, (
+            "ensure_scaled should scale even when batch_size is already set, "
+            "because max_attempts (100) < required (350)"
+        )
+        assert budget.max_attempts == 350, (
+            f"max_attempts should be scaled to 350, got {budget.max_attempts}"
+        )
+        assert budget.batch_size == 175
+
+    @pytest.mark.fast
+    def test_ensure_scaled_after_restore_200_videos_50_attempts_used(self):
+        """Test US-42-004 AC4: restore budget with 50 attempts used, new batch of 200.
+
+        AC4: Add test: restore budget with 50 attempts used, new batch of 200,
+        verify scaling to 400.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # From config
+        budget.attempts_per_video = 2.0
+
+        # Simulate checkpoint restore
+        budget.batch_size = 200  # Previous batch size
+        budget.attempts = 50  # Prior attempts used
+
+        # Call ensure_scaled for current batch of 200
+        result = budget.ensure_scaled(200)
+
+        # Should scale: 200 * 2.0 = 400 > 100
+        assert result is True
+        assert budget.max_attempts == 400
+
+    @pytest.mark.fast
+    def test_ensure_scaled_considers_remaining_budget_headroom(self):
+        """Test US-42-004 AC5: ensure_scaled considers remaining budget headroom.
+
+        When checkpoint restores with attempts already used, scaling should
+        still occur based on total batch size, not remaining videos.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.max_attempts = 100  # From config
+        budget.attempts_per_video = 2.0
+
+        # Checkpoint restored 175 batch with 99 attempts used
+        # (matching user log: 175 videos, 99 successes, budget exhausted at 101)
+        budget.batch_size = 175
+        budget.attempts = 99
+        budget.successes = 99
+        budget.failures = 0
+
+        # Call ensure_scaled - should scale even though batch_size matches
+        result = budget.ensure_scaled(175)
+
+        # Must scale: 175 * 2.0 = 350 > 100
+        assert result is True
+        assert budget.max_attempts == 350
+
+        # Verify budget is now sufficient for remaining videos
+        # 76 remaining videos need ~152 more attempts
+        # We have 350 - 99 = 251 remaining, which is enough
+        remaining = budget.max_attempts - budget.attempts
+        assert remaining >= 76 * 2.0, f"Should have headroom for 76 videos, got {remaining}"
+
 
 # ============================================================================
 # US-37-005: Detailed logging for retry budget consumption

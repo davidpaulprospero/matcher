@@ -1019,7 +1019,9 @@ class CaptionRetryBudget:
         that handles the auto_scale check internally.
 
         This method is idempotent - calling multiple times with the same batch_size
-        has no effect after the first call.
+        has no effect after the first call, UNLESS max_attempts is insufficient
+        (US-42-004 fix: handles checkpoint restore where batch_size is set but
+        max_attempts was reset to config default).
 
         Args:
             batch_size: Number of videos in the batch.
@@ -1029,7 +1031,7 @@ class CaptionRetryBudget:
 
         Example:
             >>> budget = CaptionRetryBudget()
-            >>> budget.ensure_scaled(200)  # Returns True, scales from 100 to 300
+            >>> budget.ensure_scaled(200)  # Returns True, scales from 100 to 400
             True
             >>> budget.ensure_scaled(200)  # Returns False, already scaled
             False
@@ -1045,16 +1047,22 @@ class CaptionRetryBudget:
                 )
                 return False
 
-            # Check if already scaled for this batch size
-            if self.batch_size == batch_size:
-                logger.debug(
-                    f"CaptionRetryBudget.ensure_scaled: already scaled for "
-                    f"batch_size={batch_size}, skipping"
-                )
-                return False
-
             # Calculate required attempts for this batch
             required_attempts = int(batch_size * self.attempts_per_video + 0.5)
+
+            # US-42-004: Check if already scaled AND max_attempts is sufficient
+            # Previously, we only checked batch_size match which caused a bug:
+            # When checkpoint restores batch_size=175 but max_attempts=100 (from config),
+            # the old check `batch_size == batch_size` would skip scaling even though
+            # max_attempts was insufficient for the batch.
+            # Now we also verify max_attempts is sufficient before skipping.
+            if self.batch_size == batch_size and required_attempts <= self.max_attempts:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: already scaled for "
+                    f"batch_size={batch_size} (max_attempts={self.max_attempts} >= "
+                    f"required={required_attempts}), skipping"
+                )
+                return False
 
             # Only scale if required exceeds current max
             if required_attempts <= self.max_attempts:
@@ -1070,6 +1078,16 @@ class CaptionRetryBudget:
             old_max = self.max_attempts
             self.max_attempts = required_attempts
             self.batch_size = batch_size
+
+            # US-42-004: Log when scaling occurs after checkpoint restore
+            # This helps diagnose issues where batch_size was already set from checkpoint
+            # but max_attempts needed scaling
+            was_checkpoint_restore = old_max != required_attempts and self.attempts > 0
+            if was_checkpoint_restore:
+                logger.info(
+                    f"[US-42-004] CaptionRetryBudget.ensure_scaled: scaling after checkpoint restore "
+                    f"({self.attempts} attempts already used), max_attempts {old_max} -> {self.max_attempts}"
+                )
 
             # US-41-009: Reset counters on scale-up if configured
             if self.reset_on_scale:
@@ -1088,7 +1106,7 @@ class CaptionRetryBudget:
                     f"CaptionRetryBudget.ensure_scaled: Budget scaled and reset: "
                     f"{cleared_attempts} attempts cleared (scaled from {old_max} to {self.max_attempts})"
                 )
-            else:
+            elif not was_checkpoint_restore:
                 logger.info(
                     f"CaptionRetryBudget.ensure_scaled: scaled max_attempts from {old_max} "
                     f"to {self.max_attempts} for batch of {batch_size} videos"
