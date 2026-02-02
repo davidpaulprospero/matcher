@@ -542,9 +542,9 @@ class CaptionStage(Stage):
                     except Exception as e:
                         logger.warning(f"Failed to initialize GlobalRateLimitCoordinator: {e}")
 
-                # US-37-003: Scale retry budget to batch size
+                # US-37-003/US-37-004: Scale retry budget to batch size if auto_scale enabled
                 # Default max_attempts=100 is insufficient for large batches (175+ videos)
-                if retry_budget:
+                if retry_budget and retry_budget.auto_scale:
                     batch_size = len(ids_to_fetch)
                     retry_budget.scale_to_batch_size(batch_size)
 
@@ -758,6 +758,10 @@ class CaptionStage(Stage):
                 'caption_metrics': metrics.to_dict(),
             }
 
+            # US-37-007: Save retry budget state for resume support
+            if retry_budget:
+                checkpoint_data['retry_budget'] = retry_budget.to_dict()
+
             return StageResult.ok(checkpoint_data, warnings)
 
         except ImportError as e:
@@ -809,6 +813,18 @@ class CaptionStage(Stage):
                 else:
                     logger.info(f"Restored CAPTION: {len(caption_results)} videos, "
                                f"{data.get('total_segments', 0)} segments")
+
+                # US-37-007: Log retry budget state if available
+                retry_budget_data = data.get('retry_budget')
+                if retry_budget_data:
+                    from ..caption.retry_budget import CaptionRetryBudget
+                    restored_budget = CaptionRetryBudget.from_dict(retry_budget_data)
+                    rb_summary = restored_budget.get_summary()
+                    logger.info(
+                        f"Restored retry budget: {rb_summary['attempts']} attempts, "
+                        f"{rb_summary['failures']} failures, "
+                        f"{rb_summary['videos_skipped']} skipped"
+                    )
             else:
                 # Stage data exists but no caption results - valid empty case
                 logger.info("Restored CAPTION: 0 videos (no captions fetched)")
