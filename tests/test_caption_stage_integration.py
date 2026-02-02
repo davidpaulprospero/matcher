@@ -730,3 +730,229 @@ class TestCaptionStageIntegrationFlow:
         # Metrics object should have been passed to batch fetch
         # (may be empty if fetch_captions_batch was fully mocked)
         assert result is not None
+
+
+# =============================================================================
+# US-40-002: Checkpoint Restoration Hook for CaptionRetryBudget
+# =============================================================================
+
+
+class TestCaptionStageRetryBudgetCheckpointRestoration:
+    """Test CaptionStage restores and re-scales retry budget from checkpoint (US-40-002)."""
+
+    @pytest.mark.fast
+    def test_ensure_scaled_called_after_checkpoint_restoration(self):
+        """Test ensure_scaled() is called after restoring retry budget from checkpoint.
+
+        AC3: Add unit test verifying ensure_scaled() is called after checkpoint restoration
+        """
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+                'attempts_per_video': 1.5,
+            }
+        )
+
+        # Create state with 200 videos (should trigger scaling from 100 to 300)
+        # Use video_ids attribute (primary path in _get_video_ids)
+        video_ids_list = [f"vid{i:08d}" for i in range(200)]  # vid00000000 = 11 chars
+        state = MockPipelineState(
+            downloaded_videos=[
+                MockDownloadedVideo(vid)
+                for vid in video_ids_list
+            ]
+        )
+        # Add video_ids attribute for the primary path in _get_video_ids
+        state.video_ids = video_ids_list
+
+        # Checkpoint with previous retry budget state (smaller batch)
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 50,
+                        'failures': 10,
+                        'successes': 40,
+                        'backoff_time_spent': 20.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 150,  # Was scaled for 100 videos
+                        'max_backoff_time': 300.0,
+                        'batch_size': 100,  # Previous batch was 100 videos
+                    }
+                }
+            }
+        )
+
+        # Track calls to ensure_scaled
+        ensure_scaled_calls = []
+        original_ensure_scaled = None
+
+        def mock_batch_fetch(video_ids, retry_budget=None, **kwargs):
+            # Capture the retry budget state when fetch is called
+            if retry_budget:
+                ensure_scaled_calls.append({
+                    'max_attempts': retry_budget.max_attempts,
+                    'batch_size': retry_budget.batch_size,
+                    'attempts': retry_budget.attempts,
+                })
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+            with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                    with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                        result = stage.run(state, config, checkpoint)
+
+        # Verify budget was re-scaled for new batch size
+        assert len(ensure_scaled_calls) == 1
+        budget_state = ensure_scaled_calls[0]
+
+        # Should be scaled for 200 videos: 200 * 1.5 = 300
+        assert budget_state['max_attempts'] == 300
+        assert budget_state['batch_size'] == 200
+
+        # Previous attempts should be preserved
+        assert budget_state['attempts'] == 50
+
+    @pytest.mark.fast
+    def test_max_attempts_updated_when_batch_size_increases_after_resume(self):
+        """Test max_attempts is updated when batch_size increases after checkpoint resume.
+
+        AC4: Add unit test verifying max_attempts is updated when batch_size increases after resume
+        """
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+                'attempts_per_video': 2.0,  # 2 attempts per video
+            }
+        )
+
+        # Larger batch than checkpoint had (150 vs 50)
+        # Use video_ids attribute (primary path in _get_video_ids)
+        video_ids_list = [f"vid{i:08d}" for i in range(150)]  # vid00000000 = 11 chars
+        state = MockPipelineState(
+            downloaded_videos=[
+                MockDownloadedVideo(vid)
+                for vid in video_ids_list
+            ]
+        )
+        # Add video_ids attribute for the primary path in _get_video_ids
+        state.video_ids = video_ids_list
+
+        # Checkpoint from smaller batch (50 videos, scaled to 100 attempts)
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 30,
+                        'failures': 5,
+                        'successes': 25,
+                        'backoff_time_spent': 10.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 100,  # Was 50 * 2.0 = 100
+                        'max_backoff_time': 300.0,
+                        'batch_size': 50,
+                    }
+                }
+            }
+        )
+
+        captured_budget = {}
+
+        def mock_batch_fetch(video_ids, retry_budget=None, **kwargs):
+            if retry_budget:
+                captured_budget['max_attempts'] = retry_budget.max_attempts
+                captured_budget['batch_size'] = retry_budget.batch_size
+                captured_budget['attempts'] = retry_budget.attempts
+                captured_budget['failures'] = retry_budget.failures
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+            with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                    with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                        result = stage.run(state, config, checkpoint)
+
+        # max_attempts should be scaled up for larger batch
+        # 150 videos * 2.0 attempts/video = 300 max_attempts
+        assert captured_budget['max_attempts'] == 300
+
+        # batch_size should reflect new batch
+        assert captured_budget['batch_size'] == 150
+
+        # Usage counters should be preserved from checkpoint
+        assert captured_budget['attempts'] == 30
+        assert captured_budget['failures'] == 5
+
+    @pytest.mark.fast
+    def test_budget_scaled_before_fetch_captions_batch_called(self):
+        """Test budget is scaled BEFORE fetch_captions_batch is called.
+
+        AC5: Verify budget is scaled BEFORE fetch_captions_batch is called
+        """
+        stage = CaptionStage()
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 100,
+                'auto_scale': True,
+                'attempts_per_video': 1.5,
+            }
+        )
+
+        # Use video_ids attribute (primary path in _get_video_ids)
+        video_ids_list = [f"vid{i:08d}" for i in range(100)]  # vid00000000 = 11 chars
+        state = MockPipelineState(
+            downloaded_videos=[
+                MockDownloadedVideo(vid)
+                for vid in video_ids_list
+            ]
+        )
+        # Add video_ids attribute for the primary path in _get_video_ids
+        state.video_ids = video_ids_list
+
+        checkpoint = MockCheckpointManager(
+            stage_data={
+                'CAPTION': {
+                    'caption_results': {},
+                    'retry_budget': {
+                        'attempts': 0,
+                        'failures': 0,
+                        'successes': 0,
+                        'backoff_time_spent': 0.0,
+                        'videos_skipped': 0,
+                        'max_attempts': 75,  # Was scaled for 50 videos
+                        'max_backoff_time': 300.0,
+                        'batch_size': 50,
+                    }
+                }
+            }
+        )
+
+        budget_at_fetch_time = {}
+
+        def mock_batch_fetch(video_ids, retry_budget=None, **kwargs):
+            if retry_budget:
+                # Record budget state at the moment fetch_captions_batch is called
+                budget_at_fetch_time['max_attempts'] = retry_budget.max_attempts
+                budget_at_fetch_time['batch_size'] = retry_budget.batch_size
+            return {vid: make_mock_caption_result(vid) for vid in video_ids}
+
+        with patch.object(CaptionFetcher, 'fetch_captions_batch', side_effect=mock_batch_fetch):
+            with patch.object(CaptionFetcher, '__init__', lambda self, **kwargs: None):
+                with patch.object(CaptionFetcher, 'apply_adaptive_format_order', return_value=None):
+                    with patch.object(CaptionFetcher, '_using_adaptive_order', False, create=True):
+                        result = stage.run(state, config, checkpoint)
+
+        # At the time fetch_captions_batch is called, budget should already be scaled
+        # 100 videos * 1.5 = 150 max_attempts (scaled up from 75)
+        assert budget_at_fetch_time['max_attempts'] == 150
+        assert budget_at_fetch_time['batch_size'] == 100

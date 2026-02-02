@@ -281,6 +281,36 @@ class CaptionStage(Stage):
                 retry_budget = CaptionRetryBudget.from_config(None)
                 logger.info("Using default retry budget (config missing)")
 
+            # US-40-002: Restore retry budget state from checkpoint if available
+            # When resuming from checkpoint, the budget limits may have been scaled for
+            # a previous batch size. After restoring, we'll re-scale for the current batch.
+            if retry_budget:
+                try:
+                    checkpoint_data = checkpoint.get_stage_data(self.name)
+                    if checkpoint_data and 'retry_budget' in checkpoint_data:
+                        restored_budget = CaptionRetryBudget.from_dict(
+                            checkpoint_data['retry_budget']
+                        )
+                        # Preserve usage counters from checkpoint
+                        retry_budget.attempts = restored_budget.attempts
+                        retry_budget.failures = restored_budget.failures
+                        retry_budget.successes = restored_budget.successes
+                        retry_budget.backoff_time_spent = restored_budget.backoff_time_spent
+                        retry_budget.videos_skipped = restored_budget.videos_skipped
+                        retry_budget.error_counts = restored_budget.error_counts
+                        retry_budget.vpn_resets_used = restored_budget.vpn_resets_used
+                        retry_budget.early_terminated = restored_budget.early_terminated
+                        retry_budget.early_termination_reason = restored_budget.early_termination_reason
+                        retry_budget.batch_size = restored_budget.batch_size
+                        # Keep max_attempts from config (will be re-scaled below)
+                        logger.info(
+                            f"Retry budget restored from checkpoint: "
+                            f"{retry_budget.attempts} attempts, {retry_budget.failures} failures, "
+                            f"{retry_budget.videos_skipped} skipped"
+                        )
+                except Exception as e:
+                    logger.debug(f"Could not restore retry budget from checkpoint: {e}")
+
             # US-002 Sprint 7: Initialize caption cache for adaptive format ordering
             caption_cache = CaptionCache(caption_config)
 
@@ -644,11 +674,27 @@ class CaptionStage(Stage):
                 self._validate_budget_for_batch(batch_size, retry_budget)
 
                 # US-39-010: Use ensure_scaled() convenience method
+                # US-40-002: Re-scale budget after checkpoint restoration
                 # This handles auto_scale check, idempotency, and logging internally
                 if retry_budget:
+                    # Check if budget was restored from checkpoint (has previous batch_size)
+                    was_restored = retry_budget.batch_size is not None
+                    old_batch_size = retry_budget.batch_size
+
                     scaled = retry_budget.ensure_scaled(batch_size)
                     if scaled:
-                        logger.info(f"Retry budget scaled for {batch_size} videos")
+                        if was_restored and old_batch_size != batch_size:
+                            logger.info(
+                                f"Retry budget restored from checkpoint, re-scaling for batch of "
+                                f"{batch_size} videos (was {old_batch_size})"
+                            )
+                        else:
+                            logger.info(f"Retry budget scaled for {batch_size} videos")
+                    elif was_restored:
+                        logger.info(
+                            f"Retry budget restored from checkpoint, re-scaling for batch of "
+                            f"{batch_size} videos"
+                        )
                     elif not retry_budget.auto_scale:
                         # Warn if auto_scale disabled and batch is large enough to risk exhaustion
                         if batch_size > retry_budget.max_attempts:

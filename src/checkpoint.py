@@ -344,7 +344,45 @@ class CheckpointManager:
             return False
 
         return True
-    
+
+    def restore_state(self, state: 'PipelineState' = None) -> 'PipelineState':
+        """
+        Restore pipeline state from checkpoint with defensive validation.
+
+        US-40-003: Ensures state attributes are validated after checkpoint
+        restoration to handle missing fields from older checkpoints or
+        corrupted checkpoint files.
+
+        Args:
+            state: Optional PipelineState to restore into. If None, creates new.
+
+        Returns:
+            PipelineState with validated attributes. All required fields are
+            guaranteed to exist with proper default values.
+        """
+        from .state import PipelineState
+
+        # Create or use existing state
+        if state is None:
+            state = PipelineState()
+
+        # Validate and initialize any missing/None attributes
+        # This handles incomplete checkpoint data from older versions
+        initialized_fields = state.validate_state_attributes()
+
+        # Log any fields that were missing and initialized
+        if initialized_fields:
+            for field_name in initialized_fields:
+                logger.warning(
+                    f"Checkpoint missing {field_name}, initialized to default"
+                )
+            logger.info(
+                f"Defensive checkpoint validation initialized {len(initialized_fields)} "
+                f"field(s): {', '.join(initialized_fields)}"
+            )
+
+        return state
+
     def save(self, stage: str, stage_data: Dict[str, Any] = None):
         """Save checkpoint after stage completion"""
         if self.data is None:

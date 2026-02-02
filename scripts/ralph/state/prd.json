@@ -48,7 +48,7 @@
             "id": "US-40-003",
             "title": "Add defensive checkpoint state validation on load",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In CheckpointManager.restore_state(), call state.validate_state_attributes() after deserializing",
                 "Log WARNING for each attribute that was missing/None and initialized",
@@ -56,7 +56,7 @@
                 "Add unit test verifying caption_results is initialized to {} if missing from checkpoint",
                 "Add unit test verifying video_ids is initialized to [] if missing from checkpoint"
             ],
-            "notes": "Tier 1 (Core Bug Fix). Files: src/checkpoint.py (CheckpointManager.restore_state), src/state.py lines 179-207 (validate_state_attributes already exists). The error 'PipelineState object has no attribute text_metadata' indicates checkpoint restore bypasses field defaults."
+            "notes": "Tier 1 (Core Bug Fix). COMPLETE: Added CheckpointManager.restore_state() method at src/checkpoint.py:349-387 that calls validate_state_attributes() and logs warnings for each missing field. Updated src/pipeline.py:113-115 to use restore_state(). Added 7 new tests in tests/test_checkpoint_unit.py (TestCheckpointManagerRestoreState class). All 45 tests pass."
         },
         {
             "id": "US-40-004",

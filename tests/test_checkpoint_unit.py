@@ -508,5 +508,106 @@ class TestPipelineStateValidation:
         assert 'Restored missing text_metadata after checkpoint load' in caplog.text
 
 
+class TestCheckpointManagerRestoreState:
+    """Test CheckpointManager.restore_state() for US-40-003."""
+
+    @pytest.mark.fast
+    def test_restore_state_creates_new_state_if_none(self, tmp_path):
+        """Test restore_state() creates a new PipelineState if none provided."""
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        state = manager.restore_state()
+
+        assert isinstance(state, PipelineState)
+
+    @pytest.mark.fast
+    def test_restore_state_uses_provided_state(self, tmp_path):
+        """Test restore_state() uses provided state object."""
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        existing_state = PipelineState()
+        existing_state.keywords = ["test", "keyword"]
+
+        result = manager.restore_state(existing_state)
+
+        assert result is existing_state
+        assert result.keywords == ["test", "keyword"]
+
+    @pytest.mark.fast
+    def test_restore_state_initializes_text_metadata_if_missing(self, tmp_path):
+        """AC3: Test text_metadata is initialized to [] if missing from checkpoint."""
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        state = PipelineState()
+        state.text_metadata = None  # Simulate missing from checkpoint
+
+        result = manager.restore_state(state)
+
+        assert result.text_metadata == []
+
+    @pytest.mark.fast
+    def test_restore_state_initializes_caption_results_if_missing(self, tmp_path):
+        """AC4: Test caption_results is initialized to {} if missing from checkpoint."""
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        state = PipelineState()
+        state.caption_results = None  # Simulate missing from checkpoint
+
+        result = manager.restore_state(state)
+
+        assert result.caption_results == {}
+
+    @pytest.mark.fast
+    def test_restore_state_initializes_video_ids_if_missing(self, tmp_path):
+        """AC5: Test video_ids is initialized to [] if missing from checkpoint."""
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        state = PipelineState()
+        state.video_ids = None  # Simulate missing from checkpoint
+
+        result = manager.restore_state(state)
+
+        assert result.video_ids == []
+
+    @pytest.mark.fast
+    def test_restore_state_logs_warning_for_missing_fields(self, tmp_path, caplog):
+        """AC2: Test WARNING is logged for each missing/None attribute."""
+        import logging
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        state = PipelineState()
+        state.text_metadata = None
+        state.caption_results = None
+
+        with caplog.at_level(logging.WARNING):
+            manager.restore_state(state)
+
+        # Should have logged warnings for missing fields
+        assert 'Checkpoint missing text_metadata' in caplog.text
+        assert 'Checkpoint missing caption_results' in caplog.text
+
+    @pytest.mark.fast
+    def test_restore_state_preserves_existing_values(self, tmp_path):
+        """Test restore_state() preserves existing non-None values."""
+        from src.state import PipelineState
+
+        manager = CheckpointManager(tmp_path)
+        state = PipelineState()
+        state.text_metadata = [{'text': 'existing'}]
+        state.video_ids = ['video1', 'video2']
+
+        result = manager.restore_state(state)
+
+        # Existing values should be preserved
+        assert result.text_metadata == [{'text': 'existing'}]
+        assert result.video_ids == ['video1', 'video2']
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
