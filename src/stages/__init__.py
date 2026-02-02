@@ -244,3 +244,49 @@ def get_stage(name: str) -> Optional[type]:
 def list_stages() -> List[str]:
     """List all registered stage names"""
     return list(_stage_registry.keys())
+
+
+# Default values for state attributes when missing
+_STATE_ATTR_DEFAULTS = {
+    'text_metadata': [],
+    'caption_results': {},
+    'voiceover_segments': [],
+    'matches': [],
+    'embeddings': None,
+    'videos': [],
+    'keywords': [],
+    'alternatives': {},
+    'location_chapters': [],
+}
+
+
+def validate_required_state_attrs(
+    state: 'PipelineState',
+    required_attrs: List[str],
+    stage_name: str
+) -> None:
+    """
+    Validate and initialize required state attributes at stage entry.
+
+    US-40-008: Prevents AttributeError crashes when checkpoint restoration
+    fails to initialize all fields. Missing attributes are initialized to
+    sensible defaults and logged as warnings.
+
+    Args:
+        state: Pipeline state object to validate
+        required_attrs: List of attribute names required by this stage
+        stage_name: Name of the calling stage (for logging)
+
+    Returns:
+        None (modifies state in place)
+
+    Example:
+        validate_required_state_attrs(state, ['text_metadata', 'matches'], 'MATCH')
+    """
+    for attr in required_attrs:
+        if not hasattr(state, attr):
+            default = _STATE_ATTR_DEFAULTS.get(attr, None)
+            _stages_logger.warning(
+                f"[{stage_name}] Missing state attribute '{attr}', initializing to {type(default).__name__}"
+            )
+            setattr(state, attr, default)

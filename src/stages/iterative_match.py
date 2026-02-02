@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
-from . import Stage, StageResult, StageMetrics, register_stage
+from . import Stage, StageResult, StageMetrics, register_stage, validate_required_state_attrs
 from ..downloader.search_cache import SearchResultsCache
 
 if TYPE_CHECKING:
@@ -156,9 +156,17 @@ class IterativeMatchStage(Stage):
         """Execute the iterative matching stage.
 
         US-39-009: Validates state type and converts legacy objects if needed.
+        US-40-008: Validates required state attributes exist.
         """
         # US-39-009: Validate state type at stage entry
         state = self._validate_state_type(state)
+
+        # US-40-008: Validate required attributes exist
+        validate_required_state_attrs(
+            state,
+            ['matches', 'text_metadata'],
+            self.name
+        )
 
         warnings = []
 

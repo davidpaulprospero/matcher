@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from . import Stage, StageResult, register_stage
+from . import Stage, StageResult, register_stage, validate_required_state_attrs
 from ..logger import get_global_logger
 from ..utils import is_embeddings_empty
 
@@ -54,9 +54,17 @@ class MatchStage(Stage):
         """Execute the match stage.
 
         US-39-009: Validates state type and converts legacy objects if needed.
+        US-40-008: Validates required state attributes exist.
         """
         # US-39-009: Validate state type at stage entry
         state = self._validate_state_type(state)
+
+        # US-40-008: Validate required attributes exist
+        validate_required_state_attrs(
+            state,
+            ['text_metadata', 'caption_results', 'voiceover_segments'],
+            self.name
+        )
 
         warnings = []
 

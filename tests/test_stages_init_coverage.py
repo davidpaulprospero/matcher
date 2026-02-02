@@ -369,3 +369,124 @@ class TestValidateStateType:
 
         # When conversion fails, should return original object
         # (either original or successfully converted - both are valid)
+
+
+class TestValidateRequiredStateAttrs:
+    """Test validate_required_state_attrs function (US-40-008)."""
+
+    @pytest.mark.fast
+    def test_missing_attribute_initialized_with_warning(self, caplog):
+        """Test missing attribute is initialized to default and warning logged."""
+        import logging
+        from types import SimpleNamespace
+        from src.stages import validate_required_state_attrs
+
+        # Create state with missing 'text_metadata' attribute
+        state = SimpleNamespace(matches=[], voiceover_segments=[])
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            validate_required_state_attrs(state, ['text_metadata'], 'MATCH')
+
+        # Verify attribute was initialized
+        assert hasattr(state, 'text_metadata')
+        assert state.text_metadata == []
+
+        # Verify warning was logged
+        assert "[MATCH] Missing state attribute 'text_metadata'" in caplog.text
+        assert "initializing to list" in caplog.text
+
+    @pytest.mark.fast
+    def test_existing_attribute_not_modified(self, caplog):
+        """Test existing attribute is not modified."""
+        import logging
+        from types import SimpleNamespace
+        from src.stages import validate_required_state_attrs
+
+        # Create state with existing 'text_metadata' attribute
+        original_value = [{'video_id': 'abc123', 'text': 'test'}]
+        state = SimpleNamespace(text_metadata=original_value)
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            validate_required_state_attrs(state, ['text_metadata'], 'MATCH')
+
+        # Verify attribute was NOT modified
+        assert state.text_metadata is original_value
+        assert state.text_metadata == [{'video_id': 'abc123', 'text': 'test'}]
+
+        # Verify NO warning was logged
+        assert 'text_metadata' not in caplog.text
+
+    @pytest.mark.fast
+    def test_multiple_missing_attributes(self, caplog):
+        """Test multiple missing attributes are all initialized."""
+        import logging
+        from types import SimpleNamespace
+        from src.stages import validate_required_state_attrs
+
+        # Create state with no required attributes
+        state = SimpleNamespace()
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            validate_required_state_attrs(
+                state,
+                ['text_metadata', 'caption_results', 'matches'],
+                'TEST_STAGE'
+            )
+
+        # Verify all attributes were initialized
+        assert hasattr(state, 'text_metadata')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'matches')
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.matches == []
+
+        # Verify warnings logged for each
+        assert "[TEST_STAGE] Missing state attribute 'text_metadata'" in caplog.text
+        assert "[TEST_STAGE] Missing state attribute 'caption_results'" in caplog.text
+        assert "[TEST_STAGE] Missing state attribute 'matches'" in caplog.text
+
+    @pytest.mark.fast
+    def test_unknown_attribute_defaults_to_none(self, caplog):
+        """Test unknown attribute defaults to None."""
+        import logging
+        from types import SimpleNamespace
+        from src.stages import validate_required_state_attrs
+
+        state = SimpleNamespace()
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            validate_required_state_attrs(state, ['unknown_attr'], 'TEST')
+
+        # Verify attribute was initialized to None
+        assert hasattr(state, 'unknown_attr')
+        assert state.unknown_attr is None
+        assert "initializing to NoneType" in caplog.text
+
+    @pytest.mark.fast
+    def test_mixed_existing_and_missing_attributes(self, caplog):
+        """Test state with some existing and some missing attributes."""
+        import logging
+        from types import SimpleNamespace
+        from src.stages import validate_required_state_attrs
+
+        # Create state with only 'matches' existing
+        existing_matches = [{'segment': 1}]
+        state = SimpleNamespace(matches=existing_matches)
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            validate_required_state_attrs(
+                state,
+                ['matches', 'text_metadata'],
+                'ITERATIVE_MATCH'
+            )
+
+        # Existing attribute unchanged
+        assert state.matches is existing_matches
+
+        # Missing attribute initialized
+        assert state.text_metadata == []
+
+        # Only missing attribute logged
+        assert "'matches'" not in caplog.text
+        assert "'text_metadata'" in caplog.text
