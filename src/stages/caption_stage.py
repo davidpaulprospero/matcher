@@ -287,6 +287,11 @@ class CaptionStage(Stage):
             # When resuming from checkpoint, the budget limits may have been scaled for
             # a previous batch size. After restoring, we'll re-scale for the current batch.
             if retry_budget:
+                # US-41-008: Log retry budget state BEFORE checkpoint restore
+                logger.info(
+                    f"[US-41-008] Retry budget before restore: max_attempts={retry_budget.max_attempts}, "
+                    f"batch_size={retry_budget.batch_size}"
+                )
                 try:
                     checkpoint_data = checkpoint.get_stage_data(self.name)
                     if checkpoint_data and 'retry_budget' in checkpoint_data:
@@ -305,6 +310,20 @@ class CaptionStage(Stage):
                         retry_budget.early_termination_reason = restored_budget.early_termination_reason
                         retry_budget.batch_size = restored_budget.batch_size
                         # Keep max_attempts from config (will be re-scaled below)
+
+                        # US-41-008: Log retry budget state AFTER checkpoint restore
+                        logger.info(
+                            f"[US-41-008] Retry budget after restore: max_attempts={retry_budget.max_attempts}, "
+                            f"batch_size={retry_budget.batch_size}, attempts_used={retry_budget.attempts}"
+                        )
+
+                        # US-41-008: Warn if restored budget has attempts but no batch_size (old checkpoint)
+                        if retry_budget.attempts > 0 and retry_budget.batch_size is None:
+                            logger.warning(
+                                f"[US-41-008] Restored budget has {retry_budget.attempts} attempts but "
+                                f"batch_size is None - indicates old checkpoint format without scaling info"
+                            )
+
                         logger.info(
                             f"Retry budget restored from checkpoint: "
                             f"{retry_budget.attempts} attempts, {retry_budget.failures} failures, "
