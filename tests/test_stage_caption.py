@@ -4238,6 +4238,142 @@ class TestCaptionStageRestoreFullUS003:
 
 
 # ============================================================================
+# US-41-002: Fix PipelineState text_metadata AttributeError on checkpoint restore
+# ============================================================================
+
+@pytest.mark.fast
+class TestCaptionStageTextMetadataCheckpointRestore:
+    """US-41-002: Test checkpoint restore with missing text_metadata attribute."""
+
+    def test_restore_with_legacy_state_missing_text_metadata(self, mock_config, caplog):
+        """US-41-002 AC1-AC4: Checkpoint restore with state missing text_metadata.
+
+        Tests that:
+        1. hasattr() check prevents AttributeError
+        2. Warning is logged when text_metadata missing
+        3. Stage completes successfully
+        4. text_metadata is initialized and populated correctly
+        """
+        import logging
+        stage = CaptionStage()
+
+        # Create legacy state object that lacks text_metadata attribute
+        class LegacyState:
+            def __init__(self):
+                self.video_ids = ['abc123', 'def456']
+                self.video_search_results = []
+                self.caption_results = {}
+                # Intentionally missing: text_metadata
+
+        state = LegacyState()
+        assert not hasattr(state, 'text_metadata'), "State should not have text_metadata"
+
+        checkpoint = MagicMock()
+        checkpoint_data = {
+            'caption_results': {
+                "abc123XYZ_0": {
+                    "video_id": "abc123XYZ_0",
+                    "segments": [
+                        {"text": "Hello world", "start": 0.0, "end": 2.5},
+                        {"text": "Test segment", "start": 2.5, "end": 5.0},
+                    ],
+                    "language": "en",
+                    "is_auto_generated": False,
+                    "caption_quality": "high",
+                },
+            },
+            'total_segments': 2,
+        }
+        checkpoint.get_stage_data.return_value = checkpoint_data
+
+        with caplog.at_level(logging.WARNING):
+            # This should NOT raise AttributeError
+            restored = stage.restore(state, checkpoint, mock_config)
+
+        # AC4: Caption stage completes without AttributeError
+        assert restored is True
+
+        # AC3: text_metadata should now exist and be populated
+        assert hasattr(state, 'text_metadata'), "text_metadata should be initialized"
+        assert len(state.text_metadata) == 2, "Should have 2 segments"
+        assert state.text_metadata[0]['text'] == 'Hello world'
+
+        # AC2: Warning logged when text_metadata was missing
+        warning_found = any(
+            'US-41-002' in record.message and 'text_metadata' in record.message
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+        )
+        assert warning_found, (
+            f"Expected US-41-002 warning about missing text_metadata. "
+            f"Got: {[r.message for r in caplog.records if r.levelno == logging.WARNING]}"
+        )
+
+    def test_restore_with_simple_namespace_missing_text_metadata(self, mock_config):
+        """US-41-002: Checkpoint restore with SimpleNamespace missing text_metadata."""
+        from types import SimpleNamespace
+        stage = CaptionStage()
+
+        # SimpleNamespace is used in some legacy checkpoint paths
+        state = SimpleNamespace()
+        state.video_ids = ['abc123']
+        state.video_search_results = []
+        state.caption_results = {}
+        # Note: text_metadata not set
+
+        assert not hasattr(state, 'text_metadata')
+
+        checkpoint = MagicMock()
+        checkpoint_data = {
+            'caption_results': {
+                "abc123": {
+                    "video_id": "abc123",
+                    "segments": [{"text": "Caption text", "start": 0.0, "end": 1.0}],
+                    "language": "en",
+                    "is_auto_generated": True,
+                },
+            },
+            'total_segments': 1,
+        }
+        checkpoint.get_stage_data.return_value = checkpoint_data
+
+        # Should complete without error
+        restored = stage.restore(state, checkpoint, mock_config)
+
+        assert restored is True
+        assert hasattr(state, 'text_metadata')
+        assert len(state.text_metadata) == 1
+
+    def test_populate_text_metadata_logs_warning_when_initializing(self, mock_config, caplog):
+        """US-41-002 AC2: Verify warning is logged when text_metadata auto-initialized."""
+        import logging
+        stage = CaptionStage()
+
+        # Create state without text_metadata
+        class BareState:
+            pass
+
+        state = BareState()
+        caption_results = {
+            'vid1': {
+                'segments': [{'text': 'Test', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            }
+        }
+
+        with caplog.at_level(logging.WARNING):
+            stage._populate_text_metadata(state, caption_results)
+
+        # Verify warning logged with US-41-002 marker
+        assert any(
+            'US-41-002' in record.message
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+        ), f"Expected US-41-002 warning. Records: {[r.message for r in caplog.records]}"
+
+
+# ============================================================================
 # US-37-010: Defensive State Initialization Tests
 # ============================================================================
 

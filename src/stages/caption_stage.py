@@ -1320,10 +1320,14 @@ class CaptionStage(Stage):
                     'timing_penalty': timing_penalty,  # US-008 Sprint 7: Timing penalty factor
                 })
 
-        # US-37-010: Defensive check before extending (belt-and-suspenders)
+        # US-37-010/US-41-002: Defensive check before extending (belt-and-suspenders)
         if not hasattr(state, 'text_metadata'):
             state.text_metadata = []
-            logger.debug("Initialized missing text_metadata in _populate_text_metadata")
+            logger.warning(
+                "US-41-002: text_metadata attribute missing from state object. "
+                "Auto-initialized to empty list. This may indicate checkpoint was loaded "
+                "from legacy format or state object was not properly constructed."
+            )
 
         # Extend existing text_metadata (don't replace, as TRANSCRIBE may add more)
         state.text_metadata.extend(text_metadata)
