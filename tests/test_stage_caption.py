@@ -4380,6 +4380,90 @@ class TestCaptionStageDefensiveInitialization:
         assert state.text_metadata[0]['video_id'] == 'pre_existing'
         assert state.text_metadata[1]['text'] == 'New caption'
 
+    @pytest.mark.fast
+    def test_ensure_state_attributes_handles_simple_namespace(self):
+        """Test _ensure_state_attributes handles SimpleNamespace objects (US-39-003).
+
+        SimpleNamespace is commonly used for creating dynamic objects
+        and should work with our defensive initialization.
+        """
+        from types import SimpleNamespace
+        stage = CaptionStage()
+
+        # Create SimpleNamespace with no attributes
+        state = SimpleNamespace()
+
+        # Verify attributes don't exist
+        assert not hasattr(state, 'text_metadata')
+        assert not hasattr(state, 'caption_results')
+        assert not hasattr(state, 'video_ids')
+        assert not hasattr(state, 'video_search_results')
+
+        # Call defensive initialization
+        stage._ensure_state_attributes(state)
+
+        # Verify all attributes are now initialized
+        assert hasattr(state, 'text_metadata')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'video_ids')
+        assert hasattr(state, 'video_search_results')
+
+        # Verify correct types and values
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.video_ids == []
+        assert state.video_search_results == []
+
+    @pytest.mark.fast
+    def test_ensure_state_attributes_handles_object_subclass(self):
+        """Test _ensure_state_attributes handles plain object()-like classes (US-39-003).
+
+        Bare object() instances cannot have attributes set, but subclasses can.
+        This tests that our setattr approach works with minimal classes.
+        """
+        stage = CaptionStage()
+
+        # Create minimal class (like what object() would be if it allowed attributes)
+        class MinimalState:
+            __slots__ = []  # No predefined attributes
+
+        # MinimalState with __slots__=[] won't allow attributes
+        # So test with a class that has no __slots__ (standard behavior)
+        class DynamicState:
+            pass
+
+        state = DynamicState()
+
+        # Verify attributes don't exist
+        assert not hasattr(state, 'text_metadata')
+
+        # Call defensive initialization
+        stage._ensure_state_attributes(state)
+
+        # Verify text_metadata is now initialized
+        assert hasattr(state, 'text_metadata')
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_ensure_state_attributes_logs_initialization(self, caplog):
+        """Test _ensure_state_attributes logs INFO when initializing missing attributes (US-39-003)."""
+        import logging
+        stage = CaptionStage()
+
+        class BareState:
+            pass
+
+        state = BareState()
+
+        # Capture logs at INFO level
+        with caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+            stage._ensure_state_attributes(state)
+
+        # Verify INFO log messages contain expected text
+        log_messages = [record.message for record in caplog.records]
+        assert any('Initialized missing text_metadata on state object' in msg for msg in log_messages), \
+            f"Expected log message not found. Got: {log_messages}"
+
 
 @pytest.mark.fast
 class TestCaptionStageLegacyStateCompatibility:

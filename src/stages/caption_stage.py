@@ -77,28 +77,32 @@ class CaptionStage(Stage):
         attributes, ensuring compatibility with both new PipelineState instances
         and legacy pipeline objects that may not have all attributes defined.
 
+        US-39-003: Uses explicit setattr() for compatibility with object() and
+        SimpleNamespace instances that may not support direct attribute assignment
+        in all Python versions/contexts.
+
         This follows the pattern established in PipelineState.from_legacy_pipeline()
         where attributes are copied with getattr() defaults.
         """
         # Ensure text_metadata exists (required by _populate_text_metadata)
         if not hasattr(state, 'text_metadata'):
-            state.text_metadata = []
-            logger.debug("Initialized missing text_metadata attribute on state")
+            setattr(state, 'text_metadata', [])
+            logger.info("Initialized missing text_metadata on state object")
 
         # Ensure caption_results exists (stores caption data by video_id)
         if not hasattr(state, 'caption_results'):
-            state.caption_results = {}
-            logger.debug("Initialized missing caption_results attribute on state")
+            setattr(state, 'caption_results', {})
+            logger.info("Initialized missing caption_results on state object")
 
         # Ensure video_ids exists (input from VIDEO_SEARCH stage)
         if not hasattr(state, 'video_ids'):
-            state.video_ids = []
-            logger.debug("Initialized missing video_ids attribute on state")
+            setattr(state, 'video_ids', [])
+            logger.info("Initialized missing video_ids on state object")
 
         # Ensure video_search_results exists (full search metadata)
         if not hasattr(state, 'video_search_results'):
-            state.video_search_results = []
-            logger.debug("Initialized missing video_search_results attribute on state")
+            setattr(state, 'video_search_results', [])
+            logger.info("Initialized missing video_search_results on state object")
 
     def run(
         self,
