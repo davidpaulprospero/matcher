@@ -40,6 +40,15 @@ class CaptionRetryBudgetConfig:
     # Set to 0 for unlimited backoff
     max_backoff_time_seconds: float = 300.0
 
+    # Automatic scaling settings (US-37-004)
+    # When enabled, max_attempts scales up based on batch size
+    auto_scale: bool = True
+
+    # Attempts per video multiplier for auto-scaling
+    # e.g., 1.5 means budget = batch_size * 1.5
+    # Only scales UP when batch > max_attempts / attempts_per_video
+    attempts_per_video: float = 1.5
+
 
 @dataclass
 class CaptionRetryBudget:
@@ -76,9 +85,16 @@ class CaptionRetryBudget:
     backoff_time_spent: float = 0.0
     videos_skipped: int = 0
 
+    # Error category tracking (US-37-006)
+    error_counts: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+
     # Budget limits (set from config)
     max_attempts: int = 100
     max_backoff_time: float = 300.0  # 5 minutes total backoff budget
+
+    # Auto-scaling settings (US-37-004)
+    auto_scale: bool = True
+    attempts_per_video: float = 1.5
 
     # Thread-safety lock
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
@@ -101,13 +117,18 @@ class CaptionRetryBudget:
         if isinstance(config, dict):
             budget.max_attempts = int(config.get('max_attempts', 100))
             budget.max_backoff_time = float(config.get('max_backoff_time_seconds', 300.0))
+            budget.auto_scale = bool(config.get('auto_scale', True))
+            budget.attempts_per_video = float(config.get('attempts_per_video', 1.5))
         else:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
+            budget.auto_scale = bool(getattr(config, 'auto_scale', True))
+            budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 1.5))
 
         logger.debug(
             f"CaptionRetryBudget initialized: max_attempts={budget.max_attempts}, "
-            f"max_backoff_time={budget.max_backoff_time}s"
+            f"max_backoff_time={budget.max_backoff_time}s, auto_scale={budget.auto_scale}, "
+            f"attempts_per_video={budget.attempts_per_video}"
         )
         return budget
 
@@ -119,8 +140,11 @@ class CaptionRetryBudget:
         """
         with self._lock:
             self.attempts += 1
+            attempts_count = self.attempts
         logger.debug(f"CaptionRetryBudget: attempt recorded for {video_id or 'unknown'} "
-                     f"(total: {self.attempts})")
+                     f"(total: {attempts_count})")
+        # Check if we crossed a consumption threshold (US-37-005)
+        self._check_and_log_threshold(video_id)
 
     def record_success(self, video_id: str = "") -> None:
         """Record a successful fetch.
@@ -133,16 +157,28 @@ class CaptionRetryBudget:
         logger.debug(f"CaptionRetryBudget: success for {video_id or 'unknown'} "
                      f"(total: {self.successes})")
 
-    def record_failure(self, video_id: str = "") -> None:
+    def record_failure(
+        self,
+        video_id: str = "",
+        error_category: Optional[CaptionErrorCategory] = None
+    ) -> None:
         """Record a failed fetch.
 
         Args:
             video_id: Optional video ID for logging context.
+            error_category: Optional error category for tracking (US-37-006).
         """
         with self._lock:
             self.failures += 1
+            failures_count = self.failures
+            # Track error category if provided (US-37-006)
+            if error_category is not None:
+                self.error_counts[error_category] = self.error_counts.get(error_category, 0) + 1
         logger.debug(f"CaptionRetryBudget: failure for {video_id or 'unknown'} "
-                     f"(total: {self.failures})")
+                     f"(total: {failures_count})"
+                     f"{f' [{error_category.name}]' if error_category else ''}")
+        # Check if we crossed a consumption threshold (US-37-005)
+        self._check_and_log_threshold(video_id)
 
     def record_backoff(self, seconds: float, video_id: str = "") -> None:
         """Record backoff time spent.
@@ -153,10 +189,13 @@ class CaptionRetryBudget:
         """
         with self._lock:
             self.backoff_time_spent += seconds
+            total_backoff = self.backoff_time_spent
         logger.debug(
             f"CaptionRetryBudget: backoff {seconds:.1f}s for {video_id or 'unknown'} "
-            f"(total: {self.backoff_time_spent:.1f}s)"
+            f"(total: {total_backoff:.1f}s)"
         )
+        # Check if we crossed a consumption threshold (US-37-005)
+        self._check_and_log_threshold(video_id)
 
     def record_skipped(self, video_id: str = "") -> None:
         """Record a video skipped due to budget exhaustion.
@@ -196,6 +235,131 @@ class CaptionRetryBudget:
                 return True
 
             return False
+
+    def get_top_errors(self, limit: int = 5) -> List[tuple]:
+        """Get the top error categories by count (US-37-006).
+
+        Returns sorted list of (CaptionErrorCategory, count) tuples,
+        ordered by count descending.
+
+        Args:
+            limit: Maximum number of categories to return. Default 5.
+
+        Returns:
+            List of (CaptionErrorCategory, int) tuples sorted by count descending.
+
+        Example:
+            >>> budget.get_top_errors()
+            [(CaptionErrorCategory.NETWORK, 15), (CaptionErrorCategory.TIMEOUT, 5)]
+        """
+        with self._lock:
+            sorted_errors = sorted(
+                self.error_counts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            return sorted_errors[:limit]
+
+    def get_consumption_percentage(self) -> Dict[str, Optional[float]]:
+        """Get percentage of budget consumed for each resource (US-37-005).
+
+        Returns:
+            Dict with keys 'attempts' and 'backoff_time', values are percentages
+            (0.0 to 100.0+) or None if that limit is unlimited.
+
+        Example:
+            {'attempts': 45.0, 'backoff_time': 30.5}  # 45% attempts, 30.5% backoff used
+        """
+        with self._lock:
+            result = {}
+
+            if self.max_attempts > 0:
+                result['attempts'] = round((self.attempts / self.max_attempts) * 100, 1)
+            else:
+                result['attempts'] = None
+
+            if self.max_backoff_time > 0:
+                result['backoff_time'] = round((self.backoff_time_spent / self.max_backoff_time) * 100, 1)
+            else:
+                result['backoff_time'] = None
+
+            return result
+
+    def _log_consumption_status(self, trigger: str, video_id: str = "") -> None:
+        """Log detailed consumption status at key thresholds (US-37-005).
+
+        Logs INFO when crossing 25%, 50%, 75%, 90% thresholds.
+        Logs WARNING at 90%+ to alert impending exhaustion.
+
+        Args:
+            trigger: What caused this log ('attempt', 'failure', 'backoff', 'exhausted').
+            video_id: Optional video ID for context.
+        """
+        consumption = self.get_consumption_percentage()
+        attempts_pct = consumption.get('attempts')
+        backoff_pct = consumption.get('backoff_time')
+
+        # Determine the highest percentage for threshold checking
+        max_pct = 0.0
+        if attempts_pct is not None:
+            max_pct = max(max_pct, attempts_pct)
+        if backoff_pct is not None:
+            max_pct = max(max_pct, backoff_pct)
+
+        # Build status message
+        status_parts = []
+        if attempts_pct is not None:
+            status_parts.append(f"attempts: {self.attempts}/{self.max_attempts} ({attempts_pct:.0f}%)")
+        if backoff_pct is not None:
+            status_parts.append(f"backoff: {self.backoff_time_spent:.1f}s/{self.max_backoff_time}s ({backoff_pct:.0f}%)")
+
+        status_msg = ", ".join(status_parts)
+        video_ctx = f" [{video_id}]" if video_id else ""
+
+        # Check thresholds for INFO/WARNING logging
+        # We log when crossing key thresholds: 25%, 50%, 75%, 90%
+        if max_pct >= 90:
+            logger.warning(
+                f"CaptionRetryBudget: 90%+ consumed{video_ctx} - {status_msg} "
+                f"(successes: {self.successes}, failures: {self.failures})"
+            )
+        elif max_pct >= 75:
+            logger.info(
+                f"CaptionRetryBudget: 75%+ consumed{video_ctx} - {status_msg}"
+            )
+        elif max_pct >= 50:
+            logger.info(
+                f"CaptionRetryBudget: 50%+ consumed{video_ctx} - {status_msg}"
+            )
+        elif max_pct >= 25:
+            logger.info(
+                f"CaptionRetryBudget: 25%+ consumed{video_ctx} - {status_msg}"
+            )
+
+    def _check_and_log_threshold(self, video_id: str = "") -> None:
+        """Check if we just crossed a threshold and log if so (US-37-005).
+
+        Called after mutations to log when crossing 25%, 50%, 75%, 90% thresholds.
+        Uses a simple heuristic: log if current percentage is within 1% of a threshold.
+        """
+        consumption = self.get_consumption_percentage()
+        attempts_pct = consumption.get('attempts')
+        backoff_pct = consumption.get('backoff_time')
+
+        # Get highest percentage
+        max_pct = 0.0
+        if attempts_pct is not None:
+            max_pct = max(max_pct, attempts_pct)
+        if backoff_pct is not None:
+            max_pct = max(max_pct, backoff_pct)
+
+        # Check if we just crossed a threshold (within small margin)
+        thresholds = [25, 50, 75, 90]
+        for threshold in thresholds:
+            # Log if we're within 1 percentage point above threshold (just crossed it)
+            if threshold <= max_pct < threshold + 2:
+                self._log_consumption_status("threshold", video_id)
+                break
 
     def attempts_remaining(self) -> Optional[int]:
         """Get remaining attempts before exhaustion.
@@ -237,9 +401,12 @@ class CaptionRetryBudget:
         """Get a summary of budget usage for reporting.
 
         Returns:
-            Dict with budget usage statistics.
+            Dict with budget usage statistics including error breakdown (US-37-006).
         """
         with self._lock:
+            # Build error breakdown (category name -> count)
+            error_breakdown = {cat.name: count for cat, count in self.error_counts.items()}
+
             return {
                 "attempts": self.attempts,
                 "attempts_remaining": self.attempts_remaining(),
@@ -253,13 +420,14 @@ class CaptionRetryBudget:
                 ),
                 "videos_skipped": self.videos_skipped,
                 "is_exhausted": self.budget_exhausted(),
+                "error_breakdown": error_breakdown,  # US-37-006
             }
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize budget state for checkpoint persistence.
 
         Returns:
-            Dict with all budget state data.
+            Dict with all budget state data including error_counts (US-37-006).
         """
         with self._lock:
             return {
@@ -270,6 +438,7 @@ class CaptionRetryBudget:
                 "videos_skipped": self.videos_skipped,
                 "max_attempts": self.max_attempts,
                 "max_backoff_time": self.max_backoff_time,
+                "error_counts": {cat.name: count for cat, count in self.error_counts.items()},  # US-37-006
             }
 
     @classmethod
@@ -297,6 +466,14 @@ class CaptionRetryBudget:
         budget.max_attempts = data.get("max_attempts", 100)
         budget.max_backoff_time = data.get("max_backoff_time", 300.0)
 
+        # Restore error counts (US-37-006)
+        for cat_name, count in data.get("error_counts", {}).items():
+            try:
+                cat = CaptionErrorCategory[cat_name]
+                budget.error_counts[cat] = count
+            except KeyError:
+                logger.warning(f"Unknown error category in checkpoint: {cat_name}")
+
         return budget
 
     def reset(self) -> None:
@@ -307,9 +484,10 @@ class CaptionRetryBudget:
             self.successes = 0
             self.backoff_time_spent = 0.0
             self.videos_skipped = 0
+            self.error_counts.clear()  # US-37-006
         logger.debug("CaptionRetryBudget: reset for new batch")
 
-    def scale_to_batch_size(self, batch_size: int, attempts_per_video: float = 1.5) -> int:
+    def scale_to_batch_size(self, batch_size: int, attempts_per_video: Optional[float] = None) -> int:
         """Scale max_attempts proportionally to batch size (US-37-003).
 
         The default max_attempts of 100 is insufficient for large batches (175+ videos).
@@ -318,7 +496,8 @@ class CaptionRetryBudget:
 
         Args:
             batch_size: Number of videos in the batch.
-            attempts_per_video: Average attempts per video (default 1.5 = 1 + 0.5 retries).
+            attempts_per_video: Average attempts per video. Defaults to self.attempts_per_video
+                (from config, typically 1.5 = 1 + 0.5 retries).
 
         Returns:
             The new max_attempts value (for logging/testing convenience).
@@ -328,8 +507,11 @@ class CaptionRetryBudget:
             - 175 videos -> max_attempts becomes 263 (175 * 1.5 = 262.5, rounded up)
         """
         with self._lock:
+            # Use instance config value if not overridden
+            multiplier = attempts_per_video if attempts_per_video is not None else self.attempts_per_video
+
             # Calculate required attempts for this batch
-            required_attempts = int(batch_size * attempts_per_video + 0.5)  # Round up
+            required_attempts = int(batch_size * multiplier + 0.5)  # Round up
 
             # Only scale UP, never reduce below default
             if required_attempts > self.max_attempts:
@@ -338,7 +520,7 @@ class CaptionRetryBudget:
                 logger.info(
                     f"CaptionRetryBudget: scaled max_attempts from {old_max} to "
                     f"{self.max_attempts} for batch of {batch_size} videos "
-                    f"({attempts_per_video:.1f} attempts/video)"
+                    f"({multiplier:.1f} attempts/video)"
                 )
             else:
                 logger.debug(

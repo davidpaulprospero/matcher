@@ -64,7 +64,7 @@
             "id": "US-37-004",
             "title": "Add batch size config option for retry budget scaling",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add `attempts_per_video: float = 1.5` field to CaptionRetryBudgetConfig in download.py",
                 "Add `auto_scale: bool = True` field to enable/disable automatic scaling",
@@ -73,13 +73,13 @@
                 "Unit test verifies config values are correctly loaded from dict and dataclass",
                 "Documentation comment explains the 1.5 multiplier (1 attempt + avg 0.5 retries)"
             ],
-            "notes": "Tier: T2-Medium (config extension). Source files: src/config/sections/download.py:160-181 (CaptionRetryBudgetConfig), src/caption/retry_budget.py:86-112 (from_config method), config.yaml. Follow CLAUDE.md Rule 1: update BOTH config sections AND config.yaml."
+            "notes": "COMPLETE. Added auto_scale and attempts_per_video fields to CaptionRetryBudgetConfig in both src/config/sections/download.py and src/caption/retry_budget.py. Updated config.yaml with retry_budget section. Updated from_config() to read new settings. CaptionStage respects auto_scale flag. Added 9 unit tests for config loading. All 72 tests in test_caption_retry_budget.py pass."
         },
         {
             "id": "US-37-005",
             "title": "Add detailed logging for retry budget consumption",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Log the error category (NETWORK, TIMEOUT, RATE_LIMIT, etc.) when recording failures",
                 "Log budget remaining after each attempt: 'CaptionRetryBudget: {remaining}/{max} attempts remaining'",
@@ -88,13 +88,13 @@
                 "Existing log at INFO level; add DEBUG level for per-video tracking",
                 "Unit test verifies threshold warnings are logged at correct consumption levels"
             ],
-            "notes": "Tier: T2-Medium (logging enhancement). Source files: src/caption/retry_budget.py:114-170 (record_* methods), src/caption/batch_processor.py:259-276 (budget checks). The current log 'EXHAUSTED (attempts: 100/100)' repeats for every skipped video but doesn't explain WHY attempts were consumed."
+            "notes": "COMPLETE. Added get_consumption_percentage() method returning percentage consumed. Added _log_consumption_status() and _check_and_log_threshold() for threshold-based logging at 25/50/75/90%. Updated record_attempt/failure/backoff to call threshold check. Logs INFO at 25/50/75%, WARNING at 90% with success/failure counts. Added 15 unit tests in test_caption_retry_budget.py. All 87 tests pass."
         },
         {
             "id": "US-37-006",
             "title": "Add error category tracking to CaptionRetryBudget",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add `error_counts: Dict[CaptionErrorCategory, int]` field to CaptionRetryBudget",
                 "Modify record_failure() to accept optional error_category parameter",
@@ -103,7 +103,7 @@
                 "Include error breakdown in get_summary() output",
                 "Unit test verifies error categories are tracked correctly across multiple failures"
             ],
-            "notes": "Tier: T2-Medium (feature addition). Source files: src/caption/retry_budget.py:45-75 (CaptionRetryBudget fields), src/caption/retry_budget.py:136-145 (record_failure), src/caption/batch_processor.py:351-407. This enables diagnosing whether budget exhaustion is due to rate limits, network issues, or parsing errors."
+            "notes": "COMPLETE. Added error_counts field (line 90), modified record_failure() to accept error_category (lines 163-182), added get_top_errors() method (lines 239-261), added error_breakdown to get_summary() (lines 417-418), updated batch_processor.py to call categorize_caption_error() and pass category (lines 376-379). Updated to_dict/from_dict and reset() for serialization. Added 24 unit tests in test_caption_retry_budget.py covering error tracking, get_top_errors, serialization, reset, and integration scenarios. All 111 tests pass."
         },
         {
             "id": "US-37-007",

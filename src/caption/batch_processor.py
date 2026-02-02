@@ -370,9 +370,12 @@ class BatchProcessor:
                         if isinstance(e, CaptionFetchError):
                             circuit_breaker.record_failure()
 
-                    # Record failure in retry budget
+                    # Record failure in retry budget with error category (US-37-006)
                     if retry_budget:
-                        retry_budget.record_failure(video_id)
+                        from .error_handling import categorize_caption_error
+                        error_reason = str(getattr(e, 'reason', str(e)))
+                        error_category = categorize_caption_error(e, error_reason)
+                        retry_budget.record_failure(video_id, error_category=error_category)
 
                     error_result = {
                         'video_id': video_id,
