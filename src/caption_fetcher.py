@@ -3049,6 +3049,12 @@ class CaptionFetcher:
 
                 last_error = e
 
+                # US-40-005: Log DEBUG for each retry attempt with error details
+                logger.debug(
+                    f"CaptionRetry: video={video_id}, attempt={attempt + 1}, "
+                    f"category={category.name}, error_reason={e.reason if hasattr(e, 'reason') else str(e)}"
+                )
+
                 # Check if we've exhausted the budget for this category
                 if attempts_for_category > budget:
                     logger.warning(
@@ -3097,6 +3103,12 @@ class CaptionFetcher:
                 attempts_for_category = category_attempts[category]
 
                 last_error = CaptionFetchError(video_id, str(e))
+
+                # US-40-005: Log DEBUG for each retry attempt with error details
+                logger.debug(
+                    f"CaptionRetry: video={video_id}, attempt={attempt + 1}, "
+                    f"category={category.name}, error_reason={type(e).__name__}: {str(e)}"
+                )
 
                 # Check if we've exhausted the budget for this category
                 if attempts_for_category > budget:

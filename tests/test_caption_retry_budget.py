@@ -3292,3 +3292,74 @@ class TestCaptionRetryBudgetFormattedSummary:
             assert "failed" in summary
             assert "skipped" in summary
             assert "batch_size=" in summary
+
+
+class TestCaptionRetryBudgetPerVideoLogging:
+    """Tests for US-40-005: Per-video retry logging for budget consumption diagnosis.
+
+    These tests verify that retry attempts are logged with appropriate details
+    to help diagnose why budget is consumed by early videos.
+    """
+
+    @pytest.mark.fast
+    def test_threshold_log_includes_percentage(self):
+        """Verify threshold crossing logs include consumption percentage (AC3, AC5).
+
+        US-40-005: When budget reaches 50%, 75%, 90% thresholds, the log message
+        must include the actual percentage consumed.
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            # Move to just below 50%
+            budget.attempts = 49
+
+            # Cross 50% threshold
+            budget.record_attempt("video_50")
+
+            # Verify INFO call includes percentage
+            info_calls = mock_logger.info.call_args_list
+            threshold_calls = [c for c in info_calls if '50%' in str(c)]
+            assert len(threshold_calls) >= 1
+
+            # Verify the percentage is in the message
+            call_str = str(threshold_calls[0])
+            assert '50%' in call_str
+            # The message format includes both absolute and percentage
+            assert 'attempts:' in call_str or '50/100' in call_str
+
+    @pytest.mark.fast
+    def test_threshold_75_percent_includes_percentage(self):
+        """Verify 75% threshold log includes correct percentage."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            budget.attempts = 74
+            budget.record_attempt("video_75")
+
+            info_calls = mock_logger.info.call_args_list
+            threshold_calls = [c for c in info_calls if '75%' in str(c)]
+            assert len(threshold_calls) >= 1
+            call_str = str(threshold_calls[0])
+            assert '75%' in call_str
+
+    @pytest.mark.fast
+    def test_threshold_90_percent_warning_includes_percentage(self):
+        """Verify 90% threshold WARNING includes correct percentage."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            budget.attempts = 89
+            budget.record_attempt("video_90")
+
+            warning_calls = mock_logger.warning.call_args_list
+            threshold_calls = [c for c in warning_calls if '90%' in str(c)]
+            assert len(threshold_calls) >= 1
+            call_str = str(threshold_calls[0])
+            assert '90%' in call_str
+            # 90% threshold also includes success/failure counts
+            assert 'successes' in call_str
+            assert 'failures' in call_str

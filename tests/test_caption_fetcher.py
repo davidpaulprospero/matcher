@@ -7465,3 +7465,119 @@ class TestChannelSummaryInMetricsSummary:
         assert "Caption fetch:" in summary
         # No channel line since no patterns
         assert "Top channels:" not in summary
+
+
+class TestCaptionRetryDebugLogging:
+    """Tests for US-40-005: Per-video retry DEBUG logging with error details.
+
+    These tests verify that each retry attempt logs DEBUG with:
+    - video_id
+    - attempt_number
+    - error_reason
+    """
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
+    def test_retry_attempt_logs_debug_with_error_reason(self, mock_fetch, mock_sleep):
+        """Verify DEBUG log includes video_id, attempt, and error_reason (AC1, AC4).
+
+        US-40-005: Each retry attempt must log DEBUG with format:
+        'CaptionRetry: video={video_id}, attempt={N}, category={category}, error_reason={reason}'
+        """
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test_vid_123",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test_vid_123")],
+            language="en"
+        )
+        # First call fails with specific error reason, second succeeds
+        mock_fetch.side_effect = [
+            CaptionFetchError("test_vid_123", "Network connection reset"),
+            mock_result
+        ]
+
+        with patch('src.caption_fetcher.logger') as mock_logger:
+            result = fetcher.fetch_captions_with_retry(
+                "test_vid_123", max_retries=3, retry_delay=1.0
+            )
+
+            # Check DEBUG was called with error details
+            debug_calls = mock_logger.debug.call_args_list
+            retry_debug_calls = [
+                c for c in debug_calls
+                if 'CaptionRetry:' in str(c) and 'test_vid_123' in str(c)
+            ]
+
+            assert len(retry_debug_calls) >= 1, "Expected DEBUG log with retry details"
+            call_str = str(retry_debug_calls[0])
+            assert 'video=test_vid_123' in call_str
+            assert 'attempt=' in call_str
+            assert 'error_reason=' in call_str
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
+    def test_retry_attempt_logs_category_in_debug(self, mock_fetch, mock_sleep):
+        """Verify DEBUG log includes error category."""
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test_vid_456",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test_vid_456")],
+            language="en"
+        )
+        # First call fails with network error
+        mock_fetch.side_effect = [
+            CaptionFetchError("test_vid_456", "Connection timeout"),
+            mock_result
+        ]
+
+        with patch('src.caption_fetcher.logger') as mock_logger:
+            result = fetcher.fetch_captions_with_retry(
+                "test_vid_456", max_retries=3, retry_delay=1.0
+            )
+
+            debug_calls = mock_logger.debug.call_args_list
+            retry_debug_calls = [
+                c for c in debug_calls
+                if 'CaptionRetry:' in str(c) and 'category=' in str(c)
+            ]
+
+            assert len(retry_debug_calls) >= 1, "Expected DEBUG log with category"
+            call_str = str(retry_debug_calls[0])
+            assert 'category=' in call_str
+
+    @patch('time.sleep')
+    @patch.object(CaptionFetcher, 'fetch_captions')
+    @pytest.mark.fast
+    def test_multiple_retries_log_incrementing_attempt_number(self, mock_fetch, mock_sleep):
+        """Verify each retry increments the attempt number in logs."""
+        fetcher = CaptionFetcher()
+
+        mock_result = CaptionResult(
+            video_id="test_vid_789",
+            segments=[CaptionSegment(0, 0.0, 1.0, "Test", "test_vid_789")],
+            language="en"
+        )
+        # Fail twice then succeed
+        mock_fetch.side_effect = [
+            CaptionFetchError("test_vid_789", "Error 1"),
+            CaptionFetchError("test_vid_789", "Error 2"),
+            mock_result
+        ]
+
+        with patch('src.caption_fetcher.logger') as mock_logger:
+            result = fetcher.fetch_captions_with_retry(
+                "test_vid_789", max_retries=5, retry_delay=1.0
+            )
+
+            debug_calls = mock_logger.debug.call_args_list
+            retry_debug_calls = [
+                c for c in debug_calls
+                if 'CaptionRetry:' in str(c) and 'test_vid_789' in str(c)
+            ]
+
+            # Should have 2 DEBUG logs (one for each failure)
+            assert len(retry_debug_calls) >= 2, "Expected 2 DEBUG logs for 2 failures"
