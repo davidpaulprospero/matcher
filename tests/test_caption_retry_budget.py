@@ -3069,3 +3069,128 @@ class TestCaptionRetryBudgetAutoScaleSufficiency:
         # Should have DEBUG log
         debug_logs = [r for r in caplog.records if "sufficient for" in r.message]
         assert debug_logs, "Expected DEBUG log about budget being sufficient"
+
+
+class TestCaptionRetryBudgetFormattedSummary:
+    """Tests for US-39-005: Budget consumption summary logging at stage completion.
+
+    These tests verify the get_formatted_summary() method returns a properly
+    formatted string with all required fields for diagnosis of budget issues.
+    """
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_includes_all_required_fields(self):
+        """Verify formatted summary contains all required fields.
+
+        US-39-005: Summary format must be:
+        'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts,
+         {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N})'
+        """
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 200
+        budget.batch_size = 150
+
+        # Simulate activity
+        for i in range(120):
+            budget.record_attempt(f"vid_{i}")
+        for i in range(100):
+            budget.record_success(f"vid_{i}")
+        for i in range(20):
+            budget.record_failure(f"fail_{i}")
+        for i in range(5):
+            budget.record_skipped(f"skip_{i}")
+
+        summary = budget.get_formatted_summary()
+
+        # Verify all required components are present
+        assert "CaptionRetryBudget summary:" in summary
+        assert "120/200 attempts" in summary
+        assert "100 succeeded" in summary
+        assert "20 failed" in summary
+        assert "5 skipped" in summary
+        assert "batch_size=150" in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_with_zero_values(self):
+        """Verify formatted summary handles zero values correctly."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.batch_size = 50
+
+        summary = budget.get_formatted_summary()
+
+        assert "0/100 attempts" in summary
+        assert "0 succeeded" in summary
+        assert "0 failed" in summary
+        assert "0 skipped" in summary
+        assert "batch_size=50" in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_with_none_batch_size(self):
+        """Verify formatted summary handles None batch_size."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        # batch_size defaults to None
+
+        summary = budget.get_formatted_summary()
+
+        # Should show batch_size=0 when None
+        assert "batch_size=0" in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_includes_scaled_max_attempts(self):
+        """Verify summary shows scaled max_attempts value (actual vs default).
+
+        US-39-005: The max_attempts in summary should reflect the scaled value,
+        not the original default 100.
+        """
+        budget = CaptionRetryBudget()
+        budget.auto_scale = True
+        budget.attempts_per_video = 1.5
+
+        # Scale to 175 videos (175 * 1.5 = 263)
+        budget.scale_to_batch_size(175)
+
+        # Record some activity
+        for i in range(150):
+            budget.record_attempt(f"vid_{i}")
+        for i in range(100):
+            budget.record_success(f"vid_{i}")
+        for i in range(50):
+            budget.record_failure(f"fail_{i}")
+
+        summary = budget.get_formatted_summary()
+
+        # Should show scaled max_attempts (263), not default (100)
+        assert "150/263 attempts" in summary
+        assert "100 succeeded" in summary
+        assert "50 failed" in summary
+        assert "batch_size=175" in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_thread_safe(self):
+        """Verify get_formatted_summary is thread-safe."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 1000
+        budget.batch_size = 500
+        summaries = []
+
+        def record_and_get_summary(thread_id):
+            for i in range(10):
+                budget.record_attempt(f"vid_{thread_id}_{i}")
+                budget.record_success(f"vid_{thread_id}_{i}")
+            summaries.append(budget.get_formatted_summary())
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(record_and_get_summary, i) for i in range(8)]
+            for f in futures:
+                f.result()
+
+        # All summaries should be valid strings
+        assert len(summaries) == 8
+        for summary in summaries:
+            assert "CaptionRetryBudget summary:" in summary
+            assert "succeeded" in summary
+            assert "failed" in summary
+            assert "skipped" in summary
+            assert "batch_size=" in summary
