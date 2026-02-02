@@ -1335,5 +1335,67 @@ class TestPipelineStateTextMetadata:
         assert state.text_metadata[0]['extra_field'] == ['nested', 'list']
 
 
+@pytest.mark.fast
+class TestPipelineStatePostInit:
+    """Test PipelineState.__post_init__ defensive initialization (US-38-008)."""
+
+    def test_text_metadata_never_none_after_creation(self):
+        """Verify text_metadata is never None after PipelineState creation."""
+        state = PipelineState()
+        # __post_init__ ensures text_metadata is always a list, never None
+        assert state.text_metadata is not None
+        assert isinstance(state.text_metadata, list)
+
+    @pytest.mark.fast
+    def test_text_metadata_preserved_if_already_set(self):
+        """Verify text_metadata is preserved if already set (not replaced)."""
+        # Create state with pre-populated text_metadata
+        state = PipelineState(text_metadata=[{'video_id': 'test123', 'text': 'Preserved'}])
+
+        # __post_init__ should NOT reset a valid list
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_id'] == 'test123'
+        assert state.text_metadata[0]['text'] == 'Preserved'
+
+    @pytest.mark.fast
+    def test_text_metadata_initialized_when_none_manually_set(self):
+        """Verify __post_init__ initializes text_metadata to [] when manually set to None."""
+        # This simulates edge cases like deserialization issues
+        # We can't directly pass None to a default_factory field normally,
+        # but we can test the __post_init__ behavior by manually setting it
+        state = PipelineState()
+        state.text_metadata = None  # Simulate corruption/deserialization issue
+
+        # Call __post_init__ manually to verify it fixes the issue
+        state.__post_init__()
+
+        assert state.text_metadata is not None
+        assert isinstance(state.text_metadata, list)
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_post_init_follows_from_legacy_pipeline_pattern(self):
+        """Verify __post_init__ follows the defensive pattern used in from_legacy_pipeline."""
+        # The from_legacy_pipeline method uses getattr with defaults as defensive measure
+        # __post_init__ adds another layer of defense at init time
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # Both __post_init__ and from_legacy_pipeline should ensure text_metadata exists
+        assert state.text_metadata is not None
+        assert isinstance(state.text_metadata, list)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
