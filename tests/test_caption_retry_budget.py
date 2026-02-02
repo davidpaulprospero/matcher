@@ -3406,6 +3406,31 @@ class TestCaptionRetryBudgetBatchSizeTracking:
         assert budget.batch_size == 175
 
     @pytest.mark.fast
+    def test_batch_size_175_checkpoint_restore_logs_summary(self, caplog):
+        """US-42-008: Verify batch_size=175 is logged in checkpoint restore summary.
+
+        AC5: Log batch_size in checkpoint restore summary.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        checkpoint_data = {
+            "attempts": 50,
+            "failures": 10,
+            "successes": 40,
+            "batch_size": 175,
+            "max_attempts": 350,
+        }
+
+        budget = CaptionRetryBudget.from_dict(checkpoint_data)
+
+        # Verify batch_size is logged in restore summary
+        assert budget.batch_size == 175
+        assert "[US-42-008]" in caplog.text
+        assert "batch_size=175" in caplog.text
+        assert "restored from checkpoint" in caplog.text
+
+    @pytest.mark.fast
     def test_batch_size_roundtrip(self):
         """Test batch_size survives to_dict/from_dict roundtrip."""
         budget = CaptionRetryBudget()

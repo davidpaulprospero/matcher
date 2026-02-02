@@ -936,6 +936,13 @@ class CaptionRetryBudget:
         # Restore circuit breaker trip count (US-41-006)
         budget.circuit_breaker_trips = data.get("circuit_breaker_trips", 0)
 
+        # US-42-008: Log checkpoint restore summary including batch_size
+        logger.info(
+            f"[US-42-008] CaptionRetryBudget restored from checkpoint: "
+            f"batch_size={budget.batch_size}, attempts={budget.attempts}/{budget.max_attempts}, "
+            f"successes={budget.successes}, failures={budget.failures}"
+        )
+
         return budget
 
     @classmethod

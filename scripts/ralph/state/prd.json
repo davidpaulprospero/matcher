@@ -118,7 +118,7 @@
             "id": "US-42-008",
             "title": "Add batch size to retry budget checkpoint data",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "to_dict() already includes batch_size (verify)",
                 "from_dict() restores batch_size field",
@@ -126,7 +126,7 @@
                 "Add test: save budget with batch_size=175, restore, verify batch_size preserved",
                 "Log batch_size in checkpoint restore summary"
             ],
-            "notes": "Tier 2 Verification: src/caption/retry_budget.py to_dict() and from_dict() methods\n\nUS-38-009 added batch_size tracking. Verify checkpoint persistence works correctly.\n\nThis ensures batch_size mismatch detection (US-41-012) has the data it needs."
+            "notes": "COMPLETED: Verified all acceptance criteria.\n\nAC1: ✓ to_dict() includes batch_size at line 883\nAC2: ✓ from_dict() restores batch_size at line 931\nAC3: ✓ restore_with_integrity_check() uses restored batch_size at line 993\nAC4: ✓ Test already exists: test_batch_size_restored_from_dict (line 3394)\nAC5: ✓ ADDED logging in from_dict() with [US-42-008] marker\n\nNew test added: test_batch_size_175_checkpoint_restore_logs_summary\nVerifies [US-42-008] marker and batch_size=175 appear in restore log.\n\nAll 273 tests pass."
         },
         {
             "id": "US-42-009",
