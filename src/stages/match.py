@@ -77,19 +77,20 @@ class MatchStage(Stage):
             # In simplified pipeline, text_metadata comes from CAPTION stage
             # Embeddings are optional for caption-first matching
 
-            # US-39-012: Fallback recovery if text_metadata is empty but caption_results exists
+            # US-39-012/US-40-007: Fallback recovery if text_metadata is empty but caption_results exists
             if not state.text_metadata and getattr(state, 'caption_results', None):
                 logger.warning(
-                    "text_metadata is empty but caption_results exists. "
-                    "Attempting recovery from caption_results."
+                    "text_metadata empty, attempting recovery from caption_results"
                 )
                 warnings.append("Recovered text_metadata from caption_results (CAPTION stage partial failure)")
                 self._recover_text_metadata_from_captions(state)
 
+            # US-40-007: Return error if both text_metadata and caption_results are unavailable
             if not state.text_metadata:
-                print("  ! No video data to match against")
-                warnings.append("No video text metadata (run CAPTION stage)")
-                return StageResult.ok({'matches': []}, warnings)
+                error_msg = "No captions available: text_metadata empty and caption_results has no usable data. Run CAPTION stage first."
+                print(f"  ! {error_msg}")
+                logger.error(error_msg)
+                return StageResult.fail(error_msg, warnings)
 
             # Print settings
             self._print_settings(config)

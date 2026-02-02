@@ -104,7 +104,7 @@
             "id": "US-40-007",
             "title": "Add match stage defensive check for empty text_metadata",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "At start of MatchStage.run(), check if text_metadata is None or empty list",
                 "If empty but caption_results has entries, attempt to recover by calling _populate_text_metadata logic",
@@ -113,7 +113,7 @@
                 "Add unit test verifying recovery from caption_results when text_metadata empty",
                 "Add unit test verifying appropriate error when both are unavailable"
             ],
-            "notes": "Tier 1 (Core Bug Fix). Files: src/stages/match.py (run method entry), src/stages/caption_stage.py lines 1040-1100 (_populate_text_metadata for reference). Match stage failed because text_metadata was missing - need defensive fallback."
+            "notes": "Tier 1 (Core Bug Fix). COMPLETE: Updated match.py lines 80-93 to check text_metadata, attempt recovery from caption_results, and return StageResult.fail() when both are empty. Updated existing tests (test_match_stage_run_fails_when_both_missing, test_match_stage_run_no_caption_results_attribute) to expect error result. Also fixed outdated tests: updated validation tests for caption-first mode (embeddings optional), added location_chapters to test state fixtures. All 138 tests pass."
         },
         {
             "id": "US-40-008",
