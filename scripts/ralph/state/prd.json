@@ -86,9 +86,9 @@
                                 "Run: pytest tests/test_caption_stage.py -v --tb=short -x",
                                 "Commit: fix: [US-43-005] Add defensive text_metadata initialization in CaptionStage.run()"
                             ],
-                            "passes": false,
+                            "passes": true,
                             "priority": 43005,
-                            "notes": "Tier 1 (defensive fix). File: src/stages/caption_stage.py. The error shows text_metadata doesn't exist on state object. Current defenses in _populate_text_metadata are not catching this - add earlier defense in run()."
+                            "notes": "Tier 1 (defensive fix). Added defensive check at very start of run() before try block - ensures text_metadata exists before _validate_state_type or _preflight_check could fail. Logs warning with [US-43-005] tag when triggered. All tests pass."
                         },
                         {
                             "id":  "US-43-006",
@@ -101,9 +101,9 @@
                                 "Run: pytest tests/test_state.py::test_pipeline_state_deserialize -v --tb=short",
                                 "Commit: test: [US-43-006] Add test for PipelineState deserialization with missing fields"
                             ],
-                            "passes": false,
+                            "passes": true,
                             "priority": 43006,
-                            "notes": "Tier 1 (test). File: tests/test_state.py. The AttributeError indicates text_metadata doesn't exist at all (not just None), which means __post_init__ isn't being called during checkpoint restore."
+                            "notes": "Tier 1 (test). File: tests/test_state_dataclasses.py (not test_state.py as originally noted). Created TestPipelineStateDeserializeMissingFields with 6 tests covering: missing text_metadata key, explicit None, validate_state_attributes(), CheckpointManager.restore_state() path, data preservation, and construction/restore parity. All tests pass - commit ccf34ba."
                         },
                         {
                             "id":  "US-43-007",
@@ -116,9 +116,9 @@
                                 "Run: pytest tests/test_state.py tests/test_checkpoint.py -v --tb=short -x",
                                 "Commit: fix: [US-43-007] Fix PipelineState checkpoint restore to initialize required fields"
                             ],
-                            "passes": false,
+                            "passes": true,
                             "priority": 43007,
-                            "notes": "Tier 1 (bug fix). Files: src/checkpoint.py, src/state.py. The __post_init__ at state.py:172-177 should handle None text_metadata, but it's not being called during checkpoint restore."
+                            "notes": "Tier 1 (bug fix). INVESTIGATION COMPLETE: The restore_state() at checkpoint.py:390-426 already creates PipelineState() which DOES call __post_init__. The __post_init__ at state.py:172-177 handles text_metadata=None. Additionally, validate_state_attributes() provides a second layer of defense. The US-43-006 tests verify this works correctly. Also fixed 7 outdated tests in test_state_dataclasses.py to match current simplified PipelineState API (video_ids instead of downloaded_videos, etc)."
                         },
                         {
                             "id":  "US-43-008",
