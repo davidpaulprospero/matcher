@@ -70,6 +70,36 @@ class CaptionStage(Stage):
         if config is not None:
             self._validate_language_config(config)
 
+    def _ensure_state_attributes(self, state: 'PipelineState') -> None:
+        """Ensure state has required attributes with defensive initialization.
+
+        US-37-010: Provides belt-and-suspenders protection for dynamically-added
+        attributes, ensuring compatibility with both new PipelineState instances
+        and legacy pipeline objects that may not have all attributes defined.
+
+        This follows the pattern established in PipelineState.from_legacy_pipeline()
+        where attributes are copied with getattr() defaults.
+        """
+        # Ensure text_metadata exists (required by _populate_text_metadata)
+        if not hasattr(state, 'text_metadata'):
+            state.text_metadata = []
+            logger.debug("Initialized missing text_metadata attribute on state")
+
+        # Ensure caption_results exists (stores caption data by video_id)
+        if not hasattr(state, 'caption_results'):
+            state.caption_results = {}
+            logger.debug("Initialized missing caption_results attribute on state")
+
+        # Ensure video_ids exists (input from VIDEO_SEARCH stage)
+        if not hasattr(state, 'video_ids'):
+            state.video_ids = []
+            logger.debug("Initialized missing video_ids attribute on state")
+
+        # Ensure video_search_results exists (full search metadata)
+        if not hasattr(state, 'video_search_results'):
+            state.video_search_results = []
+            logger.debug("Initialized missing video_search_results attribute on state")
+
     def run(
         self,
         state: 'PipelineState',
@@ -83,10 +113,15 @@ class CaptionStage(Stage):
 
         US-005: Validates language configuration before first fetch if not
         already validated at __init__.
+
+        US-37-010: Ensures state has required attributes before processing.
         """
         warnings = []
 
         try:
+            # US-37-010: Ensure state has required attributes (defensive initialization)
+            self._ensure_state_attributes(state)
+
             # Get caption config (caption fetching is always enabled)
             caption_config = getattr(config.download, 'caption_first', None)
 
@@ -200,6 +235,11 @@ class CaptionStage(Stage):
                         f"Caption retry budget enabled: max_attempts={retry_budget.max_attempts}, "
                         f"max_backoff_time={retry_budget.max_backoff_time}s"
                     )
+            else:
+                # US-38-002: Fallback initialization when config missing
+                # Create default budget with auto_scale=True to prevent exhaustion on large batches
+                retry_budget = CaptionRetryBudget.from_config(None)
+                logger.info("Using default retry budget (config missing)")
 
             # US-002 Sprint 7: Initialize caption cache for adaptive format ordering
             caption_cache = CaptionCache(caption_config)
@@ -544,9 +584,22 @@ class CaptionStage(Stage):
 
                 # US-37-003/US-37-004: Scale retry budget to batch size if auto_scale enabled
                 # Default max_attempts=100 is insufficient for large batches (175+ videos)
-                if retry_budget and retry_budget.auto_scale:
-                    batch_size = len(ids_to_fetch)
-                    retry_budget.scale_to_batch_size(batch_size)
+                # US-38-003: Log budget scaling decision for debugging
+                batch_size = len(ids_to_fetch)
+                if retry_budget:
+                    if retry_budget.auto_scale:
+                        logger.info(f"Retry budget auto_scale enabled, batch_size={batch_size}")
+                        old_max = retry_budget.max_attempts
+                        new_max = retry_budget.scale_to_batch_size(batch_size)
+                        if new_max != old_max:
+                            logger.info(f"Retry budget scaled: {old_max} -> {new_max} for {batch_size} videos")
+                    else:
+                        # Warn if auto_scale disabled and batch is large enough to risk exhaustion
+                        if batch_size > retry_budget.max_attempts:
+                            logger.warning(
+                                f"Retry budget auto_scale DISABLED, max_attempts={retry_budget.max_attempts} "
+                                f"may be insufficient for batch of {batch_size}"
+                            )
 
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
@@ -1070,6 +1123,11 @@ class CaptionStage(Stage):
                     'caption_quality': caption_quality,  # US-007: Quality indicator
                     'timing_penalty': timing_penalty,  # US-008 Sprint 7: Timing penalty factor
                 })
+
+        # US-37-010: Defensive check before extending (belt-and-suspenders)
+        if not hasattr(state, 'text_metadata'):
+            state.text_metadata = []
+            logger.debug("Initialized missing text_metadata in _populate_text_metadata")
 
         # Extend existing text_metadata (don't replace, as TRANSCRIBE may add more)
         state.text_metadata.extend(text_metadata)

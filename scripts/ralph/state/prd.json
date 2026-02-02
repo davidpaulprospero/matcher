@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 37,
-    "focusArea": "caption",
-    "branchName": "ralph/sprint-37",
+    "sprintNumber": 38,
+    "focusArea": "transcription",
+    "branchName": "ralph/sprint-38",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,189 +11,180 @@
     },
     "userStories": [
         {
-            "id": "US-37-001",
-            "title": "Generate sprint stories for caption focus area",
+            "id": "US-38-001",
+            "title": "Generate sprint stories for transcription focus area",
             "priority": "high",
-            "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'caption' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'transcription' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'caption'",
-                "Add stories US-37-002 through US-37-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'transcription'",
+                "Add stories US-38-002 through US-38-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-37-NNN to be unique across sprints",
-                "Mark this story (US-37-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-38-NNN to be unique across sprints",
+                "Mark this story (US-38-001) as passes: true when done"
             ],
-            "notes": "Story generation complete. Generated 11 stories (US-37-002 through US-37-012) addressing the two critical issues: (1) Missing text_metadata attribute on PipelineState causing AttributeError, (2) CaptionRetryBudget exhaustion at 100 attempts causing 75+ videos to be skipped."
-        },
-        {
-            "id": "US-37-002",
-            "title": "Add text_metadata attribute to PipelineState class",
-            "priority": "critical",
             "passes": true,
-            "acceptanceCriteria": [
-                "Add `text_metadata: List[Dict[str, Any]] = field(default_factory=list)` to PipelineState dataclass in src/state.py",
-                "Attribute is placed in the CAPTION STATE section after caption_results (line ~149)",
-                "Type hint uses `List[Dict[str, Any]]` matching the pattern in _populate_text_metadata",
-                "Unit test verifies new PipelineState instance has empty text_metadata list",
-                "Unit test verifies text_metadata.extend() works without AttributeError",
-                "Pipeline runs without AttributeError at caption_stage.py:1053"
-            ],
-            "notes": "COMPLETE. Added text_metadata field to PipelineState in src/state.py:150. Added 5 unit tests in tests/test_state_dataclasses.py::TestPipelineStateTextMetadata. All tests pass, main.py runs without errors."
+            "notes": "Sprint 38 stories generated based on analysis of caption budget exhaustion and text_metadata AttributeError issues."
         },
         {
-            "id": "US-37-003",
-            "title": "Scale CaptionRetryBudget max_attempts proportional to batch size",
-            "priority": "critical",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Modify CaptionRetryBudget to support dynamic max_attempts based on batch size",
-                "Add `scale_to_batch_size(batch_size: int, attempts_per_video: float = 1.5)` method",
-                "Default max_attempts stays at 100 but scales up when batch > 67 videos",
-                "For 175 videos, max_attempts becomes ~263 (175 * 1.5) ensuring all videos can be attempted",
-                "CaptionStage calls scale_to_batch_size() before starting batch fetch",
-                "Unit test verifies budget scales correctly: 50 videos -> 100, 175 videos -> 263"
-            ],
-            "notes": "COMPLETE. Added scale_to_batch_size() method to CaptionRetryBudget in src/caption/retry_budget.py:313-355. CaptionStage calls it at line 547-550 before batch fetch. Added 11 unit tests in TestCaptionRetryBudgetScaleToBatchSize. All 65 tests pass."
-        },
-        {
-            "id": "US-37-004",
-            "title": "Add batch size config option for retry budget scaling",
+            "id": "US-38-002",
+            "title": "Add retry_budget fallback initialization when config missing",
             "priority": "high",
-            "passes": true,
             "acceptanceCriteria": [
-                "Add `attempts_per_video: float = 1.5` field to CaptionRetryBudgetConfig in download.py",
-                "Add `auto_scale: bool = True` field to enable/disable automatic scaling",
-                "Update config.yaml with new options under download.caption_first.retry_budget",
-                "CaptionRetryBudget.from_config() reads and applies new settings",
-                "Unit test verifies config values are correctly loaded from dict and dataclass",
-                "Documentation comment explains the 1.5 multiplier (1 attempt + avg 0.5 retries)"
+                "When caption_config.retry_budget is None or missing, create a default CaptionRetryBudget with auto_scale=True",
+                "Log INFO message when using fallback: 'Using default retry budget (config missing)'",
+                "The fallback budget MUST have auto_scale=True to prevent budget exhaustion on large batches",
+                "Add unit test verifying fallback is created when rb_config is None",
+                "Add unit test verifying fallback has auto_scale=True by default"
             ],
-            "notes": "COMPLETE. Added auto_scale and attempts_per_video fields to CaptionRetryBudgetConfig in both src/config/sections/download.py and src/caption/retry_budget.py. Updated config.yaml with retry_budget section. Updated from_config() to read new settings. CaptionStage respects auto_scale flag. Added 9 unit tests for config loading. All 72 tests in test_caption_retry_budget.py pass."
+            "passes": true,
+            "notes": "Tier 1 (quick fix). Target: src/stages/caption_stage.py:226-237. Root cause of budget exhaustion: when retry_budget config section is absent, retry_budget stays None and no budget protection exists. This caused 100/100 exhaustion on 175 video batch."
         },
         {
-            "id": "US-37-005",
-            "title": "Add detailed logging for retry budget consumption",
+            "id": "US-38-003",
+            "title": "Log budget scaling decision for debugging",
             "priority": "medium",
-            "passes": true,
             "acceptanceCriteria": [
-                "Log the error category (NETWORK, TIMEOUT, RATE_LIMIT, etc.) when recording failures",
-                "Log budget remaining after each attempt: 'CaptionRetryBudget: {remaining}/{max} attempts remaining'",
-                "Log when budget reaches 50% and 75% consumption thresholds",
-                "Add summary log when batch completes: success rate, skipped count, top error categories",
-                "Existing log at INFO level; add DEBUG level for per-video tracking",
-                "Unit test verifies threshold warnings are logged at correct consumption levels"
+                "Log INFO when auto_scale is enabled: 'Retry budget auto_scale enabled, batch_size={N}'",
+                "Log INFO after scaling: 'Retry budget scaled: {old} -> {new} for {batch_size} videos'",
+                "Log WARNING when auto_scale is disabled: 'Retry budget auto_scale DISABLED, max_attempts={N} may be insufficient for batch of {batch_size}'",
+                "Add unit test verifying INFO log when scaling occurs",
+                "Add unit test verifying WARNING log when auto_scale is False with large batch"
             ],
-            "notes": "COMPLETE. Added get_consumption_percentage() method returning percentage consumed. Added _log_consumption_status() and _check_and_log_threshold() for threshold-based logging at 25/50/75/90%. Updated record_attempt/failure/backoff to call threshold check. Logs INFO at 25/50/75%, WARNING at 90% with success/failure counts. Added 15 unit tests in test_caption_retry_budget.py. All 87 tests pass."
+            "passes": true,
+            "notes": "Tier 2 (diagnostic). Target: src/stages/caption_stage.py:585-602. Added budget scaling decision logging with INFO for auto_scale enabled and WARNING for disabled with large batch. Tests in TestBudgetScalingLogging class."
         },
         {
-            "id": "US-37-006",
-            "title": "Add error category tracking to CaptionRetryBudget",
+            "id": "US-38-004",
+            "title": "Add budget status to batch progress report",
             "priority": "medium",
-            "passes": true,
             "acceptanceCriteria": [
-                "Add `error_counts: Dict[CaptionErrorCategory, int]` field to CaptionRetryBudget",
-                "Modify record_failure() to accept optional error_category parameter",
-                "Update batch_processor.py to pass error category when recording failures",
-                "Add get_top_errors() method returning sorted list of (category, count) tuples",
-                "Include error breakdown in get_summary() output",
-                "Unit test verifies error categories are tracked correctly across multiple failures"
+                "Include budget consumption percentage in caption progress callback details",
+                "Add 'budget_consumed_pct' key to progress callback details dict",
+                "Progress display shows budget status when >50% consumed: '[75/175] abc123: ... (budget: 75%)'",
+                "Add unit test verifying budget_consumed_pct is included in callback details",
+                "Add unit test verifying progress format includes budget when >50%"
             ],
-            "notes": "COMPLETE. Added error_counts field (line 90), modified record_failure() to accept error_category (lines 163-182), added get_top_errors() method (lines 239-261), added error_breakdown to get_summary() (lines 417-418), updated batch_processor.py to call categorize_caption_error() and pass category (lines 376-379). Updated to_dict/from_dict and reset() for serialization. Added 24 unit tests in test_caption_retry_budget.py covering error tracking, get_top_errors, serialization, reset, and integration scenarios. All 111 tests pass."
-        },
-        {
-            "id": "US-37-007",
-            "title": "Add budget checkpoint persistence for resume support",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "CaptionRetryBudget.to_dict() includes error_counts in serialization",
-                "CaptionRetryBudget.from_dict() restores error_counts from checkpoint",
-                "CaptionStage saves budget state to checkpoint after batch completion",
-                "CaptionStage restores budget state when resuming from checkpoint",
-                "Budget remaining is recalculated correctly on resume",
-                "Unit test verifies round-trip serialization preserves all budget state"
-            ],
-            "notes": "COMPLETE. to_dict() and from_dict() already included error_counts from US-37-006. Added retry_budget to checkpoint_data in CaptionStage (line 762-763). Added restore logging for retry_budget in restore() method (lines 815-822). Added 6 unit tests in TestCaptionRetryBudgetCheckpointPersistence covering: to_dict includes all state, from_dict restores all state, budget remaining correct on resume, exhausted budget preserved, complete roundtrip, partial data with defaults. All 117 tests in test_caption_retry_budget.py pass."
-        },
-        {
-            "id": "US-37-008",
-            "title": "Add budget exhaustion recovery with VPN rotation trigger",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "When budget exhausts due to >50% RATE_LIMIT errors, trigger VPN rotation if enabled",
-                "After VPN rotation, reset budget and retry remaining videos",
-                "Add `trigger_vpn_rotation_on_rate_limit: bool = True` config option",
-                "Limit VPN-triggered budget resets to max 2 per session to prevent loops",
-                "Log VPN rotation trigger: 'Budget exhausted with {rate_limit_pct}% rate limit errors, rotating VPN'",
-                "Integration test verifies VPN rotation resets budget (requires mock VPN)"
-            ],
-            "notes": "COMPLETE. Added get_rate_limit_error_percentage() method, should_trigger_vpn_rotation() method with >50% threshold check, record_vpn_reset() method, and can_vpn_reset() method to CaptionRetryBudget. Added trigger_vpn_on_rate_limit, max_vpn_resets, and vpn_resets_used fields. Config options added to CaptionRetryBudgetConfig in both src/caption/retry_budget.py and src/config/sections/download.py. Updated config.yaml with trigger_vpn_rotation_on_rate_limit and max_vpn_resets_per_session. Updated to_dict/from_dict for VPN state serialization. Updated reset() to preserve VPN count by default. Added 23 unit tests in TestCaptionRetryBudgetVPNRotationTrigger and TestCaptionRetryBudgetVPNRotationIntegration covering: rate limit percentage calculation, VPN rotation triggering conditions, config options, serialization, logging, and complete workflow. All 140 tests in test_caption_retry_budget.py pass."
-        },
-        {
-            "id": "US-37-009",
-            "title": "Add early termination when success rate drops below threshold",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add `min_success_rate: float = 0.3` config option to CaptionRetryBudgetConfig",
-                "After processing 20+ videos, check if success rate < min_success_rate",
-                "If success rate too low, log warning and skip remaining videos gracefully",
-                "Add `early_terminated: bool` flag to budget state for checkpoint",
-                "BatchResult includes early_termination_reason when terminated",
-                "Unit test verifies early termination triggers at 20% success rate"
-            ],
-            "notes": "COMPLETE. Added min_success_rate and min_sample_for_early_termination config options to both CaptionRetryBudgetConfig dataclasses (src/caption/retry_budget.py and src/config/sections/download.py). Added get_success_rate(), should_terminate_early(), check_and_terminate_early(), and is_early_terminated() methods to CaptionRetryBudget. Added early_terminated and early_termination_reason fields with full serialization support. Updated BatchResult with early_termination_reason field. Updated config.yaml with new options. Added 21 unit tests in TestCaptionRetryBudgetEarlyTermination and TestCaptionRetryBudgetEarlyTerminationIntegration. All 161 tests in test_caption_retry_budget.py pass."
-        },
-        {
-            "id": "US-37-010",
-            "title": "Consolidate text_metadata population with defensive initialization",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add hasattr check before extending text_metadata: `if not hasattr(state, 'text_metadata'): state.text_metadata = []`",
-                "Apply same defensive pattern for other dynamically-added attributes",
-                "Add _ensure_state_attributes() helper method to CaptionStage",
-                "Call _ensure_state_attributes() at start of run() method",
-                "Remove any duplicate text_metadata initialization elsewhere",
-                "Unit test verifies both legacy and new PipelineState objects work"
-            ],
-            "notes": "COMPLETE. Added _ensure_state_attributes() helper method to CaptionStage (src/stages/caption_stage.py:73-100) that defensively initializes text_metadata, caption_results, video_ids, and video_search_results if missing. Called at start of run() method (line 121). Added hasattr check in _populate_text_metadata() (line 1098) as belt-and-suspenders. Added 8 unit tests in tests/test_stage_caption.py: TestCaptionStageDefensiveInitialization (6 tests) and TestCaptionStageLegacyStateCompatibility (2 tests). All tests pass."
-        },
-        {
-            "id": "US-37-011",
-            "title": "Add CaptionStage batch progress reporting",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Log progress every 25 videos: '[50/175] 45 success, 3 failed, 2 skipped'",
-                "Log budget consumption alongside progress: '(budget: 67/263 attempts used)'",
-                "Add estimated time remaining based on average fetch time",
-                "Progress callback updates checkpoint with partial results",
-                "Progress is visible in non-verbose mode (INFO level)",
-                "Unit test verifies progress logging at correct intervals"
-            ],
-            "notes": "COMPLETE. Implementation already existed in batch_processor.py:466-512 (_log_batch_progress) and :543-556 (interval checking). Added progress_report_interval=25 config option (line 72). 8 unit tests in TestBatchProcessorProgressReporting verify: interval config, progress logging at intervals, success/fail/skip counts, budget consumption, ETA, callback firing, INFO level logging, and checkpoint partial results. All 23 tests in test_batch_processor.py pass."
-        },
-        {
-            "id": "US-37-012",
-            "title": "Add integration test for caption stage with large batch",
-            "priority": "low",
             "passes": false,
+            "notes": "Tier 2 (diagnostic). Target: src/stages/caption_stage.py:515-553 (on_progress callback), src/caption_fetcher.py:3403-3500 (fetch_single). Helps users understand budget consumption in real-time."
+        },
+        {
+            "id": "US-38-005",
+            "title": "Add comprehensive caption stage integration test",
+            "priority": "high",
             "acceptanceCriteria": [
-                "Create test_caption_stage_large_batch.py in tests/integration/",
-                "Test fixture generates 200 mock video IDs",
-                "Test verifies budget scales correctly for large batch",
-                "Test verifies text_metadata is populated without AttributeError",
-                "Test verifies early termination works when success rate drops",
-                "Test marked with @pytest.mark.integration for selective runs"
+                "Create tests/integration/test_caption_stage_budget.py",
+                "Test verifies retry_budget fallback is created when config missing",
+                "Test verifies budget scales correctly for 175+ video batch",
+                "Test verifies budget exhaustion triggers VPN rotation when rate_limit_pct > 50%",
+                "Test verifies early termination when success_rate < 30%",
+                "All tests marked with @pytest.mark.integration"
             ],
-            "notes": "Tier: T2-Medium (test coverage). Source files: tests/integration/ (new file), src/stages/caption_stage.py. Integration test ensures the fixes work together for realistic batch sizes. Uses mocked CaptionFetcher to avoid network calls."
+            "passes": false,
+            "notes": "Tier 2 (testing). New file: tests/integration/test_caption_stage_budget.py. Complements existing test_caption_stage_large_batch.py with focus on budget edge cases."
+        },
+        {
+            "id": "US-38-006",
+            "title": "Add transcription cache stale entry cleanup",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Add cleanup_stale_entries(max_age_days: int = 30) method to TranscriptCache",
+                "Method removes cache entries older than max_age_days",
+                "Method returns count of entries removed",
+                "Add unit test verifying stale entries are removed",
+                "Add unit test verifying recent entries are preserved"
+            ],
+            "passes": false,
+            "notes": "Tier 3 (enhancement). Target: src/transcription/cache.py. Cache can grow unbounded over time. Pattern from src/cache/base.py cleanup methods."
+        },
+        {
+            "id": "US-38-007",
+            "title": "Add WhisperClient memory cleanup logging",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Log GPU memory usage before model initialization in get_model()",
+                "Log GPU memory usage after model initialization",
+                "Log memory delta in cleanup_model() function",
+                "Add unit test verifying memory logging occurs during init (mock torch.cuda)",
+                "Add unit test verifying memory logging occurs during cleanup"
+            ],
+            "passes": false,
+            "notes": "Tier 3 (diagnostic). Target: src/transcription/whisper_client.py:51-130, cleanup_model function. Helps debug GPU memory issues during long pipeline runs."
+        },
+        {
+            "id": "US-38-008",
+            "title": "Add PipelineState.text_metadata defensive initialization in __post_init__",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "Add __post_init__ method to PipelineState dataclass if not present",
+                "In __post_init__, ensure text_metadata is initialized to empty list if None",
+                "Add unit test verifying text_metadata is never None after PipelineState creation",
+                "Add unit test verifying text_metadata is preserved if already set",
+                "Pattern follows from_legacy_pipeline() defensive initialization style"
+            ],
+            "passes": false,
+            "notes": "Tier 1 (bug fix). Target: src/state.py:127-262 (PipelineState class). Belt-and-suspenders fix for AttributeError. US-37-010 added runtime check, this adds init-time guarantee."
+        },
+        {
+            "id": "US-38-009",
+            "title": "Add batch size to retry budget summary logging",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Add batch_size field to CaptionRetryBudget dataclass",
+                "Set batch_size when scale_to_batch_size() is called",
+                "Include batch_size in get_summary() output",
+                "Include batch_size in to_dict() for checkpoint persistence",
+                "Add unit test verifying batch_size is included in summary"
+            ],
+            "passes": false,
+            "notes": "Tier 2 (diagnostic). Target: src/caption/retry_budget.py:67-127 (CaptionRetryBudget dataclass). Helps debugging by showing what batch size the budget was scaled for."
+        },
+        {
+            "id": "US-38-010",
+            "title": "Add validation warning when budget may be insufficient",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Add _validate_budget_for_batch(batch_size) method to CaptionStage",
+                "Method logs WARNING if max_attempts < batch_size (not enough for 1 attempt each)",
+                "Method logs WARNING if auto_scale=False and batch_size > 100",
+                "Call validation after retry_budget initialization, before batch fetch",
+                "Add unit test verifying WARNING is logged for insufficient budget"
+            ],
+            "passes": false,
+            "notes": "Tier 2 (validation). Target: src/stages/caption_stage.py:220-237. Proactive warning helps users understand potential budget issues before they cause failures."
+        },
+        {
+            "id": "US-38-011",
+            "title": "Add caption_results to state before processing in error path",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "Store caption_results in state.caption_results BEFORE calling _populate_text_metadata",
+                "If _populate_text_metadata fails, caption_results are still preserved in state for debugging",
+                "Add error logging with caption_results summary if _populate_text_metadata fails",
+                "Add unit test verifying caption_results is set even if _populate_text_metadata raises",
+                "Add unit test verifying error log includes caption_results count"
+            ],
+            "passes": false,
+            "notes": "Tier 1 (bug fix). Target: src/stages/caption_stage.py:680-690. Currently caption_results are lost if _populate_text_metadata fails. The error traceback shows 99 succeeded but data was lost."
+        },
+        {
+            "id": "US-38-012",
+            "title": "Add transcription parallel processor retry for transient failures",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Add retry logic to transcribe_video() for transient Whisper errors",
+                "Retry up to 2 times with exponential backoff (1s, 2s) on WhisperError",
+                "Log WARNING on retry: 'Retrying transcription for {video_id} after {error}'",
+                "Do NOT retry on file not found or permission errors",
+                "Add unit test verifying retry occurs on transient error",
+                "Add unit test verifying no retry on file not found"
+            ],
+            "passes": false,
+            "notes": "Tier 3 (resilience). Target: src/transcription/parallel_processor.py transcribe_video function. Pattern from caption fetcher retry logic. Whisper can occasionally fail on GPU memory pressure."
         }
     ]
 }

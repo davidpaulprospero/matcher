@@ -2465,3 +2465,356 @@ class TestCaptionRetryBudgetVPNRotationIntegration:
         assert restored.can_vpn_reset()
         # Note: trigger_vpn_on_rate_limit is not serialized (config setting)
         # but from_dict defaults it to True
+
+
+class TestCaptionRetryBudgetEarlyTermination:
+    """Tests for early termination when success rate drops below threshold (US-37-009)."""
+
+    @pytest.mark.fast
+    def test_get_success_rate_no_data(self):
+        """Test success rate returns 1.0 when no data."""
+        budget = CaptionRetryBudget()
+        assert budget.get_success_rate() == 1.0
+
+    @pytest.mark.fast
+    def test_get_success_rate_all_success(self):
+        """Test success rate with all successes."""
+        budget = CaptionRetryBudget()
+        for i in range(10):
+            budget.record_success(f"video_{i}")
+        assert budget.get_success_rate() == 1.0
+
+    @pytest.mark.fast
+    def test_get_success_rate_all_failures(self):
+        """Test success rate with all failures."""
+        budget = CaptionRetryBudget()
+        for i in range(10):
+            budget.record_failure(f"video_{i}")
+        assert budget.get_success_rate() == 0.0
+
+    @pytest.mark.fast
+    def test_get_success_rate_mixed(self):
+        """Test success rate with mixed results."""
+        budget = CaptionRetryBudget()
+        # 3 successes, 7 failures = 30% success rate
+        for i in range(3):
+            budget.record_success(f"success_{i}")
+        for i in range(7):
+            budget.record_failure(f"fail_{i}")
+        assert budget.get_success_rate() == 0.3
+
+    @pytest.mark.fast
+    def test_should_terminate_early_insufficient_sample(self):
+        """Test no early termination before min_sample reached."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Process only 10 videos with 0% success rate
+        for i in range(10):
+            budget.record_failure(f"video_{i}")
+
+        # Should not terminate - insufficient sample
+        assert not budget.should_terminate_early()
+        assert not budget.early_terminated
+
+    @pytest.mark.fast
+    def test_should_terminate_early_low_success_rate(self):
+        """Test early termination triggers at low success rate."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Process 25 videos with 20% success rate (below 30% threshold)
+        for i in range(5):
+            budget.record_success(f"success_{i}")
+        for i in range(20):
+            budget.record_failure(f"fail_{i}")
+
+        assert budget.should_terminate_early()
+
+    @pytest.mark.fast
+    def test_should_terminate_early_acceptable_rate(self):
+        """Test no early termination when success rate is acceptable."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Process 25 videos with 40% success rate (above 30% threshold)
+        for i in range(10):
+            budget.record_success(f"success_{i}")
+        for i in range(15):
+            budget.record_failure(f"fail_{i}")
+
+        assert not budget.should_terminate_early()
+
+    @pytest.mark.fast
+    def test_check_and_terminate_early(self):
+        """Test check_and_terminate_early sets flags and logs."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Process 25 videos with 20% success rate
+        for i in range(5):
+            budget.record_success(f"success_{i}")
+        for i in range(20):
+            budget.record_failure(f"fail_{i}")
+
+        # First call should trigger termination
+        with patch('src.caption.retry_budget.logger') as mock_logger:
+            result = budget.check_and_terminate_early()
+
+            assert result is True
+            assert budget.early_terminated is True
+            assert budget.early_termination_reason is not None
+            assert "20.0%" in budget.early_termination_reason
+            assert "30.0%" in budget.early_termination_reason
+
+            # Verify warning was logged
+            warning_calls = [c for c in mock_logger.warning.call_args_list
+                           if 'EARLY TERMINATION' in str(c)]
+            assert len(warning_calls) >= 1
+
+    @pytest.mark.fast
+    def test_check_and_terminate_early_no_double_trigger(self):
+        """Test early termination only triggers once."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Process videos to trigger termination
+        for i in range(5):
+            budget.record_success(f"success_{i}")
+        for i in range(20):
+            budget.record_failure(f"fail_{i}")
+
+        # First call triggers
+        assert budget.check_and_terminate_early() is True
+
+        # Second call should not trigger again
+        assert budget.check_and_terminate_early() is False
+        assert budget.should_terminate_early() is False
+
+    @pytest.mark.fast
+    def test_is_early_terminated(self):
+        """Test is_early_terminated returns correct flag state."""
+        budget = CaptionRetryBudget()
+        assert budget.is_early_terminated() is False
+
+        budget.early_terminated = True
+        assert budget.is_early_terminated() is True
+
+    @pytest.mark.fast
+    def test_early_termination_in_summary(self):
+        """Test early termination state appears in summary."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 10
+        budget.min_success_rate = 0.3
+
+        # Trigger early termination
+        for i in range(2):
+            budget.record_success(f"success_{i}")
+        for i in range(10):
+            budget.record_failure(f"fail_{i}")
+        budget.check_and_terminate_early()
+
+        summary = budget.get_summary()
+        assert summary['early_terminated'] is True
+        assert summary['early_termination_reason'] is not None
+        assert summary['success_rate'] < 0.3
+
+    @pytest.mark.fast
+    def test_early_termination_serialization(self):
+        """Test early termination state survives serialization."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 10
+        budget.min_success_rate = 0.3
+
+        # Trigger early termination
+        for i in range(2):
+            budget.record_success(f"success_{i}")
+        for i in range(10):
+            budget.record_failure(f"fail_{i}")
+        budget.check_and_terminate_early()
+
+        # Serialize and restore
+        data = budget.to_dict()
+        restored = CaptionRetryBudget.from_dict(data)
+
+        assert restored.early_terminated is True
+        assert restored.early_termination_reason == budget.early_termination_reason
+
+    @pytest.mark.fast
+    def test_early_termination_reset(self):
+        """Test reset clears early termination state."""
+        budget = CaptionRetryBudget()
+        budget.early_terminated = True
+        budget.early_termination_reason = "test reason"
+
+        budget.reset()
+
+        assert budget.early_terminated is False
+        assert budget.early_termination_reason is None
+
+    @pytest.mark.fast
+    def test_config_min_success_rate(self):
+        """Test min_success_rate loaded from config."""
+        config = CaptionRetryBudgetConfig(
+            min_success_rate=0.5,
+            min_sample_for_early_termination=30
+        )
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.min_success_rate == 0.5
+        assert budget.min_sample_for_early_termination == 30
+
+    @pytest.mark.fast
+    def test_config_min_success_rate_from_dict(self):
+        """Test min_success_rate loaded from dict config."""
+        config = {
+            'min_success_rate': 0.25,
+            'min_sample_for_early_termination': 15
+        }
+        budget = CaptionRetryBudget.from_config(config)
+
+        assert budget.min_success_rate == 0.25
+        assert budget.min_sample_for_early_termination == 15
+
+    @pytest.mark.fast
+    def test_early_termination_at_20_percent(self):
+        """Test early termination triggers at exactly 20% success rate (below 30%)."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # 4 successes + 16 failures = 20% success rate
+        for i in range(4):
+            budget.record_success(f"success_{i}")
+        for i in range(16):
+            budget.record_failure(f"fail_{i}")
+
+        # 20% < 30%, should terminate
+        assert budget.get_success_rate() == 0.2
+        assert budget.should_terminate_early()
+
+    @pytest.mark.fast
+    def test_early_termination_at_threshold_boundary(self):
+        """Test boundary: exactly 30% success rate should NOT terminate."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # 6 successes + 14 failures = 30% success rate
+        for i in range(6):
+            budget.record_success(f"success_{i}")
+        for i in range(14):
+            budget.record_failure(f"fail_{i}")
+
+        # 30% == 30%, should NOT terminate (only < threshold triggers)
+        assert budget.get_success_rate() == 0.3
+        assert not budget.should_terminate_early()
+
+
+class TestCaptionRetryBudgetEarlyTerminationIntegration:
+    """Integration tests for early termination feature (US-37-009)."""
+
+    @pytest.mark.fast
+    def test_realistic_workflow_high_failure_rate(self):
+        """Test realistic workflow with high failure rate leading to termination."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Simulate fetching videos - some succeed, most fail
+        processed = 0
+        terminated_at = None
+
+        for i in range(50):
+            budget.record_attempt(f"video_{i}")
+            # 10% success rate
+            if i % 10 == 0:
+                budget.record_success(f"video_{i}")
+            else:
+                budget.record_failure(f"video_{i}", error_category=CaptionErrorCategory.NETWORK)
+
+            processed += 1
+
+            # Check after each video if we should terminate
+            if budget.check_and_terminate_early():
+                terminated_at = processed
+                break
+
+        # Should have terminated around video 20-22 (once sample reached)
+        assert terminated_at is not None
+        assert terminated_at >= 20
+        assert terminated_at < 30
+        assert budget.early_terminated
+        assert "below threshold" in budget.early_termination_reason
+
+    @pytest.mark.fast
+    def test_realistic_workflow_success_recovery(self):
+        """Test workflow where success rate recovers and doesn't terminate."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # First 10 videos: 20% success
+        for i in range(2):
+            budget.record_success(f"success_1_{i}")
+        for i in range(8):
+            budget.record_failure(f"fail_1_{i}")
+
+        # Next 10 videos: 60% success (recovery)
+        for i in range(6):
+            budget.record_success(f"success_2_{i}")
+        for i in range(4):
+            budget.record_failure(f"fail_2_{i}")
+
+        # Overall: 8/20 = 40% success, should NOT terminate
+        assert not budget.should_terminate_early()
+        assert not budget.check_and_terminate_early()
+
+    @pytest.mark.fast
+    def test_budget_exhaustion_vs_early_termination(self):
+        """Test that budget exhaustion takes precedence over early termination check."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 10
+        budget.min_sample_for_early_termination = 20  # Won't reach this
+        budget.min_success_rate = 0.3
+
+        # Exhaust budget before reaching sample threshold
+        for i in range(10):
+            budget.record_attempt(f"video_{i}")
+            budget.record_failure(f"video_{i}")
+
+        # Budget should be exhausted
+        assert budget.budget_exhausted()
+        # Early termination check shouldn't trigger (insufficient sample)
+        assert not budget.should_terminate_early()
+
+    @pytest.mark.fast
+    def test_early_termination_with_error_tracking(self):
+        """Test early termination works with error category tracking."""
+        budget = CaptionRetryBudget()
+        budget.min_sample_for_early_termination = 20
+        budget.min_success_rate = 0.3
+
+        # Process with various error categories
+        for i in range(4):
+            budget.record_success(f"success_{i}")
+        for i in range(8):
+            budget.record_failure(f"fail_{i}", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for i in range(8):
+            budget.record_failure(f"fail2_{i}", error_category=CaptionErrorCategory.NETWORK)
+
+        # Should terminate (4/20 = 20% < 30%)
+        assert budget.check_and_terminate_early()
+        assert budget.early_terminated
+
+        # Error tracking should still work
+        top_errors = budget.get_top_errors()
+        assert len(top_errors) == 2
+        # Both RATE_LIMIT and NETWORK have 8 errors each

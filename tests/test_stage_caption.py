@@ -4235,3 +4235,479 @@ class TestCaptionStageRestoreFullUS003:
         restored = stage.restore(state, checkpoint, mock_config)
 
         assert restored is False
+
+
+# ============================================================================
+# US-37-010: Defensive State Initialization Tests
+# ============================================================================
+
+@pytest.mark.fast
+class TestCaptionStageDefensiveInitialization:
+    """Test _ensure_state_attributes() defensive initialization (US-37-010)."""
+
+    def test_ensure_state_attributes_on_new_pipeline_state(self):
+        """Test _ensure_state_attributes() on new PipelineState (already has attrs)."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        # State already has these attributes from dataclass definition
+        assert hasattr(state, 'text_metadata')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'video_ids')
+
+        # Calling should be a no-op, but shouldn't raise
+        stage._ensure_state_attributes(state)
+
+        # Attributes still valid
+        assert isinstance(state.text_metadata, list)
+        assert isinstance(state.caption_results, dict)
+        assert isinstance(state.video_ids, list)
+
+    @pytest.mark.fast
+    def test_ensure_state_attributes_on_legacy_object_missing_text_metadata(self):
+        """Test _ensure_state_attributes() initializes missing text_metadata."""
+        stage = CaptionStage()
+
+        # Create a mock object simulating legacy pipeline without text_metadata
+        class LegacyState:
+            def __init__(self):
+                self.caption_results = {}
+                self.video_ids = ['abc123', 'def456']
+                self.video_search_results = []
+                # Intentionally missing text_metadata
+
+        state = LegacyState()
+        assert not hasattr(state, 'text_metadata')
+
+        stage._ensure_state_attributes(state)
+
+        # Now text_metadata should exist
+        assert hasattr(state, 'text_metadata')
+        assert isinstance(state.text_metadata, list)
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_ensure_state_attributes_preserves_existing_data(self):
+        """Test _ensure_state_attributes() doesn't overwrite existing data."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        # Pre-populate state
+        state.text_metadata = [{'video_id': 'existing', 'text': 'data'}]
+        state.caption_results = {'existing': {'segments': []}}
+        state.video_ids = ['abc123']
+
+        stage._ensure_state_attributes(state)
+
+        # Data preserved
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_id'] == 'existing'
+        assert 'existing' in state.caption_results
+        assert state.video_ids == ['abc123']
+
+    @pytest.mark.fast
+    def test_ensure_state_attributes_initializes_all_missing(self):
+        """Test _ensure_state_attributes() initializes all missing attributes."""
+        stage = CaptionStage()
+
+        # Create bare object with no caption-related attributes
+        class BareState:
+            pass
+
+        state = BareState()
+
+        stage._ensure_state_attributes(state)
+
+        # All attributes should now exist
+        assert hasattr(state, 'text_metadata')
+        assert hasattr(state, 'caption_results')
+        assert hasattr(state, 'video_ids')
+        assert hasattr(state, 'video_search_results')
+
+        # All should be empty containers
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.video_ids == []
+        assert state.video_search_results == []
+
+    @pytest.mark.fast
+    def test_populate_text_metadata_defensive_check(self):
+        """Test _populate_text_metadata() defensive hasattr check."""
+        stage = CaptionStage()
+
+        # Create object missing text_metadata
+        class StateWithoutTextMetadata:
+            pass
+
+        state = StateWithoutTextMetadata()
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'Hello', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            }
+        }
+
+        # Should not raise AttributeError
+        stage._populate_text_metadata(state, caption_results)
+
+        # text_metadata should be populated
+        assert hasattr(state, 'text_metadata')
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['text'] == 'Hello'
+
+    @pytest.mark.fast
+    def test_populate_text_metadata_extends_existing(self):
+        """Test _populate_text_metadata() extends existing list."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        # Pre-populate with existing data
+        state.text_metadata = [{'video_id': 'pre_existing', 'text': 'old'}]
+
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'New caption', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            }
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        # Should have both old and new
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['video_id'] == 'pre_existing'
+        assert state.text_metadata[1]['text'] == 'New caption'
+
+
+@pytest.mark.fast
+class TestCaptionStageLegacyStateCompatibility:
+    """Test CaptionStage works with both new PipelineState and legacy objects."""
+
+    def test_works_with_mock_state_object(self, mock_config, mock_checkpoint):
+        """Test CaptionStage handles Mock state objects gracefully."""
+        stage = CaptionStage()
+        state = Mock()
+
+        # Configure mock to behave like missing attributes
+        state.configure_mock(**{
+            'video_ids': [],
+            'video_search_results': [],
+            'downloaded_audio': [],
+            'downloaded_videos': [],
+            'caption_results': {},
+        })
+
+        # hasattr on Mock returns True for any attribute by default
+        # So we need to test that our code handles this correctly
+        type(state).text_metadata = Mock(side_effect=AttributeError)
+        del state.text_metadata  # Remove the attribute
+
+        # This should initialize text_metadata
+        stage._ensure_state_attributes(state)
+
+        # Mock doesn't have proper hasattr behavior, but our code should handle it
+
+    @pytest.mark.fast
+    def test_works_with_dict_like_state(self):
+        """Test _populate_text_metadata skips unavailable results."""
+        stage = CaptionStage()
+        state = PipelineState()
+
+        caption_results = {
+            'good123': {
+                'segments': [{'text': 'Good', 'start': 0, 'end': 1}],
+                'language': 'en',
+                'is_auto_generated': False,
+            },
+            'unavailable': {
+                'unavailable': True,
+            },
+            'error': {
+                'error': 'Network timeout',
+            },
+        }
+
+        stage._populate_text_metadata(state, caption_results)
+
+        # Only good result should be in text_metadata
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_path'] == 'good123'
+
+
+# ============================================================================
+# Test Retry Budget Fallback Initialization (US-38-002)
+# ============================================================================
+
+@pytest.mark.fast
+class TestRetryBudgetFallbackInitialization:
+    """Test retry budget fallback when config is missing (US-38-002).
+
+    When caption_config.retry_budget is None or missing, CaptionStage should
+    create a default CaptionRetryBudget with auto_scale=True to prevent
+    budget exhaustion on large batches.
+    """
+
+    def test_fallback_created_when_rb_config_is_none(self, mock_checkpoint, mock_state_with_videos):
+        """Test fallback retry budget is created when rb_config is None."""
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Config with retry_budget = None (missing config section)
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.prefer_human_captions = True
+        config.download.caption_first.fallback_to_transcription = True
+        config.download.caption_first.timeout = 30
+        config.download.caption_first.cache_captions = True
+        config.download.caption_first.skip_live_streams = False
+        config.download.caption_first.max_parallel_fetches = 4
+        config.download.caption_first.min_coverage_threshold = 0.5
+        config.download.caption_first.pre_check_availability = False
+        config.download.caption_first.max_cache_age_days = 30
+        config.download.caption_first.cache_dir = '~/.matcher_caption_cache'
+        config.download.caption_first.cache_validation = 'warn'
+        config.download.caption_first.cache_validation_tolerance = 0.2
+        config.download.caption_first.retry_budget = None  # Missing config
+        config.download.cookies_from_browser = ""
+        config.download.cookies_path = ""
+
+        # Patch to capture the retry_budget that gets created
+        created_budget = None
+        original_from_config = CaptionRetryBudget.from_config
+
+        def capture_budget(cfg):
+            nonlocal created_budget
+            created_budget = original_from_config(cfg)
+            return created_budget
+
+        with patch.object(CaptionRetryBudget, 'from_config', side_effect=capture_budget), \
+             patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class:
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher.get_stats.return_value = {}
+            mock_fetcher_class.return_value = mock_fetcher
+
+            stage.run(mock_state_with_videos, config, mock_checkpoint)
+
+        # Verify fallback budget was created
+        assert created_budget is not None
+        assert isinstance(created_budget, CaptionRetryBudget)
+
+    def test_fallback_budget_has_auto_scale_true(self, mock_checkpoint, mock_state_with_videos):
+        """Test fallback retry budget has auto_scale=True by default (US-38-002)."""
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Config with retry_budget missing entirely (getattr returns None)
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.prefer_human_captions = True
+        config.download.caption_first.fallback_to_transcription = True
+        config.download.caption_first.timeout = 30
+        config.download.caption_first.cache_captions = True
+        config.download.caption_first.skip_live_streams = False
+        config.download.caption_first.max_parallel_fetches = 4
+        config.download.caption_first.min_coverage_threshold = 0.5
+        config.download.caption_first.pre_check_availability = False
+        config.download.caption_first.max_cache_age_days = 30
+        config.download.caption_first.cache_dir = '~/.matcher_caption_cache'
+        config.download.caption_first.cache_validation = 'warn'
+        config.download.caption_first.cache_validation_tolerance = 0.2
+        config.download.cookies_from_browser = ""
+        config.download.cookies_path = ""
+
+        # Make getattr return None for retry_budget
+        del config.download.caption_first.retry_budget
+
+        # Capture the retry_budget that gets created
+        created_budget = None
+        original_from_config = CaptionRetryBudget.from_config
+
+        def capture_budget(cfg):
+            nonlocal created_budget
+            created_budget = original_from_config(cfg)
+            return created_budget
+
+        with patch.object(CaptionRetryBudget, 'from_config', side_effect=capture_budget), \
+             patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class:
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher.get_stats.return_value = {}
+            mock_fetcher_class.return_value = mock_fetcher
+
+            stage.run(mock_state_with_videos, config, mock_checkpoint)
+
+        # Verify fallback budget has auto_scale=True
+        assert created_budget is not None
+        assert created_budget.auto_scale is True
+
+    def test_fallback_logs_info_message(self, mock_checkpoint, mock_state_with_videos, caplog):
+        """Test INFO message is logged when using fallback budget (US-38-002)."""
+        import logging
+
+        stage = CaptionStage()
+
+        # Config with retry_budget = None
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.prefer_human_captions = True
+        config.download.caption_first.fallback_to_transcription = True
+        config.download.caption_first.timeout = 30
+        config.download.caption_first.cache_captions = True
+        config.download.caption_first.skip_live_streams = False
+        config.download.caption_first.max_parallel_fetches = 4
+        config.download.caption_first.min_coverage_threshold = 0.5
+        config.download.caption_first.pre_check_availability = False
+        config.download.caption_first.max_cache_age_days = 30
+        config.download.caption_first.cache_dir = '~/.matcher_caption_cache'
+        config.download.caption_first.cache_validation = 'warn'
+        config.download.caption_first.cache_validation_tolerance = 0.2
+        config.download.caption_first.retry_budget = None  # Missing config
+        config.download.cookies_from_browser = ""
+        config.download.cookies_path = ""
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher.get_stats.return_value = {}
+            mock_fetcher_class.return_value = mock_fetcher
+
+            stage.run(mock_state_with_videos, config, mock_checkpoint)
+
+        # Verify log message
+        assert any('Using default retry budget (config missing)' in record.message
+                   for record in caplog.records)
+
+
+# ============================================================================
+# Test Budget Scaling Logging (US-38-003)
+# ============================================================================
+
+@pytest.mark.fast
+class TestBudgetScalingLogging:
+    """Test budget scaling decision logging (US-38-003).
+
+    When CaptionStage processes a batch, it should log:
+    - INFO when auto_scale is enabled
+    - INFO after scaling occurs
+    - WARNING when auto_scale is disabled with large batch
+    """
+
+    def test_logs_info_when_scaling_occurs(self, mock_checkpoint, caplog):
+        """Test INFO log when retry budget scales for large batch (US-38-003)."""
+        import logging
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Create state with enough videos to trigger scaling (20 videos > max_attempts=10)
+        state = PipelineState()
+        state.video_ids = [f"video_{i}" for i in range(20)]  # 20 videos * 1.5 = 30 > 10
+
+        # Create config with auto_scale enabled and low max_attempts to trigger scaling
+        retry_budget_config = MagicMock()
+        retry_budget_config.max_attempts = 10  # Low value to trigger scaling
+        retry_budget_config.max_backoff_time = 300
+        retry_budget_config.auto_scale = True
+        retry_budget_config.attempts_per_video = 1.5
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.prefer_human_captions = True
+        config.download.caption_first.fallback_to_transcription = True
+        config.download.caption_first.timeout = 30
+        config.download.caption_first.cache_captions = True
+        config.download.caption_first.skip_live_streams = False
+        config.download.caption_first.max_parallel_fetches = 4
+        config.download.caption_first.min_coverage_threshold = 0.5
+        config.download.caption_first.pre_check_availability = False
+        config.download.caption_first.max_cache_age_days = 30
+        config.download.caption_first.cache_dir = '~/.matcher_caption_cache'
+        config.download.caption_first.cache_validation = 'warn'
+        config.download.caption_first.cache_validation_tolerance = 0.2
+        config.download.caption_first.retry_budget = retry_budget_config
+        config.download.cookies_from_browser = ""
+        config.download.cookies_path = ""
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher.get_stats.return_value = {}
+            mock_fetcher_class.return_value = mock_fetcher
+
+            stage.run(state, config, mock_checkpoint)
+
+        # Verify INFO log when auto_scale is enabled
+        assert any('Retry budget auto_scale enabled' in record.message
+                   for record in caplog.records), \
+            f"Expected 'Retry budget auto_scale enabled' in logs. Got: {[r.message for r in caplog.records]}"
+
+        # Verify INFO log after scaling
+        assert any('Retry budget scaled:' in record.message and '->' in record.message
+                   for record in caplog.records), \
+            f"Expected 'Retry budget scaled: X -> Y' in logs. Got: {[r.message for r in caplog.records]}"
+
+    def test_logs_warning_when_auto_scale_disabled_large_batch(self, mock_checkpoint, caplog):
+        """Test WARNING log when auto_scale is disabled with large batch (US-38-003)."""
+        import logging
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        stage = CaptionStage()
+
+        # Create state with more videos than max_attempts (150 > 100)
+        state = PipelineState()
+        state.video_ids = [f"video_{i}" for i in range(150)]
+
+        # Config with auto_scale DISABLED
+        retry_budget_config = MagicMock()
+        retry_budget_config.max_attempts = 100
+        retry_budget_config.max_backoff_time = 300
+        retry_budget_config.auto_scale = False
+        retry_budget_config.attempts_per_video = 1.5
+
+        config = MagicMock()
+        config.download.caption_first.enabled = True
+        config.download.caption_first.preferred_language = "en"
+        config.download.caption_first.prefer_human_captions = True
+        config.download.caption_first.fallback_to_transcription = True
+        config.download.caption_first.timeout = 30
+        config.download.caption_first.cache_captions = True
+        config.download.caption_first.skip_live_streams = False
+        config.download.caption_first.max_parallel_fetches = 4
+        config.download.caption_first.min_coverage_threshold = 0.5
+        config.download.caption_first.pre_check_availability = False
+        config.download.caption_first.max_cache_age_days = 30
+        config.download.caption_first.cache_dir = '~/.matcher_caption_cache'
+        config.download.caption_first.cache_validation = 'warn'
+        config.download.caption_first.cache_validation_tolerance = 0.2
+        config.download.caption_first.retry_budget = retry_budget_config
+        config.download.cookies_from_browser = ""
+        config.download.cookies_path = ""
+
+        with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
+             caplog.at_level(logging.WARNING, logger='src.stages.caption_stage'):
+            mock_fetcher = MagicMock()
+            mock_fetcher.fetch_captions_batch.return_value = {}
+            mock_fetcher.get_stats.return_value = {}
+            mock_fetcher_class.return_value = mock_fetcher
+
+            stage.run(state, config, mock_checkpoint)
+
+        # Verify WARNING log when auto_scale is disabled with large batch
+        warning_found = any(
+            'auto_scale DISABLED' in record.message and
+            'may be insufficient' in record.message
+            for record in caplog.records
+        )
+        assert warning_found, \
+            f"Expected warning about auto_scale DISABLED. Got: {[r.message for r in caplog.records if r.levelname == 'WARNING']}"
