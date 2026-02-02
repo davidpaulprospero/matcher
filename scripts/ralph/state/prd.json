@@ -139,7 +139,7 @@
             "id": "US-37-009",
             "title": "Add early termination when success rate drops below threshold",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add `min_success_rate: float = 0.3` config option to CaptionRetryBudgetConfig",
                 "After processing 20+ videos, check if success rate < min_success_rate",
@@ -148,13 +148,13 @@
                 "BatchResult includes early_termination_reason when terminated",
                 "Unit test verifies early termination triggers at 20% success rate"
             ],
-            "notes": "Tier: T2-Medium (optimization). Source files: src/caption/retry_budget.py, src/caption/batch_processor.py:446-558. When 80%+ of fetches fail, continuing wastes time. Early termination saves time while preserving successful fetches for matching."
+            "notes": "COMPLETE. Added min_success_rate and min_sample_for_early_termination config options to both CaptionRetryBudgetConfig dataclasses (src/caption/retry_budget.py and src/config/sections/download.py). Added get_success_rate(), should_terminate_early(), check_and_terminate_early(), and is_early_terminated() methods to CaptionRetryBudget. Added early_terminated and early_termination_reason fields with full serialization support. Updated BatchResult with early_termination_reason field. Updated config.yaml with new options. Added 21 unit tests in TestCaptionRetryBudgetEarlyTermination and TestCaptionRetryBudgetEarlyTerminationIntegration. All 161 tests in test_caption_retry_budget.py pass."
         },
         {
             "id": "US-37-010",
             "title": "Consolidate text_metadata population with defensive initialization",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add hasattr check before extending text_metadata: `if not hasattr(state, 'text_metadata'): state.text_metadata = []`",
                 "Apply same defensive pattern for other dynamically-added attributes",
@@ -163,13 +163,13 @@
                 "Remove any duplicate text_metadata initialization elsewhere",
                 "Unit test verifies both legacy and new PipelineState objects work"
             ],
-            "notes": "Tier: T1-Simple (defensive coding). Source files: src/stages/caption_stage.py:647, src/stages/caption_stage.py:1053. This provides belt-and-suspenders protection even if PipelineState is instantiated without text_metadata field. Follows existing patterns in from_legacy_pipeline()."
+            "notes": "COMPLETE. Added _ensure_state_attributes() helper method to CaptionStage (src/stages/caption_stage.py:73-100) that defensively initializes text_metadata, caption_results, video_ids, and video_search_results if missing. Called at start of run() method (line 121). Added hasattr check in _populate_text_metadata() (line 1098) as belt-and-suspenders. Added 8 unit tests in tests/test_stage_caption.py: TestCaptionStageDefensiveInitialization (6 tests) and TestCaptionStageLegacyStateCompatibility (2 tests). All tests pass."
         },
         {
             "id": "US-37-011",
             "title": "Add CaptionStage batch progress reporting",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Log progress every 25 videos: '[50/175] 45 success, 3 failed, 2 skipped'",
                 "Log budget consumption alongside progress: '(budget: 67/263 attempts used)'",
@@ -178,7 +178,7 @@
                 "Progress is visible in non-verbose mode (INFO level)",
                 "Unit test verifies progress logging at correct intervals"
             ],
-            "notes": "Tier: T2-Medium (UX improvement). Source files: src/stages/caption_stage.py, src/caption/batch_processor.py:427-441 (_notify_progress). Current logging shows per-video status but no batch-level progress summary. Users can't easily tell how far along the batch is."
+            "notes": "COMPLETE. Implementation already existed in batch_processor.py:466-512 (_log_batch_progress) and :543-556 (interval checking). Added progress_report_interval=25 config option (line 72). 8 unit tests in TestBatchProcessorProgressReporting verify: interval config, progress logging at intervals, success/fail/skip counts, budget consumption, ETA, callback firing, INFO level logging, and checkpoint partial results. All 23 tests in test_batch_processor.py pass."
         },
         {
             "id": "US-37-012",

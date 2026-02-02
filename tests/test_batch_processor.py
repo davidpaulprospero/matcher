@@ -338,3 +338,305 @@ class TestBatchProcessorThreadSafety:
 
         assert len(callback_calls) == 10
         assert set(callback_calls) == set(videos)
+
+
+class TestBatchProcessorProgressReporting:
+    """Tests for batch progress reporting (US-37-011)."""
+
+    def test_progress_report_interval_config(self):
+        """BatchProcessorConfig includes progress_report_interval."""
+        from src.caption.batch_processor import BatchProcessorConfig
+
+        config = BatchProcessorConfig()
+        assert config.progress_report_interval == 25  # Default
+
+        config = BatchProcessorConfig(progress_report_interval=10)
+        assert config.progress_report_interval == 10
+
+    def test_batch_progress_logged_at_intervals(self, caplog):
+        """Progress is logged at correct intervals."""
+        import logging
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+
+        # Set log level to INFO to capture batch progress
+        caplog.set_level(logging.INFO)
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        # Use interval of 10 for faster testing
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=10)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Process 35 videos - should see progress at 10, 20, 30
+        videos = [f"vid{i:03d}" for i in range(35)]
+        processor.process(videos)
+
+        # Check that batch progress was logged
+        progress_logs = [
+            r.message for r in caplog.records
+            if "Batch progress:" in r.message
+        ]
+
+        # Should have 3 progress logs (at 10, 20, 30)
+        assert len(progress_logs) == 3
+
+        # Verify format: [N/35] X success, Y failed, Z skipped
+        assert "[10/35]" in progress_logs[0]
+        assert "[20/35]" in progress_logs[1]
+        assert "[30/35]" in progress_logs[2]
+
+    def test_batch_progress_includes_success_fail_skip_counts(self, caplog):
+        """Progress includes success, failed, and skipped counts."""
+        import logging
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.exceptions import CaptionFetchError
+
+        caplog.set_level(logging.INFO)
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        call_count = [0]
+
+        def mock_fetch(video_id, preferred_language=None):
+            call_count[0] += 1
+            # Alternate: success, fail, success, fail, ...
+            if call_count[0] % 2 == 0:
+                raise CaptionFetchError(video_id, "Test error")
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=10)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        videos = [f"vid{i:03d}" for i in range(20)]
+        processor.process(videos)
+
+        progress_logs = [
+            r.message for r in caplog.records
+            if "Batch progress:" in r.message
+        ]
+
+        # Should have progress log at video 10
+        assert len(progress_logs) >= 1
+        first_log = progress_logs[0]
+
+        # Check format includes counts
+        assert "success" in first_log
+        assert "failed" in first_log
+        assert "skipped" in first_log
+
+    def test_batch_progress_includes_budget_consumption(self, caplog):
+        """Progress includes budget consumption when retry_budget provided."""
+        import logging
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        caplog.set_level(logging.INFO)
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=10)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Create retry budget with known max
+        retry_budget = CaptionRetryBudget()
+        retry_budget.max_attempts = 100
+
+        videos = [f"vid{i:03d}" for i in range(15)]
+        processor.process(videos, retry_budget=retry_budget)
+
+        progress_logs = [
+            r.message for r in caplog.records
+            if "Batch progress:" in r.message
+        ]
+
+        assert len(progress_logs) >= 1
+        first_log = progress_logs[0]
+
+        # Check budget consumption is included
+        assert "budget:" in first_log
+        assert "attempts used" in first_log
+
+    def test_batch_progress_includes_eta(self, caplog):
+        """Progress includes ETA based on average fetch time."""
+        import logging
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+
+        caplog.set_level(logging.INFO)
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=10)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        videos = [f"vid{i:03d}" for i in range(15)]
+        processor.process(videos)
+
+        progress_logs = [
+            r.message for r in caplog.records
+            if "Batch progress:" in r.message
+        ]
+
+        assert len(progress_logs) >= 1
+        first_log = progress_logs[0]
+
+        # Check ETA is included
+        assert "ETA:" in first_log
+
+    def test_batch_progress_callback_fires(self):
+        """progress_callback receives batch_progress status events."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from typing import List, Dict
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=10)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Track batch_progress events
+        batch_progress_events: List[Dict] = []
+
+        def on_progress(video_id: str, status: str, details: Dict):
+            if status == 'batch_progress':
+                batch_progress_events.append(details)
+
+        videos = [f"vid{i:03d}" for i in range(25)]
+        processor.process(videos, progress_callback=on_progress)
+
+        # Should have 2 batch_progress events (at 10 and 20)
+        assert len(batch_progress_events) == 2
+
+        # Verify first event has expected fields
+        first_event = batch_progress_events[0]
+        assert first_event['processed'] == 10
+        assert first_event['total'] == 25
+        assert 'success_count' in first_event
+        assert 'error_count' in first_event
+        assert 'skipped_count' in first_event
+        assert 'eta_seconds' in first_event
+
+    def test_batch_progress_logged_at_info_level(self, caplog):
+        """Progress is logged at INFO level (visible in non-verbose mode)."""
+        import logging
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+
+        # Only capture INFO and above
+        caplog.set_level(logging.INFO)
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=5)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        videos = [f"vid{i:03d}" for i in range(10)]
+        processor.process(videos)
+
+        # Find batch progress records
+        batch_progress_records = [
+            r for r in caplog.records
+            if "Batch progress:" in r.message
+        ]
+
+        # Should have at least one INFO level batch progress
+        assert len(batch_progress_records) >= 1
+        assert batch_progress_records[0].levelno == logging.INFO
+
+    def test_batch_progress_checkpoint_partial_results(self):
+        """Progress callback updates checkpoint with partial results (US-37-011).
+
+        Verifies that as batch processing progresses, the checkpoint
+        accumulates partial results that can be recovered on resume.
+        """
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.batch_checkpoint import CaptionBatchCheckpoint
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        def mock_fetch(video_id, preferred_language=None):
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1, progress_report_interval=10)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        # Create checkpoint to track partial results
+        checkpoint = CaptionBatchCheckpoint()
+
+        # Track checkpoint state at each progress interval
+        checkpoint_states_at_progress: list = []
+
+        def on_progress(video_id: str, status: str, details: dict):
+            if status == 'batch_progress':
+                # Capture checkpoint state at progress report
+                # Note: progress callback fires before checkpoint.update() for the
+                # triggering video, so checkpoint_results may be 1 less than processed
+                checkpoint_states_at_progress.append({
+                    'processed': details['processed'],
+                    'checkpoint_results': len(checkpoint.results),
+                })
+
+        videos = [f"vid{i:03d}" for i in range(25)]
+        processor.process(
+            videos,
+            batch_checkpoint=checkpoint,
+            progress_callback=on_progress,
+        )
+
+        # Should have 2 progress events (at 10 and 20)
+        assert len(checkpoint_states_at_progress) == 2
+
+        # At each progress interval, checkpoint should have partial results
+        # (may be 1 less than processed count due to callback order)
+        assert checkpoint_states_at_progress[0]['checkpoint_results'] >= 9  # At 10 processed
+        assert checkpoint_states_at_progress[1]['checkpoint_results'] >= 19  # At 20 processed
+
+        # Final checkpoint should have all results
+        assert len(checkpoint.results) == 25
