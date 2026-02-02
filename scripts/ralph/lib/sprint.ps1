@@ -69,6 +69,56 @@ function Save-Sprint {
     Save-StateFile -Path $Path -Data $Sprint
 }
 
+function Ensure-SprintBranch {
+    <#
+    .SYNOPSIS
+        Ensure the sprint branch exists and we're on it
+    .DESCRIPTION
+        Creates the sprint branch if it doesn't exist and switches to it.
+        Called once per sprint to ensure git state matches sprint.json.
+    .RETURNS
+        $true if on correct branch, $false if failed
+    #>
+    param([string]$Path = $script:PrdFile)
+
+    $sprint = Get-Sprint -Path $Path
+    if (-not $sprint -or -not $sprint.branchName) {
+        return $true  # No branch requirement
+    }
+
+    $targetBranch = $sprint.branchName
+    $currentBranch = git branch --show-current 2>$null
+
+    # Already on correct branch
+    if ($currentBranch -eq $targetBranch) {
+        return $true
+    }
+
+    # Check if branch exists
+    $branchExists = git rev-parse --verify $targetBranch 2>$null
+
+    if ($branchExists) {
+        # Branch exists, switch to it
+        Write-Host "  Switching to branch: $targetBranch" -ForegroundColor Cyan
+        git checkout $targetBranch 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Warning: Failed to switch to branch $targetBranch" -ForegroundColor Yellow
+            return $false
+        }
+    }
+    else {
+        # Branch doesn't exist, create it
+        Write-Host "  Creating branch: $targetBranch" -ForegroundColor Green
+        git checkout -b $targetBranch 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Warning: Failed to create branch $targetBranch" -ForegroundColor Yellow
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Update-StoryStatus {
     <#
     .SYNOPSIS
