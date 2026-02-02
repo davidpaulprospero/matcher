@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .types import EscalationState, EscalationTier
 
@@ -208,6 +208,8 @@ class EscalationManager:
             - If budget is exhausted, skip intermediate tiers to max tier
             - get_escalation_args() calls budget.record_attempt()
         mullvad_vpn: Optional MullvadVPN manager for Tier 4 VPN rotation.
+        on_vpn_rotation_needed: Optional callback invoked when escalating to Tier 4.
+            Called with (keyword: str) to allow caller to handle VPN rotation.
     """
 
     def __init__(
@@ -217,6 +219,7 @@ class EscalationManager:
         budget: Optional["RateLimitBudget"] = None,
         strategy: Optional["EscalationStrategy"] = None,
         mullvad_vpn: Optional["MullvadVPN"] = None,
+        on_vpn_rotation_needed: Optional[Callable[[str], None]] = None,
     ):
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
@@ -225,6 +228,7 @@ class EscalationManager:
         self._strategy = strategy or EscalationStrategy(extractor_args_config)
         self._circuit_breaker: Optional["CircuitBreaker"] = None
         self._mullvad_vpn: Optional["MullvadVPN"] = mullvad_vpn
+        self._on_vpn_rotation_needed = on_vpn_rotation_needed
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
@@ -478,6 +482,14 @@ class EscalationManager:
                         f"Max escalation (Tier 4) reached for keyword={keyword}, "
                         f"engaging VPN rotation"
                     )
+                    # Invoke callback for VPN rotation handling
+                    if self._on_vpn_rotation_needed is not None:
+                        try:
+                            self._on_vpn_rotation_needed(keyword)
+                        except Exception as e:
+                            logger.error(
+                                f"VPN rotation callback failed for keyword={keyword}: {e}"
+                            )
 
     def record_success(self, keyword: str) -> None:
         """Record a successful download for a keyword.

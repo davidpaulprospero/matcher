@@ -257,3 +257,127 @@ class TestResetOnIPChange:
 
         # VPN switches should be preserved (we just used one)
         assert budget.vpn_switches_used == 1
+
+
+class TestVPNRotationCallback:
+    """Tests for on_vpn_rotation_needed callback invocation."""
+
+    def test_callback_invoked_on_tier4_escalation(self, imp_manager, ext_config_tier4):
+        """Test that on_vpn_rotation_needed callback is called when escalating to Tier 4."""
+        callback_calls = []
+
+        def track_callback(keyword: str):
+            callback_calls.append(keyword)
+
+        # Create manager with callback
+        esc_mgr = EscalationManager(
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config_tier4,
+            on_vpn_rotation_needed=track_callback,
+        )
+
+        keyword = "callback_test"
+
+        # Escalate to Tier 4 (6 failures with threshold=2)
+        for _ in range(6):
+            esc_mgr.record_failure(keyword, "HTTP Error 403: Forbidden")
+
+        # Callback should have been called once with the keyword
+        assert len(callback_calls) == 1
+        assert callback_calls[0] == keyword
+
+    def test_callback_not_invoked_at_lower_tiers(self, imp_manager, ext_config_tier4):
+        """Test that callback is NOT called for Tier 2 or Tier 3 escalations."""
+        callback_calls = []
+
+        def track_callback(keyword: str):
+            callback_calls.append(keyword)
+
+        esc_mgr = EscalationManager(
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config_tier4,
+            on_vpn_rotation_needed=track_callback,
+        )
+
+        keyword = "lower_tier_test"
+
+        # Escalate to Tier 2 (2 failures)
+        for _ in range(2):
+            esc_mgr.record_failure(keyword, "HTTP Error 403: Forbidden")
+
+        # Callback should NOT be called at Tier 2
+        assert len(callback_calls) == 0
+
+        # Escalate to Tier 3 (2 more failures)
+        for _ in range(2):
+            esc_mgr.record_failure(keyword, "HTTP Error 403: Forbidden")
+
+        # Callback should still NOT be called at Tier 3
+        assert len(callback_calls) == 0
+
+    def test_callback_exception_does_not_break_escalation(
+        self, imp_manager, ext_config_tier4
+    ):
+        """Test that callback exception is caught and doesn't prevent escalation."""
+
+        def failing_callback(keyword: str):
+            raise RuntimeError("VPN rotation failed!")
+
+        esc_mgr = EscalationManager(
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config_tier4,
+            on_vpn_rotation_needed=failing_callback,
+        )
+
+        keyword = "exception_test"
+
+        # Escalate to Tier 4 - should not raise
+        for _ in range(6):
+            esc_mgr.record_failure(keyword, "HTTP Error 403: Forbidden")
+
+        # Escalation should still complete
+        result = esc_mgr.get_escalation_args(keyword)
+        assert result.tier == EscalationTier.VPN_ROTATION
+
+    def test_callback_receives_correct_keyword_context(
+        self, imp_manager, ext_config_tier4
+    ):
+        """Test that callback receives the correct keyword for context logging."""
+        received_keywords = []
+
+        def track_keyword(keyword: str):
+            received_keywords.append(keyword)
+
+        esc_mgr = EscalationManager(
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config_tier4,
+            on_vpn_rotation_needed=track_keyword,
+        )
+
+        # Test multiple keywords
+        keywords = ["video_123", "search_term_456", "youtube_abc"]
+
+        for kw in keywords:
+            # Escalate each keyword to Tier 4
+            for _ in range(6):
+                esc_mgr.record_failure(kw, "HTTP Error 403: Forbidden")
+
+        # Callbacks should have received all keywords in order
+        assert received_keywords == keywords
+
+    def test_none_callback_is_valid(self, imp_manager, ext_config_tier4):
+        """Test that None callback (default) works without error."""
+        # Create manager without callback (default behavior)
+        esc_mgr = EscalationManager(
+            impersonation_manager=imp_manager,
+            extractor_args_config=ext_config_tier4,
+        )
+
+        keyword = "no_callback_test"
+
+        # Should not raise when escalating to Tier 4
+        for _ in range(6):
+            esc_mgr.record_failure(keyword, "HTTP Error 403: Forbidden")
+
+        result = esc_mgr.get_escalation_args(keyword)
+        assert result.tier == EscalationTier.VPN_ROTATION
