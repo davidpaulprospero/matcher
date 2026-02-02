@@ -68,6 +68,58 @@ Key settings:
 - **Download Options**: Audio-first mode, tier timeouts, live stream filtering
 - **Output Options**: Number of alternatives, strategy tracks, format
 
+## Download Resilience
+
+The downloader uses a 4-tier escalation system to handle YouTube's anti-bot protections:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Download Escalation Flow                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   ┌─────────┐    403     ┌─────────┐    403     ┌─────────┐        │
+│   │ Tier 1  │ ────────►  │ Tier 2  │ ────────►  │ Tier 3  │        │
+│   │ Imperson│            │ Extractor│           │ Cookie  │        │
+│   └─────────┘            └─────────┘            └─────────┘        │
+│       │                                              │              │
+│       │ Success                             exhausted│              │
+│       ▼                                              ▼              │
+│   ┌─────────┐                               ┌─────────┐            │
+│   │ Download│                               │ Tier 4  │            │
+│   │ Complete│                               │ VPN     │            │
+│   └─────────┘                               └─────────┘            │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+| Tier | Strategy | Trigger | Implementation |
+|------|----------|---------|----------------|
+| **1** | TLS Impersonation | Always on | `--impersonate Chrome-136:Macos-15` via curl_cffi |
+| **2** | Extractor Args | On 403 | `player_client=web_safari,tv_downgraded,web` |
+| **3** | Cookie Rotation | Continued 403s | Rotates through configured cookie files |
+| **4** | VPN Rotation | Cookies exhausted | Mullvad VPN IP rotation |
+
+### Key Features
+
+- **Automatic escalation**: Each tier triggers on failure of the previous
+- **Budget tracking**: Per-tier rate limits prevent excessive retries
+- **Circuit breaker**: Pauses after repeated failures to avoid bans
+- **Checkpoint persistence**: Escalation state survives pipeline restarts
+
+### Configuration
+
+```yaml
+download:
+  # Tier 4: Mullvad VPN (optional)
+  mullvad:
+    enabled: true
+    preferred_countries: ['us', 'gb', 'de', 'nl']
+    rotation_strategy: 'random'  # 'random', 'sequential', 'nearest'
+    max_rotations_per_session: 5
+```
+
+See [CLAUDE.md](CLAUDE.md#bypass--escalation-yt-dlp) for detailed configuration options.
+
 ## Development
 
 ### Running Tests

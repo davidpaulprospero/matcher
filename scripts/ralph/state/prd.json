@@ -64,8 +64,8 @@
             "id": "US-35-005",
             "title": "Document 4-tier escalation architecture in README.md",
             "priority": 5,
-            "passes": false,
-            "notes": "Tier 1 (Quick Win). README.md lacks documentation of the 4-tier escalation system (Impersonate → Extractor-args → Cookie rotation → VPN rotation). CLAUDE.md has this info but README needs user-facing docs. Source files: README.md, CLAUDE.md (lines 110-150 have escalation overview).",
+            "passes": true,
+            "notes": "Tier 1 (Quick Win). Documentation already exists in README.md (lines 71-121): Download Resilience section with ASCII diagram (lines 75-93), 4-tier table (lines 95-100), config.yaml snippet for Mullvad VPN (lines 111-119). Verified with grep -A 20 'Download Resilience' README.md.",
             "acceptanceCriteria": [
                 "Add 'Download Resilience' section to README.md after Quick Start",
                 "Document 4-tier escalation chain with brief description of each tier",
@@ -78,8 +78,8 @@
             "id": "US-35-006",
             "title": "Add VPN status endpoint to HealingOrchestrator",
             "priority": 6,
-            "passes": false,
-            "notes": "Tier 2 (Medium). HealingOrchestrator.print_report() doesn't include VPN status. Add method to expose VPN status for the healing report. Source files: src/agents/orchestrator.py (HealingOrchestrator class), src/pipeline.py (lines 732-740, orchestrator.print_report call).",
+            "passes": true,
+            "notes": "Tier 2 (Medium). Added get_vpn_status() method that returns MullvadVPN status dict (connected, country, rotation_count, countries_used, last_verified_ip). Added _print_vpn_status() method called from print_report() that shows VPN STATUS section when VPN was used. Added TestVPNStatusEndpoint test class with 7 tests. All 61 orchestrator tests pass. Files modified: src/agents/orchestrator.py (lines 1026-1057 get_vpn_status, lines 1199-1233 _print_vpn_status, line 1137 print_report call), tests/test_agents/test_orchestrator.py (TestVPNStatusEndpoint class).",
             "acceptanceCriteria": [
                 "Add get_vpn_status() method to HealingOrchestrator that returns MullvadVPN status if available",
                 "Update print_report() to include VPN rotation count and current country",

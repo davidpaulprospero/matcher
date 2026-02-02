@@ -819,3 +819,322 @@ class TestClassifyError:
         # This test verifies the orchestrator correctly handles the None return
         # and falls back to pattern_route. The watcher's internal logging is
         # tested in test_watcher.py::TestWatcherClassification::test_classify_error_records_fallback_on_failure
+
+
+class TestVPNMetricsCollection:
+    """Tests for US-1-012: VPN metrics in healing report."""
+
+    @pytest.mark.fast
+    def test_set_escalation_metrics_with_vpn_data(self, mock_config, project_dir):
+        """Test that VPN rotation data is included in escalation metrics."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set escalation metrics with VPN data
+        esc_metrics = {
+            'total_escalations': 5,
+            'total_403s': 10,
+            'total_successes': 50,
+            'average_tier': 2.5,
+            'escalations_per_tier': {'IMPERSONATE_ONLY': 2, 'EXTRACTOR_ARGS': 2, 'VPN_ROTATION': 1},
+            'keywords_at_each_tier': {'VPN_ROTATION': ['keyword1', 'keyword2']},
+            'vpn_rotation_count': 3,
+            'vpn_countries_used': ['us', 'de', 'gb'],
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        assert orchestrator._escalation_metrics == esc_metrics
+        assert orchestrator._escalation_metrics['vpn_rotation_count'] == 3
+        assert orchestrator._escalation_metrics['vpn_countries_used'] == ['us', 'de', 'gb']
+
+    @pytest.mark.fast
+    def test_print_report_includes_vpn_rotation(self, mock_config, project_dir, capsys):
+        """Test that print_report outputs VPN rotation info."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set escalation metrics with VPN rotation data
+        esc_metrics = {
+            'total_escalations': 3,
+            'total_403s': 8,
+            'total_successes': 40,
+            'average_tier': 2.0,
+            'escalations_per_tier': {'IMPERSONATE_ONLY': 1, 'VPN_ROTATION': 2},
+            'keywords_at_each_tier': {'VPN_ROTATION': ['test_kw']},
+            'vpn_rotation_count': 2,
+            'vpn_countries_used': ['us', 'nl'],
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        assert "VPN Rotation:" in captured.out
+        assert "Total rotations: 2" in captured.out
+        assert "Countries used: us, nl" in captured.out
+
+    @pytest.mark.fast
+    def test_print_report_shows_tier_breakdown(self, mock_config, project_dir, capsys):
+        """Test that print_report shows tier-by-tier breakdown."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set escalation metrics with tier data
+        esc_metrics = {
+            'total_escalations': 5,
+            'total_403s': 15,
+            'total_successes': 60,
+            'average_tier': 2.2,
+            'escalations_per_tier': {
+                'IMPERSONATE_ONLY': 1,
+                'EXTRACTOR_ARGS': 2,
+                'FULL_BYPASS': 1,
+                'VPN_ROTATION': 1,
+            },
+            'keywords_at_each_tier': {
+                'IMPERSONATE_ONLY': ['kw1', 'kw2'],
+                'EXTRACTOR_ARGS': ['kw3'],
+                'FULL_BYPASS': ['kw4', 'kw5', 'kw6'],
+                'VPN_ROTATION': ['kw7'],
+            },
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        assert "TIER-BY-TIER BREAKDOWN" in captured.out
+        assert "Tier 1 (Impersonate):" in captured.out
+        assert "Tier 2 (Extractor Args):" in captured.out
+        assert "Tier 3 (Full Bypass):" in captured.out
+        assert "Tier 4 (VPN Rotation):" in captured.out
+
+    @pytest.mark.fast
+    def test_print_tier_breakdown_shows_escalation_counts(self, mock_config, project_dir, capsys):
+        """Test that tier breakdown shows escalation counts per tier."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        esc_metrics = {
+            'total_escalations': 3,
+            'total_403s': 10,
+            'escalations_per_tier': {
+                'EXTRACTOR_ARGS': 2,
+                'FULL_BYPASS': 1,
+            },
+            'keywords_at_each_tier': {},
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        orchestrator._print_tier_breakdown()
+
+        captured = capsys.readouterr()
+        assert "Escalations to this tier: 2" in captured.out
+        assert "Escalations to this tier: 1" in captured.out
+
+    @pytest.mark.fast
+    def test_print_tier_breakdown_shows_keyword_counts(self, mock_config, project_dir, capsys):
+        """Test that tier breakdown shows keyword counts at each tier."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        esc_metrics = {
+            'total_escalations': 0,
+            'total_403s': 0,
+            'escalations_per_tier': {},
+            'keywords_at_each_tier': {
+                'FULL_BYPASS': ['kw1', 'kw2', 'kw3'],
+            },
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        orchestrator._print_tier_breakdown()
+
+        captured = capsys.readouterr()
+        assert "Keywords currently at this tier: 3" in captured.out
+        assert "kw1, kw2, kw3" in captured.out
+
+    @pytest.mark.fast
+    def test_print_tier_breakdown_truncates_long_keyword_list(self, mock_config, project_dir, capsys):
+        """Test that tier breakdown truncates keyword lists longer than 5."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        esc_metrics = {
+            'total_escalations': 0,
+            'total_403s': 0,
+            'escalations_per_tier': {},
+            'keywords_at_each_tier': {
+                'FULL_BYPASS': ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6', 'kw7', 'kw8'],
+            },
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        orchestrator._print_tier_breakdown()
+
+        captured = capsys.readouterr()
+        assert "Keywords currently at this tier: 8" in captured.out
+        assert "+3 more" in captured.out
+
+    @pytest.mark.fast
+    def test_print_tier_breakdown_no_output_when_empty(self, mock_config, project_dir, capsys):
+        """Test that tier breakdown outputs nothing when no escalation data."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # No escalation metrics set
+        orchestrator._print_tier_breakdown()
+
+        captured = capsys.readouterr()
+        assert "TIER-BY-TIER BREAKDOWN" not in captured.out
+
+    @pytest.mark.fast
+    def test_print_report_without_vpn_metrics(self, mock_config, project_dir, capsys):
+        """Test that print_report works without VPN metrics."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Set escalation metrics without VPN data
+        esc_metrics = {
+            'total_escalations': 2,
+            'total_403s': 5,
+            'total_successes': 30,
+            'average_tier': 1.5,
+            'escalations_per_tier': {'IMPERSONATE_ONLY': 1, 'EXTRACTOR_ARGS': 1},
+            'keywords_at_each_tier': {'IMPERSONATE_ONLY': ['kw1']},
+        }
+        orchestrator.set_escalation_metrics(esc_metrics)
+
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        assert "HEALING ORCHESTRATOR REPORT" in captured.out
+        # VPN section should not appear
+        assert "VPN Rotation:" not in captured.out
+
+
+class TestVPNStatusEndpoint:
+    """Tests for US-35-006: VPN status endpoint in HealingOrchestrator."""
+
+    @pytest.mark.fast
+    def test_get_vpn_status_returns_none_when_no_vpn(self, mock_config, project_dir):
+        """Test get_vpn_status returns None when no MullvadVPN configured."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # No VPN configured by default
+        assert orchestrator._mullvad_vpn is None
+        assert orchestrator.get_vpn_status() is None
+
+    @pytest.mark.fast
+    def test_get_vpn_status_returns_status_dict(self, mock_config, project_dir):
+        """Test get_vpn_status returns status dict when MullvadVPN is set."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Mock MullvadVPN
+        mock_vpn = Mock()
+        mock_vpn.get_status_extended.return_value = {
+            'mullvad_connected': True,
+            'current_country': 'us',
+            'switch_count': 3,
+            'used_countries': ['de', 'gb', 'us'],
+            'last_verified_ip': '123.45.67.89',
+        }
+        orchestrator.set_mullvad_vpn(mock_vpn)
+
+        status = orchestrator.get_vpn_status()
+
+        assert status is not None
+        assert status['connected'] is True
+        assert status['country'] == 'us'
+        assert status['rotation_count'] == 3
+        assert status['countries_used'] == ['de', 'gb', 'us']
+        assert status['last_verified_ip'] == '123.45.67.89'
+
+    @pytest.mark.fast
+    def test_get_vpn_status_handles_exception(self, mock_config, project_dir):
+        """Test get_vpn_status handles exceptions gracefully."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Mock MullvadVPN that raises
+        mock_vpn = Mock()
+        mock_vpn.get_status_extended.side_effect = Exception("VPN error")
+        orchestrator.set_mullvad_vpn(mock_vpn)
+
+        status = orchestrator.get_vpn_status()
+
+        # Should return None on error
+        assert status is None
+
+    @pytest.mark.fast
+    def test_print_report_includes_vpn_status_section(self, mock_config, project_dir, capsys):
+        """Test print_report includes VPN STATUS section when VPN was used."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Mock MullvadVPN with usage
+        mock_vpn = Mock()
+        mock_vpn.get_status_extended.return_value = {
+            'mullvad_connected': True,
+            'current_country': 'de',
+            'switch_count': 2,
+            'used_countries': ['us', 'de'],
+            'last_verified_ip': '10.20.30.40',
+        }
+        orchestrator.set_mullvad_vpn(mock_vpn)
+
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        assert "VPN STATUS" in captured.out
+        assert "Connected: Yes" in captured.out
+        assert "Current country: DE" in captured.out
+        assert "Total rotations: 2" in captured.out
+        assert "Countries used: US, DE" in captured.out
+        assert "Last verified IP: 10.20.30.40" in captured.out
+
+    @pytest.mark.fast
+    def test_print_report_skips_vpn_section_when_not_used(self, mock_config, project_dir, capsys):
+        """Test print_report skips VPN section when VPN was not used."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Mock MullvadVPN with no usage
+        mock_vpn = Mock()
+        mock_vpn.get_status_extended.return_value = {
+            'mullvad_connected': False,
+            'current_country': None,
+            'switch_count': 0,
+            'used_countries': [],
+            'last_verified_ip': None,
+        }
+        orchestrator.set_mullvad_vpn(mock_vpn)
+
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        # VPN STATUS section should not appear when not used
+        assert "VPN STATUS" not in captured.out
+
+    @pytest.mark.fast
+    def test_print_report_skips_vpn_section_when_no_vpn_configured(self, mock_config, project_dir, capsys):
+        """Test print_report skips VPN section when no VPN configured."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # No VPN configured
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        assert "VPN STATUS" not in captured.out
+
+    @pytest.mark.fast
+    def test_print_vpn_status_shows_disconnected(self, mock_config, project_dir, capsys):
+        """Test _print_vpn_status shows disconnected state correctly."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Mock VPN that was used but is now disconnected
+        mock_vpn = Mock()
+        mock_vpn.get_status_extended.return_value = {
+            'mullvad_connected': False,
+            'current_country': 'gb',
+            'switch_count': 1,
+            'used_countries': ['gb'],
+            'last_verified_ip': None,
+        }
+        orchestrator.set_mullvad_vpn(mock_vpn)
+
+        orchestrator._print_vpn_status()
+
+        captured = capsys.readouterr()
+        assert "VPN STATUS" in captured.out
+        assert "Connected: No" in captured.out
+        assert "Total rotations: 1" in captured.out
