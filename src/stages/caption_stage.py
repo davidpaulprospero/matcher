@@ -719,8 +719,21 @@ class CaptionStage(Stage):
                 if r.get('unavailable') and r.get('reason') == 'no_captions_available'
             )
 
+            # US-38-011: Store caption_results in state BEFORE populating text_metadata
+            # This ensures data is preserved even if _populate_text_metadata fails
+            state.caption_results = caption_results
+
             # Store caption data in state.text_metadata for matching
-            self._populate_text_metadata(state, caption_results)
+            try:
+                self._populate_text_metadata(state, caption_results)
+            except Exception as e:
+                # US-38-011: Log error with caption_results summary for debugging
+                logger.error(
+                    f"_populate_text_metadata failed: {e}. "
+                    f"caption_results preserved in state ({len(caption_results)} videos, "
+                    f"{success_count} succeeded)"
+                )
+                raise
 
             # Calculate quality distribution (US-007)
             quality_distribution = self._calculate_quality_distribution(caption_results)
