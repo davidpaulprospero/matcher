@@ -140,6 +140,11 @@ except ImportError:  # pragma: no cover
     ExtractorArgsConfig = None  # type: ignore[misc,assignment]
 
 try:
+    from ..config.sections.download import MullvadConfig
+except ImportError:  # pragma: no cover
+    MullvadConfig = None  # type: ignore[misc,assignment]
+
+try:
     from .impersonation import ImpersonationManager
 except ImportError:  # pragma: no cover
     ImpersonationManager = None  # type: ignore[misc,assignment]
@@ -816,6 +821,56 @@ class EscalationManager:
             f"Restored escalation state for {restored_count} keywords"
             f"{' (de-escalated due to stale data)' if is_stale else ''}"
         )
+
+        return manager
+
+    @classmethod
+    def create_with_mullvad(
+        cls,
+        impersonation_manager: "ImpersonationManager",
+        extractor_args_config: Optional["ExtractorArgsConfig"] = None,
+        mullvad_config: Optional["MullvadConfig"] = None,
+        budget: Optional["RateLimitBudget"] = None,
+        strategy: Optional["EscalationStrategy"] = None,
+    ) -> "EscalationManager":
+        """Create an EscalationManager with MullvadVPN pre-wired if enabled.
+
+        Factory method that instantiates both EscalationManager and MullvadVPN
+        (if mullvad_config.enabled is True), wiring them together automatically.
+        This simplifies setup compared to manually creating both and calling
+        set_mullvad_vpn().
+
+        Args:
+            impersonation_manager: Provides Tier 1 --impersonate args.
+            extractor_args_config: Configuration for Tier 2 player_client rotation.
+            mullvad_config: MullvadConfig for Tier 4 VPN rotation. If None or
+                mullvad_config.enabled is False, MullvadVPN is not created.
+            budget: Optional RateLimitBudget for budget-aware escalation.
+            strategy: Optional EscalationStrategy for decision logic.
+
+        Returns:
+            A new EscalationManager with MullvadVPN wired if enabled.
+        """
+        manager = cls(
+            impersonation_manager=impersonation_manager,
+            extractor_args_config=extractor_args_config,
+            budget=budget,
+            strategy=strategy,
+        )
+
+        # Wire MullvadVPN if config is enabled
+        if mullvad_config and getattr(mullvad_config, 'enabled', False):
+            # Import here to avoid circular import at module level
+            from .mullvad_vpn import MullvadVPN
+            mullvad_vpn = MullvadVPN(mullvad_config)
+            manager.set_mullvad_vpn(mullvad_vpn)
+            logger.debug(
+                "EscalationManager created with MullvadVPN for Tier 4 bypass"
+            )
+        else:
+            logger.debug(
+                "EscalationManager created without MullvadVPN (disabled or no config)"
+            )
 
         return manager
 
