@@ -407,5 +407,106 @@ class TestVoiceoverTracking:
         assert checkpoint.voiceover_hash == "hash123"
 
 
+class TestPipelineStateValidation:
+    """Test PipelineState.validate_state_attributes() after checkpoint restoration."""
+
+    @pytest.mark.fast
+    def test_validate_state_attributes_all_present(self):
+        """Test validation when all required fields already exist."""
+        from src.state import PipelineState
+
+        state = PipelineState()
+        # All defaults should be present
+        initialized = state.validate_state_attributes()
+
+        # Nothing should be initialized since all fields have defaults
+        assert initialized == []
+        # Verify fields still exist
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.video_ids == []
+
+    @pytest.mark.fast
+    def test_validate_state_attributes_missing_text_metadata(self):
+        """Test validation initializes missing text_metadata."""
+        from src.state import PipelineState
+
+        state = PipelineState()
+        # Simulate incomplete state from checkpoint (set to None)
+        state.text_metadata = None
+
+        initialized = state.validate_state_attributes()
+
+        assert 'text_metadata' in initialized
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_validate_state_attributes_missing_caption_results(self):
+        """Test validation initializes missing caption_results."""
+        from src.state import PipelineState
+
+        state = PipelineState()
+        # Simulate incomplete state from checkpoint (set to None)
+        state.caption_results = None
+
+        initialized = state.validate_state_attributes()
+
+        assert 'caption_results' in initialized
+        assert state.caption_results == {}
+
+    @pytest.mark.fast
+    def test_validate_state_attributes_missing_video_ids(self):
+        """Test validation initializes missing video_ids."""
+        from src.state import PipelineState
+
+        state = PipelineState()
+        # Simulate incomplete state from checkpoint (set to None)
+        state.video_ids = None
+
+        initialized = state.validate_state_attributes()
+
+        assert 'video_ids' in initialized
+        assert state.video_ids == []
+
+    @pytest.mark.fast
+    def test_validate_state_attributes_multiple_missing(self):
+        """Test validation initializes multiple missing fields."""
+        from src.state import PipelineState
+
+        state = PipelineState()
+        # Simulate multiple missing fields
+        state.text_metadata = None
+        state.caption_results = None
+        state.video_ids = None
+
+        initialized = state.validate_state_attributes()
+
+        # All three should be initialized
+        assert len(initialized) == 3
+        assert 'text_metadata' in initialized
+        assert 'caption_results' in initialized
+        assert 'video_ids' in initialized
+
+        # Verify defaults
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.video_ids == []
+
+    @pytest.mark.fast
+    def test_validate_state_attributes_logs_warning(self, caplog):
+        """Test validation logs WARNING for each restored field."""
+        import logging
+        from src.state import PipelineState
+
+        state = PipelineState()
+        state.text_metadata = None
+
+        with caplog.at_level(logging.WARNING):
+            state.validate_state_attributes()
+
+        # Should have logged a warning
+        assert 'Restored missing text_metadata after checkpoint load' in caplog.text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
