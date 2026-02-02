@@ -662,3 +662,160 @@ class TestCombinedBudgetScenarios:
 
         # VPN rotation should trigger
         assert budget.should_trigger_vpn_rotation()
+
+
+# =============================================================================
+# Integration Tests: Budget Validation Warnings (US-38-010)
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestBudgetValidationWarnings:
+    """Integration tests for _validate_budget_for_batch warnings."""
+
+    def test_warning_when_max_attempts_less_than_batch_size(self, caplog):
+        """Test WARNING logged when max_attempts < batch_size."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with max_attempts=50, batch_size=100
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=50,
+            auto_scale=False,  # Disable auto-scale
+        ))
+
+        # Call validation with batch larger than max_attempts
+        stage._validate_budget_for_batch(100, budget)
+
+        # Check that WARNING was logged
+        assert any(
+            "max_attempts=50" in record.message and "batch_size=100" in record.message
+            for record in caplog.records
+        ), "Expected WARNING about max_attempts < batch_size"
+
+    def test_warning_when_auto_scale_false_and_large_batch(self, caplog):
+        """Test WARNING logged when auto_scale=False and batch_size > 100."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with auto_scale=False and high max_attempts
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=200,  # Enough for batch, but auto_scale is False
+            auto_scale=False,
+        ))
+
+        # Call validation with batch > 100
+        stage._validate_budget_for_batch(150, budget)
+
+        # Check that WARNING was logged about large batch without auto_scale
+        assert any(
+            "auto_scale" in record.message.lower() and "150" in record.message
+            for record in caplog.records
+        ), "Expected WARNING about large batch without auto_scale"
+
+    def test_no_warning_when_auto_scale_enabled(self, caplog):
+        """Test NO warning when auto_scale=True even with large batch."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with auto_scale=True
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=50,  # Small, but auto_scale will fix it
+            auto_scale=True,
+        ))
+
+        # Call validation
+        stage._validate_budget_for_batch(200, budget)
+
+        # WARNING about "without auto_scale" should NOT appear
+        # (but there may be a warning about max_attempts < batch_size before scaling)
+        assert not any(
+            "without auto_scale" in record.message
+            for record in caplog.records
+        ), "Should NOT warn about auto_scale when it's enabled"
+
+    def test_no_warning_when_budget_is_sufficient(self, caplog):
+        """Test NO warning when max_attempts >= batch_size and auto_scale=True."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with sufficient max_attempts
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=200,
+            auto_scale=True,
+        ))
+
+        # Call validation with batch smaller than max_attempts
+        stage._validate_budget_for_batch(50, budget)
+
+        # No warnings should be logged
+        assert len(caplog.records) == 0, (
+            f"Expected no warnings, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_no_warning_when_budget_is_none(self, caplog):
+        """Test NO warning when retry_budget is None."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Call validation with None budget
+        stage._validate_budget_for_batch(100, None)
+
+        # No warnings should be logged
+        assert len(caplog.records) == 0
+
+    def test_no_warning_when_batch_size_is_zero(self, caplog):
+        """Test NO warning when batch_size is 0."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=50,
+            auto_scale=False,
+        ))
+
+        # Call validation with batch_size=0
+        stage._validate_budget_for_batch(0, budget)
+
+        # No warnings should be logged
+        assert len(caplog.records) == 0
+
+    def test_both_warnings_when_both_conditions_met(self, caplog):
+        """Test both warnings logged when both conditions are met."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        stage = CaptionStage()
+
+        # Create budget with max_attempts=50, auto_scale=False
+        budget = CaptionRetryBudget.from_config(CaptionRetryBudgetConfig(
+            enabled=True,
+            max_attempts=50,
+            auto_scale=False,
+        ))
+
+        # batch_size=150: > max_attempts AND > 100
+        stage._validate_budget_for_batch(150, budget)
+
+        # Should have two warnings
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_messages) == 2, (
+            f"Expected 2 warnings, got {len(warning_messages)}: {warning_messages}"
+        )
