@@ -5,8 +5,10 @@
 # All shared functions belong in lib/*.ps1
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PrdPath = Join-Path $ScriptDir "prd.json"
-$MetricsPath = Join-Path $ScriptDir "metrics.csv"
+$StateDir = Join-Path $ScriptDir "state"
+$SessionDir = Join-Path $ScriptDir "session"
+$PrdPath = Join-Path $StateDir "prd.json"
+$MetricsPath = Join-Path $SessionDir "metrics.csv"
 $BlockedPath = Join-Path $ScriptDir "BLOCKED.md"
 
 if (-not (Test-Path $PrdPath)) {
