@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     from ..config import Config
     from ..checkpoint import CheckpointManager
-    from .state import PipelineState
+    from ..state import PipelineState
 
 _stages_logger = logging.getLogger(__name__)
 
