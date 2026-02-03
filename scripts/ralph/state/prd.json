@@ -174,7 +174,7 @@
       "id": "US-46-012",
       "title": "Add unit tests for iterative_match query_learning module",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Create tests/test_iterative_match_query_learning.py with tests for src/iterative_match/query_learning.py",
         "Test query generation from a gap with low confidence produces relevant search terms",
@@ -182,7 +182,7 @@
         "Test that generated queries do not duplicate existing search keywords from the original analysis",
         "Test edge case with gap that has no context text returns reasonable fallback query"
       ],
-      "notes": "Tier: T3 (test coverage). Files: src/iterative_match/query_learning.py (zero dedicated test coverage), tests/test_iterative_match_query_learning.py (new file). Query learning generates search queries from gaps detected by gap_analyzer. No unit tests exist - only integration coverage via test_stage_iterative_match.py."
+      "notes": "47 tests in tests/test_iterative_match_query_learning.py covering: QueryPlan/QueryResult/StrategyStats dataclasses, QueryLearningDB init/persistence/save-load, get_best_strategy, get_strategy_ranking, record_result EMA, _extract_template, get_refined_template, get_synonym_suggestions, get_summary. AC-specific test classes: TestACQueryGenerationFromLowConfidence, TestACQueryGenerationFromNoMatch, TestACNoDuplicateKeywords, TestACNoContextFallback. All 47 tests pass."
     }
   ]
 }
