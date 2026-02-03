@@ -294,6 +294,9 @@ function Build-StoryPrompt {
         catch {}
     }
 
+    # Detect seed stories early (affects how notes are presented)
+    $isSeedStory = $Story.title -and $Story.title -match 'Generate sprint stories'
+
     # Section 7: ALWAYS include full story details in prompt (prevents exploration stalls)
     $promptParts += ""
     $promptParts += "============================================================"
@@ -301,26 +304,55 @@ function Build-StoryPrompt {
     $promptParts += "============================================================"
     $promptParts += ""
 
-    # Include story notes (contains critical context like file locations)
-    if ($Story.notes) {
-        $promptParts += "CONTEXT: $($Story.notes)"
+    # For seed stories: instructions and criteria FIRST (truncation-safe),
+    # notes last (background context that can be safely trimmed).
+    # For regular stories: notes first (implementation context), then criteria, then instructions.
+    if ($isSeedStory) {
+        # Instructions first - these MUST survive truncation
+        $promptParts += "INSTRUCTIONS:"
+        $promptParts += "1. This is a SEED STORY that generates work items - do NOT implement code fixes"
+        $promptParts += "2. Read scripts/ralph/state/prd.json first, then the config/context files in acceptance criteria"
+        $promptParts += "3. Analyze the codebase and generate 8-12 stories as specified"
+        $promptParts += "4. Write the COMPLETE updated prd.json with all new stories AND set this story's passes: true"
+        $promptParts += "5. CRITICAL: The file must be actually written - verify by reading it back after writing"
         $promptParts += ""
-    }
 
-    if ($Story.acceptanceCriteria) {
-        $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
-        foreach ($criterion in $Story.acceptanceCriteria) {
-            $promptParts += "  [ ] $criterion"
+        if ($Story.acceptanceCriteria) {
+            $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+            foreach ($criterion in $Story.acceptanceCriteria) {
+                $promptParts += "  [ ] $criterion"
+            }
+            $promptParts += ""
         }
-        $promptParts += ""
-    }
 
-    # Concise instructions - story details already provided above
-    $promptParts += "INSTRUCTIONS:"
-    $promptParts += "1. All story details are above - DO NOT read prd.json (saves time)"
-    $promptParts += "2. Read scripts/ralph/session/prompt.md for project-level instructions"
-    $promptParts += "3. Implement the story, verify all acceptance criteria"
-    $promptParts += "4. Update scripts/ralph/state/prd.json to set passes: true when complete"
+        # Notes last - background context, safe to truncate
+        if ($Story.notes) {
+            $promptParts += "USER INTERVIEW NOTES (background context for generating stories - DO NOT implement these directly):"
+            $promptParts += $Story.notes
+            $promptParts += ""
+        }
+    }
+    else {
+        # Regular stories: notes as implementation context, then criteria, then instructions
+        if ($Story.notes) {
+            $promptParts += "CONTEXT: $($Story.notes)"
+            $promptParts += ""
+        }
+
+        if ($Story.acceptanceCriteria) {
+            $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+            foreach ($criterion in $Story.acceptanceCriteria) {
+                $promptParts += "  [ ] $criterion"
+            }
+            $promptParts += ""
+        }
+
+        $promptParts += "INSTRUCTIONS:"
+        $promptParts += "1. All story details are above - DO NOT read prd.json (saves time)"
+        $promptParts += "2. Read scripts/ralph/session/prompt.md for project-level instructions"
+        $promptParts += "3. Implement the story, verify all acceptance criteria"
+        $promptParts += "4. Update scripts/ralph/state/prd.json to set passes: true when complete"
+    }
 
     $prompt = $promptParts -join "`n"
 

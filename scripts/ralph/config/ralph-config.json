@@ -200,7 +200,7 @@
     },
     "prompts": {
         "adaptive": false,
-        "maxLength": 4000
+        "maxLength": 10000
     },
     "parallel": {
         "enabled": false,
@@ -224,11 +224,17 @@
             "enabled": true,
             "threshold": 0.5
         },
+        "subprocessDetection": {
+            "enabled": true,
+            "extendTimeoutOnPytest": true,
+            "pytestTimeoutMultiplier": 3.0
+        },
         "focusAreaOverrides": {
             "testing": { "stallThreshold": 300, "killThreshold": 600 },
             "unit-tests": { "stallThreshold": 300, "killThreshold": 600 },
             "integration-tests": { "stallThreshold": 420, "killThreshold": 720 },
-            "mutation-tests": { "stallThreshold": 420, "killThreshold": 720 }
+            "mutation-tests": { "stallThreshold": 420, "killThreshold": 720 },
+            "quality": { "stallThreshold": 420, "killThreshold": 900 }
         }
     }
 }
