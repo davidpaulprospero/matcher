@@ -48,7 +48,7 @@
             "id": "US-47-003",
             "title": "Add stale PipelineState attribute access audit test",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add AST-based or grep-based test that scans all files in src/stages/ for state.FIELD_NAME attribute access",
                 "Test validates every accessed field actually exists on PipelineState dataclass in src/state.py",
@@ -57,13 +57,13 @@
                 "Test fails with clear message listing file, line number, and invalid field name if a stale reference is found",
                 "All tests in tests/test_state_attribute_audit.py must pass"
             ],
-            "notes": "Tier: T1 (systemic prevention). Source files: src/stages/*.py (all stage files), src/state.py:240-430 (PipelineState dataclass). This is a structural test that prevents the class of bug found in the user interview (state.embeddings, state.embedding_index removed but still referenced). Use AST parsing to find all Attribute nodes where the value is Name('state') and verify the attr exists on PipelineState. Cover both direct access (state.foo) and defensive access (getattr(state, 'foo'))."
+            "notes": "12 tests in tests/test_state_attribute_audit.py - AST-based scan of src/stages/*.py for state.FIELD_NAME, getattr(state, 'field'), hasattr(state, 'field'). Validates against PipelineState dataclass fields. Known legacy exceptions tracked with bidirectional enforcement. Caught 5 real stale references (downloaded_videos, downloaded_audio, pending_streams, project_dir)."
         },
         {
             "id": "US-47-004",
             "title": "Add unit tests for scene_detection module",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add tests for sanitize_path_for_url() function covering Windows paths, spaces, and special characters",
                 "Add tests for SceneDetectionCache (BaseCache subclass) including cache hit/miss and serialization",
@@ -71,7 +71,7 @@
                 "Add tests for batch scene detection with ThreadPoolExecutor mocked to verify parallel execution logic",
                 "All tests in tests/test_scene_detection.py must pass"
             ],
-            "notes": "Tier: T1 (zero coverage). Source file: src/scene_detection.py (242 lines). This is the ONLY src/ top-level module with zero test file coverage. Key classes: SceneDetectionCache(BaseCache). Key functions: sanitize_path_for_url (line 38), detect_scenes_for_video, detect_scenes_batch. Dependencies requiring mocks: cv2, scenedetect (ContentDetector, SceneManager, open_video), opentimelineio. The module uses BaseCache from src/cache/ which has well-tested patterns to follow."
+            "notes": "COMPLETED. 50 tests in tests/test_scene_detection.py covering 12 test classes: TestSanitizePathForUrl (9 tests: Windows backslashes, extended-length prefix, spaces, special chars, unicode, Path objects), TestSceneInfo (3 tests: to_dict, broll fields, JSON serialization), TestVideoSceneData (5 tests: round-trip, missing fields, old cache format, post_init defaults, JSON), TestSceneCache (7 tests: set/get, miss, get_all, persistence, delete, overwrite, stats), TestSceneDetectorInit (3 tests: presets, config override), TestDetectScenesInVideo (2 tests: scene detection with mocked scenedetect, no-scenes case), TestSceneListToInfo (3 tests: empty list, multiple scenes, zero framerate), TestProcessVideo (3 tests: end-to-end with OTIO mock, caching, error handling), TestProcessAllVideos (3 tests: empty dir, multiple videos, extension filtering), TestGetSceneClips (2 tests: clip generation, empty index), TestEnrichVideoMetadata (2 tests), TestGetStats (2 tests), plus utility tests for get_file_hash, PRESETS, VIDEO_EXTENSIONS."
         },
         {
             "id": "US-47-005",
