@@ -1197,6 +1197,14 @@ class DownloadConfig:
     # is broadly blocking. Resets on any successful download. 0 = disabled.
     bot_detection_tier_floor_threshold: int = 5
 
+    # Bot-detection abort threshold: after N total bot-detection errors across all
+    # videos in the stage, abort the entire download loop. This prevents the stage
+    # from running to completion hitting YouTube's block wall for every remaining
+    # segment when cookies are broken or impersonation is defeated. Progress is
+    # checkpointed before aborting so --resume can pick up where it left off.
+    # 0 = disabled (never abort on bot-detection errors).
+    bot_detection_abort_threshold: int = 10
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""

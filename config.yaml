@@ -1352,6 +1352,12 @@ download:
   # Resets on any successful download. 0 = disabled.
   bot_detection_tier_floor_threshold: 5
 
+  # Bot-detection abort threshold: after N total bot-detection errors across all
+  # videos in the stage, abort the download loop entirely. Prevents running through
+  # every remaining segment when YouTube is broadly blocking. Progress is checkpointed
+  # before aborting so --resume picks up where it left off. 0 = disabled.
+  bot_detection_abort_threshold: 10
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

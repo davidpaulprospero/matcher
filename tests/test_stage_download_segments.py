@@ -474,6 +474,12 @@ class TestRetryQueueIntegration:
         mock_downloader = MagicMock()
         mock_downloader.retry_queue = RetryQueue(BatchRetryConfig(enabled=True))
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None  # No circuit breaker for this test
+        mock_downloader.escalation_manager = None  # No escalation for this test
+        mock_downloader.cookie_rotator = None
+        # Explicit config values to prevent int(MagicMock()) = 1 triggering early abort
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 5
+        mock_downloader.download_config.bot_detection_abort_threshold = 0  # Disabled
 
         stage.downloader = mock_downloader
 
@@ -585,8 +591,12 @@ class TestRetryQueueIntegration:
         mock_downloader = MagicMock()
         mock_downloader.retry_queue = RetryQueue(BatchRetryConfig(enabled=True))
         mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.circuit_breaker = None  # No circuit breaker for this test
         mock_downloader.cookie_rotator = None
         mock_downloader.impersonation_manager = None
+        # Explicit config values to prevent int(MagicMock()) triggering early abort
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 5
+        mock_downloader.download_config.bot_detection_abort_threshold = 0  # Disabled
 
         stage.downloader = mock_downloader
 
