@@ -1175,6 +1175,16 @@ class DownloadConfig:
     # Controls how many rotations, backoff time, and VPN switches are available per session
     rate_limit_budget: RateLimitBudgetConfig = field(default_factory=RateLimitBudgetConfig)
 
+    # Segment download settings (used by DOWNLOAD_SEGMENTS stage)
+    # Buffer seconds to add before/after each matched segment for editing flexibility
+    segment_buffer: float = 5.0
+    # yt-dlp format string for segment downloads (height capped by segment_max_resolution)
+    segment_format: str = "best[height<={segment_max_resolution}]"
+    # Maximum video resolution (height) for segment downloads
+    segment_max_resolution: int = 1080
+    # Socket timeout for segment downloads (seconds). 0 = use main socket_timeout value.
+    segment_socket_timeout: int = 0
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""

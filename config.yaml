@@ -1324,6 +1324,16 @@ download:
     max_vpn_switches: 3         # Max VPN switches per session (0 = unlimited)
     auto_scale_budget: true     # Scale budget limits by keyword count (ceil(n/5), max 5x)
 
+  # Segment download settings (DOWNLOAD_SEGMENTS stage)
+  # Buffer seconds to add before/after each matched segment for editing flexibility
+  segment_buffer: 5.0
+  # yt-dlp format string for segment downloads (use {segment_max_resolution} placeholder)
+  segment_format: "best[height<={segment_max_resolution}]"
+  # Maximum video resolution (height in pixels) for segment downloads
+  segment_max_resolution: 1080
+  # Socket timeout for segment downloads (seconds). 0 = use main socket_timeout value.
+  segment_socket_timeout: 0
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

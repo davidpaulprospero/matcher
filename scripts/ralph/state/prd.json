@@ -135,7 +135,7 @@
       "id": "US-48-009",
       "title": "Add checkpoint restore validation for download_segments stage",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Validate restored segment files actually exist on disk and have non-zero size in restore() method",
         "Filter out restored segments where the file has been deleted or is empty (0 bytes)",
@@ -150,7 +150,7 @@
       "id": "US-48-010",
       "title": "Add configurable defaults for download_segments stage options",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add segment_buffer, segment_format, segment_max_resolution, and segment_socket_timeout fields to DownloadConfig dataclass",
         "Wire segment_buffer from config instead of hardcoded getattr fallback at download_segments.py:73",
@@ -159,7 +159,7 @@
         "Add unit test verifying DownloadConfig loads segment_ prefixed fields from config dict",
         "Add unit test verifying default values match current hardcoded values (buffer=5.0, resolution=1080)"
       ],
-      "notes": "Tier: enhancement. Files: src/config/sections/download.py (DownloadConfig dataclass, currently ~500 lines), src/stages/download_segments.py:73 (segment_buffer hardcoded fallback), src/stages/download_segments.py:210 (format string hardcoded). Currently download_segments.py reads segment_buffer via getattr(download_config, 'segment_buffer', 5.0) but the field doesn't exist on DownloadConfig. Other options like format='best[height<=1080]' and force_keyframes_at_cuts=True are hardcoded in the ydl_opts dict. Making these configurable follows the pattern established by other download config options."
+      "notes": "Completed. Added 4 fields to DownloadConfig: segment_buffer (float, default 5.0), segment_format (str, template with {segment_max_resolution} placeholder), segment_max_resolution (int, default 1080), segment_socket_timeout (int, default 0 = use main socket_timeout). Wired segment_buffer directly (no more getattr fallback). Format string now uses segment_max_resolution via template. segment_socket_timeout overrides main socket_timeout when non-zero. No __post_init__ needed (all plain fields, no nested dataclasses). Added 7 tests: config defaults, dict loading, default matches hardcoded, resolution wired into format, socket timeout override, socket timeout zero fallback. Updated config.yaml. All 58 stage tests + 427 relevant tests pass."
     },
     {
       "id": "US-48-011",

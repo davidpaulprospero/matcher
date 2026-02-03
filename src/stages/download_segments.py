@@ -195,7 +195,7 @@ class DownloadVideoSegmentsStage(Stage):
 
             # Get download settings from config
             download_config = config.download
-            buffer_seconds = getattr(download_config, 'segment_buffer', 5.0)
+            buffer_seconds = download_config.segment_buffer
 
             print(f"  Downloading matched segments")
             print(f"    Buffer: {buffer_seconds}s before/after each match")
@@ -418,13 +418,19 @@ class DownloadVideoSegmentsStage(Stage):
                 # Download segment using yt-dlp with downloader's infrastructure
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
-                # Read socket_timeout from download config with fallback default
+                # Read segment config from download config with fallback defaults
+                _dl_cfg = getattr(self.downloader, 'download_config', None) if self.downloader else None
                 _socket_timeout = 30
-                if self.downloader and hasattr(self.downloader, 'download_config'):
-                    _socket_timeout = getattr(self.downloader.download_config, 'socket_timeout', 30)
+                _max_res = 1080
+                _seg_format = 'best[height<={segment_max_resolution}]'
+                if _dl_cfg:
+                    _seg_sock = getattr(_dl_cfg, 'segment_socket_timeout', 0)
+                    _socket_timeout = _seg_sock if _seg_sock else getattr(_dl_cfg, 'socket_timeout', 30)
+                    _max_res = getattr(_dl_cfg, 'segment_max_resolution', 1080)
+                    _seg_format = getattr(_dl_cfg, 'segment_format', _seg_format)
 
                 ydl_opts = {
-                    'format': 'best[height<=1080]',
+                    'format': _seg_format.format(segment_max_resolution=_max_res),
                     'outtmpl': str(output_file),
                     'quiet': True,
                     'no_warnings': True,
@@ -652,13 +658,19 @@ class DownloadVideoSegmentsStage(Stage):
             try:
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
-                # Read socket_timeout from download config with fallback default
+                # Read segment config from download config with fallback defaults
+                _dl_cfg = getattr(self.downloader, 'download_config', None)
                 _socket_timeout = 30
-                if hasattr(self.downloader, 'download_config'):
-                    _socket_timeout = getattr(self.downloader.download_config, 'socket_timeout', 30)
+                _max_res = 1080
+                _seg_format = 'best[height<={segment_max_resolution}]'
+                if _dl_cfg:
+                    _seg_sock = getattr(_dl_cfg, 'segment_socket_timeout', 0)
+                    _socket_timeout = _seg_sock if _seg_sock else getattr(_dl_cfg, 'socket_timeout', 30)
+                    _max_res = getattr(_dl_cfg, 'segment_max_resolution', 1080)
+                    _seg_format = getattr(_dl_cfg, 'segment_format', _seg_format)
 
                 ydl_opts = {
-                    'format': 'best[height<=1080]',
+                    'format': _seg_format.format(segment_max_resolution=_max_res),
                     'outtmpl': str(output_file),
                     'quiet': True,
                     'no_warnings': True,
