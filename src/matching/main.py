@@ -404,14 +404,17 @@ def match_all_segments(
     v7_matched = sum(1 for r in results if r.strategy_matches and len(r.strategy_matches) >= 1)
 
     total_segs = len(results)
-    logger.info(f"  Track Coverage:")
-    logger.info(f"    V1 (Primary):    {v1_matched:4d}/{total_segs} ({v1_matched/total_segs*100:.1f}%)")
-    logger.info(f"    V2 (Alt 1):      {v2_matched:4d}/{total_segs} ({v2_matched/total_segs*100:.1f}%)")
-    logger.info(f"    V3 (Alt 2):      {v3_matched:4d}/{total_segs} ({v3_matched/total_segs*100:.1f}%)")
-    logger.info(f"    V4 (Sec Pri):    {v4_matched:4d}/{total_segs} ({v4_matched/total_segs*100:.1f}%)")
-    logger.info(f"    V5 (Sec Alt 1):  {v5_matched:4d}/{total_segs} ({v5_matched/total_segs*100:.1f}%)")
-    logger.info(f"    V6 (Sec Alt 2):  {v6_matched:4d}/{total_segs} ({v6_matched/total_segs*100:.1f}%)")
-    logger.info(f"    V7 (Strategy):   {v7_matched:4d}/{total_segs} ({v7_matched/total_segs*100:.1f}%)")
+    if total_segs > 0:
+        logger.info(f"  Track Coverage:")
+        logger.info(f"    V1 (Primary):    {v1_matched:4d}/{total_segs} ({v1_matched/total_segs*100:.1f}%)")
+        logger.info(f"    V2 (Alt 1):      {v2_matched:4d}/{total_segs} ({v2_matched/total_segs*100:.1f}%)")
+        logger.info(f"    V3 (Alt 2):      {v3_matched:4d}/{total_segs} ({v3_matched/total_segs*100:.1f}%)")
+        logger.info(f"    V4 (Sec Pri):    {v4_matched:4d}/{total_segs} ({v4_matched/total_segs*100:.1f}%)")
+        logger.info(f"    V5 (Sec Alt 1):  {v5_matched:4d}/{total_segs} ({v5_matched/total_segs*100:.1f}%)")
+        logger.info(f"    V6 (Sec Alt 2):  {v6_matched:4d}/{total_segs} ({v6_matched/total_segs*100:.1f}%)")
+        logger.info(f"    V7 (Strategy):   {v7_matched:4d}/{total_segs} ({v7_matched/total_segs*100:.1f}%)")
+    else:
+        logger.info(f"  Track Coverage: No segments to match")
 
     # Source concentration analysis
     v1_sources: Dict[str, int] = defaultdict(int)
@@ -432,11 +435,12 @@ def match_all_segments(
             logger.info(f"      {src}: {count} clips ({count/total_segs*100:.1f}%)")
 
     # Gap analysis
-    low_alt_segments = sum(1 for r in results if len(r.alternatives or []) < 2)
-    no_secondary = sum(1 for r in results if not r.secondary_matches)
-    logger.info(f"  Gap Analysis:")
-    logger.info(f"    Segments with <2 alternatives: {low_alt_segments}/{total_segs} ({low_alt_segments/total_segs*100:.1f}%)")
-    logger.info(f"    Segments with no V4-V6:       {no_secondary}/{total_segs} ({no_secondary/total_segs*100:.1f}%)")
+    if total_segs > 0:
+        low_alt_segments = sum(1 for r in results if len(r.alternatives or []) < 2)
+        no_secondary = sum(1 for r in results if not r.secondary_matches)
+        logger.info(f"  Gap Analysis:")
+        logger.info(f"    Segments with <2 alternatives: {low_alt_segments}/{total_segs} ({low_alt_segments/total_segs*100:.1f}%)")
+        logger.info(f"    Segments with no V4-V6:       {no_secondary}/{total_segs} ({no_secondary/total_segs*100:.1f}%)")
 
     # Confidence distribution
     confidences = [r.primary_match.confidence for r in results if r.primary_match]
