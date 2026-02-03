@@ -327,10 +327,10 @@ class TestCanSkipAndRestore:
 
     def test_restore_scans_disk_for_segments(self, stage, mock_checkpoint, mock_config, tmp_path):
         """restore() scans output dir for existing segment files"""
-        # Create mock segment files
+        # Create mock segment files with non-zero content
         mock_config.downloaded_videos_dir = str(tmp_path)
-        (tmp_path / "abc123_5_20.mp4").touch()
-        (tmp_path / "def456_0_15.mp4").touch()
+        (tmp_path / "abc123_5_20.mp4").write_bytes(b'\x00\x00\x01')
+        (tmp_path / "def456_0_15.mp4").write_bytes(b'\x00\x00\x01')
 
         state = PipelineState()
         state.downloaded_segments = []
@@ -339,6 +339,96 @@ class TestCanSkipAndRestore:
 
         assert result is True
         assert len(state.downloaded_segments) == 2
+
+    def test_restore_filters_out_zero_byte_files(self, stage, mock_checkpoint, mock_config, tmp_path):
+        """restore() filters out zero-byte (empty) files from restored segments"""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+        # One valid file, one empty file
+        (tmp_path / "abc123_5_20.mp4").write_bytes(b'\x00\x00\x01')
+        (tmp_path / "corrupt_0_10.mp4").touch()  # zero bytes
+
+        state = PipelineState()
+        state.downloaded_segments = []
+
+        result = stage.restore(state, mock_checkpoint, mock_config)
+
+        assert result is True
+        assert len(state.downloaded_segments) == 1
+        assert 'abc123_5_20.mp4' in state.downloaded_segments[0].file
+
+    def test_restore_filters_out_nonexistent_files(self, stage, mock_checkpoint, mock_config, tmp_path):
+        """restore() filters out files that don't exist (glob race condition)"""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+        # Create two files, then delete one after the test setup
+        valid_file = tmp_path / "abc123_5_20.mp4"
+        vanishing_file = tmp_path / "gone_0_10.mp4"
+        valid_file.write_bytes(b'\x00\x00\x01')
+        vanishing_file.write_bytes(b'\x00\x00\x01')
+
+        # Patch glob to return both, but delete one before restore checks it
+        original_glob = Path.glob
+
+        def glob_then_delete(self_path, pattern):
+            results = list(original_glob(self_path, pattern))
+            # Delete vanishing file after glob finds it but before stat check
+            if vanishing_file.exists():
+                vanishing_file.unlink()
+            return results
+
+        state = PipelineState()
+        state.downloaded_segments = []
+
+        with patch.object(Path, 'glob', glob_then_delete):
+            result = stage.restore(state, mock_checkpoint, mock_config)
+
+        assert result is True
+        assert len(state.downloaded_segments) == 1
+        assert 'abc123_5_20.mp4' in state.downloaded_segments[0].file
+
+    def test_restore_logs_valid_and_invalid_counts(self, stage, mock_checkpoint, mock_config, tmp_path):
+        """restore() logs count of valid vs invalid segments"""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+        (tmp_path / "good1_5_20.mp4").write_bytes(b'\x00\x01')
+        (tmp_path / "good2_0_15.mp4").write_bytes(b'\x00\x01')
+        (tmp_path / "empty_0_10.mp4").touch()  # zero bytes
+
+        state = PipelineState()
+        state.downloaded_segments = []
+
+        with patch('src.stages.download_segments.logger') as mock_logger:
+            stage.restore(state, mock_checkpoint, mock_config)
+            # Check that log message includes both valid and invalid counts
+            log_calls = [str(c) for c in mock_logger.info.call_args_list]
+            log_text = ' '.join(log_calls)
+            assert '2 valid' in log_text
+            assert '1 invalid' in log_text
+
+    def test_restore_cross_references_matches(self, stage, mock_checkpoint, mock_config, tmp_path):
+        """restore() logs missing segments when matches exist but files don't"""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+        # Only one segment file on disk
+        (tmp_path / "abc123_5_20.mp4").write_bytes(b'\x00\x01')
+
+        state = PipelineState()
+        state.downloaded_segments = []
+        # Matches reference two video IDs but only one has a file on disk
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "abc123"
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "missing_vid"
+        state.matches = [match1, match2]
+
+        with patch('src.stages.download_segments.logger') as mock_logger:
+            result = stage.restore(state, mock_checkpoint, mock_config)
+
+            assert result is True
+            assert len(state.downloaded_segments) == 1
+            # Should log about missing video(s)
+            log_calls = [str(c) for c in mock_logger.info.call_args_list]
+            log_text = ' '.join(log_calls)
+            assert '1 matched video(s) have no restored segments' in log_text
 
 
 # ============================================================================

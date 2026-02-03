@@ -767,21 +767,54 @@ class DownloadVideoSegmentsStage(Stage):
         checkpoint: 'CheckpointManager',
         config: 'Config' = None
     ) -> bool:
-        """Restore from checkpoint"""
-        # Segment files are on disk, scan for them
+        """Restore from checkpoint.
+
+        US-48-009: Validates restored segment files exist on disk and have
+        non-zero size. Filters out deleted or empty files. Cross-references
+        against state.matches to identify segments that still need downloading.
+        """
         try:
             if config:
                 output_dir = Path(config.downloaded_videos_dir)
                 if output_dir.exists():
                     from ..state import DownloadedVideo
                     segments = []
+                    skipped = 0
                     for f in output_dir.glob('*_*_*.mp4'):
+                        if not f.exists() or f.stat().st_size == 0:
+                            skipped += 1
+                            continue
                         segments.append(DownloadedVideo(
                             file=str(f),
                             source='restored'
                         ))
                     state.downloaded_segments = segments
-                    logger.info(f"Restored DOWNLOAD_SEGMENTS: {len(segments)} segments from disk")
+                    logger.info(
+                        f"Restored DOWNLOAD_SEGMENTS: {len(segments)} valid, "
+                        f"{skipped} invalid (missing or empty)"
+                    )
+
+                    # Cross-reference against matches to find segments needing download
+                    if state.matches:
+                        restored_ids = set()
+                        for seg in segments:
+                            fname = Path(seg.file).stem
+                            parts = fname.rsplit('_', 2)
+                            if len(parts) >= 3:
+                                restored_ids.add(parts[0])
+
+                        matched_ids = set()
+                        for match in state.matches:
+                            vid = getattr(match, 'video_file', '') or ''
+                            if vid:
+                                matched_ids.add(vid)
+
+                        missing = matched_ids - restored_ids
+                        if missing:
+                            logger.info(
+                                f"DOWNLOAD_SEGMENTS restore: {len(missing)} matched "
+                                f"video(s) have no restored segments on disk"
+                            )
             return True
         except Exception as e:
             logger.warning(f"Failed to restore DOWNLOAD_SEGMENTS: {e}")
