@@ -766,5 +766,258 @@ class TestCaptionQualityModeExclusivity:
                 assert "multiplicative" not in reason_add, f"Additive reason contains 'multiplicative': {reason_add}"
 
 
+# ============================================================================
+# Test Adaptive Threshold Edge Cases (US-46-010)
+# ============================================================================
+
+class TestAdaptiveThresholdEdgeCases:
+    """Test adaptive threshold boundary conditions and extreme pool sizes."""
+
+    @pytest.mark.fast
+    def test_empty_voiceover_text_adjusts_threshold(self, mock_config, sample_video_segment):
+        """
+        AC1: Empty voiceover text (0 chars) should trigger short_vo adjustment (+0.05).
+        """
+        scoring = MatchScoring(mock_config)
+        candidates = [(sample_video_segment, 0.8)]
+
+        threshold, reason = scoring.calculate_adaptive_threshold(
+            base_threshold=0.85,
+            voiceover_text="",
+            candidates=candidates
+        )
+
+        # Empty string -> 0 chars after strip -> short_vo adjustment
+        assert threshold >= 0.85  # base + 0.05 = 0.90 (or clamped)
+        assert "short_vo(0c)" in reason
+
+    @pytest.mark.fast
+    def test_none_voiceover_text_adjusts_threshold(self, mock_config, sample_video_segment):
+        """
+        AC1 variant: None voiceover text should also trigger short_vo adjustment.
+        """
+        scoring = MatchScoring(mock_config)
+        candidates = [(sample_video_segment, 0.8)]
+
+        threshold, reason = scoring.calculate_adaptive_threshold(
+            base_threshold=0.85,
+            voiceover_text=None,
+            candidates=candidates
+        )
+
+        assert threshold >= 0.85
+        assert "short_vo(0c)" in reason
+
+    @pytest.mark.fast
+    def test_large_pool_1000_candidates_normalization(self, mock_config):
+        """
+        AC2: Very large candidate pool (1000+) should produce valid normalized threshold.
+        Pool normalization factor is capped at 1.2, so even 1000 candidates
+        should not produce unreasonable thresholds.
+        """
+        from src.matching.scoring import normalize_confidence_by_pool
+
+        # 1000 candidates: raw factor = sqrt(1000/50) = 4.47, clamped to 1.2
+        confidence = 0.85
+        result, reason = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=1000,
+            pool_normalization_enabled=True
+        )
+
+        # Inverse of 1.2 = 0.833, so 0.85 * 0.833 ≈ 0.708
+        assert 0.5 <= result <= 0.99
+        assert result < confidence  # Large pool reduces confidence
+        assert "large_pool(1000)" in reason
+
+    @pytest.mark.fast
+    def test_large_pool_2000_same_as_1000(self, mock_config):
+        """
+        AC2 variant: 2000 candidates should produce same result as 1000 due to capping.
+        """
+        from src.matching.scoring import normalize_confidence_by_pool
+
+        confidence = 0.85
+        result_1000, _ = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=1000,
+            pool_normalization_enabled=True
+        )
+        result_2000, _ = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=2000,
+            pool_normalization_enabled=True
+        )
+
+        # Both capped at max factor 1.2, so results should be identical
+        assert abs(result_1000 - result_2000) < 0.001
+
+    @pytest.mark.fast
+    def test_small_pool_1_candidate_reasonable_threshold(self, mock_config):
+        """
+        AC3: Very small pool (1 candidate) should not produce unreasonable thresholds.
+        """
+        from src.matching.scoring import normalize_confidence_by_pool
+
+        confidence = 0.7
+        result, reason = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=1,
+            pool_normalization_enabled=True
+        )
+
+        # Factor = sqrt(1/50) = 0.141, clamped to 0.8
+        # Inverse = 1/0.8 = 1.25, so 0.7 * 1.25 = 0.875
+        assert result > confidence  # Small pool boosts
+        assert result <= 1.0  # Never exceeds 1.0
+        assert "small_pool(1)" in reason
+
+    @pytest.mark.fast
+    def test_small_pool_2_candidates_reasonable_threshold(self, mock_config):
+        """
+        AC3: Very small pool (2 candidates) should not produce unreasonable thresholds.
+        """
+        from src.matching.scoring import normalize_confidence_by_pool
+
+        seg = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="A", source_file="a.mp4")
+        candidates = [(seg, 0.80), (seg, 0.60)]
+
+        confidence = 0.7
+        result, reason = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=2,
+            candidates=candidates,
+            pool_normalization_enabled=True
+        )
+
+        # Pool of 2 with clear winner (margin 0.20 >= 0.1) gets +0.05 boost
+        assert result > confidence
+        assert result <= 1.0
+        assert "small_pool(2)" in reason
+
+    @pytest.mark.fast
+    def test_variance_exactly_at_005_boundary(self, mock_config):
+        """
+        AC4: Candidate variance exactly at 0.05 boundary should NOT trigger
+        the low_var threshold boost. The condition is variance < 0.05 (strict).
+        """
+        from src.matching.scoring import calculate_adaptive_threshold
+        import statistics
+
+        # Craft candidates whose top-5 stdev is exactly >= 0.05
+        # stdev([0.78, 0.84, 0.85, 0.86, 0.92]) ≈ 0.0510
+        seg = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="V", source_file="v.mp4")
+        candidates = [
+            (seg, 0.92),
+            (seg, 0.86),
+            (seg, 0.85),
+            (seg, 0.84),
+            (seg, 0.78),
+        ]
+
+        # Verify our crafted variance is >= 0.05
+        top_scores = [s for _, s in candidates[:5]]
+        actual_stdev = statistics.stdev(top_scores)
+        assert actual_stdev >= 0.05, f"Test setup error: stdev={actual_stdev}"
+
+        threshold, reason = calculate_adaptive_threshold(
+            base_threshold=0.85,
+            voiceover_text="This is a normal length voiceover text that is long enough.",
+            candidates=candidates
+        )
+
+        # Variance >= 0.05 should NOT trigger low_var adjustment
+        assert "low_var" not in reason
+
+    @pytest.mark.fast
+    def test_variance_just_below_005_triggers_boost(self, mock_config):
+        """
+        AC4 complement: Variance just below 0.05 SHOULD trigger the low_var boost.
+        """
+        from src.matching.scoring import calculate_adaptive_threshold
+        import statistics
+
+        # Craft candidates with stdev just under 0.05
+        # stdev([0.84, 0.85, 0.85, 0.86, 0.87]) ≈ 0.0112
+        seg = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="V", source_file="v.mp4")
+        candidates = [
+            (seg, 0.87),
+            (seg, 0.86),
+            (seg, 0.85),
+            (seg, 0.85),
+            (seg, 0.84),
+        ]
+
+        # Verify variance is < 0.05
+        top_scores = [s for _, s in candidates[:5]]
+        actual_stdev = statistics.stdev(top_scores)
+        assert actual_stdev < 0.05, f"Test setup error: stdev={actual_stdev}"
+
+        threshold, reason = calculate_adaptive_threshold(
+            base_threshold=0.85,
+            voiceover_text="This is a normal length voiceover text that is long enough.",
+            candidates=candidates
+        )
+
+        # Variance < 0.05 SHOULD trigger low_var adjustment
+        assert "low_var" in reason
+        assert abs(threshold - 0.80) < 0.001  # 0.85 - 0.05 = 0.80
+
+    @pytest.mark.fast
+    def test_pool_normalization_scaling_at_10_50_200(self, mock_config):
+        """
+        AC5: Pool normalization reference size (50) produces expected scaling
+        for pools of 10, 50, and 200 candidates.
+        """
+        from src.matching.scoring import (
+            normalize_confidence_by_pool,
+            POOL_NORMALIZATION_REFERENCE_SIZE,
+        )
+
+        confidence = 0.8
+
+        # Pool of 10: sqrt(10/50) = 0.447, clamped to 0.8
+        # inverse = 1/0.8 = 1.25, result = 0.8 * 1.25 = 1.0
+        result_10, reason_10 = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=10,
+            pool_normalization_enabled=True
+        )
+
+        # Pool of 50 (reference): sqrt(50/50) = 1.0
+        # inverse = 1/1.0 = 1.0, result = 0.8 * 1.0 = 0.8
+        result_50, reason_50 = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=50,
+            pool_normalization_enabled=True
+        )
+
+        # Pool of 200: sqrt(200/50) = 2.0, clamped to 1.2
+        # inverse = 1/1.2 = 0.833, result = 0.8 * 0.833 ≈ 0.667
+        result_200, reason_200 = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=200,
+            pool_normalization_enabled=True
+        )
+
+        # Verify ordering: small pool boosts > reference unchanged > large pool reduces
+        assert result_10 > result_50 > result_200
+
+        # Verify reference size produces ~unchanged confidence
+        assert abs(result_50 - confidence) < 0.01
+
+        # Verify small pool boosts confidence
+        assert result_10 > confidence
+
+        # Verify large pool reduces confidence
+        assert result_200 < confidence
+
+        # Verify reason strings reflect pool category
+        # Pool of 10 is at the POOL_SMALL_THRESHOLD boundary (10 is NOT < 10)
+        assert "medium_pool(10)" in reason_10 or "small_pool(10)" in reason_10
+        assert "medium_pool(50)" in reason_50
+        assert "large_pool(200)" in reason_200
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

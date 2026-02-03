@@ -90,7 +90,7 @@
       "id": "US-46-006",
       "title": "Ensure confidence_variance and matched_keywords propagate on all MatchResult paths",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Audit all code paths in src/matching/tiered_matcher.py that create MatchResult objects and verify confidence_variance is always set (lines 713, 794, 966 and any others)",
         "Audit all code paths that create MatchResult and verify matched_keywords is always populated (not left as None or empty when keywords exist)",
@@ -98,13 +98,13 @@
         "Remove defensive getattr(r, 'confidence_variance', 0.0) in src/matching/main.py:601 after ensuring field is always present",
         "Add test verifying MatchResult objects from all 7 matching strategies contain both confidence_variance and matched_keywords fields"
       ],
-      "notes": "Tier: T2 (data completeness). Files: src/matching/tiered_matcher.py lines 713-720, 794-804, 966-981 (where fields are set), src/matching/main.py line 601 (defensive getattr suggests field may be missing), src/matching/types.py (MatchResult definition). The defensive getattr pattern indicates a known fragility."
+      "notes": "Audited all 5 MatchResult creation paths in tiered_matcher.py and 1 in output.py. Dataclass defaults already guarantee both fields. Removed 4 defensive getattr() calls in main.py (lines 579, 601, 617) and stages/match.py (lines 172, 174), replacing with direct field access. Added 13 tests in test_matchresult_field_propagation.py covering dataclass defaults, gap paths, explicit paths, direct access patterns, and TieredMatcher integration. 284 related tests pass."
     },
     {
       "id": "US-46-007",
       "title": "Add unit tests for alternative_selection module",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Create tests/test_matching_alternative_selection.py with tests for the alternative selection logic in src/matching/alternative_selection.py",
         "Test that V2-V3 alternatives are selected with confidence above a minimum threshold",
@@ -112,13 +112,13 @@
         "Test edge case where candidate pool has fewer videos than requested alternatives",
         "Test that alternatives do not duplicate the primary match for any segment"
       ],
-      "notes": "Tier: T2 (test coverage). Files: src/matching/alternative_selection.py (226 lines, zero test coverage), tests/test_matching_alternative_selection.py (new file). This module handles V2-V6 track generation which is core to the OTIO output quality. No existing tests verify alternative viability or diversity."
+      "notes": "30 tests in tests/test_matching_alternative_selection.py covering: config defaults, constructor paths, V2-V3 alternatives (source exclusion, confidence retention, fallback penalty, diversity preference, empty/small pools, scene callbacks), V4-V6 secondary matches (3-pass selection, source exclusion, confidence penalties per pass, segment deduplication, reasoning labels, alt_segments exclusion). All 30 pass."
     },
     {
       "id": "US-46-008",
       "title": "Add unit tests for similarity_cache thread safety and eviction",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Create tests/test_matching_similarity_cache.py with tests for src/matching/similarity_cache.py",
         "Test that cache returns consistent results for identical embedding pairs",
@@ -126,13 +126,13 @@
         "Test concurrent access from multiple threads does not corrupt cache state or raise exceptions",
         "Test cache clearing resets all stored entries and counters"
       ],
-      "notes": "Tier: T2 (test coverage + correctness). Files: src/matching/similarity_cache.py (381 lines, zero test coverage), tests/test_matching_similarity_cache.py (new file). Thread-safe memoization for cosine similarity computations. Performance-critical and used heavily during matching. No tests exist for thread safety or memory bounds."
+      "notes": "45 tests: basic get/put/stats (7), eviction (3), clear (2), thread safety (4), log_stats (1), KeywordExtractionCache (5), TopicPenaltyCache (5), hash helpers (10), global accessors (8). All passing."
     },
     {
       "id": "US-46-009",
       "title": "Add unit tests for iterative_match gap_analyzer module",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Create tests/test_iterative_match_gap_analyzer.py with tests for src/iterative_match/gap_analyzer.py",
         "Test gap detection identifies segments with confidence below threshold",
@@ -141,13 +141,13 @@
         "Test gap analysis with mixed confidence levels correctly ranks gaps by severity",
         "Test edge case with empty segment list returns empty gap list"
       ],
-      "notes": "Tier: T2 (test coverage). Files: src/iterative_match/gap_analyzer.py (zero dedicated test coverage), tests/test_iterative_match_gap_analyzer.py (new file). Only integration-level testing exists in test_stage_iterative_match.py. No unit tests for gap detection logic isolation."
+      "notes": "56 tests passing. Covers GapSegment/GapAnalysis dataclasses, _classify_gap_pattern (all 6 pattern types + priority order), _has_location_pattern, _has_proper_noun, analyze_gaps (empty, single, mixed, entities, clustered), extract_keywords_for_gap (all pattern types, dedup, limits), LockedMatch, word list sanity checks."
     },
     {
       "id": "US-46-010",
       "title": "Expand scoring test coverage for adaptive threshold edge cases",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add test in tests/test_matching_scoring.py for adaptive threshold with empty voiceover text (0 chars) - verify threshold adjusts appropriately",
         "Add test for adaptive threshold with very large candidate pool (1000+ candidates) to verify normalization behavior",
@@ -155,7 +155,7 @@
         "Add test for candidate variance exactly at 0.05 boundary to verify threshold boost is applied correctly",
         "Add test verifying pool normalization reference size (50 candidates) produces expected scaling for pools of 10, 50, and 200"
       ],
-      "notes": "Tier: T2 (test robustness). Files: src/matching/scoring.py lines 26-84 (adaptive threshold calculation), tests/test_matching_scoring.py (existing file, expand). Current threshold considers voiceover length and candidate variance but has no tests for boundary conditions or extreme pool sizes."
+      "notes": "9 tests added in TestAdaptiveThresholdEdgeCases class. Empty/None voiceover (0 chars) triggers short_vo. Large pool 1000/2000 capped at max factor 1.2 (same result). Small pool 1-2 candidates boosts within bounds. Variance at 0.05 boundary: exact 0.05 does NOT trigger, below 0.05 DOES. Pool scaling 10/50/200: small boosts > reference unchanged > large reduces. All 45 tests pass."
     },
     {
       "id": "US-46-011",
