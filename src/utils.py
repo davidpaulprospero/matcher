@@ -3,6 +3,7 @@ Utility classes and functions
 """
 
 import os
+import re
 import sys
 import json
 import hashlib
@@ -127,6 +128,33 @@ def resolve_path(path: Union[str, Path], base_dir: Union[str, Path] = None) -> s
     
     # Sanitize to remove any extended-length prefix
     return sanitize_path(path)
+
+
+# =============================================================================
+# VIDEO ID UTILITIES
+# =============================================================================
+
+# YouTube video IDs are exactly 11 characters: alphanumeric, underscore, hyphen
+_YOUTUBE_ID_PATTERN = re.compile(r'([a-zA-Z0-9_-]{11})')
+
+
+def extract_video_id(path_or_id: str) -> Optional[str]:
+    """
+    Extract a YouTube video ID from a path, URL, or raw ID string.
+
+    Searches for the first 11-character alphanumeric+underscore+hyphen
+    sequence, which is the standard YouTube video ID format.
+
+    Args:
+        path_or_id: File path, URL, or video ID string
+
+    Returns:
+        The extracted video ID, or None if no valid ID found
+    """
+    if not path_or_id:
+        return None
+    match = _YOUTUBE_ID_PATTERN.search(str(path_or_id))
+    return match.group(1) if match else None
 
 
 # =============================================================================

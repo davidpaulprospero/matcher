@@ -105,7 +105,7 @@
             "id": "US-44-007",
             "title": "Extract duplicated video ID extraction logic into a shared utility",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "A new function extract_video_id(path_or_id: str) -> Optional[str] exists in src/utils.py (or appropriate shared module)",
                 "The function uses the YouTube 11-character regex pattern r'([a-zA-Z0-9_-]{11})' with proper validation",
@@ -113,7 +113,7 @@
                 "src/state.py from_legacy_pipeline() (line 287) uses the shared utility instead of inline regex",
                 "All existing tests still pass after the refactor"
             ],
-            "notes": "Tier: T3 (code quality). Source files: src/stages/iterative_match.py (two methods: _extract_video_id around line 652-674, _extract_video_id_from_path around line 1318-1322), src/state.py:287 (inline regex in from_legacy_pipeline). All three locations use the same regex pattern r'([a-zA-Z0-9_-]{11})' for YouTube ID extraction. Consolidating prevents drift between implementations."
+            "notes": "Done. Added extract_video_id(path_or_id: str) -> Optional[str] to src/utils.py with compiled _YOUTUBE_ID_PATTERN regex. Updated iterative_match.py _extract_video_id() and _extract_video_id_from_path() to use shared utility. Updated state.py from_legacy_pipeline() to use shared utility instead of inline regex. All 370 relevant tests pass (2 pre-existing failures in unrelated benchmark/transcription tests)."
         },
         {
             "id": "US-44-008",
