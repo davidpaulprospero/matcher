@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Error patterns indicating systemic network failures (not video-specific)
+# These match both subprocess stderr AND Python API DownloadError messages,
+# which wrap exceptions as "ERROR: [youtube] ID: <original exception text>".
 _NETWORK_FAILURE_PATTERNS = (
     'getaddrinfo failed',
     'Name or service not known',
@@ -36,6 +38,8 @@ _NETWORK_FAILURE_PATTERNS = (
     'Network is unreachable',
     'No address associated with hostname',
     'Temporary failure in name resolution',
+    'URLError',              # Python urllib wrapper (e.g. URLError: <urlopen error ...>)
+    'ConnectionResetError',  # Python API: connection dropped mid-transfer
 )
 
 # ffmpeg exit code 0xFFFFFEC6 = 4294967158 unsigned = -314 signed (network error)

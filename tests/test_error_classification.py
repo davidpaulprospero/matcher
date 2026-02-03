@@ -233,3 +233,99 @@ class TestRetryQueueErrorCategory:
         # Re-add with different category (returns False but updates)
         queue.add('vid1', 'kw', 'short', 'DNS failed', error_category='network_systemic')
         assert queue.items['vid1'].error_category == 'network_systemic'
+
+
+# =============================================================================
+# US-49-006: _is_network_failure() pattern validation for Python API + subprocess
+# =============================================================================
+
+class TestIsNetworkFailurePythonApiFormat:
+    """Verify _is_network_failure() works with both Python API DownloadError
+    format (wrapped with 'ERROR: [youtube] ID: ...') and raw subprocess stderr.
+
+    US-49-006: Validates patterns against real-world error strings.
+    """
+
+    # --- Real-world network failure messages (should return True) ---
+
+    def test_subprocess_stderr_dns_failure(self):
+        """Raw subprocess stderr: getaddrinfo failed."""
+        error = "ERROR: unable to download video data: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert _is_network_failure(error) is True
+
+    def test_python_api_download_error_dns(self):
+        """Python API DownloadError wraps exception with 'ERROR: [youtube] ID:' prefix."""
+        error = "ERROR: [youtube] dQw4w9WgXcQ: Unable to download API page; getaddrinfo failed"
+        assert _is_network_failure(error) is True
+
+    def test_python_api_urlerror_wrapper(self):
+        """Python API: URLError wrapping a socket error."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: URLError: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert _is_network_failure(error) is True
+
+    def test_urlerror_without_nested_dns(self):
+        """URLError as a standalone pattern (no nested DNS error visible)."""
+        error = "URLError: <urlopen error timed out>"
+        assert _is_network_failure(error) is True
+
+    def test_connection_reset_error_python_api(self):
+        """Python API: ConnectionResetError during download."""
+        error = "ERROR: [youtube] xyz789: Unable to download video data: ConnectionResetError: [Errno 104] Connection reset by peer"
+        assert _is_network_failure(error) is True
+
+    def test_connection_reset_error_bare(self):
+        """Bare ConnectionResetError string (from repr/str of exception)."""
+        error = "ConnectionResetError(104, 'Connection reset by peer')"
+        assert _is_network_failure(error) is True
+
+    def test_windows_dns_errno_11001(self):
+        """Windows DNS failure: Errno 11001 in subprocess output."""
+        error = "ERROR: [youtube] vid1: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert _is_network_failure(error) is True
+
+    def test_ffmpeg_exit_code_unsigned(self):
+        """ffmpeg exit code 4294967158 (0xFFFFFEC6, unsigned -314) in stderr."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158"
+        assert _is_network_failure(error) is True
+
+    def test_network_unreachable_linux(self):
+        """Linux: Network is unreachable (no internet)."""
+        error = "ERROR: [youtube] vid2: Unable to download: OSError: [Errno 101] Network is unreachable"
+        assert _is_network_failure(error) is True
+
+    def test_temporary_name_resolution_failure(self):
+        """Temporary failure in name resolution (DNS intermittent)."""
+        error = "socket.gaierror: [Errno -3] Temporary failure in name resolution"
+        assert _is_network_failure(error) is True
+
+    # --- Bot-detection / video-specific messages (should return False) ---
+
+    def test_sign_in_bot_detection_not_network(self):
+        """Bot-detection 'Sign in to confirm' must NOT be classified as network failure."""
+        error = "ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies"
+        assert _is_network_failure(error) is False
+
+    def test_http_403_forbidden_not_network(self):
+        """HTTP Error 403 is access-related, NOT a network failure."""
+        error = "ERROR: [youtube] def456: HTTP Error 403: Forbidden"
+        assert _is_network_failure(error) is False
+
+    def test_video_unavailable_not_network(self):
+        """Video unavailable is content-specific, NOT a network failure."""
+        error = "ERROR: [youtube] ghi789: Video unavailable. This video is no longer available"
+        assert _is_network_failure(error) is False
+
+    def test_age_restricted_not_network(self):
+        """Age-restricted video is access-specific, NOT a network failure."""
+        error = "ERROR: [youtube] jkl012: Sign in to confirm your age. This video may be inappropriate for some users."
+        assert _is_network_failure(error) is False
+
+    def test_copyright_claim_not_network(self):
+        """Copyright takedown is content-specific, NOT a network failure."""
+        error = "ERROR: [youtube] mno345: This video contains content from UMG, who has blocked it on copyright grounds."
+        assert _is_network_failure(error) is False
+
+    def test_429_rate_limit_not_network(self):
+        """Rate limiting (429) is transient/video-specific, NOT systemic network failure."""
+        error = "HTTP Error 429: Too Many Requests"
+        assert _is_network_failure(error) is False
