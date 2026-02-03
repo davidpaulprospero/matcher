@@ -1339,6 +1339,12 @@ download:
   segment_max_resolution: 1080
   # Socket timeout for segment downloads (seconds). 0 = use main socket_timeout value.
   segment_socket_timeout: 0
+  # Stall timeout for segment downloads (seconds). Wraps ydl.download() in a
+  # ThreadPoolExecutor to detect hangs where the call blocks indefinitely
+  # (e.g., ffmpeg post-processing stalls, stream-level hangs with no data flow).
+  # Unlike socket_timeout (HTTP sockets only), this covers the entire download
+  # including ffmpeg merging/remuxing. 0 = no stall detection.
+  segment_stall_timeout: 120
 
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect

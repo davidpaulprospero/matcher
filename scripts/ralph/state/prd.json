@@ -49,7 +49,7 @@
             "id": "US-49-003",
             "title": "Fix ImpersonateTarget type conversion in _apply_escalation_to_ydl_opts",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Replace raw string assignment ydl_opts['impersonate'] = value with ImpersonateTarget.from_str() conversion in _apply_escalation_to_ydl_opts()",
                 "Lowercase the client and os fields after parsing (e.g., 'Chrome-136' -> 'chrome-136', 'Macos-15' -> 'macos-15')",
@@ -57,13 +57,13 @@
                 "Add unit test verifying ImpersonateTarget object (not string) is set in ydl_opts after escalation translation",
                 "Add unit test verifying case-insensitive matching works (uppercase input produces lowercase target fields)"
             ],
-            "notes": "P0 fix - Issue #5 from user interview. Tier: bug fix. _apply_escalation_to_ydl_opts() at download_segments.py:109-148 translates CLI '--impersonate Chrome-136:Macos-15' to ydl_opts['impersonate'] = 'Chrome-136:Macos-15' (raw string). The yt-dlp Python API requires an ImpersonateTarget object — passing a string causes AssertionError at networking/impersonate.py:119. Additionally ImpersonateTarget.from_str() preserves case but available targets are lowercase, so client/os fields must be lowered. Import from yt_dlp.networking.impersonate import ImpersonateTarget. Source files: src/stages/download_segments.py:109-148 (_apply_escalation_to_ydl_opts function)."
+            "notes": "Fixed _apply_escalation_to_ydl_opts to convert raw impersonate string to ImpersonateTarget object with lowercased client/os fields. Added try/except fallback. Updated 4 existing tests + added 3 new tests (object type, lowercase fields, invalid input fallback). 79/79 tests pass."
         },
         {
             "id": "US-49-004",
             "title": "Add process-level stall detection wrapper around ydl.download() call",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Wrap the ydl.download() call in a concurrent.futures.ThreadPoolExecutor with configurable timeout (default from stall_timeout config, fallback 120s)",
                 "On timeout, log a warning with video_id and elapsed time, then raise a TimeoutError that feeds into the existing retry/escalation logic",
@@ -71,7 +71,7 @@
                 "Add unit test verifying that a simulated stall (mocked ydl.download that sleeps) triggers timeout and raises",
                 "Add unit test verifying successful downloads within timeout are not interrupted"
             ],
-            "notes": "P1 fix - Issue #1 from user interview. Tier: reliability improvement. socket_timeout (added in US-48-002) only covers yt-dlp's internal HTTP socket timeout, not ffmpeg post-processing or stream-level stalls where the download hangs with no data flow. The subprocess-based core.py has stall detection via process monitoring, but download_segments.py calls ydl.download() directly which can block indefinitely. Use concurrent.futures.ThreadPoolExecutor + future.result(timeout=X) pattern. Source files: src/stages/download_segments.py:492 (ydl.download() call), src/config/sections/download.py (add segment_stall_timeout field), config.yaml."
+            "notes": "Implemented process-level stall detection using concurrent.futures.ThreadPoolExecutor around ydl.download(). Added segment_stall_timeout=120 to DownloadConfig and config.yaml. When timeout=0, falls back to unwrapped call. On stall, logs warning with video_id/elapsed and raises TimeoutError that feeds into existing retry/escalation. Added 4 tests: stall triggers timeout, success not interrupted, disabled when 0, reads from config. Also added defensive int() conversion for MagicMock compatibility with existing tests. 83/83 tests pass."
         },
         {
             "id": "US-49-005",

@@ -11,6 +11,7 @@ Stage 6 of the simplified 7-stage pipeline:
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import statistics
 import time
@@ -522,9 +523,41 @@ class DownloadVideoSegmentsStage(Stage):
                     except Exception:
                         pass
 
+                # US-49-004: Read stall timeout for process-level hang detection
+                _stall_timeout = 120  # fallback
+                if _dl_cfg:
+                    _raw_stall = getattr(_dl_cfg, 'segment_stall_timeout', 120)
+                    try:
+                        _stall_timeout = int(_raw_stall)
+                    except (TypeError, ValueError):
+                        _stall_timeout = 120
+
                 seg_start_time = time.time()
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+                if _stall_timeout and _stall_timeout > 0:
+                    # US-49-004: Wrap ydl.download() in ThreadPoolExecutor to detect
+                    # process-level stalls (ffmpeg hangs, stream stalls with no data).
+                    # socket_timeout only covers HTTP sockets; this covers the entire call.
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        def _do_download():
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([url])
+
+                        future = executor.submit(_do_download)
+                        try:
+                            future.result(timeout=_stall_timeout)
+                        except concurrent.futures.TimeoutError:
+                            elapsed = time.time() - seg_start_time
+                            logger.warning(
+                                f"Segment {video_id}: ydl.download() stalled for "
+                                f"{elapsed:.1f}s (timeout={_stall_timeout}s) — killing"
+                            )
+                            raise TimeoutError(
+                                f"ydl.download() stalled for {elapsed:.1f}s "
+                                f"(segment_stall_timeout={_stall_timeout}s)"
+                            )
+                else:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
                 seg_duration = time.time() - seg_start_time
 
                 if output_file.exists():

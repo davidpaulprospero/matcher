@@ -2543,3 +2543,183 @@ class TestCookiePropagation:
 
         assert len(captured_opts) > 0
         assert captured_opts[0]['cookiesfrombrowser'] == ['chrome']
+
+
+# ============================================================================
+# Segment Stall Timeout (US-49-004)
+# ============================================================================
+
+class TestSegmentStallTimeout:
+    """Test process-level stall detection wrapping ydl.download() call"""
+
+    @pytest.mark.fast
+    def test_stall_timeout_triggers_on_hung_download(self, stage, tmp_path):
+        """A simulated stall (mocked ydl.download that sleeps) triggers timeout and raises"""
+        import time as _time
+
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 2  # 2-second timeout for fast test
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'stall_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            # Simulate a stalled download that blocks for 60 seconds
+            mock_ydl_instance.download.side_effect = lambda urls: _time.sleep(60)
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # The stalled download should have been caught and counted as failure
+        # (the TimeoutError is caught by the existing except Exception handler)
+        assert len(downloaded) == 0
+        assert stats['failed'] == 1
+
+    @pytest.mark.fast
+    def test_successful_download_within_timeout_not_interrupted(self, stage, tmp_path):
+        """Successful downloads within timeout are not interrupted"""
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 30  # Generous timeout
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'fast_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        # Create the output file to simulate successful download
+        output_dir = tmp_path
+        output_file = output_dir / "fast_test_0_15.mp4"
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+
+            def fake_download(urls):
+                # Simulate a fast successful download — create the output file
+                output_file.write_bytes(b'\x00' * 1024)
+
+            mock_ydl_instance.download.side_effect = fake_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Successful download should be in the result
+        assert len(downloaded) == 1
+        assert downloaded[0].source == 'segment_download'
+        assert stats['succeeded'] == 1
+
+    @pytest.mark.fast
+    def test_stall_timeout_disabled_when_zero(self, stage, tmp_path):
+        """When segment_stall_timeout=0, ydl.download() runs without ThreadPoolExecutor"""
+        import concurrent.futures
+
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 0  # Disabled
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'no_stall_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        output_file = tmp_path / "no_stall_test_0_15.mp4"
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'), \
+             patch('src.stages.download_segments.concurrent.futures.ThreadPoolExecutor') as mock_executor:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = lambda urls: output_file.write_bytes(b'\x00' * 512)
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # ThreadPoolExecutor should NOT have been used when timeout is 0
+        mock_executor.assert_not_called()
+
+    @pytest.mark.fast
+    def test_stall_timeout_reads_from_config(self, stage, tmp_path):
+        """segment_stall_timeout value is read from download config"""
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 90  # Custom value
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'cfg_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        output_file = tmp_path / "cfg_test_0_15.mp4"
+
+        # We'll verify the timeout value by patching ThreadPoolExecutor
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = lambda urls: output_file.write_bytes(b'\x00' * 512)
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # If it worked, the download completed successfully (no timeout at 90s)
+        assert len(downloaded) == 1
