@@ -111,11 +111,12 @@ class TestEntityVideosStageInit:
         assert "stock videos" in stage.description.lower()
 
     @pytest.mark.fast
-    def test_stage_registration(self):
-        """Test stage is registered in stage registry"""
+    def test_stage_not_registered(self):
+        """Test stage is NOT in the registry (optional stage, no @register_stage)"""
         from src.stages import get_stage
         stage_class = get_stage("ENTITY_VIDEOS")
-        assert stage_class is EntityVideosStage
+        # Entity stages are optional and not auto-registered
+        assert stage_class is None
 
 
 # ============================================================================
