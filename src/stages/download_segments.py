@@ -130,7 +130,21 @@ def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -
     i = 0
     while i < len(args):
         if args[i] == '--impersonate' and i + 1 < len(args):
-            ydl_opts['impersonate'] = args[i + 1]
+            try:
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                target = ImpersonateTarget.from_str(args[i + 1])
+                # Lowercase client/os fields - available targets are lowercase
+                # but from_str() preserves original case
+                target = ImpersonateTarget(
+                    client=target.client.lower() if target.client else None,
+                    version=target.version,
+                    os=target.os.lower() if target.os else None,
+                    os_version=target.os_version,
+                )
+                ydl_opts['impersonate'] = target
+            except Exception:
+                # Fall back to no impersonation rather than crashing
+                pass
             i += 2
         elif args[i] == '--extractor-args' and i + 1 < len(args):
             # Parse "youtube:player_client=X,Y,Z" format
