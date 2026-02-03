@@ -636,6 +636,9 @@ class TestSocketTimeoutInYdlOpts:
         when calling yt-dlp Python API"""
         mock_download_config = MagicMock()
         mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
 
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
@@ -676,6 +679,9 @@ class TestSocketTimeoutInYdlOpts:
         """socket_timeout value is read from download config, not hardcoded"""
         mock_download_config = MagicMock()
         mock_download_config.socket_timeout = 60  # Custom value
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
 
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
@@ -742,6 +748,9 @@ class TestSocketTimeoutInYdlOpts:
 
         mock_download_config = MagicMock()
         mock_download_config.socket_timeout = 45
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
 
         retry_queue = RetryQueue(BatchRetryConfig(
             enabled=True, delay_seconds=0, max_passes=1
@@ -1588,6 +1597,200 @@ class TestSegmentDeduplicationAndMerging:
         assert match1.video_file == "/tmp/segments/abc_def_5_30.mp4"
 
     @pytest.mark.fast
+    @pytest.mark.fast
+    def test_merge_segments_empty_list(self, stage):
+        """_merge_segments returns empty list for empty input."""
+        assert DownloadVideoSegmentsStage._merge_segments([], 5.0) == []
+
+
+# ============================================================================
+# Configurable Segment Defaults (US-48-010)
+# ============================================================================
+
+class TestConfigurableSegmentDefaults:
+    """Test that DownloadConfig segment_ fields exist with correct defaults
+    and are wired into download_segments stage.
+
+    US-48-010: Verifies:
+    - DownloadConfig loads segment_buffer, segment_format, segment_max_resolution,
+      segment_socket_timeout from config dict
+    - Default values match current hardcoded values (buffer=5.0, resolution=1080)
+    - Stage reads segment_buffer directly from config (no getattr fallback)
+    - Stage uses segment_max_resolution in format string
+    """
+
+    @pytest.mark.fast
+    def test_download_config_has_segment_fields_with_defaults(self):
+        """DownloadConfig has segment_ fields with correct default values."""
+        from src.config.sections.download import DownloadConfig
+
+        cfg = DownloadConfig()
+
+        assert cfg.segment_buffer == 5.0
+        assert cfg.segment_max_resolution == 1080
+        assert cfg.segment_socket_timeout == 0
+        assert '{segment_max_resolution}' in cfg.segment_format
+
+    @pytest.mark.fast
+    def test_download_config_loads_segment_fields_from_dict(self):
+        """DownloadConfig loads segment_ prefixed fields from config dict."""
+        from src.config.sections.download import DownloadConfig
+
+        cfg = DownloadConfig(
+            segment_buffer=10.0,
+            segment_format='best[height<={segment_max_resolution}]/best',
+            segment_max_resolution=720,
+            segment_socket_timeout=45,
+        )
+
+        assert cfg.segment_buffer == 10.0
+        assert cfg.segment_max_resolution == 720
+        assert cfg.segment_socket_timeout == 45
+        assert '720' not in cfg.segment_format  # Template not yet resolved
+        assert '{segment_max_resolution}' in cfg.segment_format
+
+    @pytest.mark.fast
+    def test_default_values_match_previous_hardcoded(self):
+        """Default segment values match what was previously hardcoded.
+
+        Before US-48-010:
+        - buffer was getattr(download_config, 'segment_buffer', 5.0) → 5.0
+        - format was 'best[height<=1080]' → resolution 1080
+        """
+        from src.config.sections.download import DownloadConfig
+
+        cfg = DownloadConfig()
+
+        # Buffer default matches getattr fallback
+        assert cfg.segment_buffer == 5.0
+        # Resolution default matches hardcoded format string
+        assert cfg.segment_max_resolution == 1080
+        # Format template resolves to the previously hardcoded value
+        resolved = cfg.segment_format.format(segment_max_resolution=cfg.segment_max_resolution)
+        assert resolved == 'best[height<=1080]'
+
+    @pytest.mark.fast
+    def test_segment_max_resolution_wired_into_format_string(self, stage, tmp_path):
+        """segment_max_resolution is used in the ydl_opts format string."""
+        mock_download_config = MagicMock()
+        mock_download_config.segment_buffer = 5.0
+        mock_download_config.segment_max_resolution = 720
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.socket_timeout = 30
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'res_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['format'] == 'best[height<=720]'
+
+    @pytest.mark.fast
+    def test_segment_socket_timeout_overrides_main(self, stage, tmp_path):
+        """When segment_socket_timeout > 0, it overrides the main socket_timeout."""
+        mock_download_config = MagicMock()
+        mock_download_config.segment_buffer = 5.0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_socket_timeout = 60
+        mock_download_config.socket_timeout = 30
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'sock_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert captured_opts[0]['socket_timeout'] == 60
+
+    @pytest.mark.fast
+    def test_segment_socket_timeout_zero_uses_main(self, stage, tmp_path):
+        """When segment_socket_timeout is 0, falls back to main socket_timeout."""
+        mock_download_config = MagicMock()
+        mock_download_config.segment_buffer = 5.0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.socket_timeout = 45
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'sock_default', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert captured_opts[0]['socket_timeout'] == 45
+
+
     def test_precision_dedup_preserves_close_segments(self, stage):
         """Segments differing by <0.5s are NOT incorrectly deduped (unlike round()).
 
