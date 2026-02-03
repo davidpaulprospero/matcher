@@ -284,12 +284,38 @@ class DownloadVideoSegmentsStage(Stage):
                 'retry_count': download_stats.get('retry_count', 0),
             }
 
-            # Stage metrics for pipeline observability (US-49-009: includes error breakdown)
+            # US-49-012: Collect escalation summary from escalation manager
+            escalation_summary = {}
+            if self.downloader:
+                _esc_mgr = getattr(self.downloader, 'escalation_manager', None)
+                if _esc_mgr and hasattr(_esc_mgr, 'get_metrics'):
+                    try:
+                        esc_metrics = _esc_mgr.get_metrics()
+                        # Build serializable summary: videos per tier, totals, effectiveness
+                        escalation_summary = {
+                            'total_escalations': esc_metrics.get('total_escalations', 0),
+                            'videos_per_tier': {
+                                tier: len(keywords)
+                                for tier, keywords in esc_metrics.get('keywords_at_each_tier', {}).items()
+                            },
+                            'escalations_per_tier': esc_metrics.get('escalations_per_tier', {}),
+                            'total_403s': esc_metrics.get('total_403s', 0),
+                            'total_successes': esc_metrics.get('total_successes', 0),
+                            'average_tier': esc_metrics.get('average_tier', 1.0),
+                        }
+                        # Include tier effectiveness if available
+                        if hasattr(_esc_mgr, 'get_tier_effectiveness'):
+                            escalation_summary['tier_effectiveness'] = _esc_mgr.get_tier_effectiveness()
+                    except Exception as esc_err:
+                        logger.debug(f"Could not collect escalation summary: {esc_err}")
+
+            # Stage metrics for pipeline observability (US-49-009 + US-49-012)
             metrics = StageMetrics(
                 items_processed=download_stats['succeeded'] + download_stats['cached'],
                 items_failed=download_stats['failed'],
                 duration_seconds=elapsed,
                 error_categories=download_stats.get('error_categories', {}),
+                escalation_summary=escalation_summary,
             )
 
             return StageResult.ok(checkpoint_data, warnings, metrics)

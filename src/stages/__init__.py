@@ -31,12 +31,14 @@ class StageMetrics:
         duration_seconds: Time taken to execute the stage
         failed: Whether the stage failed (True) or succeeded (False)
         error_categories: Per-category error counts (e.g. {'bot_detection': 5, 'network': 2})
+        escalation_summary: Escalation tier breakdown (US-49-012)
     """
     items_processed: int = 0
     items_failed: int = 0
     duration_seconds: float = 0.0
     failed: bool = False
     error_categories: Dict[str, int] = field(default_factory=dict)
+    escalation_summary: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary for serialization."""
@@ -48,6 +50,8 @@ class StageMetrics:
         }
         if self.error_categories:
             d['error_categories'] = dict(self.error_categories)
+        if self.escalation_summary:
+            d['escalation_summary'] = dict(self.escalation_summary)
         return d
 
     @classmethod
@@ -59,6 +63,7 @@ class StageMetrics:
             duration_seconds=data.get('duration_seconds', 0.0),
             failed=data.get('failed', False),
             error_categories=data.get('error_categories', {}),
+            escalation_summary=data.get('escalation_summary', {}),
         )
 
 

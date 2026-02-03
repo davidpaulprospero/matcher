@@ -452,9 +452,13 @@ class PipelineOrchestrator:
             for warning in result.warnings:
                 logger.warning(f"Stage {stage_name}: {warning}")
 
-            # Save checkpoint
+            # Save checkpoint (US-49-012: include stage metrics if available)
             if result.data:
-                self.checkpoint.save(stage_name, result.data)
+                metrics_dict = None
+                if stage_name in self.stage_metrics:
+                    metrics_dict = self.stage_metrics[stage_name].to_dict()
+                self.checkpoint.save(stage_name, result.data,
+                                     stage_metrics=metrics_dict)
 
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
 
@@ -631,9 +635,13 @@ class PipelineOrchestrator:
             for warning in result.warnings:
                 logger.warning(f"Stage {stage_name}: {warning}")
 
-            # Save checkpoint (in stage order)
+            # Save checkpoint (in stage order, US-49-012: include stage metrics)
             if result.data:
-                self.checkpoint.save(stage_name, result.data)
+                metrics_dict = None
+                if stage_name in self.stage_metrics:
+                    metrics_dict = self.stage_metrics[stage_name].to_dict()
+                self.checkpoint.save(stage_name, result.data,
+                                     stage_metrics=metrics_dict)
 
             logger.info(f"Parallel stage {stage_name} completed in {elapsed:.1f}s")
 
