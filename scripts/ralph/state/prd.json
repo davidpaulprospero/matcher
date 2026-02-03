@@ -119,7 +119,7 @@
             "id": "US-44-008",
             "title": "Add cross-stage data flow integration tests for the full pipeline sequence",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "A new test file tests/integration/test_stage_transitions.py exists",
                 "Test verifies ANALYZE output (keywords, voiceover_segments) is valid input for VIDEO_SEARCH",
@@ -128,13 +128,14 @@
                 "Test verifies MATCH output (matches, alternatives) is valid input for ITERATIVE_MATCH",
                 "All tests use mock data and do not require network access or API keys"
             ],
-            "notes": "Tier: T2 (test coverage). While individual stage tests are thorough (362 caption tests, 158 match tests, etc.), there are no tests verifying that one stage's output format is compatible with the next stage's expected input. This is how the stale PipelineState reference bug (state.embeddings) went undetected. Each test should create minimal mock output from stage N and pass it through stage N+1's validate_inputs() and initial state checks."
+            "notes": "Done. Created tests/integration/test_stage_transitions.py with 25 tests across 5 test classes: TestAnalyzeToVideoSearch (4), TestVideoSearchToCaption (5), TestCaptionToMatch (6), TestMatchToIterativeMatch (6), TestFullChainDataFlow (4). Tests use mock data factories for VoiceoverSegment, VideoSearchResult, caption_results, text_metadata, and Match objects. Validates validate_required_state_attrs compatibility, field structure, Rule 22 compliance (video IDs not paths), and recovery paths. All 25 tests pass in 0.64s with no network access."
         },
         {
             "id": "US-44-009",
             "title": "Harmonize match serialization and deserialization validation between MATCH and ITERATIVE_MATCH stages",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
+            "notes": "Added Match.from_dict() classmethod and restore_matches_from_dicts() shared helper in src/state.py. Both MATCH and ITERATIVE_MATCH restore methods now use the shared helper. 29 tests verify confidence clamping, type validation, legacy format, and cross-stage consistency.",
             "acceptanceCriteria": [
                 "ITERATIVE_MATCH restore (src/stages/iterative_match.py) applies the same confidence clamping [0,1] as MATCH restore (src/stages/match.py:284-286)",
                 "ITERATIVE_MATCH restore validates video_file is not empty string, matching MATCH stage behavior",
