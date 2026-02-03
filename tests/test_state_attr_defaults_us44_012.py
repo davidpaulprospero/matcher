@@ -23,9 +23,19 @@ class TestDefaultsMatchPipelineState:
         defaults_keys = set(_STATE_ATTR_DEFAULTS.keys())
 
         missing = pipeline_fields - defaults_keys
-        # Allow 'videos' legacy key in defaults but not required in PipelineState
         assert not missing, (
             f"PipelineState fields missing from _STATE_ATTR_DEFAULTS: {missing}"
+        )
+
+    @pytest.mark.fast
+    def test_no_extra_keys_in_defaults(self):
+        """_STATE_ATTR_DEFAULTS must not contain keys absent from PipelineState (US-45-002)."""
+        pipeline_fields = {f.name for f in dataclasses.fields(PipelineState)}
+        defaults_keys = set(_STATE_ATTR_DEFAULTS.keys())
+
+        extra = defaults_keys - pipeline_fields
+        assert not extra, (
+            f"_STATE_ATTR_DEFAULTS contains keys not in PipelineState: {extra}"
         )
 
     @pytest.mark.fast
@@ -40,7 +50,7 @@ class TestDefaultsMatchPipelineState:
 
         for attr, default_val in _STATE_ATTR_DEFAULTS.items():
             if attr not in pipeline_defaults:
-                continue  # Legacy key like 'videos'
+                continue  # Key without a simple default (shouldn't happen after US-45-002)
             expected = pipeline_defaults[attr]
             assert type(default_val) == type(expected), (
                 f"_STATE_ATTR_DEFAULTS['{attr}'] is {type(default_val).__name__} "
