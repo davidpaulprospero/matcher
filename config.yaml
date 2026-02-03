@@ -943,6 +943,11 @@ download:
   # (NOT recommended — a medium tier video would wait 480s with zero output).
   stall_timeout: 60
 
+  # Socket timeout: seconds before yt-dlp gives up on a stalled TCP connection.
+  # Used by both subprocess calls (--socket-timeout) and Python API calls.
+  # Without this, ydl.download() blocks indefinitely on stalled connections.
+  socket_timeout: 30
+
   # Tier-specific download timeouts (longer videos need more time)
   download_timeouts:
     short: 180     # 3 min timeout for videos <2 min

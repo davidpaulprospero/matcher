@@ -206,6 +206,11 @@ class DownloadVideoSegmentsStage(Stage):
                 # Download segment using yt-dlp with downloader's infrastructure
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
+                # Read socket_timeout from download config with fallback default
+                _socket_timeout = 30
+                if self.downloader and hasattr(self.downloader, 'download_config'):
+                    _socket_timeout = getattr(self.downloader.download_config, 'socket_timeout', 30)
+
                 ydl_opts = {
                     'format': 'best[height<=1080]',
                     'outtmpl': str(output_file),
@@ -214,6 +219,10 @@ class DownloadVideoSegmentsStage(Stage):
                     # Time-based download options
                     'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
                     'force_keyframes_at_cuts': True,
+                    # Network resilience (matches core.py subprocess args)
+                    'socket_timeout': _socket_timeout,
+                    'retries': 10,
+                    'fragment_retries': 10,
                 }
 
                 # Apply impersonation from downloader if available
@@ -315,6 +324,11 @@ class DownloadVideoSegmentsStage(Stage):
             try:
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
+                # Read socket_timeout from download config with fallback default
+                _socket_timeout = 30
+                if hasattr(self.downloader, 'download_config'):
+                    _socket_timeout = getattr(self.downloader.download_config, 'socket_timeout', 30)
+
                 ydl_opts = {
                     'format': 'best[height<=1080]',
                     'outtmpl': str(output_file),
@@ -322,6 +336,10 @@ class DownloadVideoSegmentsStage(Stage):
                     'no_warnings': True,
                     'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
                     'force_keyframes_at_cuts': True,
+                    # Network resilience (matches core.py subprocess args)
+                    'socket_timeout': _socket_timeout,
+                    'retries': 10,
+                    'fragment_retries': 10,
                 }
 
                 # Apply impersonation
