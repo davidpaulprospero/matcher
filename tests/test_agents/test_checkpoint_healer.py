@@ -1,5 +1,7 @@
 """Unit tests for CheckpointHealer."""
 
+import ast
+import inspect
 import json
 import shutil
 import pytest
@@ -8,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from src.agents.healers.checkpoint import CheckpointHealer
 from src.agents.base import HealerResult, HealerAction
+from src.checkpoint import LEGACY_STAGES, STAGE_ORDER
 
 
 class TestCheckpointHealerInit:
@@ -182,16 +185,16 @@ class TestCheckpointHealerRebuildCheckpoint:
     """Test CheckpointHealer._rebuild_checkpoint() method."""
 
     @pytest.mark.fast
-    def test_rebuild_checkpoint_finds_transcriptions(self, tmp_path):
-        """Test rebuild finds cached transcriptions."""
+    def test_rebuild_checkpoint_finds_captions(self, tmp_path):
+        """Test rebuild finds cached captions (CAPTION stage)."""
         config = MagicMock()
         project_dir = tmp_path / "project"
         project_dir.mkdir()
 
-        # Create transcriptions cache
-        trans_cache = project_dir / ".cache" / "transcriptions"
-        trans_cache.mkdir(parents=True)
-        (trans_cache / "test.json").write_text('{}')
+        # Create captions cache
+        caption_cache = project_dir / ".cache" / "captions"
+        caption_cache.mkdir(parents=True)
+        (caption_cache / "test.json").write_text('{}')
 
         healer = CheckpointHealer(config, str(project_dir))
         state = MagicMock()
@@ -199,16 +202,36 @@ class TestCheckpointHealerRebuildCheckpoint:
         result = healer._rebuild_checkpoint(Exception("missing"), state)
 
         assert result.success is True
-        assert "TRANSCRIBE" in result.details.get("cached_stages", [])
+        assert "CAPTION" in result.details.get("cached_stages", [])
 
     @pytest.mark.fast
-    def test_rebuild_checkpoint_finds_embeddings(self, tmp_path):
-        """Test rebuild finds cached embeddings."""
+    def test_rebuild_checkpoint_finds_llm_responses(self, tmp_path):
+        """Test rebuild finds cached LLM responses (ANALYZE stage)."""
         config = MagicMock()
         project_dir = tmp_path / "project"
         project_dir.mkdir()
 
-        # Create embeddings cache
+        # Create LLM responses cache
+        llm_cache = project_dir / ".cache" / "llm_responses"
+        llm_cache.mkdir(parents=True)
+        (llm_cache / "test.json").write_text('{}')
+
+        healer = CheckpointHealer(config, str(project_dir))
+        state = MagicMock()
+
+        result = healer._rebuild_checkpoint(Exception("missing"), state)
+
+        assert result.success is True
+        assert "ANALYZE" in result.details.get("cached_stages", [])
+
+    @pytest.mark.fast
+    def test_rebuild_checkpoint_finds_embeddings(self, tmp_path):
+        """Test rebuild finds cached embeddings (MATCH stage data)."""
+        config = MagicMock()
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        # Create embeddings cache (used by MATCH stage)
         embed_cache = project_dir / ".cache" / "embeddings"
         embed_cache.mkdir(parents=True)
         (embed_cache / "test.npy").write_bytes(b'\x00')
@@ -219,27 +242,7 @@ class TestCheckpointHealerRebuildCheckpoint:
         result = healer._rebuild_checkpoint(Exception("missing"), state)
 
         assert result.success is True
-        assert "EMBEDDINGS" in result.details.get("cached_stages", [])
-
-    @pytest.mark.fast
-    def test_rebuild_checkpoint_finds_scene_detection(self, tmp_path):
-        """Test rebuild finds cached scene detection data."""
-        config = MagicMock()
-        project_dir = tmp_path / "project"
-        project_dir.mkdir()
-
-        # Create scene detection cache
-        scene_cache = project_dir / ".cache" / "scene_detection"
-        scene_cache.mkdir(parents=True)
-        (scene_cache / "test.json").write_text('{}')
-
-        healer = CheckpointHealer(config, str(project_dir))
-        state = MagicMock()
-
-        result = healer._rebuild_checkpoint(Exception("missing"), state)
-
-        assert result.success is True
-        assert "SCENE_DETECTION" in result.details.get("cached_stages", [])
+        assert "MATCH" in result.details.get("cached_stages", [])
 
     @pytest.mark.fast
     def test_rebuild_checkpoint_no_cache(self, tmp_path):
@@ -264,7 +267,7 @@ class TestCheckpointHealerRebuildCheckpoint:
         project_dir.mkdir()
 
         # Create empty cache directories
-        (project_dir / ".cache" / "transcriptions").mkdir(parents=True)
+        (project_dir / ".cache" / "captions").mkdir(parents=True)
         (project_dir / ".cache" / "embeddings").mkdir(parents=True)
 
         healer = CheckpointHealer(config, str(project_dir))
@@ -519,3 +522,61 @@ class TestCheckpointHealerIntegration:
         assert result.details.get("fresh_start") is True
         assert not checkpoint_path.exists()
         assert (project_dir / "checkpoint.corrupted.json").exists()
+
+
+class TestCheckpointHealerNoLegacyStages:
+    """Ensure checkpoint healer does not reference legacy stage names."""
+
+    @pytest.mark.fast
+    def test_no_legacy_stage_names_in_rebuild(self):
+        """Verify _rebuild_checkpoint does not reference any LEGACY_STAGES."""
+        source = inspect.getsource(CheckpointHealer._rebuild_checkpoint)
+        for legacy_stage in LEGACY_STAGES:
+            assert legacy_stage not in source, (
+                f"Legacy stage '{legacy_stage}' found in _rebuild_checkpoint(). "
+                f"Only current STAGE_ORDER stages should be referenced."
+            )
+
+    @pytest.mark.fast
+    def test_rebuilt_stages_are_in_stage_order(self, tmp_path):
+        """Verify all stage names returned by _rebuild_checkpoint are in STAGE_ORDER."""
+        config = MagicMock()
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+
+        # Create all cache directories with files
+        for cache_name in ["captions", "llm_responses", "embeddings"]:
+            cache_dir = project_dir / ".cache" / cache_name
+            cache_dir.mkdir(parents=True)
+            (cache_dir / "test.json").write_text('{}')
+
+        healer = CheckpointHealer(config, str(project_dir))
+        state = MagicMock()
+
+        result = healer._rebuild_checkpoint(Exception("missing"), state)
+
+        assert result.success is True
+        cached_stages = result.details.get("cached_stages", [])
+        for stage in cached_stages:
+            assert stage in STAGE_ORDER, (
+                f"Stage '{stage}' returned by _rebuild_checkpoint is not in STAGE_ORDER. "
+                f"Valid stages: {STAGE_ORDER}"
+            )
+
+    @pytest.mark.fast
+    def test_no_legacy_stage_string_literals_in_healer(self):
+        """Scan the entire CheckpointHealer source for legacy stage string literals."""
+        source = inspect.getsource(CheckpointHealer)
+        tree = ast.parse(source)
+
+        legacy_set = set(LEGACY_STAGES)
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value in legacy_set:
+                    found.append(node.value)
+
+        assert not found, (
+            f"Legacy stage string literals found in CheckpointHealer: {found}. "
+            f"These should be replaced with current 7-stage pipeline names."
+        )
