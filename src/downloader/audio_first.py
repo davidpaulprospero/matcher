@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
@@ -311,6 +312,9 @@ class AudioFirstPipeline:
                 '--no-playlist',
                 '--no-warnings',
                 '--no-keep-video',
+                '--socket-timeout', '10',
+                '--retries', '10',
+                '--fragment-retries', '10',
             ]
 
             # Add ffmpeg location if configured
@@ -527,6 +531,9 @@ class AudioFirstPipeline:
                 '-o', str(video_dir / f'{video_id}_%(autonumber)s.%(ext)s'),
                 '--no-playlist',
                 '--no-warnings',
+                '--socket-timeout', '10',
+                '--retries', '10',
+                '--fragment-retries', '10',
             ]
 
             # Add ffmpeg location
@@ -566,20 +573,37 @@ class AudioFirstPipeline:
 
                 try:
                     seg_dl_start = time.time()
-                    result = subprocess.run(
+                    # Use Popen + stall detection instead of subprocess.run
+                    # This allows slow-but-progressing downloads to continue
+                    stall_timeout = getattr(self.download_config, 'stall_timeout', 0)
+                    stall_timeout = stall_timeout if stall_timeout > 0 else timeout
+                    max_timeout = int(timeout * 1.5)
+
+                    process = subprocess.Popen(
                         cmd,
-                        capture_output=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         text=True,
-                        timeout=timeout,
                         encoding='utf-8',
                         errors='replace'
                     )
+
+                    stdout, stderr, timeout_type = self._wait_for_process_with_progress(
+                        process, stall_timeout, max_timeout, video_id
+                    )
                     seg_dl_elapsed = time.time() - seg_dl_start
 
-                    if result.returncode != 0:
-                        last_error = result.stderr[-200:] if result.stderr else 'Unknown error'
+                    if timeout_type:
+                        last_error = f"{'Stall' if timeout_type == 'stall' else 'Max'} timeout after {seg_dl_elapsed:.0f}s"
+                        print(f"      ✗ {last_error} (attempt {attempt + 1}/{max_retries})")
+                        logger.warning(f"Segment download {timeout_type} timeout for {video_id}")
+                        # Timeout is retryable
+                        continue
+
+                    if process.returncode != 0:
+                        last_error = stderr[-200:] if stderr else 'Unknown error'
                         # Record 403/bot errors with escalation manager
-                        stderr = result.stderr or ''
                         if self.escalation_manager and is_escalation_trigger(stderr):
                             self.escalation_manager.record_failure(video_id, stderr)
                         # Try cookie rotation first for auth/rate-limit errors
@@ -635,12 +659,6 @@ class AudioFirstPipeline:
                         print(f"      ✓ Downloaded {success_count}/{len(segments)} segments")
                         break  # Success, exit retry loop
 
-                except subprocess.TimeoutExpired:
-                    last_error = f"Timeout after {timeout}s"
-                    print(f"      ✗ {last_error} (attempt {attempt + 1}/{max_retries})")
-                    logger.warning(f"Segment download timeout for {video_id}")
-                    # Timeout is retryable
-                    continue
                 except Exception as e:
                     last_error = str(e)
                     print(f"      ✗ Error: {e}")
@@ -723,6 +741,9 @@ class AudioFirstPipeline:
             '-o', str(output_file),
             '--no-playlist',
             '--no-warnings',
+            '--socket-timeout', '10',
+            '--retries', '10',
+            '--fragment-retries', '10',
         ]
 
         # Add ffmpeg location
@@ -742,16 +763,30 @@ class AudioFirstPipeline:
             cmd.extend(self._get_cookie_args())
 
             try:
-                result = subprocess.run(
+                # Use Popen + stall detection for full video fallback
+                stall_timeout = getattr(self.download_config, 'stall_timeout', 0)
+                stall_timeout = stall_timeout if stall_timeout > 0 else timeout
+                max_timeout = int(timeout * 1.5)
+
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
-                    timeout=timeout,
                     encoding='utf-8',
                     errors='replace'
                 )
 
-                if result.returncode == 0 and output_file.exists():
+                stdout, stderr, timeout_type = self._wait_for_process_with_progress(
+                    process, stall_timeout, max_timeout, video_id
+                )
+
+                if timeout_type:
+                    logger.error(f"Full video fallback {timeout_type} timeout for {video_id}")
+                    return []
+
+                if process.returncode == 0 and output_file.exists():
                     # Record success with escalation manager
                     if self.escalation_manager:
                         self.escalation_manager.record_success(video_id)
@@ -779,7 +814,6 @@ class AudioFirstPipeline:
                     )]
                 else:
                     # Record 403/bot errors with escalation manager
-                    stderr = result.stderr or ''
                     if self.escalation_manager and is_escalation_trigger(stderr):
                         self.escalation_manager.record_failure(video_id, stderr)
                     # Try cookie rotation on error
@@ -790,9 +824,6 @@ class AudioFirstPipeline:
                     logger.error(f"Full video fallback failed for {video_id}: {stderr[:200]}")
                     return []
 
-            except subprocess.TimeoutExpired:
-                logger.error(f"Full video fallback timeout for {video_id}")
-                return []
             except Exception as e:
                 logger.error(f"Full video fallback error for {video_id}: {e}")
                 return []
@@ -971,3 +1002,143 @@ class AudioFirstPipeline:
         if signal.detected:
             avg_speed = self.speed_tracker.get_average_speed_mbps()
             self.escalation_manager.record_slow_speed(keyword, speed_mbps=avg_speed)
+
+    def _wait_for_process_with_progress(
+        self,
+        process: subprocess.Popen,
+        stall_timeout: int,
+        max_timeout: int,
+        video_id: str
+    ) -> Tuple[str, str, Optional[str]]:
+        """Wait for process with progress-aware stall detection.
+
+        Mirrors core.py's _wait_for_process_with_progress pattern. Monitors
+        stderr/stdout output and kills the process only if:
+        1. No output for stall_timeout seconds (download stalled), OR
+        2. Total elapsed time exceeds max_timeout (absolute cap)
+
+        This allows slow-but-progressing downloads to continue instead of being
+        killed by a fixed timeout.
+
+        Args:
+            process: Running subprocess.Popen instance
+            stall_timeout: Seconds of no output before declaring stall
+            max_timeout: Absolute maximum seconds to wait
+            video_id: For logging context
+
+        Returns:
+            Tuple of (stdout, stderr, timeout_type) where timeout_type is
+            None (completed normally), 'stall', or 'max_timeout'.
+        """
+        stderr_lines = []
+        stdout_lines = []
+        last_activity = time.time()
+        lock = threading.Lock()
+        stderr_done = threading.Event()
+        stdout_done = threading.Event()
+
+        def read_stderr():
+            nonlocal last_activity
+            try:
+                while True:
+                    line = process.stderr.readline()
+                    if not isinstance(line, str) or not line:
+                        break
+                    with lock:
+                        stderr_lines.append(line)
+                        last_activity = time.time()
+            except (OSError, ValueError, UnicodeDecodeError):
+                pass
+            finally:
+                stderr_done.set()
+
+        def read_stdout():
+            nonlocal last_activity
+            try:
+                while True:
+                    line = process.stdout.readline()
+                    if not isinstance(line, str) or not line:
+                        break
+                    with lock:
+                        stdout_lines.append(line)
+                        last_activity = time.time()
+            except (OSError, ValueError, UnicodeDecodeError):
+                pass
+            finally:
+                stdout_done.set()
+
+        stderr_reader = threading.Thread(target=read_stderr, daemon=True)
+        stdout_reader = threading.Thread(target=read_stdout, daemon=True)
+        stderr_reader.start()
+        stdout_reader.start()
+
+        logger.debug(
+            f"Download process started for '{video_id}' — "
+            f"stall_timeout={stall_timeout}s, max_timeout={max_timeout}s, pid={process.pid}"
+        )
+
+        start_time = time.time()
+        timeout_type = None
+
+        while process.poll() is None:
+            time.sleep(1)
+            now = time.time()
+
+            with lock:
+                stall_duration = now - last_activity
+                lines_so_far = len(stderr_lines) + len(stdout_lines)
+
+            if stall_duration > stall_timeout:
+                logger.info(
+                    f"Download stalled for '{video_id}' — "
+                    f"no output for {stall_timeout}s ({lines_so_far} lines before stall), "
+                    f"killing pid {process.pid}"
+                )
+                timeout_type = 'stall'
+                break
+
+            if now - start_time > max_timeout:
+                logger.info(
+                    f"Download hit max timeout for '{video_id}' — "
+                    f"{int(now - start_time)}s total ({lines_so_far} lines received), "
+                    f"killing pid {process.pid}"
+                )
+                timeout_type = 'max_timeout'
+                break
+
+        if timeout_type:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            # Close pipes to unblock reader threads (Windows hang prevention)
+            try:
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+            except Exception:
+                pass
+        else:
+            process.wait()
+
+        # Wait for reader threads to finish
+        stderr_done.wait(timeout=5)
+        stdout_done.wait(timeout=5)
+        stderr_reader.join(timeout=2)
+        stdout_reader.join(timeout=2)
+
+        # Close pipes to avoid ResourceWarning
+        try:
+            if process.stdout and not process.stdout.closed:
+                process.stdout.close()
+            if process.stderr and not process.stderr.closed:
+                process.stderr.close()
+        except Exception:
+            pass
+
+        stderr = ''.join(stderr_lines)
+        stdout = ''.join(stdout_lines)
+
+        return stdout, stderr, timeout_type

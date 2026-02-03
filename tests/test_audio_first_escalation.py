@@ -64,6 +64,7 @@ def _make_mock_config():
     download.ffmpeg_location = ''
     download.checkpoint_interval = 10
     download.llm_title_filter = None
+    download.stall_timeout = 60
 
     config.download = download
     return config
@@ -82,6 +83,28 @@ def _make_search_results(videos):
     result = Mock()
     result.videos = videos
     return result
+
+
+def _make_mock_popen(returncode=0, stderr_text=''):
+    """Create a mock subprocess.Popen that completes immediately.
+
+    Used for segment/fallback download tests that use Popen + stall detection.
+    """
+    proc = Mock()
+    proc.pid = 12345
+    proc.returncode = returncode
+    proc.poll = Mock(return_value=0)  # Process finished immediately
+    proc.wait = Mock()
+    proc.kill = Mock()
+    proc.stdout = Mock()
+    proc.stdout.readline = Mock(return_value='')
+    proc.stdout.closed = False
+    proc.stdout.close = Mock()
+    proc.stderr = Mock()
+    proc.stderr.readline = Mock(return_value='')
+    proc.stderr.closed = False
+    proc.stderr.close = Mock()
+    return proc
 
 
 def _make_pipeline(
@@ -318,11 +341,11 @@ class TestSegmentDownloadEscalationArgs:
 
         captured_cmds = []
 
-        def mock_run(cmd, **kwargs):
+        def mock_popen_factory(cmd, **kwargs):
             captured_cmds.append(list(cmd))
-            return Mock(returncode=0)
+            return _make_mock_popen(returncode=0)
 
-        with patch('subprocess.run', side_effect=mock_run), \
+        with patch('subprocess.Popen', side_effect=mock_popen_factory), \
              patch('src.downloader.segment_utils.rename_segments_with_timing',
                    return_value=[None]):
             pipeline.download_video_segments(segments, temp_dir)
@@ -354,13 +377,13 @@ class TestSegmentDownloadEscalationArgs:
 
         seg_dir = temp_dir / "travel_segments"
 
-        def mock_run(cmd, **kwargs):
+        def mock_popen_factory(cmd, **kwargs):
             # Create segment file on successful download (simulating yt-dlp)
             seg_dir.mkdir(parents=True, exist_ok=True)
             (seg_dir / "vid1_0010.mp4").write_bytes(b'segment')
-            return Mock(returncode=0)
+            return _make_mock_popen(returncode=0)
 
-        with patch('subprocess.run', side_effect=mock_run), \
+        with patch('subprocess.Popen', side_effect=mock_popen_factory), \
              patch('src.downloader.segment_utils.rename_segments_with_timing',
                    return_value=[str(seg_dir / "vid1_0010.mp4")]):
             pipeline.download_video_segments(segments, temp_dir)
@@ -397,12 +420,12 @@ class TestFallbackEscalationIndependence:
         video_dir = temp_dir / "video_dir"
         video_dir.mkdir()
 
-        def mock_run(cmd, **kwargs):
+        def mock_popen_factory(cmd, **kwargs):
             captured_cmds.append(list(cmd))
             # Create the output file so fallback considers it successful
             output_file = video_dir / "vid1_0000.mp4"
             output_file.write_bytes(b'full video')
-            return Mock(returncode=0)
+            return _make_mock_popen(returncode=0)
 
         segments = [
             MergedSegment(
@@ -415,7 +438,7 @@ class TestFallbackEscalationIndependence:
             )
         ]
 
-        with patch('subprocess.run', side_effect=mock_run), \
+        with patch('subprocess.Popen', side_effect=mock_popen_factory), \
              patch.object(pipeline, '_get_video_duration', return_value=300.0):
             result = pipeline._download_full_video_fallback(
                 video_id="vid1",
@@ -457,10 +480,12 @@ class TestFallbackEscalationIndependence:
             )
         ]
 
-        def mock_run(cmd, **kwargs):
-            return Mock(returncode=1, stderr="ERROR: HTTP Error 403: Forbidden")
+        def mock_popen_factory(cmd, **kwargs):
+            return _make_mock_popen(returncode=1)
 
-        with patch('subprocess.run', side_effect=mock_run):
+        with patch('subprocess.Popen', side_effect=mock_popen_factory), \
+             patch.object(pipeline, '_wait_for_process_with_progress',
+                        return_value=('', "ERROR: HTTP Error 403: Forbidden", None)):
             pipeline._download_full_video_fallback(
                 video_id="vid1",
                 video_url="https://youtube.com/watch?v=vid1",
@@ -503,11 +528,11 @@ class TestFallbackEscalationIndependence:
             )
         ]
 
-        def mock_run(cmd, **kwargs):
+        def mock_popen_factory(cmd, **kwargs):
             (video_dir / "vid1_0000.mp4").write_bytes(b'data')
-            return Mock(returncode=0)
+            return _make_mock_popen(returncode=0)
 
-        with patch('subprocess.run', side_effect=mock_run), \
+        with patch('subprocess.Popen', side_effect=mock_popen_factory), \
              patch.object(pipeline, '_get_video_duration', return_value=120.0):
             pipeline._download_full_video_fallback(
                 video_id="vid1",
