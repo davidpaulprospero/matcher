@@ -679,3 +679,166 @@ class TestSocketTimeoutInYdlOpts:
         assert captured_opts[0]['socket_timeout'] == 45
         assert captured_opts[0]['retries'] == 10
         assert captured_opts[0]['fragment_retries'] == 10
+
+
+# ============================================================================
+# Network Failure Circuit Breaker (US-48-004)
+# ============================================================================
+
+class TestNetworkFailureCircuitBreaker:
+    """Test consecutive network failure detection and early abort in download loop"""
+
+    @pytest.mark.fast
+    def test_is_network_failure_detects_dns_errors(self):
+        """_is_network_failure detects DNS resolution failures"""
+        from src.stages.download_segments import _is_network_failure
+
+        # Should detect
+        assert _is_network_failure("getaddrinfo failed") is True
+        assert _is_network_failure("[Errno 11001] getaddrinfo failed") is True
+        assert _is_network_failure("Name or service not known") is True
+        assert _is_network_failure("nodename nor servname provided") is True
+        assert _is_network_failure("Network is unreachable") is True
+        assert _is_network_failure("Temporary failure in name resolution") is True
+        assert _is_network_failure("No address associated with hostname") is True
+        # ffmpeg network exit code
+        assert _is_network_failure("ffmpeg exited with code 4294967158") is True
+
+        # Should NOT detect (video-specific errors)
+        assert _is_network_failure("HTTP Error 403: Forbidden") is False
+        assert _is_network_failure("Video unavailable") is False
+        assert _is_network_failure("This video is private") is False
+
+    @pytest.mark.fast
+    def test_early_abort_after_consecutive_dns_failures(self, stage, tmp_path):
+        """Download loop aborts after 3 consecutive DNS failures, skipping remaining segments"""
+        stage.downloader = None  # No retry queue
+
+        # 5 segments — should abort after 3rd DNS failure
+        segments = [
+            {'video_id': f'dns_fail_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        dns_error = OSError("[Errno 11001] getaddrinfo failed")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = dns_error
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            result = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # yt-dlp should only be called 3 times (abort after 3rd failure)
+        assert mock_ydl_class.call_count == 3
+        assert result == []
+
+    @pytest.mark.fast
+    def test_counter_resets_on_successful_download(self, stage, tmp_path):
+        """Counter resets after a successful download between network failures"""
+        stage.downloader = None
+
+        # 6 segments: fail, fail, success, fail, fail, fail
+        # The success at index 2 resets the counter, so segments 3-5
+        # are the new consecutive failures that should trigger abort at segment 5
+        segments = [
+            {'video_id': f'reset_test_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(6)
+        ]
+
+        dns_error = OSError("[Errno 11001] getaddrinfo failed")
+        call_count = [0]
+
+        def mock_download_side_effect(urls):
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx == 2:
+                # Simulate success: create the output file
+                video_id = segments[idx]['video_id']
+                output_file = tmp_path / f"{video_id}_0_15.mp4"  # 0-5 buffer, 10+5
+                output_file.write_text("fake")
+                return
+            raise dns_error
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download_side_effect
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            result = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Should have tried: 0(fail), 1(fail), 2(success+reset), 3(fail), 4(fail), 5(fail=abort)
+        # Total yt-dlp calls = 6 (all 6 segments attempted)
+        assert mock_ydl_class.call_count == 6
+        # Only 1 successful download (index 2)
+        assert len(result) == 1
+
+    @pytest.mark.fast
+    def test_non_network_errors_dont_trigger_abort(self, stage, tmp_path):
+        """Non-network errors (403, removed) don't increment the network failure counter"""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': f'http_err_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        http_error = Exception("HTTP Error 403: Forbidden")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = http_error
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            result = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # All 5 segments should be attempted (no early abort)
+        assert mock_ydl_class.call_count == 5
+
+    @pytest.mark.fast
+    def test_abort_checkpoints_before_breaking(self, stage, tmp_path):
+        """Progress callback is called before aborting the loop"""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': f'cp_test_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        dns_error = OSError("getaddrinfo failed")
+        progress_calls = []
+
+        def track_progress(current, total, downloaded):
+            progress_calls.append((current, total, len(downloaded)))
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = dns_error
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0,
+                progress_callback=track_progress
+            )
+
+        # Should have 3 progress calls (segments 1, 2, 3 — abort after 3rd)
+        assert len(progress_calls) == 3
+        # Last call should be for segment 3 of 5
+        assert progress_calls[-1][0] == 3
+        assert progress_calls[-1][1] == 5

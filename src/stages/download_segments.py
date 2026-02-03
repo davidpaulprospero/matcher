@@ -22,6 +22,46 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Error patterns indicating systemic network failures (not video-specific)
+_NETWORK_FAILURE_PATTERNS = (
+    'getaddrinfo failed',
+    'Name or service not known',
+    'Errno 11001',           # Windows DNS resolution failure
+    'nodename nor servname',  # macOS DNS failure
+    'Network is unreachable',
+    'No address associated with hostname',
+    'Temporary failure in name resolution',
+)
+
+# ffmpeg exit code 0xFFFFFEC6 = 4294967158 unsigned = -314 signed (network error)
+_FFMPEG_NETWORK_EXIT_CODE = '4294967158'
+
+
+def _is_network_failure(error_msg: str) -> bool:
+    """Check if an error message indicates a systemic network failure.
+
+    These are failures that affect ALL downloads (DNS down, no internet),
+    as opposed to video-specific errors (403, removed, age-gated).
+
+    Args:
+        error_msg: The exception message string.
+
+    Returns:
+        True if the error indicates a systemic network issue.
+    """
+    error_lower = error_msg.lower()
+    for pattern in _NETWORK_FAILURE_PATTERNS:
+        if pattern.lower() in error_lower:
+            return True
+    # Check for ffmpeg network exit code
+    if _FFMPEG_NETWORK_EXIT_CODE in error_msg:
+        return True
+    return False
+
+
+# Default threshold for consecutive network failures before aborting
+NETWORK_FAILURE_THRESHOLD = 3
+
 
 @register_stage
 class DownloadVideoSegmentsStage(Stage):
@@ -184,6 +224,7 @@ class DownloadVideoSegmentsStage(Stage):
 
         downloaded = []
         total = len(segments)
+        consecutive_network_failures = 0
 
         for idx, seg in enumerate(segments, 1):
             video_id = seg['video_id']
@@ -200,6 +241,7 @@ class DownloadVideoSegmentsStage(Stage):
                     url=f"https://www.youtube.com/watch?v={video_id}",
                     source='segment_cache'
                 ))
+                consecutive_network_failures = 0  # Cached file counts as success
                 continue
 
             try:
@@ -243,12 +285,40 @@ class DownloadVideoSegmentsStage(Stage):
                         source='segment_download'
                     ))
                     print(f"  [{idx}/{total}] Downloaded {video_id} ({start:.0f}s-{end:.0f}s)")
+                    consecutive_network_failures = 0  # Reset on success
                 else:
                     logger.warning(f"Download succeeded but file not found: {output_file}")
 
             except Exception as e:
                 error_msg = str(e)
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
+
+                # Track consecutive network failures for early abort
+                if _is_network_failure(error_msg):
+                    consecutive_network_failures += 1
+                    logger.warning(
+                        f"Network failure detected ({consecutive_network_failures}/"
+                        f"{NETWORK_FAILURE_THRESHOLD}): {error_msg}"
+                    )
+                    if consecutive_network_failures >= NETWORK_FAILURE_THRESHOLD:
+                        remaining = total - idx
+                        logger.error(
+                            f"Aborting download loop: {consecutive_network_failures} consecutive "
+                            f"network failures indicate systemic network issue. "
+                            f"Skipping {remaining} remaining segment(s)."
+                        )
+                        print(
+                            f"  !! Network unavailable — aborting after "
+                            f"{consecutive_network_failures} consecutive DNS/network failures "
+                            f"({remaining} segments skipped)"
+                        )
+                        # Checkpoint before aborting
+                        if progress_callback:
+                            progress_callback(idx, total, downloaded)
+                        break
+                else:
+                    # Non-network error (403, removed, etc.) — reset counter
+                    consecutive_network_failures = 0
 
                 # Add failed download to retry queue for batch retry later
                 if self.downloader and self.downloader.retry_queue:
