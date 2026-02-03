@@ -91,7 +91,7 @@
             "id": "US-47-006",
             "title": "Add match_all_segments integration tests for parameter contracts",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test that match_all_segments succeeds with location_chapters=None and video_locations=None",
                 "Add test that match_all_segments succeeds with embedding_index=None",
@@ -100,13 +100,13 @@
                 "Add test verifying face_preference parameter flows through correctly to TieredMatcher",
                 "All tests in tests/test_match_all_segments_contract.py must pass"
             ],
-            "notes": "Tier: T2 (contract validation). Source file: src/matching/main.py:30-43 (function signature), lines 85-184 (setup logic). The user interview flagged that Optional parameters may not be truly optional in the implementation. Tests should use mocked TieredMatcher and EmbeddingSearch to verify parameter flow without requiring actual embeddings. Key assertions: no AttributeError, no TypeError on None params, correct initialization of LocationMatcher when location_chapters provided."
+            "notes": "7 tests in tests/test_match_all_segments_contract.py — all passing. Tests: location_chapters=None + video_locations=None optional, embedding_index=None works, empty voiceover_segments returns [], empty video_segments handled, face_preference flows through to TieredMatcher. Discovery: Fixed ZeroDivisionError in variety metrics dashboard (src/matching/main.py:406-442) when voiceover_segments is empty."
         },
         {
             "id": "US-47-007",
             "title": "Add unit tests for downloader cache modules",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add tests for LLMFilterCache in src/downloader/llm_filter_cache.py covering cache set, get, and expiry",
                 "Add tests for SearchCache in src/downloader/search_cache.py covering search result caching and invalidation",
@@ -114,13 +114,13 @@
                 "Add tests for cache size limits and eviction behavior if applicable",
                 "All tests in tests/test_downloader_caches.py must pass"
             ],
-            "notes": "Tier: T2 (gap fill). Source files: src/downloader/llm_filter_cache.py, src/downloader/search_cache.py. These two cache modules have no dedicated test files. They likely follow the BaseCache pattern from src/cache/base.py which is well-tested. The llm_filter_cache caches LLM-based title filtering decisions; search_cache caches YouTube search results. Both are used in the download pipeline to avoid redundant API calls."
+            "notes": "COMPLETED. 38 tests in tests/test_downloader_caches.py across 9 test classes: TestLLMFilterCacheSetGet (6 tests: set/get, miss, separate keywords, separate video sets, case insensitive, empty approved list), TestLLMFilterCacheExpiry (3 tests: expired returns None, fresh valid, zero TTL never expires), TestLLMFilterCacheInvalidation (3 tests: invalidate removes entries, nonexistent returns 0, clear removes all), TestSearchCacheSetGet (6 tests: set/get, miss, different tiers, different pool sizes, case insensitive, empty list), TestSearchCacheExpiry (3 tests: expired, fresh, zero TTL), TestSearchCacheInvalidation (3 tests: invalidate, nonexistent, clear), TestSerializationRoundtrip (5 tests: LLM persist to disk, search persist to disk, valid JSON index, corrupted index recovery), TestEvictionBehavior (4 tests: cleanup_expired, evict_to_size, dry_run, under target), TestStatistics (2 tests: hit/miss tracking, hit_rate), TestDataclassHelpers (3 tests: CachedLLMFilterResult roundtrip, CachedSearchResult roundtrip, extra fields ignored)."
         },
         {
             "id": "US-47-008",
             "title": "Add unit tests for agent module internals",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add tests for HealingLogger in src/agents/healing_logger.py covering JSONL log writing and reading",
                 "Add tests for agent strategy selection in src/agents/strategy.py covering strategy ranking and selection",
@@ -128,13 +128,13 @@
                 "Add tests for fallback behavior in src/agents/fallback.py covering graceful degradation paths",
                 "All tests in tests/test_agent_internals.py must pass"
             ],
-            "notes": "Tier: T2 (gap fill). Source files: src/agents/healing_logger.py, src/agents/strategy.py, src/agents/watcher.py, src/agents/fallback.py. The agents/ package has 7 modules but only 5 test files, and existing tests (test_api_healer.py, test_healer_base.py) focus on the orchestrator/runner. The internal modules (healing_logger, strategy, watcher, fallback) lack dedicated unit tests. These are critical for the self-healing pipeline feature."
+            "notes": "97 tests in tests/test_agent_internals.py covering HealingLogger (JSONL write/read, truncation, thread safety, report generation), HealingStrategy (factory methods, mode selection, priority ordering), WatcherAgent (escalation logic, healer priority, response parsing), and FallbackChain (circuit breaker, pattern routing, graceful degradation). All passing."
         },
         {
             "id": "US-47-009",
             "title": "Add config section post_init edge case tests",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add tests for IterativeMatchingConfig post_init with boundary values (0, negative, very large numbers)",
                 "Add tests for DownloadConfig post_init with nested dataclass fields passed as raw dicts",
@@ -142,7 +142,7 @@
                 "Add tests verifying config sections handle missing optional fields with correct defaults",
                 "All tests in tests/test_config_post_init_edge_cases.py must pass"
             ],
-            "notes": "Tier: T2 (robustness). Source files: src/config/sections/iterative_matching.py (95 lines, complex post_init), src/config/sections/download.py (18+ nested config classes), src/config/sections/matching.py. Existing test_config_post_init.py tests basic post_init behavior but doesn't cover edge cases like: negative values for max_attempts, zero for timeouts, dict-vs-dataclass coercion (Rule 2 from CLAUDE.md), or missing nested fields. The download section is particularly complex with RemixConfig, CaptionRetryBudgetConfig, MullvadConfig."
+            "notes": "71 tests in tests/test_config_post_init_edge_cases.py across 7 test classes: TestIterativeMatchingConfigBoundaryValues (21 tests: clamping for target_confidence, source_spacing_seconds, max_iterations, min_gap_percentage, search_results_per_gap, max_new_videos_per_pass, caption_batch_size, caption_fetch_delay with 0/negative/very-large values), TestDownloadConfigNestedDictCoercion (15 tests: all 15 nested config classes coerced from raw dicts including deeply-nested caption_first with circuit_breaker/retry_budget dicts), TestMatchingConfigPostInitClamping (9 tests: None-to-default, dict-to-dataclass, identity preservation for location_matching and chapter_detection), TestCaptionRetryBudgetConfigValidation (13 tests: ValueError on max_attempts<10, attempts_per_video<1.0, max_backoff<30, plus boundary valid values), TestCookieRotationConfigValidation (2 tests), TestMissingOptionalFieldDefaults (11 tests: all config sections create correct defaults with no args). All passing."
         },
         {
             "id": "US-47-010",
