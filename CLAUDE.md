@@ -81,6 +81,8 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 30 | Per-project config | Use `--config custom.yaml` flag — project_config.yaml auto-merge removed |
 | 31 | Pipeline stages source | `src/checkpoint.py:STAGE_ORDER` is truth; sync `scripts/ralph/config/ralph-config.json` |
 | 32 | Ralph file paths | Always use `state/prd.json`, `state/queue.json`, `session/prompt.md`, `config/ralph-config.json` — never root-level |
+| 33 | Ralph seed story prompts | In `Build-StoryPrompt`, seed stories emit instructions+criteria BEFORE notes (notes are background context, safe to truncate) |
+| 34 | Ralph prompt maxLength | `ralph-config.json` `prompts.maxLength` (default 10000) truncates story prompts — if stories fail mysteriously, check truncation first |
 
 ### Config Access Pattern
 
