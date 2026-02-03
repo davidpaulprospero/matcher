@@ -107,6 +107,7 @@ class RetryItem:
     added_at: float = field(default_factory=time.time)
     severity: str = 'medium'  # low, medium, high - determines delay multiplier
     error_category: str = 'video_specific'  # 'network', 'bot_detection', 'timeout', or 'video_specific'
+    escalation_tier: int = 1  # US-49-010: Last-used escalation tier (1-4) so retry starts at this tier or higher
 
 
 class RetryQueue:
@@ -342,7 +343,8 @@ class RetryQueue:
         keyword: str,
         tier: str,
         error_message: str,
-        error_category: str = 'video_specific'
+        error_category: str = 'video_specific',
+        escalation_tier: int = 1,
     ) -> bool:
         """Add a failed video to the retry queue.
 
@@ -355,6 +357,9 @@ class RetryQueue:
                 Network errors (DNS, no connectivity) affect all
                 segments and should not be retried. Other errors
                 (403, unavailable) may succeed on retry with escalation.
+            escalation_tier: The escalation tier (1-4) that was in effect when
+                the video failed. Retry will start at this tier or higher,
+                avoiding wasted attempts at already-failed lower tiers.
 
         Returns:
             True if added to queue, False if disabled or already in queue.
@@ -367,10 +372,14 @@ class RetryQueue:
 
         # Check if already in queue
         if video_id in self.items:
-            # Update error message, severity, and category but don't re-add
+            # Update error message, severity, category, and escalation tier but don't re-add
             self.items[video_id].error_message = error_message
             self.items[video_id].severity = classify_error_severity(error_message)
             self.items[video_id].error_category = error_category
+            # Keep the higher escalation tier (don't regress)
+            self.items[video_id].escalation_tier = max(
+                self.items[video_id].escalation_tier, escalation_tier
+            )
             logger.debug(f"Retry queue: {video_id} already queued, updated error")
             return False
 
@@ -390,13 +399,15 @@ class RetryQueue:
             retry_count=0,
             severity=severity,
             error_category=error_category,
+            escalation_tier=escalation_tier,
         )
         self._total_added += 1
         self._stats.record_failure(video_id, error_message)
 
         logger.debug(
             f"Retry queue: added {video_id} ({keyword}/{tier}) severity={severity} "
-            f"category={error_category} - queue size now {len(self.items)}"
+            f"category={error_category} escalation_tier={escalation_tier} "
+            f"- queue size now {len(self.items)}"
         )
         return True
 
@@ -584,6 +595,7 @@ class RetryQueue:
                     'error_message': item.error_message,
                     'retry_count': item.retry_count,
                     'error_category': item.error_category,
+                    'escalation_tier': item.escalation_tier,
                 }
                 for item in self.items.values()
             ],
@@ -618,6 +630,7 @@ class RetryQueue:
                     error_message=item_data.get('error_message', ''),
                     retry_count=item_data.get('retry_count', 0),
                     error_category=item_data.get('error_category', 'video_specific'),
+                    escalation_tier=item_data.get('escalation_tier', 1),
                 )
 
         # Restore state
