@@ -162,7 +162,7 @@
             "id": "US-47-011",
             "title": "Add stage error propagation integration tests",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test that stage failure in MATCH stage produces correct error in checkpoint",
                 "Add test that validate_required_state_attrs() raises clear errors for missing fields",
@@ -170,7 +170,7 @@
                 "Add test that --resume correctly skips already-completed stages after a mid-pipeline failure",
                 "All tests in tests/test_stage_error_propagation.py must pass"
             ],
-            "notes": "Tier: T3 (integration). Source files: src/pipeline.py (run method), src/stages/base.py (BaseStage.validate_required_state_attrs), src/checkpoint.py (save/restore). Existing test_stage_error_handling.py covers individual stage error handling but not the cross-stage propagation through the pipeline orchestrator. The user interview identified that stale state references cause AttributeError crashes mid-pipeline - this story ensures such crashes are handled gracefully."
+            "notes": "COMPLETED. 20 tests in tests/test_stage_error_propagation.py across 5 test classes: TestMatchStageFailureCheckpoint (4 tests: prior stages preserved, match data not checkpointed, returns false, state rollback), TestValidateRequiredStateAttrs (6 tests: missing attr initialized, multiple missing, existing preserved, PipelineState.validate_state_attributes, empty when valid, unknown attr gets None), TestPipelineRunExceptionHandling (5 tests: fail preserves checkpoint, unhandled exception propagates, checkpoint written to disk, validation failure safe, progressive checkpointing), TestResumeAfterMidPipelineFailure (3 tests: skips completed stages, resume from disk, empty checkpoint runs all), TestStageMetricsOnFailure (2 tests: failed flag true, successful unfailed)."
         },
         {
             "id": "US-47-012",
