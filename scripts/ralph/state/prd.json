@@ -92,7 +92,7 @@
             "id": "US-49-006",
             "title": "Validate and extend _is_network_failure() patterns for Python API error format",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Audit _is_network_failure() regex patterns against actual Python API DownloadError message format (which wraps exceptions differently than subprocess stderr)",
                 "Add pattern for Windows DNS failure 'Errno 11001' and ffmpeg exit code '4294967158' (0xFFFFFEC6) if not already covered",
@@ -100,7 +100,7 @@
                 "Add unit test with 6+ real-world error message strings from both Python API and subprocess stderr verifying correct classification",
                 "Add unit test verifying bot-detection messages ('Sign in to confirm', 'HTTP Error 403') are NOT classified as network failures"
             ],
-            "notes": "P2 fix - Issue #3 from user interview. Tier: correctness improvement. _is_network_failure() at download_segments.py:29-63 pattern-matches against error messages, but Python API exceptions format differently than subprocess stderr. For example, yt_dlp.utils.DownloadError wraps the original exception with 'ERROR: ...' prefix. The function needs to handle both formats. Also verify that ffmpeg exit code 4294967158 (unsigned representation of -314 signed) is detected. Source files: src/stages/download_segments.py:29-63 (_is_network_failure function), lines 536-557 (abort logic)."
+            "notes": "Done. Added URLError and ConnectionResetError patterns to _NETWORK_FAILURE_PATTERNS. Errno 11001 and ffmpeg 4294967158 were already present. Added 16 tests (10 positive network failures from both Python API and subprocess stderr, 6 negative tests for bot-detection/403/unavailable/age-restricted/copyright/429). All 40 tests pass in test_error_classification.py."
         },
         {
             "id": "US-49-007",
