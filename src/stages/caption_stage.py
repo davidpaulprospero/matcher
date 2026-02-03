@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from . import Stage, StageResult, register_stage
+from . import Stage, StageResult, register_stage, validate_required_state_attrs
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -157,6 +157,9 @@ class CaptionStage(Stage):
         """
         warnings = []
         retry_budget = None  # US-40-004: Initialize early for access in except block
+
+        # US-44-002: Validate required attributes exist
+        validate_required_state_attrs(state, ['video_ids'], self.name)
 
         # US-43-005: Defensive text_metadata initialization at very start of run()
         # This ensures text_metadata exists even if _validate_state_type or

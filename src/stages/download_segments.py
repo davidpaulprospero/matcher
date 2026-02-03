@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from . import Stage, StageResult, register_stage
+from . import Stage, StageResult, register_stage, validate_required_state_attrs
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -52,7 +52,13 @@ class DownloadVideoSegmentsStage(Stage):
         config: 'Config',
         checkpoint: 'CheckpointManager'
     ) -> StageResult:
-        """Execute the video segment download stage"""
+        """Execute the video segment download stage.
+
+        US-44-002: Validates required state attributes exist.
+        """
+        # US-44-002: Validate required attributes exist
+        validate_required_state_attrs(state, ['matches'], self.name)
+
         warnings = []
 
         try:
