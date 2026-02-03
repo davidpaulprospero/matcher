@@ -12,6 +12,7 @@ Stage 6 of the simplified 7-stage pipeline:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -224,14 +225,19 @@ class DownloadVideoSegmentsStage(Stage):
                 }
                 checkpoint.save_intermediate('DOWNLOAD_SEGMENTS', checkpoint_data)
 
-            downloaded_segments = self._download_segments(
+            stage_start_time = time.time()
+
+            downloaded_segments, download_stats = self._download_segments(
                 segments_to_download,
                 output_dir,
                 buffer_seconds,
                 checkpoint_progress
             )
 
-            print(f"\n  + Downloaded {len(downloaded_segments)} video segments")
+            elapsed = time.time() - stage_start_time
+
+            # Print end-of-stage summary
+            self._print_summary(download_stats, elapsed)
 
             # Update matches to reference local files
             self._update_matches_with_local_paths(state, downloaded_segments)
@@ -297,7 +303,7 @@ class DownloadVideoSegmentsStage(Stage):
         output_dir: Path,
         buffer_seconds: float,
         progress_callback
-    ) -> List['DownloadedVideo']:
+    ):
         """Download video segments using VideoDownloader's retry queue.
 
         Uses the downloader's impersonation, escalation, and retry queue
@@ -306,6 +312,9 @@ class DownloadVideoSegmentsStage(Stage):
         US-48-005: Uses EscalationManager for per-segment tier progression.
         On 403/bot errors, escalates to Tier 2 (extractor_args) and Tier 3
         (cookie rotation). Escalation state is tracked per video_id.
+
+        Returns:
+            Tuple of (downloaded_segments list, stats dict).
         """
         from ..state import DownloadedVideo
         import yt_dlp
@@ -313,6 +322,15 @@ class DownloadVideoSegmentsStage(Stage):
         downloaded = []
         total = len(segments)
         consecutive_network_failures = 0
+
+        # Progress counters
+        stats = {
+            'succeeded': 0,
+            'failed': 0,
+            'cached': 0,
+            'attempted': 0,
+            'total': total,
+        }
 
         # Get escalation manager and cookie rotator from downloader
         escalation_mgr = None
@@ -336,7 +354,10 @@ class DownloadVideoSegmentsStage(Stage):
                     url=f"https://www.youtube.com/watch?v={video_id}",
                     source='segment_cache'
                 ))
+                stats['cached'] += 1
+                stats['attempted'] += 1
                 consecutive_network_failures = 0  # Cached file counts as success
+                self._print_progress(idx, total, stats)
                 continue
 
             try:
@@ -400,16 +421,23 @@ class DownloadVideoSegmentsStage(Stage):
                         url=url,
                         source='segment_download'
                     ))
-                    print(f"  [{idx}/{total}] Downloaded {video_id} ({start:.0f}s-{end:.0f}s)")
+                    stats['succeeded'] += 1
+                    stats['attempted'] += 1
                     consecutive_network_failures = 0  # Reset on success
+                    self._print_progress(idx, total, stats)
                     # Record success with escalation manager
                     if escalation_mgr:
                         escalation_mgr.record_success(video_id)
                 else:
+                    stats['failed'] += 1
+                    stats['attempted'] += 1
+                    self._print_progress(idx, total, stats)
                     logger.warning(f"Download succeeded but file not found: {output_file}")
 
             except Exception as e:
                 error_msg = str(e)
+                stats['failed'] += 1
+                stats['attempted'] += 1
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
                 # US-48-005: Record failure with escalation manager for tier progression
@@ -447,6 +475,8 @@ class DownloadVideoSegmentsStage(Stage):
                     # Non-network error (403, removed, etc.) — reset counter
                     consecutive_network_failures = 0
 
+                self._print_progress(idx, total, stats)
+
                 # Add failed download to retry queue for batch retry later
                 if self.downloader and self.downloader.retry_queue:
                     category = classify_error_category(error_msg)
@@ -468,7 +498,43 @@ class DownloadVideoSegmentsStage(Stage):
         # Process retry queue if there are pending items
         self._process_retry_queue(output_dir, buffer_seconds, downloaded, total, progress_callback)
 
-        return downloaded
+        return downloaded, stats
+
+    @staticmethod
+    def _print_progress(current: int, total: int, stats: Dict[str, int]) -> None:
+        """Print running progress line after each download attempt."""
+        ok = stats['succeeded'] + stats['cached']
+        attempted = stats['attempted']
+        rate = (ok / attempted * 100) if attempted > 0 else 0.0
+        print(
+            f"  [{current}/{total}] "
+            f"ok={ok} fail={stats['failed']} cached={stats['cached']} "
+            f"({rate:.0f}% success)"
+        )
+
+    @staticmethod
+    def _print_summary(stats: Dict[str, int], elapsed: float) -> None:
+        """Print end-of-stage summary."""
+        ok = stats['succeeded'] + stats['cached']
+        attempted = stats['attempted']
+        rate = (ok / attempted * 100) if attempted > 0 else 0.0
+
+        if elapsed < 60:
+            time_str = f"{elapsed:.1f}s"
+        elif elapsed < 3600:
+            time_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+        else:
+            h = int(elapsed // 3600)
+            m = int((elapsed % 3600) // 60)
+            time_str = f"{h}h {m}m"
+
+        print(f"\n  --- Download Summary ---")
+        print(f"    Attempted: {attempted}/{stats['total']}")
+        print(f"    Succeeded: {stats['succeeded']}")
+        print(f"    Cached:    {stats['cached']}")
+        print(f"    Failed:    {stats['failed']}")
+        print(f"    Success rate: {rate:.0f}%")
+        print(f"    Total time: {time_str}")
 
     def _process_retry_queue(
         self,

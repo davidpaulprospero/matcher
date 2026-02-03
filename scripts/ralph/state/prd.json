@@ -106,7 +106,7 @@
             "id": "US-48-007",
             "title": "Add download progress reporting and ETA to download_segments stage",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add success/failure/skip counters displayed after each segment download attempt",
                 "Display running success rate (downloaded/attempted) during the download loop",
