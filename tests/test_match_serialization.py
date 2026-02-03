@@ -351,3 +351,147 @@ class TestStageRestoreHarmonization:
 
         assert state_match.matches[0].strategy == 'restored'
         assert state_iter.matches[0].strategy == 'iterative_restored'
+
+
+# ============================================================================
+# US-48-003: MatchResult serialization in iterative_match
+# ============================================================================
+
+class TestIterativeMatchSerializesMatchResult:
+    """Verify iterative_match serializes MatchResult objects correctly.
+
+    US-48-003: The serialization loop must drill into
+    match.primary_match.video_segment.source_file instead of
+    getattr(match, 'video_file', '') which always returns '' for MatchResult.
+    """
+
+    def _make_match_result(self, source_file='vid_abc123', start_time=5.0,
+                           end_time=15.0, confidence=0.85):
+        """Create a MatchResult with primary_match containing a video_segment."""
+        from src.utils import SRTSegment, SceneInfo, Match as UtilsMatch, MatchResult
+
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=10.0, text='test voiceover')
+        vid_seg = SRTSegment(
+            index=0, start_time=start_time, end_time=end_time,
+            text='test video caption', source_file=source_file
+        )
+        primary = UtilsMatch(
+            voiceover_segment=vo_seg,
+            video_segment=vid_seg,
+            video_scene=None,
+            confidence=confidence,
+            reasoning='semantic match',
+        )
+        return MatchResult(primary_match=primary)
+
+    def test_serialized_output_has_non_empty_video_file(self):
+        """Serialized MatchResult must contain non-empty video_file."""
+        from src.stages.iterative_match import IterativeMatchStage
+        from unittest.mock import patch, MagicMock
+
+        match_result = self._make_match_result(source_file='vid_xyz789')
+
+        state = PipelineState()
+        state.voiceover_segments = [MagicMock()]
+        state.matches = [match_result]
+        state.text_metadata = [{'text': 'cap', 'video_path': 'v'}]
+        state.embeddings = None
+        state.extracted_entities = []
+        state.voiceover_path = '/tmp/test.srt'
+
+        stage = IterativeMatchStage()
+        config = MagicMock()
+        config.iterative_matching.enabled = True
+        config.iterative_matching.max_iterations = 1
+        config.iterative_matching.target_confidence = 0.90
+        config.iterative_matching.source_spacing_seconds = 300.0
+        config.iterative_matching.min_gap_percentage = 0.05
+        config.iterative_matching.search_results_per_gap = 10
+        config.iterative_matching.max_new_videos_per_pass = 50
+        config.iterative_matching.use_voiceover_text_queries = True
+        config.iterative_matching.use_similar_to_locked = True
+        config.iterative_matching.use_entity_topic_queries = True
+        config.iterative_matching.enable_progressive_refinement = True
+        config.iterative_matching.analyze_gap_patterns = True
+        config.iterative_matching.enable_query_learning = False
+        config.iterative_matching.caption_batch_size = 10
+        config.iterative_matching.caption_fetch_delay = 0.0
+        config.iterative_matching.search_cache_ttl_hours = 24
+        config.download = MagicMock()
+        config.download.cookie_rotation = None
+
+        checkpoint = MagicMock()
+        checkpoint.should_skip_stage.return_value = False
+        checkpoint.get_stage_data.return_value = None
+        checkpoint.save_intermediate = MagicMock()
+
+        with patch.object(stage, '_search_youtube_for_videos', return_value=[]), \
+             patch.object(stage, '_fetch_captions_for_videos', return_value=[]):
+            result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        serialized = result.data.get('matches', [])
+        assert len(serialized) >= 1
+
+        # The key assertion: video_file must not be empty
+        first = serialized[0]
+        assert first['video_file'] == 'vid_xyz789', \
+            f"Expected 'vid_xyz789' but got '{first['video_file']}'"
+        assert first['video_start'] == 5.0
+        assert first['video_end'] == 15.0
+        assert first['confidence'] == 0.85
+
+    def test_restore_accepts_corrected_serialization(self):
+        """restore_matches_from_dicts accepts the corrected format with video_file."""
+        corrected_data = [{
+            'segment_index': 0,
+            'video_file': 'vid_abc123',
+            'video_start': 5.0,
+            'video_end': 15.0,
+            'confidence': 0.85,
+            'strategy': 'semantic match',
+            'reason': 'semantic match',
+            'face_score': 0.5,
+        }]
+
+        result = restore_matches_from_dicts(corrected_data, default_strategy='iterative_restored')
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].video_file == 'vid_abc123'
+        assert result[0].video_start == 5.0
+        assert result[0].video_end == 15.0
+
+    def test_old_format_empty_video_file_rejected_with_warning(self, caplog):
+        """Old format (empty video_file) is rejected and logged as warning."""
+        import logging
+
+        old_format_data = [
+            {
+                'segment_index': 0,
+                'video_file': '',  # Bug: old serialization produced empty string
+                'video_start': 0.0,
+                'video_end': 0.0,
+                'confidence': 0.85,
+                'strategy': 'semantic',
+            },
+            {
+                'segment_index': 1,
+                'video_file': 'valid_vid',
+                'video_start': 1.0,
+                'video_end': 11.0,
+                'confidence': 0.7,
+            },
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            result = restore_matches_from_dicts(old_format_data)
+
+        # The valid match should be restored
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].video_file == 'valid_vid'
+
+        # A validation warning should have been logged for the empty video_file
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any('video_file' in msg or 'validation' in msg.lower() for msg in warning_messages), \
+            f"Expected warning about empty video_file, got: {warning_messages}"
