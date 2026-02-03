@@ -165,7 +165,7 @@
       "id": "US-48-011",
       "title": "Add download_segments metrics collection for pipeline observability",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Track per-segment download duration and report average/median in stage summary",
         "Track total bytes downloaded (from output file sizes) and report in stage summary",
@@ -174,7 +174,7 @@
         "Add unit test verifying StageMetrics is populated with correct counts after successful run",
         "Add unit test verifying retry_count in checkpoint data reflects actual retry attempts"
       ],
-      "notes": "Tier: enhancement. Files: src/stages/download_segments.py:54-127 (run method, currently returns StageResult.ok with minimal checkpoint_data), src/stages/__init__.py (StageResult, StageMetrics classes). The iterative_match stage returns StageMetrics (line 462-466) but download_segments doesn't. Adding metrics would enable pipeline observability dashboards and help diagnose slow downloads. The existing checkpoint_data at lines 118-121 only tracks segment_count and total_matches."
+      "notes": "Implemented: Added StageMetrics return from run() with items_processed (succeeded+cached), items_failed, duration_seconds. Per-segment durations tracked with avg/median in summary. Total bytes tracked from file sizes. retry_count added to checkpoint_data. 12 new tests (9 metrics + 3 retry_count). All 70 tests pass."
     },
     {
       "id": "US-48-012",
