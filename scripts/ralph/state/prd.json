@@ -177,8 +177,8 @@
             "id": "US-45-012",
             "title": "Add pipeline stage contract test to verify all stages handle minimal state",
             "priority": "low",
-            "passes": false,
-            "notes": "Tier: T3 (test infrastructure). Files: src/stages/*.py (all 7 stage files), src/state.py (PipelineState). The user interview identified that the stages module had zero test coverage for the kind of bug found (stale state references). A contract test that instantiates each registered stage and calls run() with a minimal PipelineState would catch AttributeError and similar crashes from stale references. This is a parametrized test over all stages in STAGE_ORDER.",
+            "passes": true,
+            "notes": "Added tests/test_stage_contracts.py with 28 parametrized tests (4 test functions x 7 stages). Tests cover run(), can_skip(), restore(), and validate_inputs() for all STAGE_ORDER stages. Each test instantiates the stage, calls with minimal PipelineState + mock Config/CheckpointManager, and asserts no AttributeError. Other exceptions (network, LLM) are tolerated. All 28 tests pass.",
             "acceptanceCriteria": [
                 "Add a parametrized test that iterates over all stage names in STAGE_ORDER",
                 "For each stage, instantiate it and call run() with a minimal PipelineState, mock Config, and mock CheckpointManager",
