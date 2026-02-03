@@ -30,20 +30,25 @@ class StageMetrics:
         items_failed: Number of items that failed processing
         duration_seconds: Time taken to execute the stage
         failed: Whether the stage failed (True) or succeeded (False)
+        error_categories: Per-category error counts (e.g. {'bot_detection': 5, 'network': 2})
     """
     items_processed: int = 0
     items_failed: int = 0
     duration_seconds: float = 0.0
     failed: bool = False
+    error_categories: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary for serialization."""
-        return {
+        d = {
             'items_processed': self.items_processed,
             'items_failed': self.items_failed,
             'duration_seconds': self.duration_seconds,
             'failed': self.failed
         }
+        if self.error_categories:
+            d['error_categories'] = dict(self.error_categories)
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'StageMetrics':
@@ -52,7 +57,8 @@ class StageMetrics:
             items_processed=data.get('items_processed', 0),
             items_failed=data.get('items_failed', 0),
             duration_seconds=data.get('duration_seconds', 0.0),
-            failed=data.get('failed', False)
+            failed=data.get('failed', False),
+            error_categories=data.get('error_categories', {}),
         )
 
 

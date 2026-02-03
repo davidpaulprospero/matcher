@@ -106,7 +106,7 @@ class RetryItem:
     retry_count: int = 0
     added_at: float = field(default_factory=time.time)
     severity: str = 'medium'  # low, medium, high - determines delay multiplier
-    error_category: str = 'video_specific'  # 'network_systemic' or 'video_specific'
+    error_category: str = 'video_specific'  # 'network', 'bot_detection', 'timeout', or 'video_specific'
 
 
 class RetryQueue:
@@ -351,9 +351,9 @@ class RetryQueue:
             keyword: Search keyword that found this video
             tier: Duration tier (short, medium, long, longer)
             error_message: Error message from the failure
-            error_category: 'network_systemic' or 'video_specific'.
-                Network-systemic errors (DNS, no connectivity) affect all
-                segments and should not be retried. Video-specific errors
+            error_category: 'network', 'bot_detection', 'timeout', or 'video_specific'.
+                Network errors (DNS, no connectivity) affect all
+                segments and should not be retried. Other errors
                 (403, unavailable) may succeed on retry with escalation.
 
         Returns:
@@ -409,18 +409,18 @@ class RetryQueue:
         return list(self.items.values())
 
     def get_retryable_items(self) -> List[RetryItem]:
-        """Get items that are worth retrying (excludes network_systemic errors).
+        """Get items that are worth retrying (excludes network errors).
 
-        Network-systemic errors (DNS failure, no connectivity) affect all
+        Network errors (DNS failure, no connectivity) affect all
         segments and won't resolve by retrying individual items. Only
         video-specific errors (403, removed) may succeed with escalation.
 
         Returns:
-            List of RetryItem objects with error_category != 'network_systemic'.
+            List of RetryItem objects with error_category != 'network'.
         """
         return [
             item for item in self.items.values()
-            if item.error_category != 'network_systemic'
+            if item.error_category != 'network'
         ]
 
     def mark_success(self, video_id: str) -> None:
