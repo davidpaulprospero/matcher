@@ -250,7 +250,7 @@ class PipelineState:
         Used for gradual migration - allows existing code to work
         while we transition to the new architecture.
         """
-        import re
+        from .utils import extract_video_id
         state = cls()
 
         # Copy basic state
@@ -284,11 +284,9 @@ class PipelineState:
             for vid in getattr(pipeline, 'downloaded_videos', []):
                 url = vid.get('url', '') if isinstance(vid, dict) else getattr(vid, 'url', '')
                 if url and ('youtube.com' in url or 'youtu.be' in url):
-                    match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
-                    if match:
-                        video_id = match.group(1)
-                        if video_id not in state.video_ids:
-                            state.video_ids.append(video_id)
+                    video_id = extract_video_id(url)
+                    if video_id and video_id not in state.video_ids:
+                        state.video_ids.append(video_id)
 
         # Copy video_search_results if present
         state.video_search_results = list(getattr(pipeline, 'video_search_results', []))

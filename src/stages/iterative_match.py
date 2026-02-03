@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from . import Stage, StageResult, StageMetrics, register_stage, validate_required_state_attrs
 from ..downloader.search_cache import SearchResultsCache
+from ..utils import extract_video_id
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -663,15 +664,7 @@ class IterativeMatchStage(Stage):
         if not source_file:
             return ""
 
-        # Extract video ID from filename or path
-        # Common patterns: 'VIDEO_ID.mp4', 'keyword_VIDEO_ID.mp4'
-        import re
-        # YouTube video IDs are 11 characters (alphanumeric + _ -)
-        match_id = re.search(r'([a-zA-Z0-9_-]{11})', str(source_file))
-        if match_id:
-            return match_id.group(1)
-
-        return Path(source_file).stem
+        return extract_video_id(source_file) or Path(source_file).stem
 
     def _get_source_file(self, match: Any) -> str:
         """Get source file path from match object."""
@@ -1317,9 +1310,7 @@ class IterativeMatchStage(Stage):
 
     def _extract_video_id_from_path(self, path: str) -> str:
         """Extract video ID from file path."""
-        import re
-        match = re.search(r'([a-zA-Z0-9_-]{11})', str(path))
-        return match.group(1) if match else ""
+        return extract_video_id(path) or ""
 
     def _rematch_gaps(
         self,
