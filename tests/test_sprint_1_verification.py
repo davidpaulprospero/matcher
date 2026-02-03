@@ -56,8 +56,7 @@ class TestStageRegistry:
         """Import all stage modules to trigger registration."""
         # Import all stage modules to trigger @register_stage decorators
         from src.stages import analyze  # noqa: F401
-        from src.stages import entity_images  # noqa: F401
-        from src.stages import entity_videos  # noqa: F401
+        # entity_images and entity_videos are optional (no @register_stage)
         from src.stages import download  # noqa: F401
         from src.stages import stock  # noqa: F401
         from src.stages import broll_download  # noqa: F401
@@ -76,8 +75,7 @@ class TestStageRegistry:
         registered = set(list_stages())
         expected = {
             "ANALYZE",
-            "ENTITY_IMAGES",
-            "ENTITY_VIDEOS",
+            # ENTITY_IMAGES and ENTITY_VIDEOS are optional stages (no @register_stage)
             "DOWNLOAD",
             "STOCK",
             "BROLL_DOWNLOAD",

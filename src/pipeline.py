@@ -8,6 +8,14 @@ This replaces the run() method and stage orchestration logic in main.py.
 
 Self-Healing: By default, pipelines use ResilientRunner with HealingOrchestrator
 for automatic error recovery. Controlled via config.healing settings.
+
+Pipeline Variants:
+    - create_default_pipeline(): Standard 7-stage pipeline
+      ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    - create_entity_enhanced_pipeline(): 9-stage pipeline with entity media stages
+      ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    - create_match_only_pipeline(): Re-run matching from checkpoint
+    - create_healing_pipeline(): Default pipeline with self-healing wrapper
 """
 
 from __future__ import annotations
@@ -721,6 +729,54 @@ def create_default_pipeline(
     pipeline.add_stage(IterativeMatchStage())    # Stage 5: Fill gaps with iterative search
     pipeline.add_stage(DownloadVideoSegmentsStage())  # Stage 6: Download matched segments
     pipeline.add_stage(OutputStage())            # Stage 7: Generate OTIO/EDL/XML
+
+    return pipeline
+
+
+def create_entity_enhanced_pipeline(
+    config: 'Config',
+    project_dir: Path,
+) -> PipelineOrchestrator:
+    """
+    Create a 9-stage pipeline that includes optional entity media stages.
+
+    Inserts ENTITY_IMAGES and ENTITY_VIDEOS between ANALYZE and VIDEO_SEARCH
+    so that entity images/videos are fetched before the main video search.
+
+    9-stage pipeline:
+    ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_SEARCH → CAPTION →
+    MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+
+    Returns:
+        Configured PipelineOrchestrator with 9 stages
+    """
+    pipeline = PipelineOrchestrator(config, project_dir)
+
+    # Import stages lazily to avoid circular imports
+    from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.video_search import VideoSearchStage
+    from .stages.caption_stage import CaptionStage
+    from .stages.match import MatchStage
+    from .stages.iterative_match import IterativeMatchStage
+    from .stages.download_segments import DownloadVideoSegmentsStage
+    from .stages.output import OutputStage
+
+    # Add stages in 9-stage order (entity stages between ANALYZE and VIDEO_SEARCH)
+    pipeline.add_stage(AnalyzeStage())                    # Stage 1: Extract keywords
+    pipeline.add_stage(EntityImagesStage())               # Stage 2: Download entity images
+    pipeline.add_stage(EntityVideosStage())                # Stage 3: Download entity stock videos
+    pipeline.add_stage(VideoSearchStage())                 # Stage 4: Search YouTube
+    pipeline.add_stage(CaptionStage())                     # Stage 5: Fetch YouTube captions
+    pipeline.add_stage(MatchStage())                       # Stage 6: Match voiceover to captions
+    pipeline.add_stage(IterativeMatchStage())              # Stage 7: Fill gaps
+    pipeline.add_stage(DownloadVideoSegmentsStage())       # Stage 8: Download matched segments
+    pipeline.add_stage(OutputStage())                      # Stage 9: Generate OTIO/EDL/XML
 
     return pipeline
 

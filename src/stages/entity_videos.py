@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from . import Stage, StageResult, register_stage
+from . import Stage, StageResult
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -23,10 +23,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@register_stage
 class EntityVideosStage(Stage):
     """
     Downloads stock videos for entities extracted from voiceover.
+
+    This is an **optional stage** not included in the default 7-stage pipeline.
+    It is not registered via @register_stage and must be added manually using
+    ``pipeline.add_stage(EntityVideosStage())``, or by using the
+    ``create_entity_enhanced_pipeline()`` factory which inserts entity stages
+    between ANALYZE and VIDEO_SEARCH.
 
     Inputs:
         - state.extracted_entities: List of entity dicts with 'text', 'type', 'context'

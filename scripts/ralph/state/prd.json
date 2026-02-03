@@ -162,8 +162,8 @@
             "id": "US-45-011",
             "title": "Consolidate entity stage registration into optional stage group",
             "priority": "low",
-            "passes": false,
-            "notes": "Tier: T2 (architecture improvement). Files: src/stages/entity_images.py:27-28, src/stages/entity_videos.py:27-28, src/pipeline.py:645-687. EntityImagesStage and EntityVideosStage are registered via @register_stage but never added to any pipeline factory function and are not in STAGE_ORDER. They exist as orphan stages. Either: (a) add them to create_default_pipeline as optional stages between ANALYZE and VIDEO_SEARCH, or (b) remove @register_stage from them and document they are manually-added optional stages. Option (b) is preferred to keep the 7-stage pipeline clean.",
+            "passes": true,
+            "notes": "Removed @register_stage from EntityImagesStage and EntityVideosStage. Added docstrings explaining they are optional manual-add stages. Added create_entity_enhanced_pipeline() factory (9 stages). Updated module docstring. Updated 5 test files to reflect entity stages are no longer auto-registered. All tests pass.",
             "acceptanceCriteria": [
                 "Remove @register_stage decorator from EntityImagesStage and EntityVideosStage",
                 "Add a docstring to each entity stage class explaining they are optional stages added manually via pipeline.add_stage()",

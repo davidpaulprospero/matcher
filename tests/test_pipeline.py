@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.pipeline import (
     PipelineOrchestrator,
     create_default_pipeline,
+    create_entity_enhanced_pipeline,
     create_match_only_pipeline
 )
 from src.state import PipelineState
@@ -506,6 +507,48 @@ class TestPipelineFactories:
 
         # Should have all 7 stages in match-only mode for proper restoration
         assert "DOWNLOAD_SEGMENTS" in stage_names
+
+    @pytest.mark.fast
+    def test_create_entity_enhanced_pipeline(self, temp_dir):
+        """Test creating entity-enhanced pipeline with 9 stages in correct order."""
+        config = Config()
+
+        pipeline = create_entity_enhanced_pipeline(config, temp_dir)
+
+        assert isinstance(pipeline, PipelineOrchestrator)
+        assert len(pipeline.stages) == 9
+
+        stage_names = [s.name for s in pipeline.stages]
+
+        # Verify exact 9-stage order
+        expected_order = [
+            "ANALYZE",
+            "ENTITY_IMAGES",
+            "ENTITY_VIDEOS",
+            "VIDEO_SEARCH",
+            "CAPTION",
+            "MATCH",
+            "ITERATIVE_MATCH",
+            "DOWNLOAD_SEGMENTS",
+            "OUTPUT"
+        ]
+        assert stage_names == expected_order, f"Stage order mismatch: {stage_names} != {expected_order}"
+
+        # Entity stages come after ANALYZE but before VIDEO_SEARCH
+        assert stage_names.index("ANALYZE") < stage_names.index("ENTITY_IMAGES")
+        assert stage_names.index("ENTITY_VIDEOS") < stage_names.index("VIDEO_SEARCH")
+
+    @pytest.mark.fast
+    def test_create_entity_enhanced_pipeline_does_not_affect_default(self, temp_dir):
+        """Test that default pipeline is unchanged (still 7 stages, no entity stages)."""
+        config = Config()
+
+        default = create_default_pipeline(config, temp_dir)
+        default_names = [s.name for s in default.stages]
+
+        assert len(default.stages) == 7
+        assert "ENTITY_IMAGES" not in default_names
+        assert "ENTITY_VIDEOS" not in default_names
 
 
 class TestPipelineCheckpointSaving:

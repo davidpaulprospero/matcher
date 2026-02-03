@@ -560,33 +560,22 @@ class TestOrphanStageDetection:
             _stage_registry["ANALYZE"] = original
 
     @pytest.mark.fast
-    def test_get_orphan_stages_identifies_entity_stages(self):
-        """Test get_orphan_stages correctly identifies entity stages as orphans."""
-        # Force import so @register_stage fires for entity stages
+    def test_get_orphan_stages_excludes_unregistered_entity_stages(self):
+        """Test get_orphan_stages does NOT include entity stages (no @register_stage)."""
+        # Import entity stages - they should NOT register themselves
         from src.stages.entity_images import EntityImagesStage  # noqa: F401
         from src.stages.entity_videos import EntityVideosStage  # noqa: F401
 
         orphans = get_orphan_stages()
 
-        # Entity stages are registered but not in STAGE_ORDER
-        assert "ENTITY_IMAGES" in orphans
-        assert "ENTITY_VIDEOS" in orphans
+        # Entity stages are optional and not registered, so not in orphans
+        assert "ENTITY_IMAGES" not in orphans
+        assert "ENTITY_VIDEOS" not in orphans
 
         # Pipeline stages should NOT be in orphans
         assert "ANALYZE" not in orphans
         assert "MATCH" not in orphans
         assert "OUTPUT" not in orphans
-
-    @pytest.mark.fast
-    def test_get_orphan_stages_returns_classes(self):
-        """Test get_orphan_stages returns stage classes, not just names."""
-        from src.stages.entity_images import EntityImagesStage
-        from src.stages.entity_videos import EntityVideosStage
-
-        orphans = get_orphan_stages()
-
-        assert orphans["ENTITY_IMAGES"] is EntityImagesStage
-        assert orphans["ENTITY_VIDEOS"] is EntityVideosStage
 
     @pytest.mark.fast
     def test_get_orphan_stages_empty_when_all_in_order(self):
