@@ -273,6 +273,13 @@ class PipelineState:
     output_files: List[Path] = field(default_factory=list)
     otio_files: List[Path] = field(default_factory=list)
 
+    # === ENTITY STATE ===
+    entity_images: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityImageResult
+    entity_videos: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityVideoResult
+
+    # === EMBEDDING STATE ===
+    voiceover_embeddings: Optional[Any] = None  # Precomputed voiceover segment embeddings
+
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
     location_chapters: List[Any] = field(default_factory=list)
@@ -303,6 +310,8 @@ class PipelineState:
             'text_metadata': [],
             'caption_results': {},
             'video_ids': [],
+            'entity_images': {},
+            'entity_videos': {},
         }
 
         for field_name, default_value in required_fields.items():
