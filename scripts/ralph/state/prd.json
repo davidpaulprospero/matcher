@@ -77,7 +77,7 @@
             "id": "US-44-005",
             "title": "Persist failed stage metrics in pipeline instead of only successful ones",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When a stage fails, its metrics (duration, items processed before failure) are still stored in self.stage_metrics",
                 "StageMetrics dataclass has a new 'failed' boolean field (default False) to distinguish failed from successful metrics",
@@ -85,13 +85,13 @@
                 "The final pipeline summary (if any) includes failed stage metrics alongside successful ones",
                 "Tests verify that after a stage failure, stage_metrics[failed_stage] exists and has failed=True"
             ],
-            "notes": "Tier: T2 (observability). Source files: src/pipeline.py:237-244 (metrics storage), src/stages/__init__.py (StageMetrics dataclass). Currently at pipeline.py:254 when a stage fails, the code returns False without storing any metrics. The elapsed time is computed at line 233 but only stored for successful stages. This makes post-mortem debugging harder since we lose how long the failed stage ran and how much work it completed."
+            "notes": "Done. Added 'failed' bool field to StageMetrics (default False), pipeline.run() sets failed=True on failure, get_metrics() returns failed_stages list. 9 new tests in TestFailedStageMetricsPersistence class + updated existing to_dict/from_dict tests. All 139 orchestrator tests pass. Commit 6843501."
         },
         {
             "id": "US-44-006",
             "title": "Add checkpoint data schema validation to prevent silent corruption",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "CheckpointData.from_dict() validates that stage data dicts contain expected keys (at minimum, non-empty for stages before last_completed_stage)",
                 "A new validate() method on CheckpointData checks internal consistency: all stages before last_completed_stage have non-empty data",
@@ -99,7 +99,7 @@
                 "CheckpointManager.save() validates that the stage_key maps to an actual field on CheckpointData before writing",
                 "Tests verify that loading a checkpoint with missing intermediate stage data produces a warning"
             ],
-            "notes": "Tier: T2 (reliability). Source file: src/checkpoint.py:62-85 (CheckpointData), 150-194 (load), 440+ (save). Currently CheckpointData.from_dict() at line 84 filters to known fields but doesn't validate contents. The save() method uses stage.lower() to find the field name but has no guard against unknown stage names. If someone adds a stage without adding a field to CheckpointData, save() silently drops data."
+            "notes": "Done. Added STAGE_FIELD_MAP constant mapping stage names to CheckpointData fields. from_dict() now validates stage data types (resets non-dicts to {}). New validate() method checks all stages before last_completed_stage have non-empty data. load() calls validate() and logs consistency warnings. save()/save_intermediate() guard against unknown stage_keys. 28 new tests in test_checkpoint_schema_validation_us44_006.py, all 272 checkpoint tests pass."
         },
         {
             "id": "US-44-007",

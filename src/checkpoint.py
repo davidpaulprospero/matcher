@@ -38,6 +38,17 @@ LEGACY_STAGES = [
     "TRANSCRIBE", "SCENE_DETECTION", "BROLL_MATCH"
 ]
 
+# Mapping from stage name to CheckpointData field name
+# OUTPUT has no checkpoint field (it's the terminal stage)
+STAGE_FIELD_MAP = {
+    "ANALYZE": "analyze",
+    "VIDEO_SEARCH": "video_search",
+    "CAPTION": "caption",
+    "MATCH": "match",
+    "ITERATIVE_MATCH": "iterative_match",
+    "DOWNLOAD_SEGMENTS": "download_segments",
+}
+
 
 @dataclass
 class SavedKeywords:
@@ -82,7 +93,54 @@ class CheckpointData:
     
     @classmethod
     def from_dict(cls, data: dict) -> 'CheckpointData':
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        filtered = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+
+        # Validate that stage data fields are dicts (not strings, lists, etc.)
+        for stage_name, field_name in STAGE_FIELD_MAP.items():
+            if field_name in filtered and not isinstance(filtered[field_name], dict):
+                logger.warning(
+                    f"CheckpointData.from_dict: stage '{field_name}' data is "
+                    f"{type(filtered[field_name]).__name__}, expected dict — resetting to empty"
+                )
+                filtered[field_name] = {}
+
+        return cls(**filtered)
+
+    def validate(self) -> List[str]:
+        """
+        Validate internal consistency of checkpoint data.
+
+        Checks that all stages before last_completed_stage have non-empty data.
+        Returns a list of warning messages (empty if fully consistent).
+        """
+        warnings = []
+
+        if not self.last_completed_stage:
+            return warnings
+
+        if self.last_completed_stage not in STAGE_ORDER:
+            warnings.append(
+                f"Unknown last_completed_stage '{self.last_completed_stage}'"
+            )
+            return warnings
+
+        completed_idx = STAGE_ORDER.index(self.last_completed_stage)
+
+        # Check all stages up to and including last_completed_stage
+        for i in range(completed_idx + 1):
+            stage_name = STAGE_ORDER[i]
+            field_name = STAGE_FIELD_MAP.get(stage_name)
+            if field_name is None:
+                # No checkpoint field for this stage (e.g., OUTPUT)
+                continue
+            stage_data = getattr(self, field_name, {})
+            if not stage_data:
+                warnings.append(
+                    f"Stage {stage_name} is before last_completed_stage "
+                    f"({self.last_completed_stage}) but has no data"
+                )
+
+        return warnings
 
 
 class CheckpointManager:
@@ -183,6 +241,11 @@ class CheckpointManager:
         if not self._validate_checkpoint_data(data):
             logger.warning("Checkpoint validation failed - data may be incomplete")
             # Continue with partial data rather than failing completely
+
+        # Validate internal consistency (stages before last_completed have data)
+        consistency_warnings = data.validate()
+        for warning in consistency_warnings:
+            logger.warning(f"Checkpoint consistency: {warning}")
 
         self.data = data
 
@@ -432,16 +495,21 @@ class CheckpointManager:
                 created_at=datetime.now().isoformat(),
                 config_hash=self.config_hash
             )
-        
+
         self.data.updated_at = datetime.now().isoformat()
         self.data.last_completed_stage = stage
-        
+
         # Store stage-specific data
         if stage_data:
             stage_key = stage.lower()
-            if hasattr(self.data, stage_key):
+            if stage_key not in CheckpointData.__dataclass_fields__:
+                logger.warning(
+                    f"save(): stage_key '{stage_key}' (from stage '{stage}') "
+                    f"does not map to a CheckpointData field — data will not be persisted"
+                )
+            elif hasattr(self.data, stage_key):
                 setattr(self.data, stage_key, stage_data)
-        
+
         # Atomic save: write to temp, then rename
         self._atomic_save()
 
@@ -468,7 +536,12 @@ class CheckpointManager:
         # Store stage-specific data without changing last_completed_stage
         if stage_data:
             stage_key = stage.lower()
-            if hasattr(self.data, stage_key):
+            if stage_key not in CheckpointData.__dataclass_fields__:
+                logger.warning(
+                    f"save_intermediate(): stage_key '{stage_key}' (from stage '{stage}') "
+                    f"does not map to a CheckpointData field — data will not be persisted"
+                )
+            elif hasattr(self.data, stage_key):
                 setattr(self.data, stage_key, stage_data)
 
         logger.debug(f"Saving intermediate checkpoint for {stage}")
