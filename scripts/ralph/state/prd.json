@@ -1,188 +1,190 @@
 {
-  "sprintNumber": 46,
-  "focusArea": "quality",
-  "branchName": "ralph/sprint-46",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-46-001",
-      "title": "Generate sprint stories for quality focus area",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'quality'",
-        "Add stories US-46-002 through US-46-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-46-NNN to be unique across sprints",
-        "Mark this story (US-46-001) as passes: true when done"
-      ],
-      "notes": "Seed story completed. Generated 11 quality-focused stories (US-46-002 through US-46-012) based on codebase analysis of matching, scoring, state management, and test coverage gaps."
+    "sprintNumber": 47,
+    "focusArea": "testing",
+    "branchName": "ralph/sprint-47",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
     },
-    {
-      "id": "US-46-002",
-      "title": "Fix stale state references in match stage _run_matching",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Replace state.embeddings reference in src/stages/match.py with locally computed video embeddings following the voiceover embedding pattern on lines 520-529",
-        "Pass None for state.embedding_index parameter since match_all_segments accepts Optional[Any] = None",
-        "Pass None for state.location_chapters if getattr guard already exists, or use getattr(state, 'location_chapters', None) defensively",
-        "Verify match stage runs without AttributeError when PipelineState has no embeddings/embedding_index fields",
-        "Add or update test in tests/test_stage_match.py confirming _run_matching does not raise AttributeError with minimal PipelineState"
-      ],
-      "notes": "Pre-implemented in US-44-001. Video embeddings computed locally (lines 499-508), embedding_index=None (line 524), location_chapters via getattr (line 527). 4 regression tests in TestNoStalePipelineStateAttributes all pass."
-    },
-    {
-      "id": "US-46-003",
-      "title": "Add undeclared attributes to PipelineState dataclass",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add entity_images field (type Dict[str, Any], default empty dict) to PipelineState in src/state.py since entity_images.py and output.py write/read it without declaration",
-        "Add entity_videos field (type Dict[str, Any], default empty dict) to PipelineState since entity_videos.py and output.py write/read it without declaration",
-        "Add voiceover_embeddings field (type Optional[Any], default None) to PipelineState since iterative_match.py reads it",
-        "Verify all stage files in src/stages/ that access these attributes no longer risk AttributeError",
-        "Run existing tests to confirm no regressions from adding new dataclass fields"
-      ],
-      "notes": "Added entity_images (Dict[str, Any], default {}), entity_videos (Dict[str, Any], default {}), voiceover_embeddings (Optional[Any], default None) to PipelineState in src/state.py. Also added to _STATE_ATTR_DEFAULTS in src/stages/__init__.py and validate_state_attributes in state.py. 1357 tests pass, no regressions."
-    },
-    {
-      "id": "US-46-004",
-      "title": "Guard against cascading confidence penalties in scoring",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add minimum confidence floor (e.g., 0.05) in src/matching/scoring.py to prevent cascading multiplicative penalties from reducing confidence to near-zero",
-        "Add mutual exclusivity check or clear precedence for caption_quality multiplicative mode (lines 287-298) vs additive mode (lines 303-316) to prevent both running on same match",
-        "Add logging when confidence drops below 0.15 after penalty application to flag over-penalized matches",
-        "Add test case in tests/test_matching_scoring.py for cascading penalties scenario: caption quality 0.9 multiplier + timing penalty 0.6 should not reduce 0.8 confidence below floor",
-        "Add test case verifying only one caption quality mode (multiplicative OR additive) applies per match"
-      ],
-      "notes": "Added CONFIDENCE_FLOOR=0.05 in MatchScoring.apply_all_adjustments, mutual exclusivity for caption quality modes (multiplicative takes precedence), warning logging when confidence drops below 0.15, and 8 new test cases covering cascading penalties and mode exclusivity. 176 related tests pass."
-    },
-    {
-      "id": "US-46-005",
-      "title": "Validate multimodal scoring weights sum and bounds",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add validation in src/matching/tiered_matcher.py around line 365 that multimodal_weights values are in [0.0, 1.0] range",
-        "Add validation that multimodal_weights sum to approximately 1.0 (within 0.01 tolerance) and log warning if not",
-        "If weights are invalid, normalize them to sum to 1.0 and log the correction rather than silently using bad values",
-        "Add test in tests/test_tiered_matcher_coverage.py verifying weights validation catches out-of-range values",
-        "Add test verifying weights normalization produces correct scores when sum != 1.0"
-      ],
-      "notes": "Added validate_multimodal_weights() in scoring.py that clamps individual weights to [0.0, 1.0], normalizes sum to 1.0 (0.01 tolerance), logs warnings for corrections, falls back to defaults for all-zero. Called from tiered_matcher.py line 365 and compute_multimodal_score. 5 new tests in test_tiered_matcher_coverage.py. 86 scoring/multimodal tests pass, 0 regressions."
-    },
-    {
-      "id": "US-46-006",
-      "title": "Ensure confidence_variance and matched_keywords propagate on all MatchResult paths",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Audit all code paths in src/matching/tiered_matcher.py that create MatchResult objects and verify confidence_variance is always set (lines 713, 794, 966 and any others)",
-        "Audit all code paths that create MatchResult and verify matched_keywords is always populated (not left as None or empty when keywords exist)",
-        "Add default values for confidence_variance (0.0) and matched_keywords (empty list) in MatchResult constructor or dataclass definition if they can be omitted",
-        "Remove defensive getattr(r, 'confidence_variance', 0.0) in src/matching/main.py:601 after ensuring field is always present",
-        "Add test verifying MatchResult objects from all 7 matching strategies contain both confidence_variance and matched_keywords fields"
-      ],
-      "notes": "Audited all 5 MatchResult creation paths in tiered_matcher.py and 1 in output.py. Dataclass defaults already guarantee both fields. Removed 4 defensive getattr() calls in main.py (lines 579, 601, 617) and stages/match.py (lines 172, 174), replacing with direct field access. Added 13 tests in test_matchresult_field_propagation.py covering dataclass defaults, gap paths, explicit paths, direct access patterns, and TieredMatcher integration. 284 related tests pass."
-    },
-    {
-      "id": "US-46-007",
-      "title": "Add unit tests for alternative_selection module",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create tests/test_matching_alternative_selection.py with tests for the alternative selection logic in src/matching/alternative_selection.py",
-        "Test that V2-V3 alternatives are selected with confidence above a minimum threshold",
-        "Test that V4-V6 secondary matches use diversity scoring and differ from primary selections",
-        "Test edge case where candidate pool has fewer videos than requested alternatives",
-        "Test that alternatives do not duplicate the primary match for any segment"
-      ],
-      "notes": "30 tests in tests/test_matching_alternative_selection.py covering: config defaults, constructor paths, V2-V3 alternatives (source exclusion, confidence retention, fallback penalty, diversity preference, empty/small pools, scene callbacks), V4-V6 secondary matches (3-pass selection, source exclusion, confidence penalties per pass, segment deduplication, reasoning labels, alt_segments exclusion). All 30 pass."
-    },
-    {
-      "id": "US-46-008",
-      "title": "Add unit tests for similarity_cache thread safety and eviction",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create tests/test_matching_similarity_cache.py with tests for src/matching/similarity_cache.py",
-        "Test that cache returns consistent results for identical embedding pairs",
-        "Test cache eviction when max_size is reached (entries are evicted, not growing unbounded)",
-        "Test concurrent access from multiple threads does not corrupt cache state or raise exceptions",
-        "Test cache clearing resets all stored entries and counters"
-      ],
-      "notes": "45 tests: basic get/put/stats (7), eviction (3), clear (2), thread safety (4), log_stats (1), KeywordExtractionCache (5), TopicPenaltyCache (5), hash helpers (10), global accessors (8). All passing."
-    },
-    {
-      "id": "US-46-009",
-      "title": "Add unit tests for iterative_match gap_analyzer module",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create tests/test_iterative_match_gap_analyzer.py with tests for src/iterative_match/gap_analyzer.py",
-        "Test gap detection identifies segments with confidence below threshold",
-        "Test gap detection identifies segments with no match at all (None or empty)",
-        "Test gap analysis with all segments above threshold returns no gaps",
-        "Test gap analysis with mixed confidence levels correctly ranks gaps by severity",
-        "Test edge case with empty segment list returns empty gap list"
-      ],
-      "notes": "56 tests passing. Covers GapSegment/GapAnalysis dataclasses, _classify_gap_pattern (all 6 pattern types + priority order), _has_location_pattern, _has_proper_noun, analyze_gaps (empty, single, mixed, entities, clustered), extract_keywords_for_gap (all pattern types, dedup, limits), LockedMatch, word list sanity checks."
-    },
-    {
-      "id": "US-46-010",
-      "title": "Expand scoring test coverage for adaptive threshold edge cases",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add test in tests/test_matching_scoring.py for adaptive threshold with empty voiceover text (0 chars) - verify threshold adjusts appropriately",
-        "Add test for adaptive threshold with very large candidate pool (1000+ candidates) to verify normalization behavior",
-        "Add test for adaptive threshold with very small candidate pool (1-2 candidates) to verify it does not produce unreasonable thresholds",
-        "Add test for candidate variance exactly at 0.05 boundary to verify threshold boost is applied correctly",
-        "Add test verifying pool normalization reference size (50 candidates) produces expected scaling for pools of 10, 50, and 200"
-      ],
-      "notes": "9 tests added in TestAdaptiveThresholdEdgeCases class. Empty/None voiceover (0 chars) triggers short_vo. Large pool 1000/2000 capped at max factor 1.2 (same result). Small pool 1-2 candidates boosts within bounds. Variance at 0.05 boundary: exact 0.05 does NOT trigger, below 0.05 DOES. Pool scaling 10/50/200: small boosts > reference unchanged > large reduces. All 45 tests pass."
-    },
-    {
-      "id": "US-46-011",
-      "title": "Add low-confidence analysis patterns for keyword and source concentration",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add missing keywords pattern to analyze_low_confidence_segments in src/matching/main.py: detect segments where matched_keywords list is empty despite keywords being available",
-        "Add source concentration pattern: detect when multiple low-confidence segments all rely on the same source video, suggesting the video pool is too narrow",
-        "Add confidence variance pattern entry at lines 599-602 where variance is checked but no pattern object is created",
-        "Add test in tests/test_matching_main_extended.py verifying new patterns appear in analysis results for matching scenarios with empty keywords and concentrated sources"
-      ],
-      "notes": "Added source_concentration pattern to analyze_low_confidence_segments (3+ low-conf segments from same source). Verified existing patterns: missing_keywords, no_keyword_overlap, high_variance already implemented. Added 8 tests in TestLowConfidenceAnalysisPatterns class in test_matching_main_extended.py. All 61 tests pass."
-    },
-    {
-      "id": "US-46-012",
-      "title": "Add unit tests for iterative_match query_learning module",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create tests/test_iterative_match_query_learning.py with tests for src/iterative_match/query_learning.py",
-        "Test query generation from a gap with low confidence produces relevant search terms",
-        "Test query generation from a gap with no match produces broader search terms than low-confidence gaps",
-        "Test that generated queries do not duplicate existing search keywords from the original analysis",
-        "Test edge case with gap that has no context text returns reasonable fallback query"
-      ],
-      "notes": "47 tests in tests/test_iterative_match_query_learning.py covering: QueryPlan/QueryResult/StrategyStats dataclasses, QueryLearningDB init/persistence/save-load, get_best_strategy, get_strategy_ranking, record_result EMA, _extract_template, get_refined_template, get_synonym_suggestions, get_summary. AC-specific test classes: TestACQueryGenerationFromLowConfidence, TestACQueryGenerationFromNoMatch, TestACNoDuplicateKeywords, TestACNoContextFallback. All 47 tests pass."
-    }
-  ]
+    "userStories": [
+        {
+            "id": "US-47-001",
+            "title": "Generate sprint stories for testing focus area",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'testing' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'testing'",
+                "Add stories US-47-002 through US-47-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-47-NNN to be unique across sprints",
+                "Mark this story (US-47-001) as passes: true when done"
+            ],
+            "notes": "Planning story completed. Generated 11 stories (US-47-002 through US-47-012) covering: match stage contract validation, stale state reference audit, scene_detection module tests, EmbeddingSearch contract tests, match_all_segments integration tests, downloader cache module tests, agent module test coverage, config post_init edge case tests, PipelineState serialization roundtrip tests, stage error propagation tests, and matching metrics edge case tests. Analysis: 13,790 existing tests, but specific gaps in scene_detection (0 tests), downloader caches, agent internals, and match stage contract validation."
+        },
+        {
+            "id": "US-47-002",
+            "title": "Add match stage stale state reference regression tests",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add tests verifying _run_matching() in match.py does NOT access state.embeddings or state.embedding_index directly",
+                "Add test confirming video embeddings are computed locally (lines 498-507 pattern) not read from PipelineState",
+                "Add test that match_all_segments receives embedding_index=None and location_chapters from getattr fallback",
+                "Add test that _run_matching() succeeds with a minimal PipelineState that has no extra fields beyond the dataclass definition",
+                "All tests in new file tests/test_match_stage_state_refs.py must pass"
+            ],
+            "notes": "Tier: T1 (critical regression prevention). Source files: src/stages/match.py:475-530 (_run_matching method), src/state.py (PipelineState dataclass). The stale references were partially fixed (video embeddings now computed locally at line 498-507, embedding_index=None at line 523) but no regression tests exist to prevent re-introduction. The getattr(state, 'location_chapters', None) at line 526 is overly defensive since field exists on PipelineState. Tests should mock compute_embeddings and match_all_segments to verify correct parameter passing."
+        },
+        {
+            "id": "US-47-003",
+            "title": "Add stale PipelineState attribute access audit test",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add AST-based or grep-based test that scans all files in src/stages/ for state.FIELD_NAME attribute access",
+                "Test validates every accessed field actually exists on PipelineState dataclass in src/state.py",
+                "Test catches getattr(state, 'field', default) patterns and validates field exists",
+                "Test catches hasattr(state, 'field') patterns and validates field exists",
+                "Test fails with clear message listing file, line number, and invalid field name if a stale reference is found",
+                "All tests in tests/test_state_attribute_audit.py must pass"
+            ],
+            "notes": "Tier: T1 (systemic prevention). Source files: src/stages/*.py (all stage files), src/state.py:240-430 (PipelineState dataclass). This is a structural test that prevents the class of bug found in the user interview (state.embeddings, state.embedding_index removed but still referenced). Use AST parsing to find all Attribute nodes where the value is Name('state') and verify the attr exists on PipelineState. Cover both direct access (state.foo) and defensive access (getattr(state, 'foo'))."
+        },
+        {
+            "id": "US-47-004",
+            "title": "Add unit tests for scene_detection module",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add tests for sanitize_path_for_url() function covering Windows paths, spaces, and special characters",
+                "Add tests for SceneDetectionCache (BaseCache subclass) including cache hit/miss and serialization",
+                "Add tests for detect_scenes_for_video() with mocked cv2 and scenedetect to verify scene boundary extraction",
+                "Add tests for batch scene detection with ThreadPoolExecutor mocked to verify parallel execution logic",
+                "All tests in tests/test_scene_detection.py must pass"
+            ],
+            "notes": "Tier: T1 (zero coverage). Source file: src/scene_detection.py (242 lines). This is the ONLY src/ top-level module with zero test file coverage. Key classes: SceneDetectionCache(BaseCache). Key functions: sanitize_path_for_url (line 38), detect_scenes_for_video, detect_scenes_batch. Dependencies requiring mocks: cv2, scenedetect (ContentDetector, SceneManager, open_video), opentimelineio. The module uses BaseCache from src/cache/ which has well-tested patterns to follow."
+        },
+        {
+            "id": "US-47-005",
+            "title": "Add EmbeddingSearch contract validation tests",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add test that EmbeddingSearch.from_matching_config() accepts embedding_index=None without error",
+                "Add test that EmbeddingSearch.search() returns valid candidates when embedding_index is None (brute-force fallback)",
+                "Add test that EmbeddingSearch handles empty video_embeddings list gracefully",
+                "Add test that EmbeddingSearch handles mismatched video_segments and video_embeddings lengths",
+                "All tests in tests/test_embedding_search_contract.py must pass"
+            ],
+            "notes": "Tier: T2 (contract validation). Source file: src/matching/embedding_search.py. The match stage passes embedding_index=None (line 523 of match.py) and this flows through match_all_segments (main.py:183) to EmbeddingSearch.from_matching_config(). The parameter is Optional[Any] but need to verify the implementation handles None correctly for both FAISS-backed and brute-force paths. Existing test file test_matching_embedding_search.py covers basic search but not the None-index contract."
+        },
+        {
+            "id": "US-47-006",
+            "title": "Add match_all_segments integration tests for parameter contracts",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add test that match_all_segments succeeds with location_chapters=None and video_locations=None",
+                "Add test that match_all_segments succeeds with embedding_index=None",
+                "Add test that match_all_segments handles empty voiceover_segments list (returns empty list)",
+                "Add test that match_all_segments handles empty video_segments list gracefully",
+                "Add test verifying face_preference parameter flows through correctly to TieredMatcher",
+                "All tests in tests/test_match_all_segments_contract.py must pass"
+            ],
+            "notes": "Tier: T2 (contract validation). Source file: src/matching/main.py:30-43 (function signature), lines 85-184 (setup logic). The user interview flagged that Optional parameters may not be truly optional in the implementation. Tests should use mocked TieredMatcher and EmbeddingSearch to verify parameter flow without requiring actual embeddings. Key assertions: no AttributeError, no TypeError on None params, correct initialization of LocationMatcher when location_chapters provided."
+        },
+        {
+            "id": "US-47-007",
+            "title": "Add unit tests for downloader cache modules",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add tests for LLMFilterCache in src/downloader/llm_filter_cache.py covering cache set, get, and expiry",
+                "Add tests for SearchCache in src/downloader/search_cache.py covering search result caching and invalidation",
+                "Add tests for cache serialization roundtrip (save to disk and reload)",
+                "Add tests for cache size limits and eviction behavior if applicable",
+                "All tests in tests/test_downloader_caches.py must pass"
+            ],
+            "notes": "Tier: T2 (gap fill). Source files: src/downloader/llm_filter_cache.py, src/downloader/search_cache.py. These two cache modules have no dedicated test files. They likely follow the BaseCache pattern from src/cache/base.py which is well-tested. The llm_filter_cache caches LLM-based title filtering decisions; search_cache caches YouTube search results. Both are used in the download pipeline to avoid redundant API calls."
+        },
+        {
+            "id": "US-47-008",
+            "title": "Add unit tests for agent module internals",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add tests for HealingLogger in src/agents/healing_logger.py covering JSONL log writing and reading",
+                "Add tests for agent strategy selection in src/agents/strategy.py covering strategy ranking and selection",
+                "Add tests for agent watcher in src/agents/watcher.py covering health check detection and alerting",
+                "Add tests for fallback behavior in src/agents/fallback.py covering graceful degradation paths",
+                "All tests in tests/test_agent_internals.py must pass"
+            ],
+            "notes": "Tier: T2 (gap fill). Source files: src/agents/healing_logger.py, src/agents/strategy.py, src/agents/watcher.py, src/agents/fallback.py. The agents/ package has 7 modules but only 5 test files, and existing tests (test_api_healer.py, test_healer_base.py) focus on the orchestrator/runner. The internal modules (healing_logger, strategy, watcher, fallback) lack dedicated unit tests. These are critical for the self-healing pipeline feature."
+        },
+        {
+            "id": "US-47-009",
+            "title": "Add config section post_init edge case tests",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add tests for IterativeMatchingConfig post_init with boundary values (0, negative, very large numbers)",
+                "Add tests for DownloadConfig post_init with nested dataclass fields passed as raw dicts",
+                "Add tests for MatchingConfig post_init clamping behavior (values outside valid ranges)",
+                "Add tests verifying config sections handle missing optional fields with correct defaults",
+                "All tests in tests/test_config_post_init_edge_cases.py must pass"
+            ],
+            "notes": "Tier: T2 (robustness). Source files: src/config/sections/iterative_matching.py (95 lines, complex post_init), src/config/sections/download.py (18+ nested config classes), src/config/sections/matching.py. Existing test_config_post_init.py tests basic post_init behavior but doesn't cover edge cases like: negative values for max_attempts, zero for timeouts, dict-vs-dataclass coercion (Rule 2 from CLAUDE.md), or missing nested fields. The download section is particularly complex with RemixConfig, CaptionRetryBudgetConfig, MullvadConfig."
+        },
+        {
+            "id": "US-47-010",
+            "title": "Add PipelineState serialization roundtrip tests",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add test that every PipelineState field survives checkpoint save and load roundtrip",
+                "Add test for to_checkpoint_dict() including all Optional fields when set to None",
+                "Add test for from_checkpoint_dict() with missing fields to verify backward compatibility",
+                "Add test for PipelineState with complex nested field types (lists of dataclasses, dicts with special keys)",
+                "All tests in tests/test_pipeline_state_roundtrip.py must pass"
+            ],
+            "notes": "Tier: T3 (hardening). Source files: src/state.py:240-430 (PipelineState), src/checkpoint.py (save/load logic). Existing tests in test_checkpoint_stage_data_roundtrip.py cover stage data but not full PipelineState field coverage. A comprehensive roundtrip test would catch serialization issues (e.g., numpy.float32 not JSON-serializable per Rule 7, Optional fields defaulting incorrectly)."
+        },
+        {
+            "id": "US-47-011",
+            "title": "Add stage error propagation integration tests",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add test that stage failure in MATCH stage produces correct error in checkpoint",
+                "Add test that validate_required_state_attrs() raises clear errors for missing fields",
+                "Add test that pipeline.run() handles stage exceptions without losing prior checkpoint data",
+                "Add test that --resume correctly skips already-completed stages after a mid-pipeline failure",
+                "All tests in tests/test_stage_error_propagation.py must pass"
+            ],
+            "notes": "Tier: T3 (integration). Source files: src/pipeline.py (run method), src/stages/base.py (BaseStage.validate_required_state_attrs), src/checkpoint.py (save/restore). Existing test_stage_error_handling.py covers individual stage error handling but not the cross-stage propagation through the pipeline orchestrator. The user interview identified that stale state references cause AttributeError crashes mid-pipeline - this story ensures such crashes are handled gracefully."
+        },
+        {
+            "id": "US-47-012",
+            "title": "Add matching metrics edge case and histogram tests",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add tests for calculate_match_quality_metrics with numpy.float32 confidence values (Rule 7)",
+                "Add tests for calculate_match_quality_metrics with single match (std=0.0 edge case)",
+                "Add tests for log_confidence_histogram with empty list, single value, and all-same-bucket distribution",
+                "Add tests for MatchQualityMetrics.from_dict() with missing fields and extra fields",
+                "All tests in tests/test_matching_metrics_edge_cases.py must pass"
+            ],
+            "notes": "Tier: T3 (edge cases). Source file: src/matching/metrics.py (242 lines). Existing tests in test_match_quality_metrics.py and test_confidence_histogram.py cover happy paths but not edge cases. Key edge cases: numpy.float32 values (line 128 converts to float - verify this works), single match producing std=0.0 (line 137 checks len>=2), empty match list, has_gap=True scenarios, histogram with all values in one bucket."
+        }
+    ]
 }
