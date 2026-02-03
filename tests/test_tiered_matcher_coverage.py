@@ -1236,3 +1236,103 @@ class TestTieredMatcherCoverageGaps:
 
         # Should return exactly 3 (hardcoded num_secondary=3, break at line 710)
         assert len(result) == 3
+
+
+class TestMultimodalWeightsValidation:
+    """US-46-005: Validate multimodal scoring weights sum and bounds."""
+
+    @pytest.mark.fast
+    def test_out_of_range_weights_clamped(self):
+        """Weights outside [0.0, 1.0] are clamped and logged."""
+        from src.matching.scoring import validate_multimodal_weights
+
+        weights = {
+            'text_embedding': 1.5,    # Over 1.0
+            'keyword_overlap': -0.2,  # Negative
+            'entity_match': 0.3,
+            'visual_description': 0.1,
+        }
+        result = validate_multimodal_weights(weights)
+
+        # Clamped values should be in valid range
+        assert result['text_embedding'] <= 1.0
+        assert result['keyword_overlap'] >= 0.0
+        assert result['entity_match'] >= 0.0
+        assert result['visual_description'] >= 0.0
+
+        # All values in [0, 1]
+        for v in result.values():
+            assert 0.0 <= v <= 1.0
+
+    @pytest.mark.fast
+    def test_weights_normalization_produces_correct_scores(self):
+        """When weights don't sum to 1.0, normalization produces correct scores."""
+        from src.matching.scoring import compute_multimodal_score
+
+        # Weights that sum to 2.0 instead of 1.0
+        weights = {
+            'text_embedding': 0.8,
+            'keyword_overlap': 0.5,
+            'entity_match': 0.4,
+            'visual_description': 0.3,
+        }
+        # Sum = 2.0, should be normalized
+
+        score, reason, components = compute_multimodal_score(
+            embedding_similarity=1.0,
+            keyword_overlap_score=1.0,
+            entity_match_score=1.0,
+            visual_description_score=1.0,
+            weights=weights,
+            multimodal_enabled=True,
+        )
+
+        # With all inputs=1.0 and normalized weights, score should be ~1.0
+        assert abs(score - 1.0) < 0.02, f"Expected ~1.0, got {score}"
+
+        # Weights used should be normalized (sum ~1.0)
+        used = components['weights_used']
+        assert abs(sum(used.values()) - 1.0) < 0.01
+
+    @pytest.mark.fast
+    def test_negative_weight_clamped_to_zero(self):
+        """Negative weight values are clamped to 0.0."""
+        from src.matching.scoring import validate_multimodal_weights
+
+        weights = {
+            'text_embedding': 0.5,
+            'keyword_overlap': -0.3,
+            'entity_match': 0.3,
+            'visual_description': 0.2,
+        }
+        result = validate_multimodal_weights(weights)
+        assert result['keyword_overlap'] >= 0.0
+
+    @pytest.mark.fast
+    def test_all_zero_weights_fallback_to_defaults(self):
+        """All-zero weights after clamping fall back to defaults."""
+        from src.matching.scoring import validate_multimodal_weights, DEFAULT_MULTIMODAL_WEIGHTS
+
+        weights = {
+            'text_embedding': 0.0,
+            'keyword_overlap': 0.0,
+            'entity_match': 0.0,
+            'visual_description': 0.0,
+        }
+        result = validate_multimodal_weights(weights)
+        assert result == DEFAULT_MULTIMODAL_WEIGHTS
+
+    @pytest.mark.fast
+    def test_valid_weights_pass_through(self):
+        """Valid weights that sum to 1.0 are returned unchanged."""
+        from src.matching.scoring import validate_multimodal_weights
+
+        weights = {
+            'text_embedding': 0.4,
+            'keyword_overlap': 0.25,
+            'entity_match': 0.2,
+            'visual_description': 0.15,
+        }
+        result = validate_multimodal_weights(weights)
+        for key in weights:
+            assert abs(result[key] - weights[key]) < 0.001

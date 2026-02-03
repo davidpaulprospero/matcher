@@ -62,7 +62,7 @@
       "id": "US-46-004",
       "title": "Guard against cascading confidence penalties in scoring",
       "priority": "high",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add minimum confidence floor (e.g., 0.05) in src/matching/scoring.py to prevent cascading multiplicative penalties from reducing confidence to near-zero",
         "Add mutual exclusivity check or clear precedence for caption_quality multiplicative mode (lines 287-298) vs additive mode (lines 303-316) to prevent both running on same match",
@@ -70,13 +70,13 @@
         "Add test case in tests/test_matching_scoring.py for cascading penalties scenario: caption quality 0.9 multiplier + timing penalty 0.6 should not reduce 0.8 confidence below floor",
         "Add test case verifying only one caption quality mode (multiplicative OR additive) applies per match"
       ],
-      "notes": "Tier: T2 (scoring robustness). Files: src/matching/scoring.py lines 243-369 (caption quality penalties + timing penalties). Current behavior: 0.8 confidence \u00c3\u2014 0.9 caption \u00c3\u2014 0.6 timing = 0.43, which may unfairly disqualify legitimate matches. The floor prevents total confidence collapse."
+      "notes": "Added CONFIDENCE_FLOOR=0.05 in MatchScoring.apply_all_adjustments, mutual exclusivity for caption quality modes (multiplicative takes precedence), warning logging when confidence drops below 0.15, and 8 new test cases covering cascading penalties and mode exclusivity. 176 related tests pass."
     },
     {
       "id": "US-46-005",
       "title": "Validate multimodal scoring weights sum and bounds",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add validation in src/matching/tiered_matcher.py around line 365 that multimodal_weights values are in [0.0, 1.0] range",
         "Add validation that multimodal_weights sum to approximately 1.0 (within 0.01 tolerance) and log warning if not",
@@ -84,7 +84,7 @@
         "Add test in tests/test_tiered_matcher_coverage.py verifying weights validation catches out-of-range values",
         "Add test verifying weights normalization produces correct scores when sum != 1.0"
       ],
-      "notes": "Tier: T2 (config safety). Files: src/matching/tiered_matcher.py line 365 (multimodal_weights access via getattr), src/config/sections/ (where multimodal config is defined). Currently no validation that weights sum to 1.0 or are in valid range - malformed config silently produces arbitrary confidence scores."
+      "notes": "Added validate_multimodal_weights() in scoring.py that clamps individual weights to [0.0, 1.0], normalizes sum to 1.0 (0.01 tolerance), logs warnings for corrections, falls back to defaults for all-zero. Called from tiered_matcher.py line 365 and compute_multimodal_score. 5 new tests in test_tiered_matcher_coverage.py. 86 scoring/multimodal tests pass, 0 regressions."
     },
     {
       "id": "US-46-006",

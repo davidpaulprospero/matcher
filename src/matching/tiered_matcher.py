@@ -43,6 +43,7 @@ from .scoring import (
     calculate_entity_match_score,
     calculate_visual_description_score,
     DEFAULT_MULTIMODAL_WEIGHTS,
+    validate_multimodal_weights,
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
@@ -362,7 +363,10 @@ class TieredMatcher:
 
         # Check if multimodal scoring is enabled
         multimodal_enabled = getattr(mc, 'multimodal_enabled', True)
-        multimodal_weights = getattr(mc, 'multimodal_weights', None)
+        raw_weights = getattr(mc, 'multimodal_weights', None)
+
+        # Validate and normalize weights before use
+        multimodal_weights = validate_multimodal_weights(raw_weights) if raw_weights else None
 
         # If disabled, return embedding similarity as-is
         if not multimodal_enabled:
