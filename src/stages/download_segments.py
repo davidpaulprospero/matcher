@@ -12,11 +12,12 @@ Stage 6 of the simplified 7-stage pipeline:
 from __future__ import annotations
 
 import logging
+import statistics
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from . import Stage, StageResult, register_stage, validate_required_state_attrs
+from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -248,9 +249,17 @@ class DownloadVideoSegmentsStage(Stage):
             checkpoint_data = {
                 'segment_count': len(downloaded_segments),
                 'total_matches': len(state.matches),
+                'retry_count': download_stats.get('retry_count', 0),
             }
 
-            return StageResult.ok(checkpoint_data, warnings)
+            # Stage metrics for pipeline observability
+            metrics = StageMetrics(
+                items_processed=download_stats['succeeded'] + download_stats['cached'],
+                items_failed=download_stats['failed'],
+                duration_seconds=elapsed,
+            )
+
+            return StageResult.ok(checkpoint_data, warnings, metrics)
 
         except Exception as e:
             logger.exception(f"Video segment download failed: {e}")
@@ -384,6 +393,9 @@ class DownloadVideoSegmentsStage(Stage):
             'cached': 0,
             'attempted': 0,
             'total': total,
+            'retry_count': 0,
+            'segment_durations': [],   # Per-segment download durations (seconds)
+            'total_bytes': 0,          # Total bytes downloaded (from output file sizes)
         }
 
         # Get escalation manager and cookie rotator from downloader
@@ -410,6 +422,10 @@ class DownloadVideoSegmentsStage(Stage):
                 ))
                 stats['cached'] += 1
                 stats['attempted'] += 1
+                try:
+                    stats['total_bytes'] += output_file.stat().st_size
+                except OSError:
+                    pass
                 consecutive_network_failures = 0  # Cached file counts as success
                 self._print_progress(idx, total, stats)
                 continue
@@ -472,8 +488,10 @@ class DownloadVideoSegmentsStage(Stage):
                     except Exception:
                         pass
 
+                seg_start_time = time.time()
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
+                seg_duration = time.time() - seg_start_time
 
                 if output_file.exists():
                     downloaded.append(DownloadedVideo(
@@ -483,6 +501,11 @@ class DownloadVideoSegmentsStage(Stage):
                     ))
                     stats['succeeded'] += 1
                     stats['attempted'] += 1
+                    stats['segment_durations'].append(seg_duration)
+                    try:
+                        stats['total_bytes'] += output_file.stat().st_size
+                    except OSError:
+                        pass
                     consecutive_network_failures = 0  # Reset on success
                     self._print_progress(idx, total, stats)
                     # Record success with escalation manager
@@ -491,6 +514,7 @@ class DownloadVideoSegmentsStage(Stage):
                 else:
                     stats['failed'] += 1
                     stats['attempted'] += 1
+                    stats['segment_durations'].append(seg_duration)
                     self._print_progress(idx, total, stats)
                     logger.warning(f"Download succeeded but file not found: {output_file}")
 
@@ -556,7 +580,7 @@ class DownloadVideoSegmentsStage(Stage):
                 progress_callback(idx, total, downloaded)
 
         # Process retry queue if there are pending items
-        self._process_retry_queue(output_dir, buffer_seconds, downloaded, total, progress_callback)
+        self._process_retry_queue(output_dir, buffer_seconds, downloaded, total, progress_callback, stats)
 
         return downloaded, stats
 
@@ -573,7 +597,7 @@ class DownloadVideoSegmentsStage(Stage):
         )
 
     @staticmethod
-    def _print_summary(stats: Dict[str, int], elapsed: float) -> None:
+    def _print_summary(stats: Dict[str, Any], elapsed: float) -> None:
         """Print end-of-stage summary."""
         ok = stats['succeeded'] + stats['cached']
         attempted = stats['attempted']
@@ -596,13 +620,38 @@ class DownloadVideoSegmentsStage(Stage):
         print(f"    Success rate: {rate:.0f}%")
         print(f"    Total time: {time_str}")
 
+        # Per-segment duration stats
+        durations = stats.get('segment_durations', [])
+        if durations:
+            avg_dur = statistics.mean(durations)
+            median_dur = statistics.median(durations)
+            print(f"    Avg segment time: {avg_dur:.1f}s")
+            print(f"    Median segment time: {median_dur:.1f}s")
+
+        # Total bytes downloaded
+        total_bytes = stats.get('total_bytes', 0)
+        if total_bytes > 0:
+            if total_bytes < 1024 * 1024:
+                size_str = f"{total_bytes / 1024:.1f} KB"
+            elif total_bytes < 1024 * 1024 * 1024:
+                size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
+            else:
+                size_str = f"{total_bytes / (1024 * 1024 * 1024):.2f} GB"
+            print(f"    Total size: {size_str}")
+
+        # Retry count
+        retry_count = stats.get('retry_count', 0)
+        if retry_count > 0:
+            print(f"    Retried: {retry_count}")
+
     def _process_retry_queue(
         self,
         output_dir: Path,
         buffer_seconds: float,
         downloaded: List['DownloadedVideo'],
         total: int,
-        progress_callback
+        progress_callback,
+        stats: Optional[Dict[str, Any]] = None
     ) -> None:
         """Process any failed downloads in the retry queue.
 
@@ -631,6 +680,7 @@ class DownloadVideoSegmentsStage(Stage):
         escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
         cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
 
+        retry_attempts = 0
         for item in pending:
             # Parse video_id from the retry item (format: video_id_start_end)
             # US-48-008: Use rsplit to handle video IDs with underscores
@@ -655,6 +705,7 @@ class DownloadVideoSegmentsStage(Stage):
                 retry_queue.mark_success(item.video_id)
                 continue
 
+            retry_attempts += 1
             try:
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -728,6 +779,10 @@ class DownloadVideoSegmentsStage(Stage):
             # Update checkpoint with retry progress
             if progress_callback:
                 progress_callback(len(downloaded), total, downloaded)
+
+        # Update stats with retry count
+        if stats is not None:
+            stats['retry_count'] = retry_attempts
 
     def _update_matches_with_local_paths(
         self,

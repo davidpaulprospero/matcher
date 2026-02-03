@@ -1843,3 +1843,332 @@ class TestConfigurableSegmentDefaults:
         assert len(segments) == 1
         assert segments[0]['start'] == 10.0
         assert segments[0]['end'] == 20.4  # Extended, not dropped
+
+
+# ============================================================================
+# Stage Metrics Collection (US-48-011)
+# ============================================================================
+
+class TestStageMetricsCollection:
+    """Test StageMetrics is populated with correct counts after run().
+
+    US-48-011: Verifies that:
+    - StageMetrics.items_processed counts succeeded + cached
+    - StageMetrics.items_failed counts failed downloads
+    - StageMetrics.duration_seconds reflects stage elapsed time
+    - Per-segment durations are tracked in stats
+    - Total bytes downloaded are tracked from output file sizes
+    """
+
+    @pytest.mark.fast
+    def test_stage_metrics_returned_on_successful_run(
+        self, stage, mock_state_with_matches, mock_config, mock_checkpoint, tmp_path
+    ):
+        """run() returns StageResult with populated StageMetrics."""
+        from src.stages import StageMetrics
+
+        mock_config.downloaded_videos_dir = str(tmp_path)
+
+        # Pre-create all segment files so they're all cached (no yt-dlp needed)
+        segments = stage._collect_matched_segments(mock_state_with_matches)
+        for seg in segments:
+            vid = seg['video_id']
+            s = int(max(0, seg['start'] - 5.0))
+            e = int(seg['end'] + 5.0)
+            (tmp_path / f"{vid}_{s}_{e}.mp4").write_bytes(b'\x00' * 1024)
+
+        with patch.object(stage, '_process_retry_queue'), \
+             patch('src.downloader.VideoDownloader'):
+            result = stage.run(mock_state_with_matches, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.metrics is not None
+        assert isinstance(result.metrics, StageMetrics)
+        # 2 unique segments (3 matches but 1 is duplicate), all cached
+        assert result.metrics.items_processed == 2
+        assert result.metrics.items_failed == 0
+        assert result.metrics.duration_seconds > 0
+
+    @pytest.mark.fast
+    def test_stage_metrics_counts_failures(self, stage, tmp_path):
+        """StageMetrics.items_failed reflects actual download failures."""
+        stage.downloader = None
+
+        # 3 segments, all fail
+        segments = [
+            {'video_id': f'fail_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(3)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("HTTP 403")
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            _downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert stats['failed'] == 3
+        assert stats['succeeded'] == 0
+
+    @pytest.mark.fast
+    def test_segment_durations_tracked_per_segment(self, stage, tmp_path):
+        """Per-segment download durations are recorded in stats."""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': f'dur_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(2)
+        ]
+
+        def mock_download(urls):
+            # Create output file for each call
+            vid_id = segments[len(stage_calls)]['video_id']
+            out = tmp_path / f"{vid_id}_0_15.mp4"
+            out.write_bytes(b'\x00' * 512)
+            stage_calls.append(1)
+
+        stage_calls = []
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            _downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Should have 2 duration entries (one per successful download)
+        assert len(stats['segment_durations']) == 2
+        assert all(d >= 0 for d in stats['segment_durations'])
+
+    @pytest.mark.fast
+    def test_total_bytes_tracked_from_file_sizes(self, stage, tmp_path):
+        """Total bytes downloaded is summed from output file sizes."""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': 'bytes_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        def mock_download(urls):
+            out = tmp_path / "bytes_test_0_15.mp4"
+            out.write_bytes(b'\x00' * 2048)
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            _downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert stats['total_bytes'] == 2048
+
+    @pytest.mark.fast
+    def test_total_bytes_includes_cached_files(self, stage, tmp_path):
+        """Total bytes includes size of already-cached segment files."""
+        stage.downloader = None
+
+        # Pre-create cached file
+        cached = tmp_path / "cached_bytes_0_15.mp4"
+        cached.write_bytes(b'\x00' * 4096)
+
+        segments = [
+            {'video_id': 'cached_bytes', 'start': 0.0, 'end': 10.0},
+        ]
+
+        with patch.object(stage, '_process_retry_queue'):
+            _downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert stats['total_bytes'] == 4096
+        assert stats['cached'] == 1
+
+    @pytest.mark.fast
+    def test_summary_includes_avg_median_duration(self, stage, capsys):
+        """_print_summary outputs avg and median segment time when durations exist."""
+        stats = {
+            'succeeded': 3,
+            'failed': 0,
+            'cached': 0,
+            'attempted': 3,
+            'total': 3,
+            'segment_durations': [2.0, 4.0, 6.0],
+            'total_bytes': 0,
+            'retry_count': 0,
+        }
+
+        stage._print_summary(stats, elapsed=12.0)
+        captured = capsys.readouterr().out
+
+        assert 'Avg segment time: 4.0s' in captured
+        assert 'Median segment time: 4.0s' in captured
+
+    @pytest.mark.fast
+    def test_summary_includes_total_size(self, stage, capsys):
+        """_print_summary outputs total downloaded size."""
+        stats = {
+            'succeeded': 2,
+            'failed': 0,
+            'cached': 0,
+            'attempted': 2,
+            'total': 2,
+            'segment_durations': [1.0, 2.0],
+            'total_bytes': 15 * 1024 * 1024,  # 15 MB
+            'retry_count': 0,
+        }
+
+        stage._print_summary(stats, elapsed=3.0)
+        captured = capsys.readouterr().out
+
+        assert 'Total size: 15.0 MB' in captured
+
+    @pytest.mark.fast
+    def test_summary_shows_retry_count(self, stage, capsys):
+        """_print_summary shows retry count when retries occurred."""
+        stats = {
+            'succeeded': 3,
+            'failed': 1,
+            'cached': 0,
+            'attempted': 4,
+            'total': 4,
+            'segment_durations': [1.0],
+            'total_bytes': 0,
+            'retry_count': 2,
+        }
+
+        stage._print_summary(stats, elapsed=5.0)
+        captured = capsys.readouterr().out
+
+        assert 'Retried: 2' in captured
+
+    @pytest.mark.fast
+    def test_stage_metrics_on_skip_no_matches(
+        self, stage, mock_state_empty, mock_config, mock_checkpoint
+    ):
+        """Skipped stage (no matches) returns no metrics (None)."""
+        result = stage.run(mock_state_empty, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.metrics is None
+
+
+# ============================================================================
+# Retry Count in Checkpoint Data (US-48-011)
+# ============================================================================
+
+class TestRetryCountInCheckpointData:
+    """Test retry_count in checkpoint data reflects actual retry attempts.
+
+    US-48-011: Verifies that:
+    - retry_count is included in checkpoint_data returned by run()
+    - retry_count reflects the number of segments that were retried
+    - retry_count is 0 when no retries occurred
+    """
+
+    @pytest.mark.fast
+    def test_retry_count_zero_when_no_retries(
+        self, stage, mock_state_with_matches, mock_config, mock_checkpoint, tmp_path
+    ):
+        """checkpoint_data has retry_count=0 when no retry queue items."""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+
+        # Pre-create all segment files so they're cached
+        segments = stage._collect_matched_segments(mock_state_with_matches)
+        for seg in segments:
+            vid = seg['video_id']
+            s = int(max(0, seg['start'] - 5.0))
+            e = int(seg['end'] + 5.0)
+            (tmp_path / f"{vid}_{s}_{e}.mp4").write_bytes(b'\x00' * 512)
+
+        with patch.object(stage, '_process_retry_queue'), \
+             patch('src.downloader.VideoDownloader'):
+            result = stage.run(mock_state_with_matches, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert result.data['retry_count'] == 0
+
+    @pytest.mark.fast
+    def test_retry_count_reflects_actual_retries(self, stage, tmp_path):
+        """stats retry_count reflects number of items processed from retry queue."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        retry_queue = RetryQueue(BatchRetryConfig(
+            enabled=True, delay_seconds=0, max_passes=1
+        ))
+        # Add 2 items to retry queue
+        retry_queue.add(
+            video_id='retry_a_0_10',
+            keyword='segment', tier='segment',
+            error_message='Initial failure'
+        )
+        retry_queue.add(
+            video_id='retry_b_0_10',
+            keyword='segment', tier='segment',
+            error_message='Initial failure'
+        )
+
+        mock_downloader = MagicMock()
+        mock_downloader.retry_queue = retry_queue
+        mock_downloader.impersonation_manager = None
+        mock_downloader.download_config = None
+
+        stage.downloader = mock_downloader
+
+        stats = {
+            'succeeded': 0, 'failed': 2, 'cached': 0,
+            'attempted': 2, 'total': 2, 'retry_count': 0,
+            'segment_durations': [], 'total_bytes': 0,
+        }
+
+        # Mock yt_dlp — both retries will fail (file not created)
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("Retry failed")
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._process_retry_queue(
+                tmp_path, 5.0, [], 2, None, stats
+            )
+
+        # 2 items were retried
+        assert stats['retry_count'] == 2
+
+    @pytest.mark.fast
+    def test_retry_count_in_checkpoint_data_key(
+        self, stage, mock_state_with_matches, mock_config, mock_checkpoint, tmp_path
+    ):
+        """checkpoint_data dict contains 'retry_count' key."""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+
+        # Pre-create all segment files so they're cached (no actual download)
+        segments = stage._collect_matched_segments(mock_state_with_matches)
+        for seg in segments:
+            vid = seg['video_id']
+            s = int(max(0, seg['start'] - 5.0))
+            e = int(seg['end'] + 5.0)
+            (tmp_path / f"{vid}_{s}_{e}.mp4").write_bytes(b'\x00' * 256)
+
+        with patch.object(stage, '_process_retry_queue'), \
+             patch('src.downloader.VideoDownloader'):
+            result = stage.run(mock_state_with_matches, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert 'retry_count' in result.data
+        assert isinstance(result.data['retry_count'], int)
