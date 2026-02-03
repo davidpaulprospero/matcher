@@ -79,20 +79,27 @@ BOT_DETECTION_ABORT_THRESHOLD = 10
 
 
 def classify_error_category(error_msg: str) -> str:
-    """Classify an error as 'network_systemic' or 'video_specific'.
+    """Classify a download error into a diagnostic category.
 
-    Network-systemic errors (DNS failure, no connectivity) affect ALL
-    downloads and retrying individual items won't help. Video-specific
-    errors (403, removed, age-gated) may succeed on retry with escalation.
+    Categories (most specific first):
+        'network'       — DNS failure, no connectivity (systemic)
+        'bot_detection' — 403/bot/captcha/sign-in errors
+        'timeout'       — stall timeouts, socket timeouts
+        'video_specific'— removed, age-gated, unavailable, etc.
 
     Args:
         error_msg: The exception message string.
 
     Returns:
-        'network_systemic' for DNS/connectivity failures, 'video_specific' otherwise.
+        One of 'network', 'bot_detection', 'timeout', 'video_specific'.
     """
     if _is_network_failure(error_msg):
-        return 'network_systemic'
+        return 'network'
+    if _is_escalation_error(error_msg):
+        return 'bot_detection'
+    lower = error_msg.lower()
+    if any(p in lower for p in ('timeout', 'timed out', 'stalled')):
+        return 'timeout'
     return 'video_specific'
 
 
@@ -277,11 +284,12 @@ class DownloadVideoSegmentsStage(Stage):
                 'retry_count': download_stats.get('retry_count', 0),
             }
 
-            # Stage metrics for pipeline observability
+            # Stage metrics for pipeline observability (US-49-009: includes error breakdown)
             metrics = StageMetrics(
                 items_processed=download_stats['succeeded'] + download_stats['cached'],
                 items_failed=download_stats['failed'],
                 duration_seconds=elapsed,
+                error_categories=download_stats.get('error_categories', {}),
             )
 
             return StageResult.ok(checkpoint_data, warnings, metrics)
@@ -422,6 +430,7 @@ class DownloadVideoSegmentsStage(Stage):
             'retry_count': 0,
             'segment_durations': [],   # Per-segment download durations (seconds)
             'total_bytes': 0,          # Total bytes downloaded (from output file sizes)
+            'error_categories': {},    # US-49-009: Per-category error counts
         }
 
         # Get escalation manager, circuit breaker, and cookie rotator from downloader
@@ -660,6 +669,9 @@ class DownloadVideoSegmentsStage(Stage):
                 error_msg = str(e)
                 stats['failed'] += 1
                 stats['attempted'] += 1
+                # US-49-009: Track error by category for end-of-stage summary
+                _err_cat = classify_error_category(error_msg)
+                stats['error_categories'][_err_cat] = stats['error_categories'].get(_err_cat, 0) + 1
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
                 # US-48-005: Record failure with escalation manager for tier progression
@@ -773,6 +785,9 @@ class DownloadVideoSegmentsStage(Stage):
         # Process retry queue if there are pending items
         self._process_retry_queue(output_dir, buffer_seconds, downloaded, total, progress_callback, stats)
 
+        # US-49-009: Log structured error summary with actionable diagnostics
+        self._log_error_summary(stats)
+
         return downloaded, stats
 
     @staticmethod
@@ -834,6 +849,35 @@ class DownloadVideoSegmentsStage(Stage):
         retry_count = stats.get('retry_count', 0)
         if retry_count > 0:
             print(f"    Retried: {retry_count}")
+
+    @staticmethod
+    def _log_error_summary(stats: Dict[str, Any]) -> None:
+        """US-49-009: Log structured error summary with per-category breakdown.
+
+        Logs at INFO level with category counts, and at WARNING level with
+        actionable guidance when >50% of failures are bot-detection.
+        """
+        error_cats = stats.get('error_categories', {})
+        failed = stats.get('failed', 0)
+        if not failed:
+            return  # No errors to summarize
+
+        summary_parts = [f"{cat}={count}" for cat, count in sorted(error_cats.items())]
+        logger.info(
+            f"Download error summary: total={stats.get('total', 0)} "
+            f"succeeded={stats.get('succeeded', 0)} failed={failed} "
+            f"cached={stats.get('cached', 0)} skipped="
+            f"{stats.get('total', 0) - stats.get('attempted', 0)} | "
+            f"errors by category: {', '.join(summary_parts) if summary_parts else 'uncategorized'}"
+        )
+
+        # Actionable guidance when >50% of failures are bot-detection
+        bot_count = error_cats.get('bot_detection', 0)
+        if bot_count > 0 and (bot_count / failed) > 0.5:
+            logger.warning(
+                "Most failures are bot-detection. "
+                "Check cookie configuration (cookies_from_browser or cookies_path in config.yaml)."
+            )
 
     def _process_retry_queue(
         self,

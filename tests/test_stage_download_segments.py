@@ -534,6 +534,7 @@ class TestRetryQueueIntegration:
         mock_downloader = MagicMock()
         mock_downloader.retry_queue = retry_queue
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -655,6 +656,9 @@ class TestSocketTimeoutInYdlOpts:
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.cookie_rotator = None
         mock_downloader.retry_queue = None
 
         stage.downloader = mock_downloader
@@ -698,6 +702,9 @@ class TestSocketTimeoutInYdlOpts:
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.cookie_rotator = None
         mock_downloader.retry_queue = None
 
         stage.downloader = mock_downloader
@@ -1053,6 +1060,9 @@ class TestEscalationTierIntegration:
         mock_downloader.cookie_rotator = None
         mock_downloader.retry_queue = None
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.download_config.bot_detection_abort_threshold = 0  # disable
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 0  # disable
 
         stage.downloader = mock_downloader
 
@@ -1135,6 +1145,9 @@ class TestEscalationTierIntegration:
         mock_downloader.cookie_rotator = mock_cookie_rotator
         mock_downloader.retry_queue = None
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.download_config.bot_detection_abort_threshold = 0
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 0
 
         stage.downloader = mock_downloader
 
@@ -1198,6 +1211,9 @@ class TestEscalationTierIntegration:
         mock_downloader.cookie_rotator = None
         mock_downloader.retry_queue = None
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.download_config.bot_detection_abort_threshold = 0
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 0
 
         stage.downloader = mock_downloader
 
@@ -1239,6 +1255,9 @@ class TestEscalationTierIntegration:
         mock_downloader.cookie_rotator = None
         mock_downloader.retry_queue = None
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.download_config.bot_detection_abort_threshold = 0
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 0
 
         stage.downloader = mock_downloader
 
@@ -1751,6 +1770,7 @@ class TestConfigurableSegmentDefaults:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -1792,6 +1812,7 @@ class TestConfigurableSegmentDefaults:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -1832,6 +1853,7 @@ class TestConfigurableSegmentDefaults:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2195,6 +2217,7 @@ class TestRetryCountInCheckpointData:
         mock_downloader.retry_queue = retry_queue
         mock_downloader.impersonation_manager = None
         mock_downloader.download_config = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2467,6 +2490,8 @@ class TestCookiePropagation:
         mock_download_config.segment_socket_timeout = 0
         mock_download_config.segment_max_resolution = 1080
         mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.bot_detection_abort_threshold = 0
+        mock_download_config.bot_detection_tier_floor_threshold = 0
 
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
@@ -2474,6 +2499,7 @@ class TestCookiePropagation:
         mock_downloader.cookie_rotator = mock_cookie_rotator
         mock_downloader.retry_queue = None
         mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2578,6 +2604,7 @@ class TestSegmentStallTimeout:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2618,6 +2645,7 @@ class TestSegmentStallTimeout:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2668,6 +2696,7 @@ class TestSegmentStallTimeout:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2708,6 +2737,7 @@ class TestSegmentStallTimeout:
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         stage.downloader = mock_downloader
 
@@ -2763,6 +2793,7 @@ class TestBotDetectionTierFloor:
         mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
         mock_download_config.segment_stall_timeout = 0  # Disable stall detection for fast tests
         mock_download_config.bot_detection_tier_floor_threshold = threshold
+        mock_download_config.bot_detection_abort_threshold = 0  # Disable abort for tier floor tests
         mock_download_config.cookies_from_browser = ''
         mock_download_config.cookies_path = ''
         mock_download_config.cookie_rotation = None
@@ -2773,6 +2804,7 @@ class TestBotDetectionTierFloor:
         mock_downloader.impersonation_manager = mock_imp_mgr
         mock_downloader.cookie_rotator = None
         mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
 
         return mock_downloader, escalation_mgr
 

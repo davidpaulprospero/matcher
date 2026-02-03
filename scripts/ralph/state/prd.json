@@ -135,7 +135,7 @@
             "id": "US-49-009",
             "title": "Add download_segments error summary with actionable diagnostics",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "At stage completion, log a structured summary: total segments, succeeded, failed, cached, skipped with breakdown by error category",
                 "Include per-error-category counts (network, bot-detection, video-specific, timeout) in the summary",
