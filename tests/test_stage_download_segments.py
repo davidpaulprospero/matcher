@@ -2172,3 +2172,316 @@ class TestRetryCountInCheckpointData:
         assert result.success is True
         assert 'retry_count' in result.data
         assert isinstance(result.data['retry_count'], int)
+
+
+# ============================================================================
+# Cookie Propagation to Python API (US-49-002)
+# ============================================================================
+
+class TestCookiePropagation:
+    """Test cookie propagation to yt-dlp Python API in download_segments.
+
+    US-49-002: The yt-dlp Python API does NOT read ~/.config/yt-dlp/config,
+    so cookies_from_browser must be explicitly passed as 'cookiesfrombrowser'
+    (a list, e.g. ['firefox']) in ydl_opts. Falls back to 'cookiefile' from
+    cookies_path or cookie_rotation files.
+    """
+
+    @pytest.mark.fast
+    def test_cookiesfrombrowser_injected_when_configured(self, stage, tmp_path):
+        """cookiesfrombrowser is set in ydl_opts when cookies_from_browser configured."""
+        mock_download_config = MagicMock()
+        mock_download_config.cookies_from_browser = 'firefox'
+        mock_download_config.cookies_path = ''
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'cookie_browser_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['cookiesfrombrowser'] == ['firefox']
+        assert 'cookiefile' not in captured_opts[0]
+
+    @pytest.mark.fast
+    def test_cookiefile_fallback_from_cookies_path(self, stage, tmp_path):
+        """cookiefile is set from cookies_path when cookies_from_browser is empty."""
+        mock_download_config = MagicMock()
+        mock_download_config.cookies_from_browser = ''
+        mock_download_config.cookies_path = '/path/to/cookies.txt'
+        mock_download_config.cookie_rotation = None
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'cookie_file_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['cookiefile'] == '/path/to/cookies.txt'
+        assert 'cookiesfrombrowser' not in captured_opts[0]
+
+    @pytest.mark.fast
+    def test_cookiefile_fallback_from_cookie_rotation(self, stage, tmp_path):
+        """cookiefile falls back to first cookie_rotation file when both
+        cookies_from_browser and cookies_path are empty."""
+        mock_cookie_rotation = MagicMock()
+        mock_cookie_rotation.cookie_files = ['/cookies/rotation1.txt', '/cookies/rotation2.txt']
+
+        mock_download_config = MagicMock()
+        mock_download_config.cookies_from_browser = ''
+        mock_download_config.cookies_path = ''
+        mock_download_config.cookie_rotation = mock_cookie_rotation
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'cookie_rotation_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['cookiefile'] == '/cookies/rotation1.txt'
+        assert 'cookiesfrombrowser' not in captured_opts[0]
+
+    @pytest.mark.fast
+    def test_no_cookies_when_nothing_configured(self, stage, tmp_path):
+        """No cookie keys in ydl_opts when no cookie config exists."""
+        mock_download_config = MagicMock()
+        mock_download_config.cookies_from_browser = ''
+        mock_download_config.cookies_path = ''
+        mock_download_config.cookie_rotation = None
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'no_cookie_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        assert 'cookiesfrombrowser' not in captured_opts[0]
+        assert 'cookiefile' not in captured_opts[0]
+
+    @pytest.mark.fast
+    def test_tier3_cookie_rotation_overrides_baseline_browser(self, stage, tmp_path):
+        """When Tier 3 escalation provides cookie rotation, it overrides the
+        baseline cookiesfrombrowser to avoid conflicts."""
+        from src.downloader.types import EscalationTier
+
+        mock_escalation_mgr = MagicMock()
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+        mock_result.tier = EscalationTier.FULL_BYPASS
+        mock_result.rotate_cookies = True
+        mock_result.rotate_vpn = False
+        mock_escalation_mgr.get_escalation_args.return_value = mock_result
+
+        mock_cookie_rotator = MagicMock()
+        mock_cookie_rotator.get_current_cookie.return_value = '/tmp/rotated_cookie.txt'
+        mock_cookie_rotator.should_rotate.return_value = False
+
+        mock_download_config = MagicMock()
+        mock_download_config.cookies_from_browser = 'firefox'
+        mock_download_config.cookies_path = ''
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.cookie_rotator = mock_cookie_rotator
+        mock_downloader.retry_queue = None
+        mock_downloader.impersonation_manager = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'tier3_override', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("test")
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        # Rotated cookie file should be set
+        assert captured_opts[0]['cookiefile'] == '/tmp/rotated_cookie.txt'
+        # Browser cookies should be removed to avoid conflict
+        assert 'cookiesfrombrowser' not in captured_opts[0]
+
+    @pytest.mark.fast
+    def test_cookiesfrombrowser_in_retry_queue(self, stage, tmp_path):
+        """cookiesfrombrowser is also propagated in retry queue downloads."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        mock_download_config = MagicMock()
+        mock_download_config.cookies_from_browser = 'chrome'
+        mock_download_config.cookies_path = ''
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        retry_queue = RetryQueue(BatchRetryConfig(
+            enabled=True, delay_seconds=0, max_passes=1
+        ))
+        retry_queue.add(
+            video_id='retry_cookie_0_10',
+            keyword='segment', tier='segment',
+            error_message='Initial failure'
+        )
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.retry_queue = retry_queue
+        mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+
+        stage.downloader = mock_downloader
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._process_retry_queue(tmp_path, 5.0, [], 1, None)
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['cookiesfrombrowser'] == ['chrome']

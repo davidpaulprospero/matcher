@@ -459,6 +459,24 @@ class DownloadVideoSegmentsStage(Stage):
                     'fragment_retries': 10,
                 }
 
+                # US-49-002: Propagate cookie auth to Python API (yt-dlp doesn't read CLI config)
+                # The yt-dlp Python API key is 'cookiesfrombrowser' (list) not --cookies-from-browser
+                if _dl_cfg:
+                    _browser = getattr(_dl_cfg, 'cookies_from_browser', '')
+                    if _browser:
+                        ydl_opts['cookiesfrombrowser'] = [_browser]
+                    else:
+                        # Fallback: use cookies_path or first cookie_rotation file
+                        _cookies_path = getattr(_dl_cfg, 'cookies_path', '')
+                        if not _cookies_path:
+                            _cookie_rotation = getattr(_dl_cfg, 'cookie_rotation', None)
+                            if _cookie_rotation:
+                                _cookie_files = getattr(_cookie_rotation, 'cookie_files', [])
+                                if _cookie_files:
+                                    _cookies_path = _cookie_files[0]
+                        if _cookies_path:
+                            ydl_opts['cookiefile'] = _cookies_path
+
                 # US-48-005: Apply escalation tiers (impersonation + extractor_args + cookies)
                 escalation_result = None
                 if escalation_mgr:
@@ -466,11 +484,13 @@ class DownloadVideoSegmentsStage(Stage):
                         escalation_result = escalation_mgr.get_escalation_args(video_id)
                         _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
 
-                        # Tier 3: apply cookie rotation
+                        # Tier 3: apply cookie rotation (overrides baseline cookies)
                         if escalation_result.rotate_cookies and cookie_rotator:
                             cookie_path = cookie_rotator.get_current_cookie()
                             if cookie_path:
                                 ydl_opts['cookiefile'] = cookie_path
+                                # Remove browser cookies when using rotated cookie file
+                                ydl_opts.pop('cookiesfrombrowser', None)
 
                         if escalation_result.tier.value > 1:
                             logger.info(
@@ -733,6 +753,22 @@ class DownloadVideoSegmentsStage(Stage):
                     'fragment_retries': 10,
                 }
 
+                # US-49-002: Propagate cookie auth to Python API (retry path)
+                if _dl_cfg:
+                    _browser = getattr(_dl_cfg, 'cookies_from_browser', '')
+                    if _browser:
+                        ydl_opts['cookiesfrombrowser'] = [_browser]
+                    else:
+                        _cookies_path = getattr(_dl_cfg, 'cookies_path', '')
+                        if not _cookies_path:
+                            _cookie_rotation = getattr(_dl_cfg, 'cookie_rotation', None)
+                            if _cookie_rotation:
+                                _cookie_files = getattr(_cookie_rotation, 'cookie_files', [])
+                                if _cookie_files:
+                                    _cookies_path = _cookie_files[0]
+                        if _cookies_path:
+                            ydl_opts['cookiefile'] = _cookies_path
+
                 # US-48-005: Apply escalation tiers for retry
                 if escalation_mgr:
                     try:
@@ -742,6 +778,7 @@ class DownloadVideoSegmentsStage(Stage):
                             cookie_path = cookie_rotator.get_current_cookie()
                             if cookie_path:
                                 ydl_opts['cookiefile'] = cookie_path
+                                ydl_opts.pop('cookiesfrombrowser', None)
                     except Exception:
                         pass
                 elif self.downloader.impersonation_manager:
