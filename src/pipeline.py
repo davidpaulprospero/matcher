@@ -13,6 +13,7 @@ for automatic error recovery. Controlled via config.healing settings.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -117,6 +118,55 @@ class PipelineOrchestrator:
         self.resume_mode = True
         return True
 
+    def _validate_config(self) -> List[str]:
+        """
+        Validate pipeline configuration before running stages.
+
+        Checks:
+        - cache_dir is writable (or can be created)
+        - Embedding provider is configured when matching stages are enabled
+
+        Returns:
+            List of validation error strings. Empty list means config is valid.
+        """
+        errors: List[str] = []
+
+        # Check cache_dir is writable or can be created
+        cache_dir = getattr(getattr(self.config, 'cache', None), 'cache_dir', None)
+        if cache_dir:
+            cache_path = Path(cache_dir)
+            if cache_path.exists():
+                if not os.access(str(cache_path), os.W_OK):
+                    errors.append(
+                        f"Cache directory is not writable: {cache_dir}"
+                    )
+            else:
+                # Check if parent is writable so we can create it
+                parent = cache_path.parent
+                if parent.exists() and not os.access(str(parent), os.W_OK):
+                    errors.append(
+                        f"Cannot create cache directory (parent not writable): {cache_dir}"
+                    )
+        else:
+            errors.append("No cache directory configured (config.cache.cache_dir)")
+
+        # Check embedding provider when matching stages are enabled
+        matching_stage_names = {'MATCH', 'ITERATIVE_MATCH'}
+        has_matching_stages = any(
+            getattr(stage, 'name', '') in matching_stage_names
+            for stage in self.stages
+        )
+        if has_matching_stages:
+            embedding_config = getattr(self.config, 'embedding', None)
+            provider = getattr(embedding_config, 'provider', None) if embedding_config else None
+            if not provider:
+                errors.append(
+                    "Embedding provider not configured (config.embedding.provider) "
+                    "but matching stages require embeddings"
+                )
+
+        return errors
+
     def run(
         self,
         resume: bool = True,
@@ -149,6 +199,13 @@ class PipelineOrchestrator:
         """
         skip_stages = set(skip_stages or [])
         only_stages = set(only_stages) if only_stages else None
+
+        # Validate config before running any stages (US-44-003: fail-fast)
+        config_errors = self._validate_config()
+        if config_errors:
+            for error in config_errors:
+                logger.error(f"Config validation error: {error}")
+            return False
 
         # Dry-run mode: log stages and validate without executing
         if dry_run:
