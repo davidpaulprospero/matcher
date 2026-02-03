@@ -422,16 +422,43 @@ class IterativeMatchStage(Stage):
             serialized_matches = []
             for i, match in enumerate(state.matches):
                 try:
-                    serialized_matches.append({
-                        'segment_index': getattr(match, 'segment_index', i),
-                        'video_file': getattr(match, 'video_file', ''),
-                        'video_start': getattr(match, 'video_start', 0.0),
-                        'video_end': getattr(match, 'video_end', 0.0),
-                        'confidence': getattr(match, 'confidence', 0.0),
-                        'strategy': getattr(match, 'strategy', ''),
-                        'reason': getattr(match, 'reason', ''),
-                        'face_score': getattr(match, 'face_score', 0.5),
-                    })
+                    # Handle MatchResult structure (has primary_match with video_segment)
+                    if hasattr(match, 'primary_match') and match.primary_match:
+                        pm = match.primary_match
+                        source_file = ''
+                        video_start = 0.0
+                        video_end = 0.0
+                        conf = 0.0
+
+                        if hasattr(pm, 'video_segment') and pm.video_segment:
+                            source_file = getattr(pm.video_segment, 'source_file', '')
+                            video_start = getattr(pm.video_segment, 'start_time', 0.0)
+                            video_end = getattr(pm.video_segment, 'end_time', 0.0)
+
+                        conf = getattr(pm, 'confidence', 0.0)
+
+                        serialized_matches.append({
+                            'segment_index': i,
+                            'video_file': source_file,
+                            'video_start': float(video_start),
+                            'video_end': float(video_end),
+                            'confidence': float(conf),
+                            'strategy': getattr(match, 'strategy', getattr(pm, 'reasoning', '')),
+                            'reason': getattr(pm, 'reasoning', ''),
+                            'face_score': getattr(match, 'face_score', 0.5),
+                        })
+                    # Handle simple Match structure (state.Match with video_file directly)
+                    else:
+                        serialized_matches.append({
+                            'segment_index': getattr(match, 'segment_index', i),
+                            'video_file': getattr(match, 'video_file', ''),
+                            'video_start': getattr(match, 'video_start', 0.0),
+                            'video_end': getattr(match, 'video_end', 0.0),
+                            'confidence': getattr(match, 'confidence', 0.0),
+                            'strategy': getattr(match, 'strategy', ''),
+                            'reason': getattr(match, 'reason', ''),
+                            'face_score': getattr(match, 'face_score', 0.5),
+                        })
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
 
