@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 # Try to import numpy for type hints
 import logging
 
+_state_logger = logging.getLogger(__name__)
+
 # Try to import numpy for type hints
 try:
     import numpy as np
@@ -95,6 +97,112 @@ class Match:
     strategy: str = ""
     reason: str = ""
     face_score: float = 0.5
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], index: int = 0, default_strategy: str = 'restored') -> 'Match':
+        """Create a Match from a checkpoint dict with full validation.
+
+        Validates types, clamps confidence to [0, 1], rejects empty video_file,
+        and handles legacy field names. Used by both MATCH and ITERATIVE_MATCH
+        restore to ensure consistent deserialization.
+
+        Args:
+            data: Dictionary from checkpoint data.
+            index: Position index, used as fallback for segment_index.
+            default_strategy: Strategy label when not present in data.
+
+        Returns:
+            A validated Match instance.
+
+        Raises:
+            ValueError: If data fails validation (not a dict, invalid types,
+                empty video_file).
+        """
+        if not isinstance(data, dict):
+            raise ValueError(f"match data is not a dict (got {type(data).__name__})")
+
+        # Handle both old format (source_file) and new format (video_file)
+        video_file = data.get('video_file') or data.get('source_file', '')
+        if not video_file or not isinstance(video_file, str):
+            raise ValueError(f"invalid video_file: {repr(video_file)}")
+
+        # Validate and coerce segment_index
+        segment_index = data.get('segment_index', index)
+        if not isinstance(segment_index, (int, float)):
+            raise ValueError(f"invalid segment_index: {repr(segment_index)}")
+        segment_index = int(segment_index)
+
+        # Validate and clamp confidence to [0, 1]
+        confidence = data.get('confidence', 0.0)
+        if not isinstance(confidence, (int, float)):
+            raise ValueError(f"invalid confidence: {repr(confidence)}")
+        confidence = float(confidence)
+        if not (0.0 <= confidence <= 1.0):
+            _state_logger.debug(f"match confidence {confidence} out of range [0, 1], clamping")
+            confidence = max(0.0, min(1.0, confidence))
+
+        # Estimate video_end if not provided (old checkpoints)
+        video_start = float(data.get('video_start', data.get('start_time', 0.0)))
+        video_end = float(data.get('video_end', video_start + 10.0))
+
+        return cls(
+            segment_index=segment_index,
+            video_file=video_file,
+            video_start=video_start,
+            video_end=video_end,
+            confidence=confidence,
+            strategy=data.get('strategy', default_strategy),
+            reason=data.get('reason', ''),
+            face_score=float(data.get('face_score', 0.5)),
+        )
+
+
+def restore_matches_from_dicts(
+    matches_data: list,
+    default_strategy: str = 'restored',
+    logger_instance: Optional[logging.Logger] = None,
+) -> Optional[List['Match']]:
+    """Restore a list of Match objects from checkpoint dicts with validation.
+
+    Shared by MATCH and ITERATIVE_MATCH restore methods to ensure consistent
+    deserialization and validation behavior.
+
+    Args:
+        matches_data: List of match dicts from checkpoint.
+        default_strategy: Strategy label for matches missing 'strategy' key.
+        logger_instance: Logger to use; defaults to module logger.
+
+    Returns:
+        List of validated Match objects, or None if matches_data is not a list
+        or no valid matches could be restored from non-empty data.
+    """
+    log = logger_instance or _state_logger
+
+    if not isinstance(matches_data, list):
+        log.warning(f"Invalid checkpoint data: 'matches' is not a list (got {type(matches_data).__name__})")
+        return None
+
+    restored_matches: List[Match] = []
+    validation_errors: List[str] = []
+
+    for i, m in enumerate(matches_data):
+        try:
+            match = Match.from_dict(m, index=i, default_strategy=default_strategy)
+            restored_matches.append(match)
+        except ValueError as e:
+            validation_errors.append(f"match[{i}]: {e}")
+
+    if validation_errors:
+        log.warning(f"Match validation errors during restore: {validation_errors[:5]}")
+        if len(validation_errors) > 5:
+            log.warning(f"... and {len(validation_errors) - 5} more validation errors")
+
+    # Return None if no valid matches were restored from non-empty data
+    if not restored_matches and matches_data:
+        log.warning(f"No valid matches restored from {len(matches_data)} checkpoint entries")
+        return None
+
+    return restored_matches
 
 
 @dataclass
