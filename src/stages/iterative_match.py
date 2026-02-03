@@ -486,7 +486,7 @@ class IterativeMatchStage(Stage):
         config: 'Config' = None
     ) -> bool:
         """Restore iterative match stage from checkpoint."""
-        from ..state import Match
+        from ..state import restore_matches_from_dicts
 
         try:
             data = checkpoint.get_stage_data(self.name)
@@ -494,29 +494,14 @@ class IterativeMatchStage(Stage):
                 logger.warning(f"No checkpoint data for {self.name}")
                 return False
 
-            # Restore matches with iterative improvements
+            # Restore matches using shared helper (same validation as MATCH stage)
             matches_data = data.get('matches', [])
             if matches_data:
-                restored_matches = []
-                for i, m in enumerate(matches_data):
-                    if not isinstance(m, dict):
-                        continue
-
-                    video_file = m.get('video_file', '')
-                    if not video_file:
-                        continue
-
-                    match = Match(
-                        segment_index=int(m.get('segment_index', i)),
-                        video_file=video_file,
-                        video_start=float(m.get('video_start', 0.0)),
-                        video_end=float(m.get('video_end', 0.0)),
-                        confidence=float(m.get('confidence', 0.0)),
-                        strategy=m.get('strategy', 'iterative_restored'),
-                        reason=m.get('reason', ''),
-                        face_score=float(m.get('face_score', 0.5)),
-                    )
-                    restored_matches.append(match)
+                restored_matches = restore_matches_from_dicts(
+                    matches_data, default_strategy='iterative_restored', logger_instance=logger
+                )
+                if restored_matches is None:
+                    return False
 
                 if restored_matches:
                     state.matches = restored_matches
