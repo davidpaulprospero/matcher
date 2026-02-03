@@ -15,6 +15,7 @@ import pytest
 import tempfile
 import shutil
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
@@ -2089,3 +2090,169 @@ class TestMullvadVPNAutoActivation:
 
         # set_mullvad_vpn should NOT be called
         mock_esc_mgr.set_mullvad_vpn.assert_not_called()
+
+
+@pytest.mark.fast
+class TestConfigValidation:
+    """
+    US-44-003: Pipeline-level config validation at startup.
+
+    Tests that _validate_config() catches invalid configurations before
+    any stage runs, following fail-fast principle.
+    """
+
+    @pytest.mark.fast
+    def test_valid_config_passes_validation(self, temp_project_dir, mock_config):
+        """Test that a valid config produces no validation errors."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+
+        errors = pipeline._validate_config()
+
+        assert errors == []
+
+    @pytest.mark.fast
+    def test_non_writable_cache_dir_fails(self, temp_project_dir, mock_config):
+        """Test that a non-writable cache dir produces a validation error."""
+        # Use a path that exists but is not writable
+        non_writable = str(temp_project_dir / "readonly_cache")
+        os.makedirs(non_writable)
+
+        # Make it read-only
+        if os.name == 'nt':
+            # Windows: use icacls to deny write (or just use a mock)
+            # Simpler: mock os.access to return False for this path
+            mock_config.cache.cache_dir = non_writable
+            pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+            pipeline.add_stage(MockStage("ANALYZE"))
+
+            with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
+                errors = pipeline._validate_config()
+        else:
+            os.chmod(non_writable, 0o444)
+            mock_config.cache.cache_dir = non_writable
+            pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+            pipeline.add_stage(MockStage("ANALYZE"))
+
+            errors = pipeline._validate_config()
+            # Restore permissions for cleanup
+            os.chmod(non_writable, 0o755)
+
+        assert len(errors) >= 1
+        assert any("not writable" in e for e in errors)
+
+    @pytest.mark.fast
+    def test_non_creatable_cache_dir_fails(self, temp_project_dir, mock_config):
+        """Test that a cache dir whose parent is not writable fails validation."""
+        # Path that doesn't exist and parent is not writable
+        mock_config.cache.cache_dir = str(temp_project_dir / "new_cache")
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+
+        with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
+            errors = pipeline._validate_config()
+
+        assert len(errors) >= 1
+        assert any("Cannot create cache directory" in e for e in errors)
+
+    @pytest.mark.fast
+    def test_no_cache_dir_configured_fails(self, temp_project_dir, mock_config):
+        """Test that missing cache_dir config produces a validation error."""
+        mock_config.cache.cache_dir = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+
+        errors = pipeline._validate_config()
+
+        assert len(errors) >= 1
+        assert any("No cache directory configured" in e for e in errors)
+
+    @pytest.mark.fast
+    def test_missing_embedding_provider_with_matching_stages(self, temp_project_dir, mock_config):
+        """Test that missing embedding provider fails when matching stages are present."""
+        mock_config.embedding.provider = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("MATCH"))
+
+        errors = pipeline._validate_config()
+
+        assert any("Embedding provider not configured" in e for e in errors)
+
+    @pytest.mark.fast
+    def test_missing_embedding_provider_without_matching_stages_ok(self, temp_project_dir, mock_config):
+        """Test that missing embedding provider is OK when no matching stages exist."""
+        mock_config.embedding.provider = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("OUTPUT"))
+
+        errors = pipeline._validate_config()
+
+        # No embedding error since no matching stages
+        assert not any("Embedding provider" in e for e in errors)
+
+    @pytest.mark.fast
+    def test_embedding_provider_checked_for_iterative_match(self, temp_project_dir, mock_config):
+        """Test that embedding provider is checked for ITERATIVE_MATCH stage too."""
+        mock_config.embedding.provider = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ITERATIVE_MATCH"))
+
+        errors = pipeline._validate_config()
+
+        assert any("Embedding provider not configured" in e for e in errors)
+
+    @pytest.mark.fast
+    def test_pipeline_run_fails_fast_on_invalid_config(self, temp_project_dir, mock_config):
+        """Test that pipeline.run() returns False and does not execute stages on invalid config."""
+        mock_config.cache.cache_dir = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage = MockStage("ANALYZE")
+        pipeline.add_stage(stage)
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False)
+
+        assert result is False
+        assert stage._run_called is False
+
+    @pytest.mark.fast
+    def test_pipeline_run_logs_validation_errors(self, temp_project_dir, mock_config):
+        """Test that pipeline.run() logs validation errors before failing."""
+        mock_config.cache.cache_dir = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+
+        with patch('src.pipeline.logger') as mock_logger:
+            pipeline.run(resume=False)
+
+        error_calls = [str(call) for call in mock_logger.error.call_args_list]
+        assert any("Config validation error" in call for call in error_calls)
+
+    @pytest.mark.fast
+    def test_valid_config_allows_pipeline_to_run(self, temp_project_dir, mock_config):
+        """Test that valid config allows pipeline to proceed and run stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage = MockStage("ANALYZE")
+        pipeline.add_stage(stage)
+
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        assert stage._run_called is True
+
+    @pytest.mark.fast
+    def test_validate_config_returns_multiple_errors(self, temp_project_dir, mock_config):
+        """Test that _validate_config can return multiple errors at once."""
+        mock_config.cache.cache_dir = None
+        mock_config.embedding.provider = None
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("MATCH"))
+
+        errors = pipeline._validate_config()
+
+        # Should have both cache dir and embedding provider errors
+        assert len(errors) >= 2
+        assert any("cache" in e.lower() for e in errors)
+        assert any("embedding" in e.lower() for e in errors)
