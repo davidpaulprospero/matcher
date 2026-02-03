@@ -418,12 +418,19 @@ class DownloadVideoSegmentsStage(Stage):
             'total_bytes': 0,          # Total bytes downloaded (from output file sizes)
         }
 
-        # Get escalation manager and cookie rotator from downloader
+        # Get escalation manager, circuit breaker, and cookie rotator from downloader
         escalation_mgr = None
         cookie_rotator = None
+        circuit_breaker = None
         if self.downloader:
             escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
             cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
+            circuit_breaker = getattr(self.downloader, 'circuit_breaker', None)
+
+            # US-49-007: Wire circuit breaker into escalation manager so that
+            # open-circuit state informs escalation decisions (skip to max tier)
+            if escalation_mgr and circuit_breaker:
+                escalation_mgr.set_circuit_breaker(circuit_breaker)
 
         # US-49-005: Read bot-detection tier floor threshold from config
         _dl_cfg_top = getattr(self.downloader, 'download_config', None) if self.downloader else None
@@ -462,6 +469,34 @@ class DownloadVideoSegmentsStage(Stage):
                         escalation_mgr.clear_tier_floor()
                 self._print_progress(idx, total, stats)
                 continue
+
+            # US-49-007: Check circuit breaker before download attempt.
+            # If circuit is open and escalation is already at max tier,
+            # skip the video and add to retry queue for later.
+            if circuit_breaker and circuit_breaker.is_open:
+                at_max_tier = False
+                if escalation_mgr:
+                    from ..downloader.types import EscalationTier
+                    kw_state = escalation_mgr._get_state(video_id)
+                    at_max_tier = kw_state.current_tier >= EscalationTier.VPN_ROTATION
+
+                if at_max_tier:
+                    stats['failed'] += 1
+                    stats['attempted'] += 1
+                    logger.info(
+                        f"Circuit breaker open + max tier reached for {video_id} "
+                        f"— skipping to retry queue"
+                    )
+                    if self.downloader and self.downloader.retry_queue:
+                        self.downloader.retry_queue.add(
+                            video_id=f"{video_id}_{int(start)}_{int(end)}",
+                            keyword='segment',
+                            tier='segment',
+                            error_message='circuit_breaker_open_max_tier',
+                            error_category='video_specific',
+                        )
+                    self._print_progress(idx, total, stats)
+                    continue
 
             try:
                 # Download segment using yt-dlp with downloader's infrastructure
