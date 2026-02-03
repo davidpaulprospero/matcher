@@ -973,6 +973,73 @@ DEFAULT_MULTIMODAL_WEIGHTS = {
     'visual_description': 0.15  # Visual description weight (15%)
 }
 
+# Valid weight keys for multimodal scoring
+VALID_MULTIMODAL_WEIGHT_KEYS = set(DEFAULT_MULTIMODAL_WEIGHTS.keys())
+
+# Tolerance for weight sum validation
+WEIGHT_SUM_TOLERANCE = 0.01
+
+
+def validate_multimodal_weights(weights: dict) -> dict:
+    """
+    Validate and normalize multimodal scoring weights.
+
+    Checks:
+    - All weight values are in [0.0, 1.0] range (clamps and warns if not)
+    - Weights sum to approximately 1.0 (normalizes and warns if not)
+
+    Args:
+        weights: Dict of weight name -> weight value
+
+    Returns:
+        Validated and potentially normalized copy of weights
+    """
+    if not weights:
+        return None
+
+    validated = dict(weights)
+
+    # Check for out-of-range values and clamp
+    any_clamped = False
+    for key, value in validated.items():
+        if not isinstance(value, (int, float)):
+            logger.warning(
+                f"Multimodal weight '{key}' has non-numeric value {value!r}, setting to 0.0"
+            )
+            validated[key] = 0.0
+            any_clamped = True
+            continue
+
+        if value < 0.0:
+            logger.warning(
+                f"Multimodal weight '{key}' is negative ({value:.3f}), clamping to 0.0"
+            )
+            validated[key] = 0.0
+            any_clamped = True
+        elif value > 1.0:
+            logger.warning(
+                f"Multimodal weight '{key}' exceeds 1.0 ({value:.3f}), clamping to 1.0"
+            )
+            validated[key] = 1.0
+            any_clamped = True
+
+    # Check sum and normalize if needed
+    weight_sum = sum(validated.values())
+    if weight_sum == 0.0:
+        logger.warning(
+            "All multimodal weights are zero after validation, falling back to defaults"
+        )
+        return dict(DEFAULT_MULTIMODAL_WEIGHTS)
+
+    if abs(weight_sum - 1.0) > WEIGHT_SUM_TOLERANCE:
+        logger.warning(
+            f"Multimodal weights sum to {weight_sum:.3f} (expected ~1.0), "
+            f"normalizing: {validated}"
+        )
+        validated = {k: v / weight_sum for k, v in validated.items()}
+
+    return validated
+
 
 def compute_multimodal_score(
     embedding_similarity: float,
@@ -1016,13 +1083,17 @@ def compute_multimodal_score(
             'weights_used': None
         }
 
-    # Use default weights if not provided
-    w = weights if weights else DEFAULT_MULTIMODAL_WEIGHTS
+    # Use default weights if not provided, validate and normalize
+    if weights:
+        w = validate_multimodal_weights(weights)
+        if w is None:
+            w = dict(DEFAULT_MULTIMODAL_WEIGHTS)
+    else:
+        w = dict(DEFAULT_MULTIMODAL_WEIGHTS)
 
-    # Ensure weights sum to 1.0 (normalize if needed)
+    # Final safety check: all-zero weights after validation
     weight_sum = sum(w.values())
     if weight_sum == 0.0:
-        # All zero weights - return zero score to avoid division by zero
         logger.warning("All multimodal weights are zero, returning score=0.0")
         return 0.0, "all_weights_zero", {
             'embedding_similarity': embedding_similarity,
@@ -1031,9 +1102,6 @@ def compute_multimodal_score(
             'visual_description': visual_description_score,
             'weights_used': w
         }
-    elif abs(weight_sum - 1.0) > 0.01:
-        logger.warning(f"Multimodal weights sum to {weight_sum:.3f}, normalizing to 1.0")
-        w = {k: v / weight_sum for k, v in w.items()}
 
     # Clamp input scores to [0, 1] range, handling NaN and Inf
     def safe_clamp(value: float) -> float:
