@@ -88,6 +88,10 @@ class CheckpointData:
     iterative_match: Dict[str, Any] = field(default_factory=dict)
     download_segments: Dict[str, Any] = field(default_factory=dict)
 
+    # Stage metrics for pipeline observability (US-49-012)
+    # Maps stage name -> serialized StageMetrics dict
+    stage_metrics: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return asdict(self)
     
@@ -558,8 +562,16 @@ class CheckpointManager:
 
         return state
 
-    def save(self, stage: str, stage_data: Dict[str, Any] = None):
-        """Save checkpoint after stage completion"""
+    def save(self, stage: str, stage_data: Dict[str, Any] = None,
+             stage_metrics: Dict[str, Any] = None):
+        """Save checkpoint after stage completion.
+
+        Args:
+            stage: Stage name (e.g., 'DOWNLOAD_SEGMENTS')
+            stage_data: Stage output data dict
+            stage_metrics: Optional serialized StageMetrics dict (US-49-012).
+                           Persisted under stage_metrics.<STAGE_NAME> in checkpoint.
+        """
         if self.data is None:
             self.data = CheckpointData(
                 created_at=datetime.now().isoformat(),
@@ -579,6 +591,10 @@ class CheckpointManager:
                 )
             elif hasattr(self.data, stage_key):
                 setattr(self.data, stage_key, stage_data)
+
+        # US-49-012: Persist stage metrics for pipeline observability
+        if stage_metrics:
+            self.data.stage_metrics[stage] = stage_metrics
 
         # Atomic save: write to temp, then rename
         self._atomic_save()
@@ -786,6 +802,19 @@ class CheckpointManager:
             return {}
         stage_key = stage.lower()
         return getattr(self.data, stage_key, {})
+
+    def get_stage_metrics(self, stage: str) -> Dict[str, Any]:
+        """Get persisted stage metrics for a specific stage (US-49-012).
+
+        Args:
+            stage: Stage name (e.g., 'DOWNLOAD_SEGMENTS')
+
+        Returns:
+            Dict with serialized StageMetrics, or empty dict if not available.
+        """
+        if not self.data or not self.data.stage_metrics:
+            return {}
+        return self.data.stage_metrics.get(stage, {})
     
     def should_skip_stage(self, stage: str) -> bool:
         """Check if a stage should be skipped (already completed)"""
@@ -836,6 +865,17 @@ class CheckpointManager:
             match_count = self.data.match.get('match_count', 0)
             avg_conf = self.data.match.get('avg_confidence', 0)
             lines.append(f"  • MATCH: {match_count} matches, {avg_conf:.1%} avg confidence")
+
+        # US-49-012: Show stage metrics summary if available
+        if self.data.stage_metrics:
+            for stage_name, m in self.data.stage_metrics.items():
+                processed = m.get('items_processed', 0)
+                failed = m.get('items_failed', 0)
+                duration = m.get('duration_seconds', 0.0)
+                lines.append(
+                    f"  • {stage_name} metrics: "
+                    f"{processed} processed, {failed} failed, {duration:.1f}s"
+                )
 
         return "\n".join(lines)
 
