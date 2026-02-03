@@ -278,9 +278,6 @@ _STATE_ATTR_DEFAULTS = {
     'face_preference': 'neutral',
     'location_chapters': [],
     'stage_timings': {},
-    'embeddings': None,
-    # Legacy (not in PipelineState but kept for backward compat)
-    'videos': [],
 }
 
 

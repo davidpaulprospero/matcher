@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 44,
-    "focusArea": "pipeline",
-    "branchName": "ralph/sprint-44",
+    "sprintNumber": 45,
+    "focusArea": "architecture",
+    "branchName": "ralph/sprint-45",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,182 +11,182 @@
     },
     "userStories": [
         {
-            "id": "US-44-001",
-            "title": "Generate sprint stories for pipeline focus area",
+            "id": "US-45-001",
+            "title": "Generate sprint stories for architecture focus area",
             "priority": "high",
             "passes": true,
+            "notes": "Generated 11 architecture stories (US-45-002 through US-45-012) based on codebase analysis. Key findings: stale _STATE_ATTR_DEFAULTS entry for 'embeddings', checkpoint healer references legacy stages (TRANSCRIBE, SCENE_DETECTION, EMBEDDINGS), logger has dead code for REMIX/TRANSCRIBE stages, entity stages registered but not in STAGE_ORDER, TYPE_CHECKING import uses wrong path, stage registration lacks validation, no state snapshot/rollback on stage failure, config validation after checkpoint load, deprecated audio_first_mode parameter.",
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'architecture' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
-                "Add stories US-44-002 through US-44-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'architecture'",
+                "Add stories US-45-002 through US-45-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-44-NNN to be unique across sprints",
-                "Mark this story (US-44-001) as passes: true when done"
-            ],
-            "notes": "Seed story completed. Generated 11 pipeline-focused stories (US-44-002 through US-44-012) based on comprehensive codebase analysis. Key themes: state validation consistency, checkpoint integrity, error context, config validation, code deduplication, cross-stage data flow testing, and match serialization consistency."
+                "IMPORTANT: Story IDs MUST follow format US-45-NNN to be unique across sprints",
+                "Mark this story (US-45-001) as passes: true when done"
+            ]
         },
         {
-            "id": "US-44-002",
-            "title": "Add validate_required_state_attrs calls to all pipeline stages missing them",
+            "id": "US-45-002",
+            "title": "Remove stale 'embeddings' entry from _STATE_ATTR_DEFAULTS",
             "priority": "high",
             "passes": true,
+            "notes": "Removed stale 'embeddings': None and 'videos': [] entries from _STATE_ATTR_DEFAULTS. Added test_no_extra_keys_in_defaults to catch future drift. 82 related tests pass.",
             "acceptanceCriteria": [
-                "CAPTION stage (src/stages/caption_stage.py) calls validate_required_state_attrs with ['video_ids'] at run() entry",
-                "VIDEO_SEARCH stage (src/stages/video_search.py) calls validate_required_state_attrs with ['keywords'] at run() entry",
-                "ANALYZE stage (src/stages/analyze.py) calls validate_required_state_attrs with ['voiceover_path'] at run() entry",
-                "DOWNLOAD_SEGMENTS stage (src/stages/download_segments.py) calls validate_required_state_attrs with ['matches'] at run() entry",
-                "OUTPUT stage (src/stages/output.py) calls validate_required_state_attrs with ['matches', 'voiceover_segments'] at run() entry",
-                "Tests verify that each stage initializes missing attributes instead of crashing with AttributeError"
-            ],
-            "notes": "Tier: T2 (hardening). Implemented: Added validate_required_state_attrs import and call to all 5 missing stages. Added voiceover_path and video_ids to _STATE_ATTR_DEFAULTS. Created tests/test_stage_validate_attrs_us44_002.py with 6 tests verifying each stage initializes missing attrs gracefully. All 7 stages now have consistent validation at run() entry."
+                "Remove 'embeddings': None from _STATE_ATTR_DEFAULTS in src/stages/__init__.py (line 281)",
+                "Remove 'videos': [] legacy entry from _STATE_ATTR_DEFAULTS in src/stages/__init__.py (line 283)",
+                "Every remaining key in _STATE_ATTR_DEFAULTS has a corresponding field in PipelineState dataclass",
+                "Add a test that asserts all keys in _STATE_ATTR_DEFAULTS exist as fields on PipelineState",
+                "Existing tests pass without regression"
+            ]
         },
         {
-            "id": "US-44-003",
-            "title": "Add pipeline-level config validation at startup before any stage runs",
+            "id": "US-45-003",
+            "title": "Remove legacy stage references from checkpoint healer",
             "priority": "high",
-            "passes": true,
+            "passes": false,
+            "notes": "Tier: T2 (targeted refactor). File: src/agents/healers/checkpoint.py, lines 130-154. The _try_cache_rebuild() method checks for 'TRANSCRIBE', 'EMBEDDINGS', and 'SCENE_DETECTION' — all of which are legacy stages removed from the 7-stage pipeline. None of these stages exist in STAGE_ORDER (src/checkpoint.py:25-33). The healer should check for caches relevant to current stages: caption caches, match caches, video search results, etc.",
             "acceptanceCriteria": [
-                "Pipeline.__init__ or run() calls a new _validate_config() method before iterating stages",
-                "_validate_config() checks that config.cache.cache_dir path is writable (or can be created)",
-                "_validate_config() checks that the embedding provider is configured when matching stages are enabled",
-                "_validate_config() returns a list of validation errors; pipeline logs them and returns False if critical errors exist",
-                "Tests verify that an invalid config (e.g., non-writable cache dir) causes pipeline to fail fast with a descriptive error"
-            ],
-            "notes": "Added _validate_config() method to PipelineOrchestrator that checks cache_dir writability and embedding provider config. Called at start of run() before any stages execute. 11 new tests in TestConfigValidation class. All 116 orchestrator tests + 43 pipeline tests pass."
+                "Replace TRANSCRIBE/EMBEDDINGS/SCENE_DETECTION references in src/agents/healers/checkpoint.py:130-154 with current 7-stage equivalents",
+                "Cache checks should reference current cache directories: .cache/captions, .cache/llm_responses, .cache/embeddings (used by MATCH, not a stage)",
+                "Stage names returned by _try_cache_rebuild() must all be in STAGE_ORDER or clearly documented as cache-data-only indicators",
+                "Add a test that the checkpoint healer does not reference any stage name from LEGACY_STAGES",
+                "Existing healer tests pass without regression"
+            ]
         },
         {
-            "id": "US-44-004",
-            "title": "Enrich pipeline error messages with recovery suggestions and state context",
+            "id": "US-45-004",
+            "title": "Remove dead REMIX and TRANSCRIBE reporting code from logger",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
+            "notes": "Tier: T2 (dead code removal). File: src/logger.py, lines 1135-1164. The report generator contains rendering blocks for 'REMIX Stage' (lines 1135-1144) and 'TRANSCRIBE Stage' (lines 1146-1164+). These stages no longer exist in the 7-stage pipeline. The REMIX block references r.remix_videos_scanned, r.remix_included, r.remix_excluded, r.remix_avg_score. The TRANSCRIBE block references r.videos_transcribed, r.transcription_cache_hits, r.video_process_logs. These metric fields may also be dead code in the report dataclass.",
             "acceptanceCriteria": [
-                "When a stage fails, the error log includes current state summary (segment count, video count, match count)",
-                "When validate_inputs fails, the error message includes which CLI flag or checkpoint reset would fix it (e.g., '--fresh', '--match-only')",
-                "Pipeline.run() at src/pipeline.py:254-258 augments result.error with state context before logging",
-                "At least 3 common failure scenarios produce actionable recovery suggestions in their error output",
-                "Tests verify that error messages contain recovery hints for known failure patterns"
-            ],
-            "notes": "Added _get_state_summary() and _get_recovery_suggestion() to PipelineOrchestrator. Both validate_inputs failures and stage.run() failures now log state context (segments/videos/matches/captions counts) and actionable recovery hints (CLI flags like --fresh, --match-only, --output-only). 14 new tests in TestErrorMessageEnrichment. 7 stage-specific + 6 error-pattern-specific recovery suggestions cover all common failure scenarios."
+                "Remove the REMIX stage report block from src/logger.py (lines 1135-1144)",
+                "Remove the TRANSCRIBE stage report block from src/logger.py (lines 1146-1164+)",
+                "Verify the removed metric fields (remix_videos_scanned, etc.) are not populated by any current pipeline code; if dead, remove from report dataclass",
+                "Report still renders correctly for all 7 current pipeline stages",
+                "Add a test that the report generator does not reference any LEGACY_STAGES names"
+            ]
         },
         {
-            "id": "US-44-005",
-            "title": "Persist failed stage metrics in pipeline instead of only successful ones",
+            "id": "US-45-005",
+            "title": "Fix TYPE_CHECKING import path in stages/__init__.py",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
+            "notes": "Tier: T1 (quick fix). File: src/stages/__init__.py, line 18. The TYPE_CHECKING block imports 'from .state import PipelineState' but there is no state.py inside src/stages/. It should be 'from ..state import PipelineState' (parent directory). This is benign at runtime since TYPE_CHECKING is False, but it breaks type checking tools (mypy, pyright) and IDE navigation. The correct import pattern is already used elsewhere in the file at the runtime import on line ~209.",
             "acceptanceCriteria": [
-                "When a stage fails, its metrics (duration, items processed before failure) are still stored in self.stage_metrics",
-                "StageMetrics dataclass has a new 'failed' boolean field (default False) to distinguish failed from successful metrics",
-                "Pipeline.run() stores metrics for failed stages with failed=True before returning False",
-                "The final pipeline summary (if any) includes failed stage metrics alongside successful ones",
-                "Tests verify that after a stage failure, stage_metrics[failed_stage] exists and has failed=True"
-            ],
-            "notes": "Done. Added 'failed' bool field to StageMetrics (default False), pipeline.run() sets failed=True on failure, get_metrics() returns failed_stages list. 9 new tests in TestFailedStageMetricsPersistence class + updated existing to_dict/from_dict tests. All 139 orchestrator tests pass. Commit 6843501."
+                "Change 'from .state import PipelineState' to 'from ..state import PipelineState' in the TYPE_CHECKING block of src/stages/__init__.py (line 18)",
+                "Verify the file compiles without error: python -m py_compile src/stages/__init__.py",
+                "Verify mypy or pyright does not flag the import (if type checker available)",
+                "No runtime behavior change (TYPE_CHECKING is False at runtime)",
+                "Existing tests pass without regression"
+            ]
         },
         {
-            "id": "US-44-006",
-            "title": "Add checkpoint data schema validation to prevent silent corruption",
+            "id": "US-45-006",
+            "title": "Add stage registration validation to prevent orphan stages",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
+            "notes": "Tier: T2 (architecture improvement). File: src/stages/__init__.py, lines 236-240. The @register_stage decorator silently accepts any stage class with no validation. EntityImagesStage and EntityVideosStage (src/stages/entity_images.py, src/stages/entity_videos.py) are registered but not in STAGE_ORDER (src/checkpoint.py:25-33), making them orphan stages with no checkpoint support. Add a warning log when a stage is registered whose name is not in STAGE_ORDER, and add a utility function to detect orphan registrations.",
             "acceptanceCriteria": [
-                "CheckpointData.from_dict() validates that stage data dicts contain expected keys (at minimum, non-empty for stages before last_completed_stage)",
-                "A new validate() method on CheckpointData checks internal consistency: all stages before last_completed_stage have non-empty data",
-                "CheckpointManager.load() calls validate() after from_dict() and logs warnings for any inconsistencies found",
-                "CheckpointManager.save() validates that the stage_key maps to an actual field on CheckpointData before writing",
-                "Tests verify that loading a checkpoint with missing intermediate stage data produces a warning"
-            ],
-            "notes": "Done. Added STAGE_FIELD_MAP constant mapping stage names to CheckpointData fields. from_dict() now validates stage data types (resets non-dicts to {}). New validate() method checks all stages before last_completed_stage have non-empty data. load() calls validate() and logs consistency warnings. save()/save_intermediate() guard against unknown stage_keys. 28 new tests in test_checkpoint_schema_validation_us44_006.py, all 272 checkpoint tests pass."
+                "register_stage in src/stages/__init__.py logs a warning when the stage name is not in STAGE_ORDER",
+                "Add get_orphan_stages() function that returns registered stages not in STAGE_ORDER",
+                "Add check for duplicate stage name registration (log warning, last-wins behavior preserved)",
+                "Add a test that register_stage warns on orphan stage names",
+                "Add a test that get_orphan_stages() correctly identifies entity stages as orphans",
+                "Existing stage registration and pipeline creation works unchanged"
+            ]
         },
         {
-            "id": "US-44-007",
-            "title": "Extract duplicated video ID extraction logic into a shared utility",
+            "id": "US-45-007",
+            "title": "Add STAGE_ORDER sync validation test between checkpoint.py and ralph-config.json",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
+            "notes": "Tier: T1 (test addition). Files: src/checkpoint.py:25-33 (STAGE_ORDER), scripts/ralph/config/ralph-config.json:77-79 (pipelineStages.order). CLAUDE.md Rule 31 says checkpoint.py is the source of truth, but there is no automated check. If these diverge, Ralph Loop will plan sprints with wrong stage understanding. This is a pure test story — no production code changes.",
             "acceptanceCriteria": [
-                "A new function extract_video_id(path_or_id: str) -> Optional[str] exists in src/utils.py (or appropriate shared module)",
-                "The function uses the YouTube 11-character regex pattern r'([a-zA-Z0-9_-]{11})' with proper validation",
-                "src/stages/iterative_match.py replaces its inline _extract_video_id() and _extract_video_id_from_path() with the shared utility",
-                "src/state.py from_legacy_pipeline() (line 287) uses the shared utility instead of inline regex",
-                "All existing tests still pass after the refactor"
-            ],
-            "notes": "Done. Added extract_video_id(path_or_id: str) -> Optional[str] to src/utils.py with compiled _YOUTUBE_ID_PATTERN regex. Updated iterative_match.py _extract_video_id() and _extract_video_id_from_path() to use shared utility. Updated state.py from_legacy_pipeline() to use shared utility instead of inline regex. All 370 relevant tests pass (2 pre-existing failures in unrelated benchmark/transcription tests)."
+                "Add test in tests/ that loads STAGE_ORDER from src/checkpoint.py and pipelineStages.order from scripts/ralph/config/ralph-config.json",
+                "Test asserts the two lists are identical in content and order",
+                "Test also verifies LEGACY_STAGES in checkpoint.py matches pipelineStages.legacy in ralph-config.json",
+                "Test file is discoverable by pytest (proper naming convention)",
+                "Test passes with current codebase (both are currently in sync)"
+            ]
         },
         {
-            "id": "US-44-008",
-            "title": "Add cross-stage data flow integration tests for the full pipeline sequence",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "A new test file tests/integration/test_stage_transitions.py exists",
-                "Test verifies ANALYZE output (keywords, voiceover_segments) is valid input for VIDEO_SEARCH",
-                "Test verifies VIDEO_SEARCH output (video_ids, video_search_results) is valid input for CAPTION",
-                "Test verifies CAPTION output (text_metadata, caption_results) is valid input for MATCH",
-                "Test verifies MATCH output (matches, alternatives) is valid input for ITERATIVE_MATCH",
-                "All tests use mock data and do not require network access or API keys"
-            ],
-            "notes": "Done. Created tests/integration/test_stage_transitions.py with 25 tests across 5 test classes: TestAnalyzeToVideoSearch (4), TestVideoSearchToCaption (5), TestCaptionToMatch (6), TestMatchToIterativeMatch (6), TestFullChainDataFlow (4). Tests use mock data factories for VoiceoverSegment, VideoSearchResult, caption_results, text_metadata, and Match objects. Validates validate_required_state_attrs compatibility, field structure, Rule 22 compliance (video IDs not paths), and recovery paths. All 25 tests pass in 0.64s with no network access."
-        },
-        {
-            "id": "US-44-009",
-            "title": "Harmonize match serialization and deserialization validation between MATCH and ITERATIVE_MATCH stages",
+            "id": "US-45-008",
+            "title": "Add state snapshot before stage execution for rollback capability",
             "priority": "medium",
-            "passes": true,
-            "notes": "Added Match.from_dict() classmethod and restore_matches_from_dicts() shared helper in src/state.py. Both MATCH and ITERATIVE_MATCH restore methods now use the shared helper. 29 tests verify confidence clamping, type validation, legacy format, and cross-stage consistency.",
+            "passes": false,
+            "notes": "Tier: T3 (architecture enhancement). File: src/pipeline.py, lines 290-400 (stage execution loop in run()). Currently if a stage fails partway through, PipelineState may be left in an inconsistent state (partially modified by the failed stage). The only recovery is --fresh. Add a shallow copy of state before each stage runs, and restore it on failure. This is not full transactional rollback, but prevents the most common corruption scenarios.",
             "acceptanceCriteria": [
-                "ITERATIVE_MATCH restore (src/stages/iterative_match.py) applies the same confidence clamping [0,1] as MATCH restore (src/stages/match.py:284-286)",
-                "ITERATIVE_MATCH restore validates video_file is not empty string, matching MATCH stage behavior",
-                "A shared helper function (or base class method) handles match dict-to-object conversion used by both stages",
-                "Tests verify that both stages produce identical Match objects from the same checkpoint dict input",
-                "Tests verify that out-of-range confidence values (negative, >1) are clamped consistently"
-            ],
-            "notes": "Tier: T2 (consistency). Source files: src/stages/match.py:246-314 (MATCH restore with extensive validation including confidence clamping), src/stages/iterative_match.py:496-519 (ITERATIVE_MATCH restore with minimal validation). The asymmetry means invalid data that MATCH would catch and fix can slip through ITERATIVE_MATCH restore unchecked. The confidence clamping is at match.py:284-286; iterative_match.py has no equivalent."
+                "Before each stage.run() call in PipelineOrchestrator.run(), create a shallow copy of critical state fields (matches, alternatives, downloaded_segments, output_files)",
+                "On stage failure (result.success == False), restore the state to the pre-stage snapshot",
+                "Log when state rollback occurs with the stage name and fields restored",
+                "Add a test that verifies state is restored after a stage failure (mock a failing stage, check state is clean)",
+                "Existing pipeline execution is not affected when stages succeed (no performance regression from snapshot)"
+            ]
         },
         {
-            "id": "US-44-010",
-            "title": "Add video count consistency assertion between video_ids, caption_results, and text_metadata",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "MATCH stage validate_inputs() checks that len(state.caption_results) > 0 when text_metadata is populated",
-                "A warning is logged if len(state.video_ids) differs from len(state.caption_results) by more than 10%",
-                "The consistency check accounts for expected drops (failed captions, filtered videos) and only warns, does not fail",
-                "Tests verify the warning triggers when video_ids has 100 entries but caption_results only has 50",
-                "Tests verify no warning when counts differ by less than 10%"
-            ],
-            "notes": "Added two warn-only checks in validate_inputs(): (1) warns when text_metadata populated but caption_results empty, (2) warns when video_ids/caption_results drift exceeds 10%. 9 tests in tests/test_video_count_consistency.py cover threshold boundaries, empty states, and pipeline non-blocking behavior."
-        },
-        {
-            "id": "US-44-011",
-            "title": "Add checkpoint backup timestamp comparison before restore",
+            "id": "US-45-009",
+            "title": "Remove deprecated audio_first_mode parameter from create_default_pipeline",
             "priority": "low",
-            "passes": true,
+            "passes": false,
+            "notes": "Tier: T1 (dead code removal). File: src/pipeline.py, line 648. The create_default_pipeline() function still accepts audio_first_mode: bool = False with a comment 'Deprecated: now always uses caption-first'. Caption-first mode is always on (CLAUDE.md confirms this). The parameter should be removed along with any callers passing it. Also check create_match_only_pipeline and other pipeline factory functions for the same deprecated parameter.",
             "acceptanceCriteria": [
-                "CheckpointManager.load() compares timestamps of main checkpoint and backup before selecting which to restore",
-                "If backup is newer than main (indicating a mid-save crash), a warning is logged explaining the situation",
-                "If main checkpoint is corrupt, load falls back to backup with a clear log message including both timestamps",
-                "Tests verify that when main checkpoint has an older timestamp than backup, the backup is preferred",
-                "Tests verify that when main is valid and newer, main is used even if backup also exists"
-            ],
-            "notes": "Done. Refactored CheckpointManager.load() to use new _select_checkpoint() method that compares timestamps between main and backup files. Added _get_checkpoint_timestamp() helper to safely extract updated_at from checkpoint JSON, and _restore_backup_to_main() helper for backup-to-main restoration. When both main and backup exist, the newer file is preferred; if backup is newer (indicating mid-save crash), a warning is logged. Corrupt main falls back to backup with timestamps in the log message. 10 tests across 4 classes in tests/test_checkpoint_backup_timestamp.py covering all acceptance criteria."
+                "Remove audio_first_mode parameter from create_default_pipeline() in src/pipeline.py",
+                "Remove audio_first_mode parameter from any other pipeline factory functions that have it",
+                "Update all callers of create_default_pipeline() to not pass audio_first_mode",
+                "Grep for 'audio_first_mode' across the entire codebase and remove all references",
+                "python -m py_compile src/pipeline.py passes",
+                "Existing tests pass without regression"
+            ]
         },
         {
-            "id": "US-44-012",
-            "title": "Add _STATE_ATTR_DEFAULTS entries for missing state fields to prevent None fallbacks",
-            "priority": "medium",
-            "passes": true,
+            "id": "US-45-010",
+            "title": "Move config validation before checkpoint loading in pipeline orchestrator",
+            "priority": "low",
+            "passes": false,
+            "notes": "Tier: T2 (architecture improvement). File: src/pipeline.py, lines 274-279 in run(). Currently _validate_config() runs at the start of run() but after PipelineOrchestrator.__init__() which sets up the checkpoint manager and potentially loads checkpoint data. Config validation should happen in __init__() or as a separate validate() method called before run(), so that invalid configs fail fast before any expensive checkpoint I/O.",
             "acceptanceCriteria": [
-                "_STATE_ATTR_DEFAULTS in src/stages/__init__.py includes 'video_ids': [] entry",
-                "_STATE_ATTR_DEFAULTS includes 'video_search_results': [] entry",
-                "_STATE_ATTR_DEFAULTS includes 'downloaded_segments': [] entry",
-                "_STATE_ATTR_DEFAULTS includes 'output_files': [] entry",
-                "All entries in _STATE_ATTR_DEFAULTS match the default_factory types defined in PipelineState (src/state.py:131-171)",
-                "Tests verify that validate_required_state_attrs initializes missing fields to the correct type (list, dict) not None"
-            ],
-            "notes": "Complete. Added all missing PipelineState fields to _STATE_ATTR_DEFAULTS: video_search_results, downloaded_segments, output_files, otio_files, search_failed_keywords, face_preference, topic_context, extracted_entities, stage_timings. Organized entries by pipeline stage groups with comments. 28 tests in test_state_attr_defaults_us44_012.py verify type matching and correct initialization."
+                "Config validation runs during PipelineOrchestrator.__init__() or via a validate() method called before checkpoint loading",
+                "Invalid config raises a clear error before any checkpoint file I/O occurs",
+                "Add a test that PipelineOrchestrator with invalid config raises error at construction/validation time, not during run()",
+                "Existing pipeline creation with valid config works unchanged",
+                "Error messages from config validation are preserved (same content as current _validate_config)"
+            ]
+        },
+        {
+            "id": "US-45-011",
+            "title": "Consolidate entity stage registration into optional stage group",
+            "priority": "low",
+            "passes": false,
+            "notes": "Tier: T2 (architecture improvement). Files: src/stages/entity_images.py:27-28, src/stages/entity_videos.py:27-28, src/pipeline.py:645-687. EntityImagesStage and EntityVideosStage are registered via @register_stage but never added to any pipeline factory function and are not in STAGE_ORDER. They exist as orphan stages. Either: (a) add them to create_default_pipeline as optional stages between ANALYZE and VIDEO_SEARCH, or (b) remove @register_stage from them and document they are manually-added optional stages. Option (b) is preferred to keep the 7-stage pipeline clean.",
+            "acceptanceCriteria": [
+                "Remove @register_stage decorator from EntityImagesStage and EntityVideosStage",
+                "Add a docstring to each entity stage class explaining they are optional stages added manually via pipeline.add_stage()",
+                "Add a create_entity_enhanced_pipeline() factory function in src/pipeline.py that includes entity stages between ANALYZE and VIDEO_SEARCH",
+                "Document the entity pipeline variant in the module docstring of src/pipeline.py",
+                "Existing create_default_pipeline() does not include entity stages (no behavior change)",
+                "Add a test that create_entity_enhanced_pipeline() produces a pipeline with 9 stages in correct order"
+            ]
+        },
+        {
+            "id": "US-45-012",
+            "title": "Add pipeline stage contract test to verify all stages handle minimal state",
+            "priority": "low",
+            "passes": false,
+            "notes": "Tier: T3 (test infrastructure). Files: src/stages/*.py (all 7 stage files), src/state.py (PipelineState). The user interview identified that the stages module had zero test coverage for the kind of bug found (stale state references). A contract test that instantiates each registered stage and calls run() with a minimal PipelineState would catch AttributeError and similar crashes from stale references. This is a parametrized test over all stages in STAGE_ORDER.",
+            "acceptanceCriteria": [
+                "Add a parametrized test that iterates over all stage names in STAGE_ORDER",
+                "For each stage, instantiate it and call run() with a minimal PipelineState, mock Config, and mock CheckpointManager",
+                "Test asserts no AttributeError is raised (the contract: stages must handle default-initialized state)",
+                "Test allows stages to return failure StageResult (we only test they don't crash on missing attributes)",
+                "Test file is in tests/ with discoverable naming (e.g., tests/test_stage_contracts.py)",
+                "Test passes with current codebase"
+            ]
         }
     ]
 }
