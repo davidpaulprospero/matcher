@@ -576,7 +576,7 @@ def analyze_low_confidence_segments(
     # Pattern 3: Abstract content (few matched keywords with video)
     abstract_indices = []
     for i, r in low_conf_segments:
-        matched_kws = getattr(r, 'matched_keywords', []) or []
+        matched_kws = r.matched_keywords or []
         vo_seg = r.primary_match.voiceover_segment
         # Check if voiceover has abstract words without concrete nouns
         text_lower = vo_seg.text.lower()
@@ -598,7 +598,7 @@ def analyze_low_confidence_segments(
     # Pattern 4: High confidence variance (uncertain matches)
     high_variance_indices = []
     for i, r in low_conf_segments:
-        variance = getattr(r, 'confidence_variance', 0.0)
+        variance = r.confidence_variance
         if variance > 0.15:
             high_variance_indices.append(i)
 
@@ -614,7 +614,7 @@ def analyze_low_confidence_segments(
     # Pattern 5: No matched keywords between VO and video
     no_keyword_match_indices = []
     for i, r in low_conf_segments:
-        matched_kws = getattr(r, 'matched_keywords', []) or []
+        matched_kws = r.matched_keywords or []
         if len(matched_kws) == 0:
             # Don't double-count if already in missing_keywords
             if i not in no_keywords_indices:
