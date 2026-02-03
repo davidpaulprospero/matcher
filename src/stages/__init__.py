@@ -29,17 +29,20 @@ class StageMetrics:
         items_processed: Number of items successfully processed
         items_failed: Number of items that failed processing
         duration_seconds: Time taken to execute the stage
+        failed: Whether the stage failed (True) or succeeded (False)
     """
     items_processed: int = 0
     items_failed: int = 0
     duration_seconds: float = 0.0
+    failed: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary for serialization."""
         return {
             'items_processed': self.items_processed,
             'items_failed': self.items_failed,
-            'duration_seconds': self.duration_seconds
+            'duration_seconds': self.duration_seconds,
+            'failed': self.failed
         }
 
     @classmethod
@@ -48,7 +51,8 @@ class StageMetrics:
         return cls(
             items_processed=data.get('items_processed', 0),
             items_failed=data.get('items_failed', 0),
-            duration_seconds=data.get('duration_seconds', 0.0)
+            duration_seconds=data.get('duration_seconds', 0.0),
+            failed=data.get('failed', False)
         )
 
 

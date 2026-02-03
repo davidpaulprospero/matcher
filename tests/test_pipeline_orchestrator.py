@@ -1052,7 +1052,7 @@ class TestStageMetricsCollection:
 
     @pytest.mark.fast
     def test_metrics_collected_for_failed_stage(self, temp_project_dir, mock_config):
-        """Test that metrics ARE collected for failed stages (before failure)."""
+        """Test that metrics ARE collected for failed stages with failed=True."""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
         pipeline.add_stage(MockStage("fail_stage", should_fail=True))
 
@@ -1063,6 +1063,8 @@ class TestStageMetricsCollection:
         assert "fail_stage" in pipeline.stage_metrics
         # Default metrics since MockStage doesn't return metrics when failing
         assert pipeline.stage_metrics["fail_stage"].items_processed == 0
+        # Failed flag must be True
+        assert pipeline.stage_metrics["fail_stage"].failed is True
 
     @pytest.mark.fast
     def test_stage_metrics_dataclass_to_dict(self, temp_project_dir, mock_config):
@@ -1074,7 +1076,8 @@ class TestStageMetricsCollection:
         assert result == {
             'items_processed': 10,
             'items_failed': 2,
-            'duration_seconds': 5.5
+            'duration_seconds': 5.5,
+            'failed': False
         }
 
     @pytest.mark.fast
@@ -1083,7 +1086,8 @@ class TestStageMetricsCollection:
         data = {
             'items_processed': 15,
             'items_failed': 3,
-            'duration_seconds': 7.2
+            'duration_seconds': 7.2,
+            'failed': True
         }
 
         metrics = StageMetrics.from_dict(data)
@@ -1091,6 +1095,20 @@ class TestStageMetricsCollection:
         assert metrics.items_processed == 15
         assert metrics.items_failed == 3
         assert metrics.duration_seconds == 7.2
+        assert metrics.failed is True
+
+    @pytest.mark.fast
+    def test_stage_metrics_from_dict_defaults_failed_false(self, temp_project_dir, mock_config):
+        """Test StageMetrics.from_dict() defaults failed to False for legacy data."""
+        data = {
+            'items_processed': 5,
+            'items_failed': 1,
+            'duration_seconds': 2.0
+        }
+
+        metrics = StageMetrics.from_dict(data)
+
+        assert metrics.failed is False
 
     @pytest.mark.fast
     def test_stage_result_ok_with_metrics(self, temp_project_dir, mock_config):
@@ -1111,6 +1129,124 @@ class TestStageMetricsCollection:
         assert result.success is False
         assert result.metrics is metrics
         assert result.metrics.items_failed == 2
+
+
+@pytest.mark.fast
+class TestFailedStageMetricsPersistence:
+    """
+    US-44-005: Persist failed stage metrics in pipeline.
+
+    Tests that when a stage fails, its metrics (duration, items processed)
+    are stored in self.stage_metrics with failed=True.
+    """
+
+    @pytest.mark.fast
+    def test_failed_stage_has_failed_true(self, temp_project_dir, mock_config):
+        """Failed stage metrics have failed=True."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("MATCH", should_fail=True))
+
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False)
+
+        assert result is False
+        assert "MATCH" in pipeline.stage_metrics
+        assert pipeline.stage_metrics["MATCH"].failed is True
+
+    @pytest.mark.fast
+    def test_successful_stage_has_failed_false(self, temp_project_dir, mock_config):
+        """Successful stage metrics have failed=False (default)."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        assert "ANALYZE" in pipeline.stage_metrics
+        assert pipeline.stage_metrics["ANALYZE"].failed is False
+
+    @pytest.mark.fast
+    def test_failed_stage_preserves_duration(self, temp_project_dir, mock_config):
+        """Failed stage metrics include actual elapsed duration."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("CAPTION", should_fail=True, run_delay=0.05))
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False)
+
+        metrics = pipeline.stage_metrics["CAPTION"]
+        assert metrics.failed is True
+        assert metrics.duration_seconds >= 0.04  # At least ~50ms
+
+    @pytest.mark.fast
+    def test_failed_stage_preserves_items_processed(self, temp_project_dir, mock_config):
+        """Failed stage metrics include items processed before failure."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        # MockStage only returns metrics on success, so use a custom approach
+        stage = MockStage("MATCH", should_fail=True)
+        pipeline.add_stage(stage)
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False)
+
+        # Metrics exist with failed=True and default values
+        metrics = pipeline.stage_metrics["MATCH"]
+        assert metrics.failed is True
+        assert metrics.items_processed == 0
+        assert metrics.duration_seconds > 0
+
+    @pytest.mark.fast
+    def test_get_metrics_includes_failed_stages_list(self, temp_project_dir, mock_config):
+        """get_metrics() returns failed_stages list with failed stage names."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("MATCH", should_fail=True))
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False)
+
+        agg = pipeline.get_metrics()
+        assert 'failed_stages' in agg
+        assert agg['failed_stages'] == ['MATCH']
+
+    @pytest.mark.fast
+    def test_get_metrics_empty_failed_stages_on_success(self, temp_project_dir, mock_config):
+        """get_metrics() returns empty failed_stages when all stages succeed."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE"))
+        pipeline.add_stage(MockStage("OUTPUT"))
+
+        pipeline.run(resume=False)
+
+        agg = pipeline.get_metrics()
+        assert agg['failed_stages'] == []
+
+    @pytest.mark.fast
+    def test_get_summary_includes_failed_stage_metrics(self, temp_project_dir, mock_config):
+        """get_summary() includes metrics from both successful and failed stages."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(MockStage("ANALYZE", items_processed=10))
+        pipeline.add_stage(MockStage("MATCH", should_fail=True))
+
+        with patch('src.pipeline.logger'):
+            pipeline.run(resume=False)
+
+        summary = pipeline.get_summary()
+        # Both stages should appear in metrics
+        assert 'ANALYZE' in summary['metrics']['stages']
+        assert 'MATCH' in summary['metrics']['stages']
+        assert summary['metrics']['failed_stages'] == ['MATCH']
+
+    @pytest.mark.fast
+    def test_stage_metrics_to_dict_includes_failed(self, temp_project_dir, mock_config):
+        """StageMetrics.to_dict() includes the failed field."""
+        metrics = StageMetrics(items_processed=5, items_failed=1, duration_seconds=2.0, failed=True)
+        d = metrics.to_dict()
+        assert d['failed'] is True
+
+        metrics_ok = StageMetrics(items_processed=5, duration_seconds=2.0)
+        d_ok = metrics_ok.to_dict()
+        assert d_ok['failed'] is False
 
 
 @pytest.mark.fast
