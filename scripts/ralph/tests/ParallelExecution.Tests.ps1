@@ -29,7 +29,9 @@ BeforeAll {
     }
     $script:SessionLogDir = Join-Path $TestDrive 'session_logs'
     $script:ProjectRoot = $TestDrive
+    $script:StateDir = Join-Path $TestDrive 'state'
     New-Item -ItemType Directory -Path $script:SessionLogDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
 
     @{
         flags = @{ llmAsJudgeQuality = $false; acceptanceDrivenBackpressure = $false }
@@ -45,7 +47,7 @@ BeforeAll {
 
 Describe 'Get-StoryProgress' -Tag 'Unit', 'Phase4' {
     It 'Returns empty milestones when no progress file exists' {
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
         # Use story ID that won't match real git commits
         $result = Get-StoryProgress -StoryId 'XTEST-001'
         $result.storyId | Should -Be 'XTEST-001'
@@ -65,14 +67,14 @@ Describe 'Get-StoryProgress' -Tag 'Unit', 'Phase4' {
                 }
                 lastCheckpoint = 'implementation'
             }
-        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $TestDrive 'story_progress.json')
+        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:StateDir 'story_progress.json')
 
         $result = Get-StoryProgress -StoryId 'XTEST-002'
         $result.milestones.testsCreated | Should -Be $true
         $result.milestones.implementationStarted | Should -Be $true
         $result.milestones.committed | Should -Be $false
 
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
     }
 
     It 'Returns empty milestones for unknown story in existing file' {
@@ -80,21 +82,21 @@ Describe 'Get-StoryProgress' -Tag 'Unit', 'Phase4' {
             'XTEST-003' = @{
                 milestones = @{ testsCreated = $true; implementationStarted = $false; committed = $false; reviewPassed = $false }
             }
-        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $TestDrive 'story_progress.json')
+        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:StateDir 'story_progress.json')
 
         $result = Get-StoryProgress -StoryId 'XTEST-999'
         $result.milestones.testsCreated | Should -Be $false
 
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
     }
 }
 
 Describe 'Save-StoryProgress' -Tag 'Unit', 'Phase4' {
     It 'Creates progress file when none exists' {
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
         Save-StoryProgress -StoryId 'XTEST-010' -Milestone 'testsCreated' -Data @{ iteration = 1 }
 
-        $file = Join-Path $TestDrive 'story_progress.json'
+        $file = Join-Path $script:StateDir 'story_progress.json'
         Test-Path $file | Should -Be $true
         $content = Get-Content $file -Raw | ConvertFrom-Json
         $content.'XTEST-010'.milestones.testsCreated | Should -Be $true
@@ -108,25 +110,25 @@ Describe 'Save-StoryProgress' -Tag 'Unit', 'Phase4' {
                 milestones = @{ testsCreated = $true; implementationStarted = $false; committed = $false; reviewPassed = $false }
                 lastCheckpoint = 'testsCreated'
             }
-        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $TestDrive 'story_progress.json')
+        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:StateDir 'story_progress.json')
 
         Save-StoryProgress -StoryId 'XTEST-011' -Milestone 'implementationStarted' -Data @{ iteration = 2 }
 
-        $content = Get-Content (Join-Path $TestDrive 'story_progress.json') -Raw | ConvertFrom-Json
+        $content = Get-Content (Join-Path $script:StateDir 'story_progress.json') -Raw | ConvertFrom-Json
         $content.'XTEST-011'.milestones.testsCreated | Should -Be $true
         $content.'XTEST-011'.milestones.implementationStarted | Should -Be $true
 
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
     }
 
     It 'Saves completed milestone' {
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
         Save-StoryProgress -StoryId 'XTEST-012' -Milestone 'completed' -Data @{ iteration = 5; retryCount = 2 }
 
-        $content = Get-Content (Join-Path $TestDrive 'story_progress.json') -Raw | ConvertFrom-Json
+        $content = Get-Content (Join-Path $script:StateDir 'story_progress.json') -Raw | ConvertFrom-Json
         $content.'XTEST-012'.lastCheckpoint | Should -Be 'completed'
 
-        Remove-Item (Join-Path $TestDrive 'story_progress.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'story_progress.json') -ErrorAction SilentlyContinue
     }
 }
 
@@ -216,7 +218,7 @@ Describe 'Get-IndependentStories' -Tag 'Unit', 'Phase4' {
 
 Describe 'Update-LearningDb' -Tag 'Unit', 'Phase4' {
     It 'Creates learning DB file when none exists' {
-        $dbFile = Join-Path $TestDrive 'learning_db.json'
+        $dbFile = Join-Path $script:StateDir 'learning_db.json'
         Remove-Item $dbFile -ErrorAction SilentlyContinue
 
         Update-LearningDb -Entry @{
@@ -234,7 +236,7 @@ Describe 'Update-LearningDb' -Tag 'Unit', 'Phase4' {
     }
 
     It 'Appends to existing learning DB' {
-        $dbFile = Join-Path $TestDrive 'learning_db.json'
+        $dbFile = Join-Path $script:StateDir 'learning_db.json'
         @{
             entries = @(
                 @{ type = "story_success"; storyId = "XTEST-001"; timestamp = (Get-Date).ToString("o") }
@@ -256,13 +258,13 @@ Describe 'Update-LearningDb' -Tag 'Unit', 'Phase4' {
 
 Describe 'Get-LearningContext' -Tag 'Unit', 'Phase4' {
     It 'Returns empty array when no DB exists' {
-        Remove-Item (Join-Path $TestDrive 'learning_db.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'learning_db.json') -ErrorAction SilentlyContinue
         $result = @(Get-LearningContext -FocusArea 'testing')
         $result.Count | Should -Be 0
     }
 
     It 'Filters by focus area' {
-        $dbFile = Join-Path $TestDrive 'learning_db.json'
+        $dbFile = Join-Path $script:StateDir 'learning_db.json'
         @{
             entries = @(
                 @{ type = "story_success"; storyId = "XTEST-001"; focusArea = "testing"; timestamp = (Get-Date).ToString("o") },
@@ -279,7 +281,7 @@ Describe 'Get-LearningContext' -Tag 'Unit', 'Phase4' {
     }
 
     It 'Filters by error category' {
-        $dbFile = Join-Path $TestDrive 'learning_db.json'
+        $dbFile = Join-Path $script:StateDir 'learning_db.json'
         @{
             entries = @(
                 @{ type = "story_failure"; storyId = "XTEST-001"; errorCategory = "test_failure"; timestamp = (Get-Date).ToString("o") },

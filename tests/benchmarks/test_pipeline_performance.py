@@ -74,7 +74,7 @@ class TestCheckpointPerformance:
             data = {
                 'voiceover_segments': len(state.voiceover_segments),
                 'keywords': state.keywords,
-                'downloaded_videos': len(state.downloaded_videos),
+                'video_ids': len(state.video_ids),
                 'stage': 'DOWNLOAD'
             }
             with open(checkpoint_path, 'w') as f:
@@ -133,20 +133,16 @@ class TestStateManagementPerformance:
         assert benchmark.stats.stats.mean < 0.001
 
     @pytest.mark.fast
-    def test_state_with_large_transcript_dict(self, benchmark):
-        """Benchmark state with 100 videos × 50 segments each"""
+    def test_state_with_large_video_ids(self, benchmark):
+        """Benchmark state with 5000 video IDs"""
         def create_large_state():
             state = PipelineState()
-            # Simulate 100 videos with transcripts
-            for i in range(100):
-                state.transcripts[f"video_{i}"] = [
-                    {"text": f"Segment {j}", "start": j*3.0, "end": (j+1)*3.0}
-                    for j in range(50)
-                ]
+            # Simulate 5000 video IDs (large batch)
+            state.video_ids = [f"video_{i}" for i in range(5000)]
             return state
 
         result = benchmark(create_large_state)
-        assert len(result.transcripts) == 100
+        assert len(result.video_ids) == 5000
         # Should complete in < 50ms
         assert benchmark.stats.stats.mean < 0.05
 
@@ -325,16 +321,18 @@ class TestMemoryEfficiency:
         """Test memory footprint of large PipelineState"""
         def create_large_state():
             state = PipelineState()
-            # 500 videos with 100 segments each
-            for i in range(500):
-                state.transcripts[f"video_{i}"] = [
-                    {"text": f"Segment {j}" * 10, "start": j*3.0, "end": (j+1)*3.0}
-                    for j in range(100)
-                ]
+            # 500 video IDs
+            state.video_ids = [f"video_{i}" for i in range(500)]
+            # 500 text_metadata entries (50 segments each simulated)
+            state.text_metadata = [
+                {"video_id": f"video_{i}", "text": f"Segment text {j}" * 10}
+                for i in range(500)
+                for j in range(50)
+            ]
             return state
 
         result = benchmark(create_large_state)
-        assert len(result.transcripts) == 500
+        assert len(result.video_ids) == 500
 
     @pytest.mark.fast
     def test_match_result_list_memory(self, benchmark):

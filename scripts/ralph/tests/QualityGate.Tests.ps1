@@ -202,22 +202,23 @@ Describe "Get-StoryFailureContext" -Tag "Unit", "QualityGate", "Phase1" {
     }
 
     Context "First attempt" {
-        It "Returns empty string for first attempt" {
-            $result = Get-StoryFailureContext -StoryId "US-001" -RetryCount 1
-            $result | Should -BeNullOrEmpty
-        }
-
-        It "Returns empty string for zero retry count" {
+        It "Returns empty string for first attempt (RetryCount=0)" {
             $result = Get-StoryFailureContext -StoryId "US-001" -RetryCount 0
             $result | Should -BeNullOrEmpty
         }
     }
 
     Context "Retry with context" {
-        It "Returns retry context for retry count > 1" {
-            $result = Get-StoryFailureContext -StoryId "US-001" -RetryCount 2
+        It "Returns retry context for RetryCount=1 (attempt 2)" {
+            $result = Get-StoryFailureContext -StoryId "US-001" -RetryCount 1
             $result | Should -Match "RETRY CONTEXT"
             $result | Should -Match "attempt 2"
+        }
+
+        It "Returns retry context for RetryCount=2 (attempt 3)" {
+            $result = Get-StoryFailureContext -StoryId "US-001" -RetryCount 2
+            $result | Should -Match "RETRY CONTEXT"
+            $result | Should -Match "attempt 3"
         }
 
         It "Includes previous verification failures" {
@@ -264,6 +265,11 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
     BeforeAll {
         $script:RalphDir = $script:TestDataDir
+        # Create config subdirectory (Compare-TestBaseline looks in $RalphDir/config/)
+        $script:ConfigDir = Join-Path $script:TestDataDir "config"
+        if (-not (Test-Path $script:ConfigDir)) {
+            New-Item -ItemType Directory -Path $script:ConfigDir -Force | Out-Null
+        }
         function global:Get-RalphConfig {
             return [PSCustomObject]@{
                 regression = [PSCustomObject]@{ enabled = $true; blockOnRegression = $true }
@@ -271,12 +277,16 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
         }
         function global:Write-JsonNoBom {
             param([string]$Path, [string]$Content)
+            $parentDir = Split-Path -Parent $Path
+            if ($parentDir -and -not (Test-Path $parentDir)) {
+                New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+            }
             $Content | Set-Content $Path -Encoding UTF8
         }
     }
 
     BeforeEach {
-        $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+        $baselineFile = Join-Path $script:ConfigDir "test_baseline.json"
         if (Test-Path $baselineFile) {
             Remove-Item $baselineFile -Force
         }
@@ -290,7 +300,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Detects no regression when tests improve" {
             @{ capturedAt = "2026-01-01"; passed = 40; failed = 1; totalTests = 41 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             $result = Compare-TestBaseline -CurrentResults "41/41 pass"
             $result.hasRegression | Should -Be $false
@@ -299,7 +309,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Detects regression when failures increase" {
             @{ capturedAt = "2026-01-01"; passed = 41; failed = 0; totalTests = 41 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             $result = Compare-TestBaseline -CurrentResults "38/41 pass, 3 fail"
             $result.hasRegression | Should -Be $true
@@ -314,7 +324,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
             }
 
             @{ capturedAt = "2026-01-01"; passed = 41; failed = 0; totalTests = 41 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             $result = Compare-TestBaseline -CurrentResults "38/41 pass, 3 fail"
             $result | Should -BeNullOrEmpty
@@ -331,7 +341,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
     Context "Compare-TestBaseline subset detection" {
         It "Does not flag regression for subset runs (fewer tests, all passing)" {
             @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             $result = Compare-TestBaseline -CurrentResults "38/38 pass"
             $result.hasRegression | Should -Be $false
@@ -340,7 +350,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Flags regression for subset runs with new failures" {
             @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             $result = Compare-TestBaseline -CurrentResults "35/38 pass, 3 fail"
             $result.hasRegression | Should -Be $true
@@ -349,7 +359,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Flags regression for comparable runs with fewer passing" {
             @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             # 48/52 is 92% of baseline - comparable run, so drop IS a regression
             $result = Compare-TestBaseline -CurrentResults "48/52 pass"
@@ -359,7 +369,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Does not flag subset when current total is at threshold" {
             @{ capturedAt = "2026-01-01"; passed = 100; failed = 0; totalTests = 100 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             # 80/80 is exactly 80% of baseline - NOT a subset (threshold is <80%)
             $result = Compare-TestBaseline -CurrentResults "80/80 pass"
@@ -368,7 +378,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Includes currentTotal and baselineTotal in result" {
             @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52 } |
-                ConvertTo-Json | Set-Content (Join-Path $script:TestDataDir "test_baseline.json") -Encoding UTF8
+                ConvertTo-Json | Set-Content (Join-Path $script:ConfigDir "test_baseline.json") -Encoding UTF8
 
             $result = Compare-TestBaseline -CurrentResults "38/38 pass"
             $result.currentTotal | Should -Be 38
@@ -380,7 +390,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
         It "Creates baseline file from test results" {
             Update-TestBaseline -TestResults "41/41 pass"
 
-            $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+            $baselineFile = Join-Path $script:ConfigDir "test_baseline.json"
             Test-Path $baselineFile | Should -Be $true
 
             $baseline = Get-Content $baselineFile -Raw | ConvertFrom-Json
@@ -390,12 +400,12 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
         It "Skips update for empty results" {
             Update-TestBaseline -TestResults ""
-            $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+            $baselineFile = Join-Path $script:ConfigDir "test_baseline.json"
             Test-Path $baselineFile | Should -Be $false
         }
 
         It "Does not downgrade baseline from subset runs" {
-            $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+            $baselineFile = Join-Path $script:ConfigDir "test_baseline.json"
 
             # Set initial baseline with 52 tests
             @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52; errors = 0 } |
@@ -411,7 +421,7 @@ Describe "Test Baseline Functions" -Tag "Unit", "QualityGate", "Phase1" {
         }
 
         It "Updates baseline when comparable or larger run" {
-            $baselineFile = Join-Path $script:TestDataDir "test_baseline.json"
+            $baselineFile = Join-Path $script:ConfigDir "test_baseline.json"
 
             # Set initial baseline with 52 tests
             @{ capturedAt = "2026-01-01"; passed = 52; failed = 0; totalTests = 52; errors = 0 } |
@@ -435,10 +445,15 @@ Describe "Human Feedback Functions" -Tag "Unit", "QualityGate", "Phase1" {
 
     BeforeAll {
         $script:RalphDir = $script:TestDataDir
+        # Create config subdirectory (Import-HumanFeedback looks in $RalphDir/config/)
+        $script:ConfigDir = Join-Path $script:TestDataDir "config"
+        if (-not (Test-Path $script:ConfigDir)) {
+            New-Item -ItemType Directory -Path $script:ConfigDir -Force | Out-Null
+        }
     }
 
     BeforeEach {
-        $feedbackFile = Join-Path $script:TestDataDir "feedback.json"
+        $feedbackFile = Join-Path $script:ConfigDir "feedback.json"
         if (Test-Path $feedbackFile) {
             Remove-Item $feedbackFile -Force
         }
@@ -456,14 +471,14 @@ Describe "Human Feedback Functions" -Tag "Unit", "QualityGate", "Phase1" {
                     @{ feedback = "Use more descriptive variable names"; focusArea = "quality" }
                     @{ feedback = "Always add type hints"; priority = "high" }
                 )
-            } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:TestDataDir "feedback.json") -Encoding UTF8
+            } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:ConfigDir "feedback.json") -Encoding UTF8
 
             $result = Import-HumanFeedback
             $result.Count | Should -Be 2
         }
 
         It "Handles malformed JSON gracefully" {
-            "not json" | Set-Content (Join-Path $script:TestDataDir "feedback.json") -Encoding UTF8
+            "not json" | Set-Content (Join-Path $script:ConfigDir "feedback.json") -Encoding UTF8
             $result = Import-HumanFeedback
             $result.Count | Should -Be 0
         }
@@ -478,7 +493,7 @@ Describe "Human Feedback Functions" -Tag "Unit", "QualityGate", "Phase1" {
                     @{ feedback = "Follow PEP8"; keywords = @("style", "format") }
                     @{ feedback = "Global: keep it simple" }
                 )
-            } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:TestDataDir "feedback.json") -Encoding UTF8
+            } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:ConfigDir "feedback.json") -Encoding UTF8
         }
 
         It "Matches by story ID" {
@@ -504,7 +519,7 @@ Describe "Human Feedback Functions" -Tag "Unit", "QualityGate", "Phase1" {
                 entries = @(
                     @{ feedback = "Only for US-001"; storyId = "US-001" }
                 )
-            } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:TestDataDir "feedback.json") -Encoding UTF8
+            } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:ConfigDir "feedback.json") -Encoding UTF8
 
             $story = [PSCustomObject]@{ title = "Something"; acceptanceCriteria = @() }
             $result = Get-FeedbackForStory -StoryId "US-999" -Story $story -FocusArea "otio"

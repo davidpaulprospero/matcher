@@ -553,6 +553,47 @@ function Invoke-ClaudeForStory {
     # Invoke the common process handler
     $success = Invoke-ClaudeProcess -Prompt $prompt -PromptType "story_work" -Identifier $StoryId -FocusArea $focusArea -StoryObj $storyObj
 
+    # Post-success validation: verify prd.json was actually updated
+    # Prevents infinite loop when Claude exits 0 but doesn't set passes: true
+    if ($success) {
+        $freshPrd = Get-Sprint
+        if ($freshPrd) {
+            $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+            if ($freshStory -and -not $freshStory.passes) {
+                Write-Host "  [PHANTOM] Story $StoryId reported success but passes is still false in prd.json" -ForegroundColor Yellow
+
+                # Track phantom successes per story
+                if (-not $script:PhantomSuccesses) { $script:PhantomSuccesses = @{} }
+                if (-not $script:PhantomSuccesses.ContainsKey($StoryId)) { $script:PhantomSuccesses[$StoryId] = 0 }
+                $script:PhantomSuccesses[$StoryId]++
+
+                $phantomCount = $script:PhantomSuccesses[$StoryId]
+                Write-Host "  [PHANTOM] Phantom success count for $StoryId`: $phantomCount" -ForegroundColor Yellow
+
+                # Treat as failure so hard-story detection kicks in
+                $success = $false
+
+                if ($phantomCount -ge 2) {
+                    Write-Host "  [PHANTOM] $StoryId has $phantomCount phantom successes - marking as hard story" -ForegroundColor Red
+                    Mark-AsHardStory `
+                        -StoryId $StoryId `
+                        -Errors @(@{ ErrorType = "phantom_success"; ErrorMessage = "Story reports success but passes remains false ($phantomCount times)"; Timestamp = (Get-Date).ToString("o") }) `
+                        -Reason "phantom_success" `
+                        -FocusArea $focusArea `
+                        -StoryTitle $(if ($storyObj) { $storyObj.title } else { "Unknown" })
+
+                    Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "HARD STORY: Phantom success - exits 0 but never sets passes: true"
+
+                    # Reset tracking
+                    $script:PhantomSuccesses.Remove($StoryId)
+                    $script:State.CurrentStoryErrors = @()
+                    $script:State.CurrentStoryStartTime = $null
+                    return $false
+                }
+            }
+        }
+    }
+
     # Check for hard story conditions
     if (-not $success) {
         # Track error

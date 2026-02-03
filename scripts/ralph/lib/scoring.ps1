@@ -313,7 +313,7 @@ function Get-OptimalNextStory {
     .DESCRIPTION
         Replaces simple "first incomplete" ordering with intelligent selection
         considering failure history, dependencies, test-first preference, and
-        file conflict risk.
+        file conflict risk. Also skips stories marked as "hard" in the archive.
     .PARAMETER Stories
         Array of story objects from PRD
     .PARAMETER Metrics
@@ -329,10 +329,17 @@ function Get-OptimalNextStory {
     $config = Get-RalphConfig
     $smartEnabled = $config.ordering -and $config.ordering.smart
 
+    # Get hard stories archive to skip stories that are already marked as hard
+    $hardArchive = Get-HardStoriesArchive
+    $hardStoryIds = @()
+    if ($hardArchive -and $hardArchive.stories) {
+        $hardStoryIds = @($hardArchive.stories | Where-Object { $_.finalStatus -eq "pending_decomposition" } | ForEach-Object { $_.originalId })
+    }
+
     if (-not $smartEnabled) {
-        # Fallback: first incomplete story (original behavior)
+        # Fallback: first incomplete story (original behavior), but skip hard stories
         foreach ($story in $Stories) {
-            if (-not $story.passes) {
+            if (-not $story.passes -and $story.id -notin $hardStoryIds) {
                 return $story
             }
         }
@@ -345,6 +352,12 @@ function Get-OptimalNextStory {
     $candidates = @()
     foreach ($story in $Stories) {
         if ($story.passes) { continue }
+
+        # Skip stories marked as hard (pending decomposition)
+        if ($story.id -in $hardStoryIds) {
+            Write-Host "  Skipping hard story: $($story.id)" -ForegroundColor DarkGray
+            continue
+        }
 
         $storyId = $story.id
         $score = 100  # Base score
