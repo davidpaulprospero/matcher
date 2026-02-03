@@ -48,7 +48,7 @@
             "id": "US-48-003",
             "title": "Fix iterative_match serialization to extract video_file from MatchResult structure",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Change serialization at iterative_match.py:427 to drill into match.primary_match.video_segment.source_file instead of getattr(match, 'video_file', '')",
                 "Follow the same pattern used in match.py:160-167 for extracting source_file from MatchResult objects",
@@ -56,13 +56,13 @@
                 "Add unit test verifying restore_matches_from_dicts() accepts the corrected serialization format",
                 "Add unit test confirming the old format (empty video_file) is detected and logged as a warning during restore"
             ],
-            "notes": "Tier: bug fix (user-reported Issue 2). Files: src/stages/iterative_match.py:421-436 (serialization loop), src/stages/match.py:157-182 (correct pattern), src/utils.py:507-517 (MatchResult dataclass). The MATCH stage correctly serializes using match.primary_match.video_segment.source_file (match.py:167), but ITERATIVE_MATCH uses getattr(match, 'video_file', '') which always returns '' because MatchResult has no video_file attribute. This causes all 566 matches to be saved with empty video_file, and Match.from_dict() rejects them all on checkpoint restore. Also need to serialize video_start/video_end from primary_match.video_segment.start_time/end_time instead of getattr(match, 'video_start', 0.0)."
+            "notes": "Completed. Fixed iterative_match serialization to extract video_file from match.primary_match.video_segment.source_file instead of the broken getattr(match, 'video_file', '') pattern. Also fixed video_start/video_end to use primary_match.video_segment.start_time/end_time. Follows the same pattern used in match.py:160-167. Added unit tests verifying: (1) serialized output contains non-empty video_file/source_file from MatchResult, (2) restore_matches_from_dicts() accepts the corrected format, (3) old format with empty video_file is detected and logged as warning during restore."
         },
         {
             "id": "US-48-004",
             "title": "Add network failure circuit breaker to download_segments stage",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add consecutive network failure tracking to _download_segments() loop with configurable threshold (default: 3)",
                 "Detect DNS resolution failures (Errno 11001, 'getaddrinfo failed', 'Name or service not known') and network unreachable errors as systemic failures",
@@ -71,7 +71,7 @@
                 "Add unit test verifying early abort after 3 consecutive DNS failures with remaining segments skipped",
                 "Add unit test verifying counter resets after a successful download between failures"
             ],
-            "notes": "Tier: bug fix (user-reported Issue 3). Files: src/stages/download_segments.py:240-252 (exception handler in download loop), src/stages/download_segments.py:188-257 (full download loop). Currently each failure is caught individually and added to retry queue, but the loop continues trying every remaining segment. For systemic issues (DNS down, no internet), this wastes time on hundreds of segments that will all fail. The existing CircuitBreaker in src/downloader/circuit_breaker.py is designed for search failures in core.py and uses time.sleep() pauses, which is wrong for download_segments (should abort, not pause). Need a lightweight consecutive-failure counter specific to this stage. Also detect ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as network-related."
+            "notes": "Completed. Added _is_network_failure() helper detecting DNS errors (getaddrinfo failed, Errno 11001, Name or service not known, nodename nor servname, Network is unreachable, Temporary failure in name resolution, No address associated with hostname) plus ffmpeg exit code 4294967158. Added consecutive_network_failures counter to _download_segments() loop with NETWORK_FAILURE_THRESHOLD=3 default. Counter resets on successful download or cached file hit. Non-network errors (403, removed) reset counter too since they're video-specific. Added 5 unit tests: DNS error detection, early abort after 3 consecutive failures, counter reset on success, non-network errors don't trigger abort, checkpoint before abort. All 27 tests pass."
         },
         {
             "id": "US-48-005",
