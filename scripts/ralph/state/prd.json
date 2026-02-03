@@ -176,7 +176,7 @@
             "id": "US-47-012",
             "title": "Add matching metrics edge case and histogram tests",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add tests for calculate_match_quality_metrics with numpy.float32 confidence values (Rule 7)",
                 "Add tests for calculate_match_quality_metrics with single match (std=0.0 edge case)",
@@ -184,7 +184,7 @@
                 "Add tests for MatchQualityMetrics.from_dict() with missing fields and extra fields",
                 "All tests in tests/test_matching_metrics_edge_cases.py must pass"
             ],
-            "notes": "Tier: T3 (edge cases). Source file: src/matching/metrics.py (242 lines). Existing tests in test_match_quality_metrics.py and test_confidence_histogram.py cover happy paths but not edge cases. Key edge cases: numpy.float32 values (line 128 converts to float - verify this works), single match producing std=0.0 (line 137 checks len>=2), empty match list, has_gap=True scenarios, histogram with all values in one bucket."
+            "notes": "COMPLETED. 24 tests in tests/test_matching_metrics_edge_cases.py across 8 test classes: TestNumpyFloat32Confidences (4 tests: float32 conversion, JSON serialization, std calculation, float64 handling), TestSingleMatchStdZero (3 tests: MatchResult std=0, direct Match std=0, avg==min==max), TestEmptyMatchList (3 tests: positive segments, zero segments, negative segments), TestHasGapScenarios (3 tests: all gaps, mixed gap/no-gap, no primary_match as gap), TestHistogramEdgeCasesExtended (6 tests: empty list, single value, all-same-bucket 100%, all zeros, all ones, returns string), TestFromDictEdgeCases (5 tests: empty dict defaults, partial dict, extra fields ignored, numpy roundtrip, int-for-float coercion)."
         }
     ]
 }
