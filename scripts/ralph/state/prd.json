@@ -77,7 +77,7 @@
             "id": "US-49-005",
             "title": "Add global bot-detection counter with escalation tier floor",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add a stage-level consecutive_bot_detection counter that increments on any 403/bot-detection error across all video IDs",
                 "When counter exceeds configurable threshold (default 5), set a global tier floor so subsequent downloads start at max escalation tier instead of Tier 1",
@@ -86,7 +86,7 @@
                 "Add unit test verifying tier floor propagation after N consecutive bot-detection errors across different video IDs",
                 "Add unit test verifying bot-detection errors no longer reset the network failure counter"
             ],
-            "notes": "P2 fix - Issue #6 from user interview. Tier: resilience improvement. Each video_id currently creates fresh escalation state starting at Tier 1 (download_segments.py:464-466). When YouTube blocks broadly, every video independently fails at Tier 1 then gets queued for retry — wasting time on doomed requests. Bot-detection errors also reset the network failure abort counter (download_segments.py:558-560), preventing early abort. Need a stage-level signal that propagates the 'YouTube is blocking everything' state. The EscalationManager.set_circuit_breaker() exists but is never called — wire it up. Source files: src/stages/download_segments.py:464-466, 536-560, src/downloader/escalation_manager.py:330 (circuit breaker shortcut logic)."
+            "notes": "Implemented stage-level consecutive_bot_detections counter in download_segments._download_segments(). Added bot_detection_tier_floor_threshold config field (default 5) to DownloadConfig and config.yaml. When threshold is exceeded, calls escalation_mgr.set_tier_floor(VPN_ROTATION) so new video IDs start at max tier. Counter resets on any successful download (including cached) and clears the tier floor. Bot-detection errors no longer reset consecutive_network_failures — only non-network, non-bot errors reset it. Added set_tier_floor()/clear_tier_floor() to EscalationManager with _get_state() floor enforcement. 5 new tests in TestBotDetectionTierFloor: tier floor activation, reset on success, disabled when threshold=0, bot errors don't reset network counter, non-bot errors still reset counter. 101/101 related tests pass."
         },
         {
             "id": "US-49-006",

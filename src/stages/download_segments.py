@@ -400,6 +400,7 @@ class DownloadVideoSegmentsStage(Stage):
         downloaded = []
         total = len(segments)
         consecutive_network_failures = 0
+        consecutive_bot_detections = 0  # US-49-005: stage-level bot-detection counter
 
         # Progress counters
         stats = {
@@ -419,6 +420,14 @@ class DownloadVideoSegmentsStage(Stage):
         if self.downloader:
             escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
             cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
+
+        # US-49-005: Read bot-detection tier floor threshold from config
+        _dl_cfg_top = getattr(self.downloader, 'download_config', None) if self.downloader else None
+        _bot_floor_threshold = 5  # default
+        if _dl_cfg_top:
+            _bot_floor_threshold = int(getattr(
+                _dl_cfg_top, 'bot_detection_tier_floor_threshold', 5
+            ))
 
         for idx, seg in enumerate(segments, 1):
             video_id = seg['video_id']
@@ -442,6 +451,11 @@ class DownloadVideoSegmentsStage(Stage):
                 except OSError:
                     pass
                 consecutive_network_failures = 0  # Cached file counts as success
+                # US-49-005: Reset bot-detection counter on success
+                if consecutive_bot_detections > 0:
+                    consecutive_bot_detections = 0
+                    if escalation_mgr:
+                        escalation_mgr.clear_tier_floor()
                 self._print_progress(idx, total, stats)
                 continue
 
@@ -574,6 +588,11 @@ class DownloadVideoSegmentsStage(Stage):
                     except OSError:
                         pass
                     consecutive_network_failures = 0  # Reset on success
+                    # US-49-005: Reset bot-detection counter on success
+                    if consecutive_bot_detections > 0:
+                        consecutive_bot_detections = 0
+                        if escalation_mgr:
+                            escalation_mgr.clear_tier_floor()
                     self._print_progress(idx, total, stats)
                     # Record success with escalation manager
                     if escalation_mgr:
@@ -592,14 +611,32 @@ class DownloadVideoSegmentsStage(Stage):
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
                 # US-48-005: Record failure with escalation manager for tier progression
-                if escalation_mgr and _is_escalation_error(error_msg):
+                is_bot_error = _is_escalation_error(error_msg)
+                if escalation_mgr and is_bot_error:
                     escalation_mgr.record_failure(video_id, error_msg)
                     # Advance cookie rotation on Tier 3+ auth errors
                     if cookie_rotator and getattr(cookie_rotator, 'should_rotate', None):
                         if cookie_rotator.should_rotate(error_msg):
                             cookie_rotator.rotate()
 
+                # US-49-005: Track stage-level bot-detection counter
+                if is_bot_error:
+                    consecutive_bot_detections += 1
+                    if (
+                        _bot_floor_threshold > 0
+                        and consecutive_bot_detections >= _bot_floor_threshold
+                        and escalation_mgr
+                    ):
+                        from ..downloader.types import EscalationTier
+                        escalation_mgr.set_tier_floor(EscalationTier.VPN_ROTATION)
+                        logger.warning(
+                            f"Bot-detection tier floor activated: "
+                            f"{consecutive_bot_detections} consecutive bot-detection "
+                            f"errors across video IDs — new downloads start at max tier"
+                        )
+
                 # Track consecutive network failures for early abort
+                # US-49-005: Bot-detection errors do NOT reset the network failure counter
                 if _is_network_failure(error_msg):
                     consecutive_network_failures += 1
                     logger.warning(
@@ -622,8 +659,9 @@ class DownloadVideoSegmentsStage(Stage):
                         if progress_callback:
                             progress_callback(idx, total, downloaded)
                         break
-                else:
-                    # Non-network error (403, removed, etc.) — reset counter
+                elif not is_bot_error:
+                    # Only non-network, non-bot errors reset the counter
+                    # (e.g., video removed, age-gated without bot detection)
                     consecutive_network_failures = 0
 
                 self._print_progress(idx, total, stats)

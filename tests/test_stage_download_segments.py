@@ -2723,3 +2723,228 @@ class TestSegmentStallTimeout:
 
         # If it worked, the download completed successfully (no timeout at 90s)
         assert len(downloaded) == 1
+
+
+# ============================================================================
+# Bot-Detection Tier Floor (US-49-005)
+# ============================================================================
+
+class TestBotDetectionTierFloor:
+    """Test stage-level bot-detection counter and global tier floor propagation.
+
+    US-49-005: When YouTube blocks broadly, consecutive 403/bot-detection errors
+    across different video IDs should activate a tier floor so new downloads
+    start at max escalation tier instead of Tier 1.
+    """
+
+    def _make_downloader_with_escalation(self, threshold=5):
+        """Create a mock downloader with real EscalationManager for tier floor testing."""
+        from src.downloader.escalation_manager import EscalationManager
+        from unittest.mock import MagicMock
+
+        mock_imp_mgr = MagicMock()
+        mock_imp_mgr.get_impersonate_args.return_value = ['--impersonate', 'Chrome-136:Macos-15']
+        escalation_mgr = EscalationManager(impersonation_manager=mock_imp_mgr)
+
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 0  # Disable stall detection for fast tests
+        mock_download_config.bot_detection_tier_floor_threshold = threshold
+        mock_download_config.cookies_from_browser = ''
+        mock_download_config.cookies_path = ''
+        mock_download_config.cookie_rotation = None
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.escalation_manager = escalation_mgr
+        mock_downloader.impersonation_manager = mock_imp_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+
+        return mock_downloader, escalation_mgr
+
+    @pytest.mark.fast
+    def test_tier_floor_activated_after_threshold_bot_errors(self, stage, tmp_path):
+        """After N consecutive bot-detection errors across different video IDs,
+        global tier floor is set so new downloads start at max tier."""
+        from src.downloader.types import EscalationTier
+
+        mock_downloader, escalation_mgr = self._make_downloader_with_escalation(threshold=3)
+        stage.downloader = mock_downloader
+
+        # 5 segments with different video IDs — all produce 403 errors
+        segments = [
+            {'video_id': f'bot_floor_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("HTTP Error 403: Forbidden")
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # After 3 consecutive bot-detection errors, tier floor should be set
+        assert escalation_mgr._tier_floor == EscalationTier.VPN_ROTATION
+
+        # New keyword state should start at the floor tier
+        state = escalation_mgr._get_state('new_keyword_never_seen')
+        assert state.current_tier == EscalationTier.VPN_ROTATION
+
+    @pytest.mark.fast
+    def test_tier_floor_resets_on_successful_download(self, stage, tmp_path):
+        """Successful download resets the bot-detection counter and clears tier floor."""
+        from src.downloader.types import EscalationTier
+
+        mock_downloader, escalation_mgr = self._make_downloader_with_escalation(threshold=2)
+        stage.downloader = mock_downloader
+
+        # 4 segments: 2 bot errors (activates floor), then 1 success (resets), then 1 bot error
+        segments = [
+            {'video_id': f'reset_test_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(4)
+        ]
+
+        call_idx = [0]
+
+        def mock_download(urls):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            if idx == 2:
+                # Simulate success: create the output file
+                vid = segments[idx]['video_id']
+                (tmp_path / f"{vid}_0_15.mp4").write_bytes(b'\x00' * 512)
+                return
+            raise Exception("HTTP Error 403: Forbidden")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # After success at index 2, tier floor should have been cleared
+        assert escalation_mgr._tier_floor is None
+
+    @pytest.mark.fast
+    def test_tier_floor_disabled_when_threshold_zero(self, stage, tmp_path):
+        """When bot_detection_tier_floor_threshold=0, tier floor is never activated."""
+        mock_downloader, escalation_mgr = self._make_downloader_with_escalation(threshold=0)
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': f'disabled_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("HTTP Error 403: Forbidden")
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Tier floor should NOT be set when threshold is 0
+        assert escalation_mgr._tier_floor is None
+
+    @pytest.mark.fast
+    def test_bot_errors_do_not_reset_network_failure_counter(self, stage, tmp_path):
+        """Bot-detection errors (403) should not reset the consecutive network failure counter.
+
+        Sequence: network_fail, 403_error, network_fail, network_fail → should abort
+        Previously: the 403 at index 1 would reset the counter, requiring 3 more
+        network failures to abort. Now it shouldn't reset."""
+        stage.downloader = None  # No escalation manager
+
+        segments = [
+            {'video_id': f'mixed_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(6)
+        ]
+
+        call_idx = [0]
+
+        def mock_download(urls):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            if idx == 1:
+                # 403/bot error — should NOT reset network failure counter
+                raise Exception("HTTP Error 403: Forbidden")
+            else:
+                # Network failure
+                raise OSError("[Errno 11001] getaddrinfo failed")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            result, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Sequence: seg0=network(counter=1), seg1=403(counter stays 1),
+        # seg2=network(counter=2), seg3=network(counter=3) → ABORT
+        # Should NOT try segments 4 and 5
+        assert mock_ydl_class.call_count == 4
+        assert stats['failed'] == 4
+
+    @pytest.mark.fast
+    def test_non_bot_non_network_errors_still_reset_counter(self, stage, tmp_path):
+        """Errors that are neither network nor bot-detection should still reset
+        the network failure counter (e.g. 'Video unavailable')."""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': f'benign_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(6)
+        ]
+
+        call_idx = [0]
+
+        def mock_download(urls):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            if idx == 1:
+                # Non-network, non-bot error — should reset counter
+                raise Exception("Video unavailable")
+            else:
+                raise OSError("[Errno 11001] getaddrinfo failed")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            result, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Sequence: seg0=network(counter=1), seg1=benign_error(counter=0),
+        # seg2=network(counter=1), seg3=network(counter=2), seg4=network(counter=3) → ABORT
+        # All 5 segments attempted before abort at seg4 (3rd consecutive)
+        # Wait: counter=1 at seg0, reset to 0 at seg1, then seg2=1, seg3=2, seg4=3 → ABORT
+        assert mock_ydl_class.call_count == 5
+        assert stats['failed'] == 5
