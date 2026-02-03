@@ -564,10 +564,27 @@ function Invoke-ClaudeSubprocess {
         }
     }
     finally {
+        # Timeout-protected event cleanup — Remove-Job can deadlock when child processes
+        # (e.g. Node.js subagents) inherit stdout/stderr pipe handles and hold them open
+        # after the main Claude process exits. Same .NET pipe-handle issue as WaitForExit().
         Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
         Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
-        Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
-        Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+        Stop-Job -Job $outEvent -ErrorAction SilentlyContinue
+        Stop-Job -Job $errEvent -ErrorAction SilentlyContinue
+        # Timeout-protected Remove-Job using [powershell]::Create() for proper runspace.
+        # Raw [System.Threading.Thread] with PowerShell cmdlets causes unhandled exceptions
+        # that crash the host process (.NET Framework terminates on unhandled thread exceptions).
+        $ps = [powershell]::Create()
+        $ps.AddScript({
+            param($outJob, $errJob)
+            Remove-Job -Job $outJob -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errJob -Force -ErrorAction SilentlyContinue
+        }).AddArgument($outEvent).AddArgument($errEvent) | Out-Null
+        $asyncResult = $ps.BeginInvoke()
+        if (-not $asyncResult.AsyncWaitHandle.WaitOne(5000)) {
+            Write-Host "  Warning: Event cleanup timed out (pipe handle deadlock avoided)" -ForegroundColor Yellow
+        }
+        $ps.Dispose()
 
         # Poll until output buffer stabilizes (max 2 seconds)
         # This ensures async event handlers have fully drained before we read the buffer
