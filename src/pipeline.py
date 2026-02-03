@@ -677,7 +677,6 @@ class PipelineOrchestrator:
 def create_default_pipeline(
     config: 'Config',
     project_dir: Path,
-    audio_first_mode: bool = False  # Deprecated: now always uses caption-first
 ) -> PipelineOrchestrator:
     """
     Create a pipeline with the simplified 7-stage order.
@@ -691,7 +690,6 @@ def create_default_pipeline(
     Args:
         config: Configuration object
         project_dir: Project directory path
-        audio_first_mode: Deprecated, ignored (caption-first is now default)
 
     Returns:
         Configured PipelineOrchestrator
@@ -766,7 +764,6 @@ def create_match_only_pipeline(
 def create_healing_pipeline(
     config: 'Config',
     project_dir: Path,
-    audio_first_mode: bool = False
 ) -> Tuple['PipelineOrchestrator', Optional['HealingOrchestrator'], Optional['ResilientRunner']]:
     """
     Create a pipeline with self-healing enabled (default behavior).
@@ -777,7 +774,6 @@ def create_healing_pipeline(
     Args:
         config: Configuration object
         project_dir: Project directory path
-        audio_first_mode: If True, uses audio-first download pipeline
 
     Returns:
         Tuple of (PipelineOrchestrator, HealingOrchestrator or None, ResilientRunner or None)
@@ -792,7 +788,7 @@ def create_healing_pipeline(
             success = pipeline.run()
     """
     # Create base pipeline
-    pipeline = create_default_pipeline(config, project_dir, audio_first_mode)
+    pipeline = create_default_pipeline(config, project_dir)
 
     # Check if healing is enabled
     healing_config = getattr(config, 'healing', None)
@@ -916,7 +912,6 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
 def run_pipeline_with_healing(
     config: 'Config',
     project_dir: Path,
-    audio_first_mode: bool = False,
     resume: bool = True
 ) -> bool:
     """
@@ -925,14 +920,13 @@ def run_pipeline_with_healing(
     Args:
         config: Configuration object
         project_dir: Project directory path
-        audio_first_mode: If True, uses audio-first download pipeline
         resume: Whether to resume from checkpoint
 
     Returns:
         True if pipeline completed successfully
     """
     pipeline, orchestrator, runner = create_healing_pipeline(
-        config, project_dir, audio_first_mode
+        config, project_dir
     )
 
     if runner:

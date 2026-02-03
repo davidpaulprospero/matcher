@@ -444,7 +444,7 @@ class TestPipelineFactories:
         """Test creating default pipeline (7-stage: v4.0)."""
         config = Config()
 
-        pipeline = create_default_pipeline(config, temp_dir, audio_first_mode=False)
+        pipeline = create_default_pipeline(config, temp_dir)
 
         assert isinstance(pipeline, PipelineOrchestrator)
         assert len(pipeline.stages) == 7
@@ -462,7 +462,7 @@ class TestPipelineFactories:
     def test_create_default_pipeline_stage_order(self, temp_dir):
         """Test that pipeline stages are in correct order (7-stage: v4.0)."""
         config = Config()
-        pipeline = create_default_pipeline(config, temp_dir, audio_first_mode=False)
+        pipeline = create_default_pipeline(config, temp_dir)
         stage_names = [s.name for s in pipeline.stages]
 
         # Verify exact order of all 7 stages
@@ -484,23 +484,6 @@ class TestPipelineFactories:
         # Verify MATCH comes after CAPTION
         assert stage_names.index("CAPTION") < stage_names.index("MATCH"), \
             "CAPTION must run before MATCH (matching needs caption data)"
-
-    @pytest.mark.fast
-    def test_create_default_pipeline_audio_first(self, temp_dir):
-        """Test creating default pipeline with audio-first mode."""
-        config = Config()
-
-        pipeline = create_default_pipeline(config, temp_dir, audio_first_mode=True)
-
-        stage_names = [s.name for s in pipeline.stages]
-        # Should have DOWNLOAD_SEGMENTS stage after MATCH
-        assert "DOWNLOAD_SEGMENTS" in stage_names
-
-        # DOWNLOAD_SEGMENTS should come after MATCH and before OUTPUT
-        match_idx = stage_names.index("MATCH")
-        download_segments_idx = stage_names.index("DOWNLOAD_SEGMENTS")
-        output_idx = stage_names.index("OUTPUT")
-        assert match_idx < download_segments_idx < output_idx
 
     @pytest.mark.fast
     def test_create_match_only_pipeline(self, temp_dir):

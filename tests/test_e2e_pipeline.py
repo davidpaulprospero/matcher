@@ -432,20 +432,6 @@ class TestPipelineFactories:
         assert "OUTPUT" in stage_names
 
     @pytest.mark.fast
-    def test_create_default_pipeline_audio_first(self, mock_config, temp_project_dir):
-        """Test creating audio-first pipeline"""
-        pipeline = create_default_pipeline(
-            mock_config,
-            temp_project_dir,
-            audio_first_mode=True
-        )
-
-        stage_names = [s.name for s in pipeline.stages]
-
-        # Audio-first should include DOWNLOAD_SEGMENTS stage
-        assert "DOWNLOAD_SEGMENTS" in stage_names
-
-    @pytest.mark.fast
     def test_create_match_only_pipeline(self, mock_config, temp_project_dir):
         """Test creating match-only pipeline"""
         pipeline = create_match_only_pipeline(mock_config, temp_project_dir)

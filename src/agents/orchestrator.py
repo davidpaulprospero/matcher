@@ -1285,7 +1285,6 @@ def create_orchestrated_pipeline(
     config: 'Config',
     project_dir: Path,
     strategy: HealingStrategy = None,
-    audio_first_mode: bool = False
 ) -> Tuple['PipelineOrchestrator', 'HealingOrchestrator', 'ResilientRunner']:
     """
     Create a fully orchestrated pipeline with healing.
@@ -1297,7 +1296,7 @@ def create_orchestrated_pipeline(
     from .runner import ResilientRunner
 
     # Create components
-    pipeline = create_default_pipeline(config, project_dir, audio_first_mode)
+    pipeline = create_default_pipeline(config, project_dir)
     orchestrator = HealingOrchestrator(config, project_dir, strategy)
     runner = ResilientRunner(config, project_dir)
 

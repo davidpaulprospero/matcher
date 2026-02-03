@@ -404,7 +404,6 @@ class ResilientRunner:
 def create_resilient_pipeline(
     config: 'Config',
     project_dir: Path,
-    audio_first_mode: bool = False,
     strategy: 'HealingStrategy' = None
 ) -> tuple:
     """
@@ -413,7 +412,6 @@ def create_resilient_pipeline(
     Args:
         config: Pipeline configuration
         project_dir: Project directory path
-        audio_first_mode: Use audio-first download mode
         strategy: Optional healing strategy
 
     Returns:
@@ -422,7 +420,7 @@ def create_resilient_pipeline(
     from ..pipeline import create_default_pipeline
     from .orchestrator import HealingOrchestrator
 
-    pipeline = create_default_pipeline(config, project_dir, audio_first_mode)
+    pipeline = create_default_pipeline(config, project_dir)
 
     # Create orchestrator if strategy provided
     orchestrator = None
@@ -437,7 +435,6 @@ def create_resilient_pipeline(
 def create_orchestrated_pipeline(
     config: 'Config',
     project_dir: Path,
-    audio_first_mode: bool = False,
     strategy: 'HealingStrategy' = None
 ) -> tuple:
     """
@@ -452,7 +449,7 @@ def create_orchestrated_pipeline(
 
     strategy = strategy or HealingStrategy.conservative()
 
-    pipeline = create_default_pipeline(config, project_dir, audio_first_mode)
+    pipeline = create_default_pipeline(config, project_dir)
     orchestrator = HealingOrchestrator(config, project_dir, strategy)
     runner = ResilientRunner(config, project_dir, orchestrator=orchestrator)
 
