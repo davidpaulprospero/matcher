@@ -161,14 +161,14 @@
       "id": "US-46-011",
       "title": "Add low-confidence analysis patterns for keyword and source concentration",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add missing keywords pattern to analyze_low_confidence_segments in src/matching/main.py: detect segments where matched_keywords list is empty despite keywords being available",
         "Add source concentration pattern: detect when multiple low-confidence segments all rely on the same source video, suggesting the video pool is too narrow",
         "Add confidence variance pattern entry at lines 599-602 where variance is checked but no pattern object is created",
         "Add test in tests/test_matching_main_extended.py verifying new patterns appear in analysis results for matching scenarios with empty keywords and concentrated sources"
       ],
-      "notes": "Tier: T3 (diagnostic improvement). Files: src/matching/main.py lines 487-660 (analyze_low_confidence_segments function). Currently identifies some patterns but misses: empty matched_keywords, source concentration across segments, and confidence variance (checked but not reported). Better diagnostics help users understand why matches are poor."
+      "notes": "Added source_concentration pattern to analyze_low_confidence_segments (3+ low-conf segments from same source). Verified existing patterns: missing_keywords, no_keyword_overlap, high_variance already implemented. Added 8 tests in TestLowConfidenceAnalysisPatterns class in test_matching_main_extended.py. All 61 tests pass."
     },
     {
       "id": "US-46-012",

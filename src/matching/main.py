@@ -629,6 +629,30 @@ def analyze_low_confidence_segments(
         ))
         suggestions.append("Ensure video candidates have relevant transcripts or metadata")
 
+    # Pattern 6: Source concentration (multiple low-conf segments use same video)
+    source_counts: Dict[str, List[int]] = {}
+    for i, r in low_conf_segments:
+        source = r.primary_match.video_segment.source_file
+        if source:
+            source_counts.setdefault(source, []).append(i)
+
+    concentrated_sources = {src: indices for src, indices in source_counts.items() if len(indices) >= 3}
+    if concentrated_sources:
+        # Collect all segment indices affected by source concentration
+        concentrated_indices = []
+        for indices in concentrated_sources.values():
+            concentrated_indices.extend(indices)
+        concentrated_indices = sorted(set(concentrated_indices))
+
+        source_list = ", ".join(f"{src} ({len(idx)}x)" for src, idx in concentrated_sources.items())
+        patterns.append(LowConfidencePattern(
+            pattern_type="source_concentration",
+            count=len(concentrated_indices),
+            segment_indices=concentrated_indices,
+            description=f"Multiple low-confidence segments matched to same source: {source_list}"
+        ))
+        suggestions.append("Expand video pool with more diverse sources to reduce reliance on a single video")
+
     # Log analysis
     logger.info("=" * 60)
     logger.info("LOW CONFIDENCE SEGMENT ANALYSIS")

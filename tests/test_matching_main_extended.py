@@ -1544,6 +1544,224 @@ class TestVarietyFilteringSuccess:
 
 
 # ============================================================================
+# Test Low Confidence Analysis Patterns (US-46-011)
+# ============================================================================
+
+from src.matching.main import (
+    analyze_low_confidence_segments,
+    LowConfidenceAnalysis,
+    LowConfidencePattern,
+)
+
+
+def _create_analysis_match_result(
+    segment_idx, vo_text, confidence,
+    vo_keywords=None, matched_keywords=None,
+    confidence_variance=0.0, source_file="video1.mp4"
+):
+    """Create a MatchResult for analysis tests."""
+    vo_seg = SRTSegment(
+        index=segment_idx,
+        start_time=segment_idx * 5.0,
+        end_time=(segment_idx + 1) * 5.0,
+        text=vo_text,
+        source_file="voiceover.srt",
+        keywords=vo_keywords or []
+    )
+    vid_seg = SRTSegment(
+        index=segment_idx,
+        start_time=segment_idx * 3.0,
+        end_time=(segment_idx + 1) * 3.0,
+        text="Video transcript text",
+        source_file=source_file,
+        keywords=[]
+    )
+    primary = Match(
+        voiceover_segment=vo_seg,
+        video_segment=vid_seg,
+        video_scene=None,
+        confidence=confidence,
+        reasoning="Test match"
+    )
+    return MatchResult(
+        primary_match=primary,
+        alternatives=[],
+        secondary_matches=[],
+        strategy_matches=[],
+        has_gap=False,
+        gap_reason="",
+        confidence_variance=confidence_variance,
+        matched_keywords=matched_keywords or []
+    )
+
+
+class TestLowConfidenceAnalysisPatterns:
+    """Test new low-confidence analysis patterns: empty matched keywords,
+    source concentration, and confidence variance (US-46-011)."""
+
+    @pytest.mark.fast
+    def test_empty_matched_keywords_detected(self):
+        """Segments with available VO keywords but empty matched_keywords
+        should trigger no_keyword_overlap pattern."""
+        results = [
+            _create_analysis_match_result(
+                0, "The ancient city of Rome has many landmarks", 0.4,
+                vo_keywords=["rome", "ancient", "landmarks"],
+                matched_keywords=[]  # Keywords available but none matched
+            ),
+            _create_analysis_match_result(
+                1, "Modern architecture in Dubai is stunning", 0.45,
+                vo_keywords=["dubai", "architecture", "modern"],
+                matched_keywords=[]  # Keywords available but none matched
+            ),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "no_keyword_overlap" in pattern_types
+        overlap = next(p for p in analysis.patterns if p.pattern_type == "no_keyword_overlap")
+        assert overlap.count == 2
+        assert sorted(overlap.segment_indices) == [0, 1]
+
+    @pytest.mark.fast
+    def test_empty_matched_keywords_not_double_counted_with_missing(self):
+        """Segments with NO VO keywords should appear as missing_keywords,
+        not also as no_keyword_overlap."""
+        results = [
+            _create_analysis_match_result(
+                0, "A segment without any keywords extracted", 0.4,
+                vo_keywords=[],  # No VO keywords
+                matched_keywords=[]
+            ),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "missing_keywords" in pattern_types
+        # Should not double-count
+        overlap = next((p for p in analysis.patterns if p.pattern_type == "no_keyword_overlap"), None)
+        if overlap:
+            assert 0 not in overlap.segment_indices
+
+    @pytest.mark.fast
+    def test_source_concentration_detected(self):
+        """When 3+ low-confidence segments use the same source video,
+        source_concentration pattern should be detected."""
+        results = [
+            _create_analysis_match_result(0, "First segment about nature", 0.3, source_file="same_video.mp4"),
+            _create_analysis_match_result(1, "Second segment about nature too", 0.35, source_file="same_video.mp4"),
+            _create_analysis_match_result(2, "Third segment also about nature", 0.4, source_file="same_video.mp4"),
+            _create_analysis_match_result(3, "Fourth from different source", 0.45, source_file="different_video.mp4"),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "source_concentration" in pattern_types
+        conc = next(p for p in analysis.patterns if p.pattern_type == "source_concentration")
+        assert conc.count == 3
+        assert sorted(conc.segment_indices) == [0, 1, 2]
+        assert "same_video.mp4" in conc.description
+
+    @pytest.mark.fast
+    def test_source_concentration_not_triggered_below_threshold(self):
+        """Fewer than 3 segments from same source should NOT trigger
+        source_concentration pattern."""
+        results = [
+            _create_analysis_match_result(0, "First segment about nature", 0.3, source_file="video_a.mp4"),
+            _create_analysis_match_result(1, "Second segment about nature", 0.35, source_file="video_a.mp4"),
+            _create_analysis_match_result(2, "Third from different source", 0.4, source_file="video_b.mp4"),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "source_concentration" not in pattern_types
+
+    @pytest.mark.fast
+    def test_source_concentration_suggestion(self):
+        """Source concentration should produce a suggestion about expanding video pool."""
+        results = [
+            _create_analysis_match_result(i, f"Segment {i} text content here", 0.3 + i * 0.03, source_file="one_source.mp4")
+            for i in range(4)
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        assert any("diverse" in s.lower() or "expand" in s.lower() or "pool" in s.lower()
+                    for s in analysis.suggestions)
+
+    @pytest.mark.fast
+    def test_high_variance_pattern_created(self):
+        """Segments with confidence_variance > 0.15 should create
+        a high_variance pattern entry."""
+        results = [
+            _create_analysis_match_result(
+                0, "Segment with high variance scores", 0.4,
+                confidence_variance=0.25
+            ),
+            _create_analysis_match_result(
+                1, "Another high variance segment here", 0.45,
+                confidence_variance=0.20
+            ),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "high_variance" in pattern_types
+        variance_pat = next(p for p in analysis.patterns if p.pattern_type == "high_variance")
+        assert variance_pat.count == 2
+        assert sorted(variance_pat.segment_indices) == [0, 1]
+
+    @pytest.mark.fast
+    def test_combined_empty_keywords_and_concentrated_sources(self):
+        """Analysis should detect both empty keywords and source concentration
+        simultaneously when both conditions are present."""
+        results = [
+            _create_analysis_match_result(
+                i, f"Segment {i} with keywords but no overlap",
+                0.3 + i * 0.02,
+                vo_keywords=["keyword_a", "keyword_b"],
+                matched_keywords=[],
+                source_file="concentrated.mp4"
+            )
+            for i in range(4)
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "no_keyword_overlap" in pattern_types, "Expected no_keyword_overlap pattern"
+        assert "source_concentration" in pattern_types, "Expected source_concentration pattern"
+
+    @pytest.mark.fast
+    def test_multiple_concentrated_sources(self):
+        """Multiple different sources each with 3+ segments should all
+        be reported in source_concentration."""
+        results = []
+        for i in range(3):
+            results.append(_create_analysis_match_result(
+                i, f"Source A segment {i} with content", 0.3 + i * 0.02, source_file="source_a.mp4"
+            ))
+        for i in range(3, 6):
+            results.append(_create_analysis_match_result(
+                i, f"Source B segment {i} with content", 0.3 + i * 0.01, source_file="source_b.mp4"
+            ))
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "source_concentration" in pattern_types
+        conc = next(p for p in analysis.patterns if p.pattern_type == "source_concentration")
+        assert conc.count == 6  # All 6 segments are concentrated
+        assert "source_a.mp4" in conc.description
+        assert "source_b.mp4" in conc.description
+
+
+# ============================================================================
 # Run tests
 # ============================================================================
 
