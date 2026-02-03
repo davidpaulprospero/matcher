@@ -314,6 +314,11 @@ _STATE_ATTR_DEFAULTS = {
     # OUTPUT STATE
     'output_files': [],
     'otio_files': [],
+    # ENTITY STATE
+    'entity_images': {},
+    'entity_videos': {},
+    # EMBEDDING STATE
+    'voiceover_embeddings': None,
     # RUNTIME STATE
     'face_preference': 'neutral',
     'location_chapters': [],
