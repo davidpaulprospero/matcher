@@ -78,7 +78,6 @@ class IterativeMatchStage(Stage):
         - state.matches: Initial matches from MATCH stage
         - state.voiceover_segments: Voiceover segments to match
         - state.text_metadata: Video segment metadata
-        - state.embeddings: Video embeddings
 
     Outputs:
         - state.matches: Updated matches with gaps filled
@@ -240,6 +239,10 @@ class IterativeMatchStage(Stage):
             # Reset cross-pass tracking for this run
             self._fetched_video_ids = set()
             self._used_queries = set()
+
+            # Initialize local embedding storage (no longer stored on PipelineState)
+            self._embeddings = None
+            self._embedding_index = None
 
             for pass_num in range(1, max_iterations + 1):
                 pass_start = time.time()
@@ -1436,18 +1439,17 @@ class IterativeMatchStage(Stage):
                 config=config
             )
 
-            # Append to existing embeddings
-            if state.embeddings is not None and len(state.embeddings) > 0:
-                state.embeddings = np.vstack([state.embeddings, new_embeddings])
+            # Append to local embedding storage (no longer stored on PipelineState)
+            if self._embeddings is not None and len(self._embeddings) > 0:
+                self._embeddings = np.vstack([self._embeddings, new_embeddings])
             else:
-                state.embeddings = new_embeddings
+                self._embeddings = new_embeddings
 
             # Rebuild embedding index with all vectors
-            if state.embedding_index is not None:
-                from ..embeddings import build_embedding_index
-                state.embedding_index = build_embedding_index(state.embeddings, config)
+            from ..embeddings import build_embedding_index
+            self._embedding_index = build_embedding_index(self._embeddings, config)
 
-            logger.info(f"Computed {len(new_embeddings)} new embeddings, total now {len(state.embeddings)}")
+            logger.info(f"Computed {len(new_embeddings)} new embeddings, total now {len(self._embeddings)}")
             return new_embeddings
 
         except Exception as e:
@@ -1478,7 +1480,7 @@ class IterativeMatchStage(Stage):
         Returns:
             Number of gaps successfully filled
         """
-        if not gaps or state.embedding_index is None:
+        if not gaps or self._embedding_index is None:
             return 0
 
         try:
@@ -1519,12 +1521,12 @@ class IterativeMatchStage(Stage):
 
                 # Search only in new segments (indices >= new_segment_start)
                 # Use FAISS index for similarity search
-                k = min(20, len(state.embeddings) - new_segment_start)
+                k = min(20, len(self._embeddings) - new_segment_start)
                 if k <= 0:
                     continue
 
                 # Query FAISS index
-                distances, indices = state.embedding_index.search(
+                distances, indices = self._embedding_index.search(
                     np.array([vo_embedding]).astype('float32'), k * 2
                 )
 

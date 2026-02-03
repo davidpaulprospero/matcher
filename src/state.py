@@ -167,6 +167,7 @@ class PipelineState:
 
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
+    location_chapters: List[Any] = field(default_factory=list)
     stage_timings: Dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self):
