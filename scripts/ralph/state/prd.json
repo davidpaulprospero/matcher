@@ -34,7 +34,7 @@
             "id": "US-47-002",
             "title": "Add match stage stale state reference regression tests",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add tests verifying _run_matching() in match.py does NOT access state.embeddings or state.embedding_index directly",
                 "Add test confirming video embeddings are computed locally (lines 498-507 pattern) not read from PipelineState",
@@ -42,7 +42,7 @@
                 "Add test that _run_matching() succeeds with a minimal PipelineState that has no extra fields beyond the dataclass definition",
                 "All tests in new file tests/test_match_stage_state_refs.py must pass"
             ],
-            "notes": "Tier: T1 (critical regression prevention). Source files: src/stages/match.py:475-530 (_run_matching method), src/state.py (PipelineState dataclass). The stale references were partially fixed (video embeddings now computed locally at line 498-507, embedding_index=None at line 523) but no regression tests exist to prevent re-introduction. The getattr(state, 'location_chapters', None) at line 526 is overly defensive since field exists on PipelineState. Tests should mock compute_embeddings and match_all_segments to verify correct parameter passing."
+            "notes": "COMPLETED. 13 tests in tests/test_match_stage_state_refs.py: TestNoStaleStateAccess (3 tests: source code inspection for state.embeddings, state.embedding_index, and limited state attribute access), TestLocalEmbeddingComputation (3 tests: compute_embeddings called twice, no embeddings/embedding_index fields on PipelineState), TestMatchAllSegmentsParameters (4 tests: embedding_index=None, location_chapters from state, fallback when missing, face_preference), TestMinimalPipelineState (3 tests: defaults-only state, fresh state no AttributeError, no stale dataclass fields)."
         },
         {
             "id": "US-47-003",
