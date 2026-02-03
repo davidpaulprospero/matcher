@@ -48,8 +48,8 @@
             "id": "US-45-003",
             "title": "Remove legacy stage references from checkpoint healer",
             "priority": "high",
-            "passes": false,
-            "notes": "Tier: T2 (targeted refactor). File: src/agents/healers/checkpoint.py, lines 130-154. The _try_cache_rebuild() method checks for 'TRANSCRIBE', 'EMBEDDINGS', and 'SCENE_DETECTION' — all of which are legacy stages removed from the 7-stage pipeline. None of these stages exist in STAGE_ORDER (src/checkpoint.py:25-33). The healer should check for caches relevant to current stages: caption caches, match caches, video search results, etc.",
+            "passes": true,
+            "notes": "Replaced TRANSCRIBE/EMBEDDINGS/SCENE_DETECTION in _rebuild_checkpoint() with CAPTION/ANALYZE/MATCH mapped to current cache dirs (captions, llm_responses, embeddings). Added 3 guard tests: source scan, stage-order validation, AST literal scan. 735 agent tests pass.",
             "acceptanceCriteria": [
                 "Replace TRANSCRIBE/EMBEDDINGS/SCENE_DETECTION references in src/agents/healers/checkpoint.py:130-154 with current 7-stage equivalents",
                 "Cache checks should reference current cache directories: .cache/captions, .cache/llm_responses, .cache/embeddings (used by MATCH, not a stage)",
@@ -62,8 +62,8 @@
             "id": "US-45-004",
             "title": "Remove dead REMIX and TRANSCRIBE reporting code from logger",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T2 (dead code removal). File: src/logger.py, lines 1135-1164. The report generator contains rendering blocks for 'REMIX Stage' (lines 1135-1144) and 'TRANSCRIBE Stage' (lines 1146-1164+). These stages no longer exist in the 7-stage pipeline. The REMIX block references r.remix_videos_scanned, r.remix_included, r.remix_excluded, r.remix_avg_score. The TRANSCRIBE block references r.videos_transcribed, r.transcription_cache_hits, r.video_process_logs. These metric fields may also be dead code in the report dataclass.",
+            "passes": true,
+            "notes": "Removed REMIX and TRANSCRIBE report blocks from _write_verbose_markdown. Removed dead RunLog fields (videos_transcribed, transcription_cache_hits, video_process_logs, remix_*), VideoProcessLog dataclass, log_remix_stats and log_video_process methods, and all references in console/file/markdown/plaintext summaries. Embeddings section preserved as standalone. Added 3 guard tests in TestLoggerNoLegacyStages. All 123 logger+feature tests pass.",
             "acceptanceCriteria": [
                 "Remove the REMIX stage report block from src/logger.py (lines 1135-1144)",
                 "Remove the TRANSCRIBE stage report block from src/logger.py (lines 1146-1164+)",

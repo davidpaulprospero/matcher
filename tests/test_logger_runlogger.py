@@ -26,7 +26,6 @@ from src.logger import (
     ConfigAccessLog,
     PerformanceLog,
     RunLog,
-    VideoProcessLog,
     MatchDetailLog,
     TrackVarietyLog,
     StageLog,
@@ -446,25 +445,6 @@ class TestRunLoggerVerboseLogging:
         assert run_logger.run_log.project_name == "MyProject"
 
     @pytest.mark.fast
-    def test_log_video_process(self, run_logger):
-        """Test logging video processing"""
-        run_logger.log_video_process(
-            index=1,
-            video_id="abc123",
-            duration_seconds=120.5,
-            segments=45,
-            vad_removed_seconds=10.2,
-            cached=True
-        )
-
-        assert len(run_logger.run_log.video_process_logs) == 1
-        vp = run_logger.run_log.video_process_logs[0]
-        assert vp.video_id == "abc123"
-        assert vp.duration_seconds == 120.5
-        assert vp.segments == 45
-        assert vp.cached is True
-
-    @pytest.mark.fast
     def test_log_match_detail(self, run_logger):
         """Test logging detailed match"""
         run_logger.log_match_detail(
@@ -502,21 +482,6 @@ class TestRunLoggerVerboseLogging:
         tv = run_logger.run_log.track_variety_logs[0]
         assert tv.track == "V1"
         assert tv.unique_sources == 15
-
-    @pytest.mark.fast
-    def test_log_remix_stats(self, run_logger):
-        """Test logging remix stats"""
-        run_logger.log_remix_stats(
-            videos_scanned=100,
-            included=80,
-            excluded=20,
-            avg_score=0.65
-        )
-
-        assert run_logger.run_log.remix_videos_scanned == 100
-        assert run_logger.run_log.remix_included == 80
-        assert run_logger.run_log.remix_excluded == 20
-        assert run_logger.run_log.remix_avg_score == 0.65
 
     @pytest.mark.fast
     def test_log_embedding_stats(self, run_logger):

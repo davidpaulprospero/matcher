@@ -33,7 +33,6 @@ from src.logger import (
     MatchDecisionLog,
     ConfigAccessLog,
     PerformanceLog,
-    VideoProcessLog,
     MatchDetailLog,
     TrackVarietyLog,
     StageLog,
@@ -417,23 +416,6 @@ class TestRunLoggerVerbose:
         assert logger.run_log.stages[0].duration_seconds > 0
 
     @pytest.mark.fast
-    def test_log_video_process(self, tmp_path):
-        """Test log_video_process."""
-        logger = RunLogger(log_dir=str(tmp_path))
-
-        logger.log_video_process(
-            index=0,
-            video_id="abc123",
-            duration_seconds=120.0,
-            segments=15,
-            vad_removed_seconds=5.0,
-            cached=False
-        )
-
-        assert len(logger.run_log.video_process_logs) == 1
-        assert logger.run_log.video_process_logs[0].video_id == "abc123"
-
-    @pytest.mark.fast
     def test_log_match_detail(self, tmp_path):
         """Test log_match_detail."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -465,21 +447,6 @@ class TestRunLoggerVerbose:
         )
 
         assert len(logger.run_log.track_variety_logs) == 1
-
-    @pytest.mark.fast
-    def test_log_remix_stats(self, tmp_path):
-        """Test log_remix_stats."""
-        logger = RunLogger(log_dir=str(tmp_path))
-
-        logger.log_remix_stats(
-            videos_scanned=100,
-            included=80,
-            excluded=20,
-            avg_score=0.75
-        )
-
-        assert logger.run_log.remix_videos_scanned == 100
-        assert logger.run_log.remix_included == 80
 
     @pytest.mark.fast
     def test_log_embedding_stats(self, tmp_path):
@@ -589,10 +556,10 @@ class TestRunLoggerUtilities:
     def test_update_stats_increment(self, tmp_path):
         """Test update_stats increments counters."""
         logger = RunLogger(log_dir=str(tmp_path))
-        logger.update_stats(transcription_cache_hits=5)
-        logger.update_stats(transcription_cache_hits=3)
+        logger.update_stats(embedding_cache_hits=5)
+        logger.update_stats(embedding_cache_hits=3)
         # Should increment
-        assert logger.run_log.transcription_cache_hits == 8
+        assert logger.run_log.embedding_cache_hits == 8
 
     @pytest.mark.fast
     def test_update_stats_set(self, tmp_path):
