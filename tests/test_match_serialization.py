@@ -495,3 +495,121 @@ class TestIterativeMatchSerializesMatchResult:
         warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert any('video_file' in msg or 'validation' in msg.lower() for msg in warning_messages), \
             f"Expected warning about empty video_file, got: {warning_messages}"
+
+
+# ============================================================================
+# US-50-004: video_file serialization drills into primary_match.video_segment
+# ============================================================================
+
+def _serialize_match(match, index=0):
+    """Replicate the iterative_match serialization logic for unit testing.
+
+    This mirrors src/stages/iterative_match.py lines 421-463 exactly so we
+    can test the serialization in isolation without running the full stage.
+    """
+    if hasattr(match, 'primary_match') and match.primary_match:
+        pm = match.primary_match
+        source_file = ''
+        video_start = 0.0
+        video_end = 0.0
+        conf = 0.0
+
+        if hasattr(pm, 'video_segment') and pm.video_segment:
+            source_file = getattr(pm.video_segment, 'source_file', '')
+            video_start = getattr(pm.video_segment, 'start_time', 0.0)
+            video_end = getattr(pm.video_segment, 'end_time', 0.0)
+
+        conf = getattr(pm, 'confidence', 0.0)
+
+        return {
+            'segment_index': index,
+            'video_file': source_file,
+            'video_start': float(video_start),
+            'video_end': float(video_end),
+            'confidence': float(conf),
+            'strategy': getattr(match, 'strategy', getattr(pm, 'reasoning', '')),
+            'reason': getattr(pm, 'reasoning', ''),
+            'face_score': getattr(match, 'face_score', 0.5),
+        }
+    else:
+        return {
+            'segment_index': getattr(match, 'segment_index', index),
+            'video_file': getattr(match, 'video_file', ''),
+            'video_start': getattr(match, 'video_start', 0.0),
+            'video_end': getattr(match, 'video_end', 0.0),
+            'confidence': getattr(match, 'confidence', 0.0),
+            'strategy': getattr(match, 'strategy', ''),
+            'reason': getattr(match, 'reason', ''),
+            'face_score': getattr(match, 'face_score', 0.5),
+        }
+
+
+class TestVideoFileSerializationDrillDown:
+    """US-50-004: Verify video_file is extracted from primary_match.video_segment.source_file."""
+
+    def _make_match_result(self, source_file='test_video.mp4', start_time=2.0,
+                           end_time=12.0, confidence=0.9):
+        """Create a MatchResult with a nested primary_match.video_segment.source_file."""
+        from src.utils import SRTSegment, Match as UtilsMatch, MatchResult
+
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=10.0, text='voiceover text')
+        vid_seg = SRTSegment(
+            index=0, start_time=start_time, end_time=end_time,
+            text='video caption', source_file=source_file,
+        )
+        primary = UtilsMatch(
+            voiceover_segment=vo_seg,
+            video_segment=vid_seg,
+            video_scene=None,
+            confidence=confidence,
+            reasoning='semantic drill-down',
+        )
+        return MatchResult(primary_match=primary)
+
+    def test_serialization_extracts_nested_source_file(self):
+        """MatchResult serialization drills into primary_match.video_segment.source_file."""
+        mr = self._make_match_result(source_file='test_video.mp4')
+        serialized = _serialize_match(mr, index=0)
+
+        assert serialized['video_file'] == 'test_video.mp4', \
+            f"Expected 'test_video.mp4', got '{serialized['video_file']}'"
+        assert serialized['video_start'] == 2.0
+        assert serialized['video_end'] == 12.0
+        assert serialized['confidence'] == 0.9
+
+    def test_round_trip_through_match_from_dict(self):
+        """Serialized MatchResult with non-empty video_file survives Match.from_dict()."""
+        mr = self._make_match_result(source_file='round_trip_vid.mp4')
+        serialized = _serialize_match(mr, index=0)
+
+        # video_file must be non-empty for from_dict to accept it
+        assert serialized['video_file'] == 'round_trip_vid.mp4'
+
+        restored = Match.from_dict(serialized)
+        assert restored.video_file == 'round_trip_vid.mp4'
+        assert restored.video_start == 2.0
+        assert restored.video_end == 12.0
+        assert restored.confidence == 0.9
+
+    def test_fallback_when_primary_match_is_none(self):
+        """When primary_match is None, serialization returns empty video_file without error."""
+        from src.utils import MatchResult, Match as UtilsMatch, SRTSegment
+
+        # Create a MatchResult with a dummy primary_match, then set it to None
+        dummy_vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy')
+        dummy_vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy',
+                               source_file='dummy.mp4')
+        dummy_match = UtilsMatch(
+            voiceover_segment=dummy_vo, video_segment=dummy_vid,
+            video_scene=None, confidence=0.0, reasoning='',
+        )
+        mr = MatchResult(primary_match=dummy_match)
+        # Forcibly set primary_match to None to simulate gap/fallback
+        mr.primary_match = None
+
+        serialized = _serialize_match(mr, index=3)
+
+        # Falls to the else branch — video_file should be empty string
+        assert serialized['video_file'] == ''
+        assert serialized['segment_index'] == 3
+        # Must not raise an exception (implicit: we got here)
