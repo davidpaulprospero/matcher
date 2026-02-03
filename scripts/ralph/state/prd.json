@@ -1,195 +1,195 @@
 {
-    "sprintNumber": 48,
-    "focusArea": "download",
-    "branchName": "ralph/sprint-48",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
+  "sprintNumber": 48,
+  "focusArea": "download",
+  "branchName": "ralph/sprint-48",
+  "projectContext": {
+    "sourceDir": "src/",
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short"
+  },
+  "userStories": [
+    {
+      "id": "US-48-001",
+      "title": "Generate sprint stories for download focus area",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'download'",
+        "Add stories US-48-002 through US-48-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-48-NNN to be unique across sprints",
+        "Mark this story (US-48-001) as passes: true when done"
+      ],
+      "notes": "Planning story completed. Generated 11 stories (US-48-002 through US-48-012) covering three user-reported bugs (socket timeout hang, iterative_match serialization mismatch, DNS circuit breaker) plus download infrastructure improvements (escalation integration in download_segments, retry queue network-aware classification, download progress reporting, segment deduplication, checkpoint restoration validation, config defaults for download_segments, download metrics collection, audio_first socket timeout parity). Analysis: download_segments.py bypasses core.py's subprocess+stall-detection by using yt-dlp Python API directly without socket_timeout; iterative_match.py:427 uses getattr(match, 'video_file', '') on MatchResult objects which lack that attribute; no circuit breaker in download_segments loop for systemic network failures."
     },
-    "userStories": [
-        {
-            "id": "US-48-001",
-            "title": "Generate sprint stories for download focus area",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'download'",
-                "Add stories US-48-002 through US-48-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-48-NNN to be unique across sprints",
-                "Mark this story (US-48-001) as passes: true when done"
-            ],
-            "notes": "Planning story completed. Generated 11 stories (US-48-002 through US-48-012) covering three user-reported bugs (socket timeout hang, iterative_match serialization mismatch, DNS circuit breaker) plus download infrastructure improvements (escalation integration in download_segments, retry queue network-aware classification, download progress reporting, segment deduplication, checkpoint restoration validation, config defaults for download_segments, download metrics collection, audio_first socket timeout parity). Analysis: download_segments.py bypasses core.py's subprocess+stall-detection by using yt-dlp Python API directly without socket_timeout; iterative_match.py:427 uses getattr(match, 'video_file', '') on MatchResult objects which lack that attribute; no circuit breaker in download_segments loop for systemic network failures."
-        },
-        {
-            "id": "US-48-002",
-            "title": "Add socket timeout to download_segments yt-dlp Python API calls",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add 'socket_timeout' key to ydl_opts dict in _download_segments() at line 209-217 with configurable value from download config",
-                "Add 'socket_timeout' key to ydl_opts dict in _process_retry_queue() at line 318-325 with same configurable value",
-                "Add 'retries' and 'fragment_retries' keys to both ydl_opts dicts to match core.py subprocess args (--retries 10, --fragment-retries 10)",
-                "Add unit test verifying socket_timeout is present in ydl_opts when calling yt-dlp Python API",
-                "Add unit test verifying timeout value is read from config with fallback default of 30 seconds"
-            ],
-            "notes": "Completed. Added socket_timeout (configurable, default 30s), retries (10), and fragment_retries (10) to both _download_segments() and _process_retry_queue() ydl_opts dicts. Added socket_timeout field to DownloadConfig dataclass in src/config/sections/download.py and config.yaml. Added 4 unit tests: socket_timeout present in ydl_opts, reads from config, fallback default of 30, and retry queue also gets timeout. All 22 tests pass."
-        },
-        {
-            "id": "US-48-003",
-            "title": "Fix iterative_match serialization to extract video_file from MatchResult structure",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Change serialization at iterative_match.py:427 to drill into match.primary_match.video_segment.source_file instead of getattr(match, 'video_file', '')",
-                "Follow the same pattern used in match.py:160-167 for extracting source_file from MatchResult objects",
-                "Add unit test with a MatchResult object (from src/utils.py:507) verifying serialized output contains non-empty video_file/source_file",
-                "Add unit test verifying restore_matches_from_dicts() accepts the corrected serialization format",
-                "Add unit test confirming the old format (empty video_file) is detected and logged as a warning during restore"
-            ],
-            "notes": "Completed. Fixed iterative_match serialization to extract video_file from match.primary_match.video_segment.source_file instead of the broken getattr(match, 'video_file', '') pattern. Also fixed video_start/video_end to use primary_match.video_segment.start_time/end_time. Follows the same pattern used in match.py:160-167. Added unit tests verifying: (1) serialized output contains non-empty video_file/source_file from MatchResult, (2) restore_matches_from_dicts() accepts the corrected format, (3) old format with empty video_file is detected and logged as warning during restore."
-        },
-        {
-            "id": "US-48-004",
-            "title": "Add network failure circuit breaker to download_segments stage",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add consecutive network failure tracking to _download_segments() loop with configurable threshold (default: 3)",
-                "Detect DNS resolution failures (Errno 11001, 'getaddrinfo failed', 'Name or service not known') and network unreachable errors as systemic failures",
-                "Abort the download loop early when consecutive network failures exceed threshold, logging clear message about systemic network issue",
-                "Reset the consecutive failure counter on any successful download",
-                "Add unit test verifying early abort after 3 consecutive DNS failures with remaining segments skipped",
-                "Add unit test verifying counter resets after a successful download between failures"
-            ],
-            "notes": "Completed. Added _is_network_failure() helper detecting DNS errors (getaddrinfo failed, Errno 11001, Name or service not known, nodename nor servname, Network is unreachable, Temporary failure in name resolution, No address associated with hostname) plus ffmpeg exit code 4294967158. Added consecutive_network_failures counter to _download_segments() loop with NETWORK_FAILURE_THRESHOLD=3 default. Counter resets on successful download or cached file hit. Non-network errors (403, removed) reset counter too since they're video-specific. Added 5 unit tests: DNS error detection, early abort after 3 consecutive failures, counter reset on success, non-network errors don't trigger abort, checkpoint before abort. All 27 tests pass."
-        },
-        {
-            "id": "US-48-005",
-            "title": "Integrate escalation tiers into download_segments stage",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Apply EscalationManager tier progression to download_segments ydl_opts, not just Tier 1 impersonation",
-                "Add extractor_args for Tier 2 escalation when 403/bot errors are detected in download_segments",
-                "Add cookie rotation support for Tier 3 escalation in download_segments",
-                "Track escalation state per-segment so retries use the escalated tier",
-                "Add unit test verifying Tier 2 extractor_args are added to ydl_opts after 403 error",
-                "Add unit test verifying cookie method is advanced after auth error in download_segments"
-            ],
-            "notes": "Integrated 4-tier escalation (EscalationManager) into download_segments stage. Added _apply_escalation_to_ydl_opts() to translate CLI args to Python API dict keys. On 403/bot errors, record_failure() triggers tier progression. Tier 2 adds extractor_args, Tier 3 adds cookie rotation. Per-segment escalation state tracking via video_id. Also updated _process_retry_queue with escalation support. 8 new tests added, all 35 pass."
-        },
-        {
-            "id": "US-48-006",
-            "title": "Add network-aware error classification to retry queue for download_segments",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add DNS/network error patterns to download_segments error handling that classify errors as 'network_systemic' vs 'video_specific'",
-                "When adding to retry queue, tag items with error_category so retry logic can skip network_systemic items",
-                "Add 'dns_failure', 'network_unreachable', 'connection_refused' to the TRANSIENT_ERROR_PATTERNS in core.py if not already present",
-                "Add unit test verifying DNS resolution failure is classified as 'network_systemic'",
-                "Add unit test verifying 403 Forbidden is classified as 'video_specific' (retryable with escalation)"
-            ],
-            "notes": "Added classify_error_category() to download_segments.py using existing _is_network_failure() patterns. Added error_category field to RetryItem (default: video_specific). RetryQueue.add() accepts error_category param, tags items on add. Added get_retryable_items() to filter out network_systemic. Checkpoint serialization includes error_category with backward compat. Added getaddrinfo/DNS patterns to TRANSIENT_ERROR_PATTERNS in core.py. 24 new tests in test_error_classification.py, all 170 related tests pass."
-        },
-        {
-            "id": "US-48-007",
-            "title": "Add download progress reporting and ETA to download_segments stage",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add success/failure/skip counters displayed after each segment download attempt",
-                "Display running success rate (downloaded/attempted) during the download loop",
-                "Add summary at end of stage: total attempted, succeeded, failed, skipped (cached), total time",
-                "Use existing ProgressBar from src/utils.py (line 534) or print-based progress consistent with other stages",
-                "Add unit test verifying progress callback is called with correct current/total values",
-                "Add unit test verifying final summary includes all counter categories"
-            ],
-            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:188-261 (download loop), src/utils.py:534-569 (ProgressBar class). Currently the stage only prints '[idx/total] Downloaded video_id' on success (line 236) and logs warnings on failure. No running totals, no success rate, no time tracking. Other stages like iterative_match.py have detailed summaries (lines 415-419). The checkpoint_progress callback at lines 93-101 only saves to checkpoint, doesn't display anything."
-        },
-        {
-            "id": "US-48-008",
-            "title": "Improve segment deduplication in download_segments to handle multi-segment videos",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Fix deduplication key in _collect_matched_segments() to handle video IDs with underscores (e.g., 'abc_def') by using video_id directly instead of round(start_time)",
-                "Add overlap detection: if two segments from same video overlap or are adjacent (gap < 2*buffer), merge them into one download",
-                "Add unit test verifying segments with overlapping time ranges from same video are merged",
-                "Add unit test verifying segments from different videos with same timestamps are NOT merged",
-                "Add unit test verifying video IDs containing underscores are deduplicated correctly"
-            ],
-            "notes": "Implemented: (1) Replaced round()-based dedup key with exact float tuple (video_id, start, end). (2) Added _merge_segments() that groups by video_id and merges overlapping/adjacent segments (gap < 2*buffer). (3) Fixed _update_matches_with_local_paths to use rsplit('_', 2) for correct underscore video ID parsing. (4) Added 7 tests in TestSegmentDeduplicationAndMerging. All 47 stage tests + 126 related tests pass."
-        },
-        {
-            "id": "US-48-009",
-            "title": "Add checkpoint restore validation for download_segments stage",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Validate restored segment files actually exist on disk and have non-zero size in restore() method",
-                "Filter out restored segments where the file has been deleted or is empty (0 bytes)",
-                "Log count of valid vs invalid restored segments for debugging",
-                "Cross-reference restored segments against state.matches to identify segments that still need downloading",
-                "Add unit test verifying restore() filters out non-existent files from restored segments list",
-                "Add unit test verifying restore() filters out zero-byte files"
-            ],
-            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:392-416 (restore method). Current restore() at line 406 blindly creates DownloadedVideo for every *_*_*.mp4 file found in the output directory without checking if files are valid (non-zero size) or complete. A corrupted/partial download could result in a zero-byte .mp4 file that passes the glob but is unusable. Also, restored segments have source='restored' but no URL, making it impossible to re-download if the file is corrupt. The glob pattern '*_*_*.mp4' could also match non-segment files."
-        },
-        {
-            "id": "US-48-010",
-            "title": "Add configurable defaults for download_segments stage options",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add segment_buffer, segment_format, segment_max_resolution, and segment_socket_timeout fields to DownloadConfig dataclass",
-                "Wire segment_buffer from config instead of hardcoded getattr fallback at download_segments.py:73",
-                "Wire segment_max_resolution into format string (currently hardcoded 'best[height<=1080]' at line 210)",
-                "Add __post_init__ for any nested dataclass fields per CLAUDE.md Rule 2",
-                "Add unit test verifying DownloadConfig loads segment_ prefixed fields from config dict",
-                "Add unit test verifying default values match current hardcoded values (buffer=5.0, resolution=1080)"
-            ],
-            "notes": "Tier: enhancement. Files: src/config/sections/download.py (DownloadConfig dataclass, currently ~500 lines), src/stages/download_segments.py:73 (segment_buffer hardcoded fallback), src/stages/download_segments.py:210 (format string hardcoded). Currently download_segments.py reads segment_buffer via getattr(download_config, 'segment_buffer', 5.0) but the field doesn't exist on DownloadConfig. Other options like format='best[height<=1080]' and force_keyframes_at_cuts=True are hardcoded in the ydl_opts dict. Making these configurable follows the pattern established by other download config options."
-        },
-        {
-            "id": "US-48-011",
-            "title": "Add download_segments metrics collection for pipeline observability",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Track per-segment download duration and report average/median in stage summary",
-                "Track total bytes downloaded (from output file sizes) and report in stage summary",
-                "Return StageMetrics from run() method with items_processed, items_failed, duration_seconds",
-                "Add retry_count to checkpoint data showing how many segments needed retry",
-                "Add unit test verifying StageMetrics is populated with correct counts after successful run",
-                "Add unit test verifying retry_count in checkpoint data reflects actual retry attempts"
-            ],
-            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:54-127 (run method, currently returns StageResult.ok with minimal checkpoint_data), src/stages/__init__.py (StageResult, StageMetrics classes). The iterative_match stage returns StageMetrics (line 462-466) but download_segments doesn't. Adding metrics would enable pipeline observability dashboards and help diagnose slow downloads. The existing checkpoint_data at lines 118-121 only tracks segment_count and total_matches."
-        },
-        {
-            "id": "US-48-012",
-            "title": "Add socket timeout and stall detection parity to audio_first pipeline yt-dlp calls",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Audit all yt-dlp subprocess calls in audio_first.py and verify --socket-timeout is present (lines ~241, ~427, ~591)",
-                "Add --socket-timeout 10 to any subprocess calls missing it, matching core.py pattern",
-                "Verify --retries 10 and --fragment-retries 10 are present on all subprocess calls",
-                "Add stall detection timeout via _wait_for_process_with_progress if not already used",
-                "Add unit test verifying all yt-dlp subprocess command lists in audio_first.py contain --socket-timeout",
-                "Add unit test verifying subprocess calls include encoding='utf-8' and errors='replace' per CLAUDE.md Rule 27"
-            ],
-            "notes": "Tier: hardening. Files: src/downloader/audio_first.py:241 (audio download subprocess), src/downloader/audio_first.py:427 (segment download subprocess), src/downloader/audio_first.py:591 (full video fallback subprocess), src/downloader/core.py:1571,1690 (reference pattern with --socket-timeout 10). The audio_first pipeline has 3 yt-dlp subprocess call sites that may or may not have socket timeout. Per prompt.md, there are 8 total call sites across the downloader. Core.py uses _wait_for_process_with_progress() for stall detection, but audio_first.py may use subprocess.communicate() with a fixed timeout instead, which kills slow-but-progressing downloads."
-        }
-    ]
+    {
+      "id": "US-48-002",
+      "title": "Add socket timeout to download_segments yt-dlp Python API calls",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add 'socket_timeout' key to ydl_opts dict in _download_segments() at line 209-217 with configurable value from download config",
+        "Add 'socket_timeout' key to ydl_opts dict in _process_retry_queue() at line 318-325 with same configurable value",
+        "Add 'retries' and 'fragment_retries' keys to both ydl_opts dicts to match core.py subprocess args (--retries 10, --fragment-retries 10)",
+        "Add unit test verifying socket_timeout is present in ydl_opts when calling yt-dlp Python API",
+        "Add unit test verifying timeout value is read from config with fallback default of 30 seconds"
+      ],
+      "notes": "Completed. Added socket_timeout (configurable, default 30s), retries (10), and fragment_retries (10) to both _download_segments() and _process_retry_queue() ydl_opts dicts. Added socket_timeout field to DownloadConfig dataclass in src/config/sections/download.py and config.yaml. Added 4 unit tests: socket_timeout present in ydl_opts, reads from config, fallback default of 30, and retry queue also gets timeout. All 22 tests pass."
+    },
+    {
+      "id": "US-48-003",
+      "title": "Fix iterative_match serialization to extract video_file from MatchResult structure",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Change serialization at iterative_match.py:427 to drill into match.primary_match.video_segment.source_file instead of getattr(match, 'video_file', '')",
+        "Follow the same pattern used in match.py:160-167 for extracting source_file from MatchResult objects",
+        "Add unit test with a MatchResult object (from src/utils.py:507) verifying serialized output contains non-empty video_file/source_file",
+        "Add unit test verifying restore_matches_from_dicts() accepts the corrected serialization format",
+        "Add unit test confirming the old format (empty video_file) is detected and logged as a warning during restore"
+      ],
+      "notes": "Completed. Fixed iterative_match serialization to extract video_file from match.primary_match.video_segment.source_file instead of the broken getattr(match, 'video_file', '') pattern. Also fixed video_start/video_end to use primary_match.video_segment.start_time/end_time. Follows the same pattern used in match.py:160-167. Added unit tests verifying: (1) serialized output contains non-empty video_file/source_file from MatchResult, (2) restore_matches_from_dicts() accepts the corrected format, (3) old format with empty video_file is detected and logged as warning during restore."
+    },
+    {
+      "id": "US-48-004",
+      "title": "Add network failure circuit breaker to download_segments stage",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add consecutive network failure tracking to _download_segments() loop with configurable threshold (default: 3)",
+        "Detect DNS resolution failures (Errno 11001, 'getaddrinfo failed', 'Name or service not known') and network unreachable errors as systemic failures",
+        "Abort the download loop early when consecutive network failures exceed threshold, logging clear message about systemic network issue",
+        "Reset the consecutive failure counter on any successful download",
+        "Add unit test verifying early abort after 3 consecutive DNS failures with remaining segments skipped",
+        "Add unit test verifying counter resets after a successful download between failures"
+      ],
+      "notes": "Completed. Added _is_network_failure() helper detecting DNS errors (getaddrinfo failed, Errno 11001, Name or service not known, nodename nor servname, Network is unreachable, Temporary failure in name resolution, No address associated with hostname) plus ffmpeg exit code 4294967158. Added consecutive_network_failures counter to _download_segments() loop with NETWORK_FAILURE_THRESHOLD=3 default. Counter resets on successful download or cached file hit. Non-network errors (403, removed) reset counter too since they're video-specific. Added 5 unit tests: DNS error detection, early abort after 3 consecutive failures, counter reset on success, non-network errors don't trigger abort, checkpoint before abort. All 27 tests pass."
+    },
+    {
+      "id": "US-48-005",
+      "title": "Integrate escalation tiers into download_segments stage",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Apply EscalationManager tier progression to download_segments ydl_opts, not just Tier 1 impersonation",
+        "Add extractor_args for Tier 2 escalation when 403/bot errors are detected in download_segments",
+        "Add cookie rotation support for Tier 3 escalation in download_segments",
+        "Track escalation state per-segment so retries use the escalated tier",
+        "Add unit test verifying Tier 2 extractor_args are added to ydl_opts after 403 error",
+        "Add unit test verifying cookie method is advanced after auth error in download_segments"
+      ],
+      "notes": "Integrated 4-tier escalation (EscalationManager) into download_segments stage. Added _apply_escalation_to_ydl_opts() to translate CLI args to Python API dict keys. On 403/bot errors, record_failure() triggers tier progression. Tier 2 adds extractor_args, Tier 3 adds cookie rotation. Per-segment escalation state tracking via video_id. Also updated _process_retry_queue with escalation support. 8 new tests added, all 35 pass."
+    },
+    {
+      "id": "US-48-006",
+      "title": "Add network-aware error classification to retry queue for download_segments",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add DNS/network error patterns to download_segments error handling that classify errors as 'network_systemic' vs 'video_specific'",
+        "When adding to retry queue, tag items with error_category so retry logic can skip network_systemic items",
+        "Add 'dns_failure', 'network_unreachable', 'connection_refused' to the TRANSIENT_ERROR_PATTERNS in core.py if not already present",
+        "Add unit test verifying DNS resolution failure is classified as 'network_systemic'",
+        "Add unit test verifying 403 Forbidden is classified as 'video_specific' (retryable with escalation)"
+      ],
+      "notes": "Added classify_error_category() to download_segments.py using existing _is_network_failure() patterns. Added error_category field to RetryItem (default: video_specific). RetryQueue.add() accepts error_category param, tags items on add. Added get_retryable_items() to filter out network_systemic. Checkpoint serialization includes error_category with backward compat. Added getaddrinfo/DNS patterns to TRANSIENT_ERROR_PATTERNS in core.py. 24 new tests in test_error_classification.py, all 170 related tests pass."
+    },
+    {
+      "id": "US-48-007",
+      "title": "Add download progress reporting and ETA to download_segments stage",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add success/failure/skip counters displayed after each segment download attempt",
+        "Display running success rate (downloaded/attempted) during the download loop",
+        "Add summary at end of stage: total attempted, succeeded, failed, skipped (cached), total time",
+        "Use existing ProgressBar from src/utils.py (line 534) or print-based progress consistent with other stages",
+        "Add unit test verifying progress callback is called with correct current/total values",
+        "Add unit test verifying final summary includes all counter categories"
+      ],
+      "notes": "Tier: enhancement. Files: src/stages/download_segments.py:188-261 (download loop), src/utils.py:534-569 (ProgressBar class). Currently the stage only prints '[idx/total] Downloaded video_id' on success (line 236) and logs warnings on failure. No running totals, no success rate, no time tracking. Other stages like iterative_match.py have detailed summaries (lines 415-419). The checkpoint_progress callback at lines 93-101 only saves to checkpoint, doesn't display anything."
+    },
+    {
+      "id": "US-48-008",
+      "title": "Improve segment deduplication in download_segments to handle multi-segment videos",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Fix deduplication key in _collect_matched_segments() to handle video IDs with underscores (e.g., 'abc_def') by using video_id directly instead of round(start_time)",
+        "Add overlap detection: if two segments from same video overlap or are adjacent (gap < 2*buffer), merge them into one download",
+        "Add unit test verifying segments with overlapping time ranges from same video are merged",
+        "Add unit test verifying segments from different videos with same timestamps are NOT merged",
+        "Add unit test verifying video IDs containing underscores are deduplicated correctly"
+      ],
+      "notes": "Implemented: (1) Replaced round()-based dedup key with exact float tuple (video_id, start, end). (2) Added _merge_segments() that groups by video_id and merges overlapping/adjacent segments (gap < 2*buffer). (3) Fixed _update_matches_with_local_paths to use rsplit('_', 2) for correct underscore video ID parsing. (4) Added 7 tests in TestSegmentDeduplicationAndMerging. All 47 stage tests + 126 related tests pass."
+    },
+    {
+      "id": "US-48-009",
+      "title": "Add checkpoint restore validation for download_segments stage",
+      "priority": "medium",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Validate restored segment files actually exist on disk and have non-zero size in restore() method",
+        "Filter out restored segments where the file has been deleted or is empty (0 bytes)",
+        "Log count of valid vs invalid restored segments for debugging",
+        "Cross-reference restored segments against state.matches to identify segments that still need downloading",
+        "Add unit test verifying restore() filters out non-existent files from restored segments list",
+        "Add unit test verifying restore() filters out zero-byte files"
+      ],
+      "notes": "Tier: enhancement. Files: src/stages/download_segments.py:392-416 (restore method). Current restore() at line 406 blindly creates DownloadedVideo for every *_*_*.mp4 file found in the output directory without checking if files are valid (non-zero size) or complete. A corrupted/partial download could result in a zero-byte .mp4 file that passes the glob but is unusable. Also, restored segments have source='restored' but no URL, making it impossible to re-download if the file is corrupt. The glob pattern '*_*_*.mp4' could also match non-segment files."
+    },
+    {
+      "id": "US-48-010",
+      "title": "Add configurable defaults for download_segments stage options",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Add segment_buffer, segment_format, segment_max_resolution, and segment_socket_timeout fields to DownloadConfig dataclass",
+        "Wire segment_buffer from config instead of hardcoded getattr fallback at download_segments.py:73",
+        "Wire segment_max_resolution into format string (currently hardcoded 'best[height<=1080]' at line 210)",
+        "Add __post_init__ for any nested dataclass fields per CLAUDE.md Rule 2",
+        "Add unit test verifying DownloadConfig loads segment_ prefixed fields from config dict",
+        "Add unit test verifying default values match current hardcoded values (buffer=5.0, resolution=1080)"
+      ],
+      "notes": "Tier: enhancement. Files: src/config/sections/download.py (DownloadConfig dataclass, currently ~500 lines), src/stages/download_segments.py:73 (segment_buffer hardcoded fallback), src/stages/download_segments.py:210 (format string hardcoded). Currently download_segments.py reads segment_buffer via getattr(download_config, 'segment_buffer', 5.0) but the field doesn't exist on DownloadConfig. Other options like format='best[height<=1080]' and force_keyframes_at_cuts=True are hardcoded in the ydl_opts dict. Making these configurable follows the pattern established by other download config options."
+    },
+    {
+      "id": "US-48-011",
+      "title": "Add download_segments metrics collection for pipeline observability",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Track per-segment download duration and report average/median in stage summary",
+        "Track total bytes downloaded (from output file sizes) and report in stage summary",
+        "Return StageMetrics from run() method with items_processed, items_failed, duration_seconds",
+        "Add retry_count to checkpoint data showing how many segments needed retry",
+        "Add unit test verifying StageMetrics is populated with correct counts after successful run",
+        "Add unit test verifying retry_count in checkpoint data reflects actual retry attempts"
+      ],
+      "notes": "Tier: enhancement. Files: src/stages/download_segments.py:54-127 (run method, currently returns StageResult.ok with minimal checkpoint_data), src/stages/__init__.py (StageResult, StageMetrics classes). The iterative_match stage returns StageMetrics (line 462-466) but download_segments doesn't. Adding metrics would enable pipeline observability dashboards and help diagnose slow downloads. The existing checkpoint_data at lines 118-121 only tracks segment_count and total_matches."
+    },
+    {
+      "id": "US-48-012",
+      "title": "Add socket timeout and stall detection parity to audio_first pipeline yt-dlp calls",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Audit all yt-dlp subprocess calls in audio_first.py and verify --socket-timeout is present (lines ~241, ~427, ~591)",
+        "Add --socket-timeout 10 to any subprocess calls missing it, matching core.py pattern",
+        "Verify --retries 10 and --fragment-retries 10 are present on all subprocess calls",
+        "Add stall detection timeout via _wait_for_process_with_progress if not already used",
+        "Add unit test verifying all yt-dlp subprocess command lists in audio_first.py contain --socket-timeout",
+        "Add unit test verifying subprocess calls include encoding='utf-8' and errors='replace' per CLAUDE.md Rule 27"
+      ],
+      "notes": "Tier: hardening. Files: src/downloader/audio_first.py:241 (audio download subprocess), src/downloader/audio_first.py:427 (segment download subprocess), src/downloader/audio_first.py:591 (full video fallback subprocess), src/downloader/core.py:1571,1690 (reference pattern with --socket-timeout 10). The audio_first pipeline has 3 yt-dlp subprocess call sites that may or may not have socket timeout. Per prompt.md, there are 8 total call sites across the downloader. Core.py uses _wait_for_process_with_progress() for stall detection, but audio_first.py may use subprocess.communicate() with a fixed timeout instead, which kills slow-but-progressing downloads."
+    }
+  ]
 }
