@@ -48,7 +48,7 @@
             "id": "US-50-003",
             "title": "Fix ImpersonateTarget type conversion with case normalization in _apply_escalation_to_ydl_opts",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "_apply_escalation_to_ydl_opts in src/stages/download_segments.py converts impersonate string to ImpersonateTarget object using from_str() with lowercased client and os fields",
                 "If ImpersonateTarget import fails (yt-dlp version mismatch), the function logs a warning and omits impersonation from ydl_opts instead of crashing",
@@ -56,13 +56,13 @@
                 "A unit test verifies that when ImpersonateTarget is unavailable (mocked ImportError), the function returns ydl_opts without the impersonate key",
                 "A unit test verifies mixed-case strings like 'FIREFOX-130:WINDOWS-11' are properly lowercased"
             ],
-            "notes": "Tier: P0 fix. Source file: src/stages/download_segments.py, function _apply_escalation_to_ydl_opts (lines 127-182). Current code at lines 151-166 already creates ImpersonateTarget with lowercase — verify this is correct and add tests. The import is at line 152: from yt_dlp.networking.impersonate import ImpersonateTarget. Guard with try/except ImportError for yt-dlp versions that don't have this class."
+            "notes": "Complete. Split except Exception into ImportError (logs warning, skips impersonation) + general Exception. Added 3 tests: test_apply_escalation_import_error_logs_warning_and_omits_impersonate, test_apply_escalation_mixed_case_firefox_lowercased, test_apply_escalation_chrome_136_macos_15_conversion. All 91 download_segments tests pass."
         },
         {
             "id": "US-50-004",
             "title": "Fix iterative_match video_file serialization to drill into primary_match.video_segment.source_file",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In src/stages/iterative_match.py, the match serialization path for MatchResult objects extracts video_file from match.primary_match.video_segment.source_file instead of getattr(match, 'video_file', '')",
                 "When primary_match or video_segment is None, the code falls back to empty string without raising an exception",
@@ -70,7 +70,7 @@
                 "A unit test verifies that serialized matches with non-empty video_file survive round-trip through Match.from_dict() without being rejected",
                 "A unit test verifies the fallback when primary_match is None returns empty string"
             ],
-            "notes": "Tier: P1 bug fix. Source file: src/stages/iterative_match.py, match serialization block (lines 421-482). The MATCH stage at src/stages/match.py:167 correctly drills into primary_match.video_segment.source_file — mirror that pattern. The MatchResult class is defined in src/utils.py. Check if getattr(match, 'video_file', '') at line 454 is in the else branch (plain Match) or the MatchResult branch — fix whichever is wrong."
+            "notes": "Complete. The serialization code at iterative_match.py:426-449 already correctly drills into primary_match.video_segment.source_file (previously fixed in US-48-003). Added 3 focused unit tests in TestVideoFileSerializationDrillDown: test_serialization_extracts_nested_source_file (source_file='test_video.mp4'), test_round_trip_through_match_from_dict (verifies Match.from_dict() accepts the serialized output), test_fallback_when_primary_match_is_none (verifies empty string fallback). All 35 match serialization tests pass."
         },
         {
             "id": "US-50-005",
