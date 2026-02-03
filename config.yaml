@@ -912,15 +912,21 @@ download:
   
   # YouTube authentication - REQUIRED!
   # YouTube blocks yt-dlp without authentication.
-  # 
+  #
   # Option 1 (RECOMMENDED): Extract cookies directly from browser
   # Set to: chrome, firefox, edge, brave, opera, vivaldi, safari
   # Note: Browser must be closed for Chrome/Edge. Firefox works while open.
+  # Used by both CLI subprocess calls (--cookies-from-browser) and
+  # Python API calls (cookiesfrombrowser key in ydl_opts).
+  # The Python API does NOT read ~/.config/yt-dlp/config, so this setting
+  # is critical for download_segments stage which uses the Python API.
   cookies_from_browser: firefox
-  
+
   # Option 2: Use exported cookies.txt file
   # Export using browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
   # Leave empty to auto-detect cookies.txt in install/project directory
+  # Fallback: if cookies_from_browser is empty, this path (or first cookie_rotation file)
+  # is passed as 'cookiefile' to the yt-dlp Python API.
   cookies_path: ""
   
   # Search pool settings - IMPORTANT for finding matching videos!
