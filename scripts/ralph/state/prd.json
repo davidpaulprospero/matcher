@@ -49,7 +49,7 @@
             "id": "US-44-003",
             "title": "Add pipeline-level config validation at startup before any stage runs",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Pipeline.__init__ or run() calls a new _validate_config() method before iterating stages",
                 "_validate_config() checks that config.cache.cache_dir path is writable (or can be created)",
@@ -57,13 +57,13 @@
                 "_validate_config() returns a list of validation errors; pipeline logs them and returns False if critical errors exist",
                 "Tests verify that an invalid config (e.g., non-writable cache dir) causes pipeline to fail fast with a descriptive error"
             ],
-            "notes": "Tier: T2 (reliability). Source file: src/pipeline.py, lines 48-70 (__init__) and 155-170 (run entry). Currently the pipeline starts running stages without validating that config paths are valid, embedding providers are available, or required directories exist. Stages discover these issues mid-execution, producing confusing errors. Adding upfront validation follows the fail-fast principle."
+            "notes": "Added _validate_config() method to PipelineOrchestrator that checks cache_dir writability and embedding provider config. Called at start of run() before any stages execute. 11 new tests in TestConfigValidation class. All 116 orchestrator tests + 43 pipeline tests pass."
         },
         {
             "id": "US-44-004",
             "title": "Enrich pipeline error messages with recovery suggestions and state context",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When a stage fails, the error log includes current state summary (segment count, video count, match count)",
                 "When validate_inputs fails, the error message includes which CLI flag or checkpoint reset would fix it (e.g., '--fresh', '--match-only')",
@@ -71,7 +71,7 @@
                 "At least 3 common failure scenarios produce actionable recovery suggestions in their error output",
                 "Tests verify that error messages contain recovery hints for known failure patterns"
             ],
-            "notes": "Tier: T2 (developer experience). Source file: src/pipeline.py:213-258 (validation and error handling block). Currently line 255 logs 'Stage {name} failed: {error}' with no context about what state the pipeline was in or how to recover. The validate_inputs failure at line 216 also gives no hint about which flag to use. This change adds structured error context without changing control flow."
+            "notes": "Added _get_state_summary() and _get_recovery_suggestion() to PipelineOrchestrator. Both validate_inputs failures and stage.run() failures now log state context (segments/videos/matches/captions counts) and actionable recovery hints (CLI flags like --fresh, --match-only, --output-only). 14 new tests in TestErrorMessageEnrichment. 7 stage-specific + 6 error-pattern-specific recovery suggestions cover all common failure scenarios."
         },
         {
             "id": "US-44-005",

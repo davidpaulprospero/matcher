@@ -2256,3 +2256,175 @@ class TestConfigValidation:
         assert len(errors) >= 2
         assert any("cache" in e.lower() for e in errors)
         assert any("embedding" in e.lower() for e in errors)
+
+
+class TestErrorMessageEnrichment:
+    """
+    US-44-004: Tests for enriched pipeline error messages with recovery
+    suggestions and state context.
+    """
+
+    @pytest.mark.fast
+    def test_state_summary_includes_counts(self, temp_project_dir, mock_config):
+        """Test _get_state_summary returns segment, video, match counts."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.state.voiceover_segments = ["seg1", "seg2", "seg3"]
+        pipeline.state.video_ids = ["v1", "v2"]
+        pipeline.state.matches = ["m1"]
+        pipeline.state.caption_results = {"v1": {}, "v2": {}}
+
+        summary = pipeline._get_state_summary()
+
+        assert "segments=3" in summary
+        assert "videos=2" in summary
+        assert "matches=1" in summary
+        assert "captions=2" in summary
+
+    @pytest.mark.fast
+    def test_state_summary_empty_state(self, temp_project_dir, mock_config):
+        """Test _get_state_summary with default empty state."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        summary = pipeline._get_state_summary()
+
+        # Should still have counts (all zero)
+        assert "segments=0" in summary
+        assert "videos=0" in summary
+        assert "matches=0" in summary
+
+    @pytest.mark.fast
+    def test_state_summary_includes_current_stage(self, temp_project_dir, mock_config):
+        """Test _get_state_summary includes current_stage when set."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.current_stage = "MATCH"
+
+        summary = pipeline._get_state_summary()
+
+        assert "current_stage=MATCH" in summary
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_for_analyze(self, temp_project_dir, mock_config):
+        """Test recovery suggestion for ANALYZE stage failure."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("ANALYZE", "stage failed")
+
+        assert "--fresh" in suggestion
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_for_match(self, temp_project_dir, mock_config):
+        """Test recovery suggestion for MATCH stage failure."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("MATCH", "generic error")
+
+        assert "--match-only" in suggestion
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_for_output(self, temp_project_dir, mock_config):
+        """Test recovery suggestion for OUTPUT stage failure."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("OUTPUT", "write error")
+
+        assert "--output-only" in suggestion
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_no_voiceover_pattern(self, temp_project_dir, mock_config):
+        """Test error-pattern override: missing voiceover suggests --voiceover flag."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("ANALYZE", "No voiceover path specified")
+
+        assert "--voiceover" in suggestion
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_no_keywords_pattern(self, temp_project_dir, mock_config):
+        """Test error-pattern override: missing keywords suggests --use-keywords."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("VIDEO_SEARCH", "No keywords available")
+
+        assert "--use-keywords" in suggestion
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_checkpoint_corruption(self, temp_project_dir, mock_config):
+        """Test error-pattern override: checkpoint corruption suggests --fresh."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("MATCH", "Checkpoint data corrupt")
+
+        assert "--fresh" in suggestion
+
+    @pytest.mark.fast
+    def test_validate_inputs_failure_includes_recovery_hint(self, temp_project_dir, mock_config):
+        """Test that validate_inputs failure logs recovery hint and state context."""
+        stage = MockStage("MATCH", validation_error="No matches from MATCH stage")
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(stage)
+        pipeline.state.voiceover_segments = ["seg1"]
+        pipeline.state.video_ids = ["v1", "v2"]
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.run(resume=False)
+
+        assert result is False
+        # Check that the error log contains state context and recovery hint
+        error_calls = [
+            str(c) for c in mock_logger.error.call_args_list
+        ]
+        error_text = " ".join(error_calls)
+        assert "state:" in error_text
+        assert "Recovery:" in error_text
+        assert "segments=1" in error_text
+
+    @pytest.mark.fast
+    def test_stage_failure_includes_state_context(self, temp_project_dir, mock_config):
+        """Test that stage run failure logs state context and recovery hint."""
+        stage = MockStage("CAPTION", should_fail=True)
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(stage)
+        pipeline.state.voiceover_segments = ["s1", "s2"]
+        pipeline.state.video_ids = ["v1", "v2", "v3"]
+        pipeline.state.matches = []
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.run(resume=False)
+
+        assert result is False
+        error_calls = [
+            str(c) for c in mock_logger.error.call_args_list
+        ]
+        error_text = " ".join(error_calls)
+        assert "state:" in error_text
+        assert "Recovery:" in error_text
+        assert "segments=2" in error_text
+        assert "videos=3" in error_text
+
+    @pytest.mark.fast
+    def test_stage_failure_recovery_for_no_matches_error(self, temp_project_dir, mock_config):
+        """Test that 'no matches' error pattern produces --match-only suggestion."""
+        # Create a stage that fails with a 'no matches' message
+        stage = MockStage("ITERATIVE_MATCH")
+        stage._should_fail = False
+        stage._validation_error = "No matches from MATCH stage. Run MATCH stage first."
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        pipeline.add_stage(stage)
+
+        with patch('src.pipeline.logger') as mock_logger:
+            result = pipeline.run(resume=False)
+
+        assert result is False
+        error_calls = [str(c) for c in mock_logger.error.call_args_list]
+        error_text = " ".join(error_calls)
+        assert "--match-only" in error_text or "--fresh" in error_text
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_unknown_stage(self, temp_project_dir, mock_config):
+        """Test fallback recovery suggestion for unknown stage names."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("UNKNOWN_STAGE", "some error")
+
+        assert "--fresh" in suggestion
+
+    @pytest.mark.fast
+    def test_recovery_suggestion_permission_error(self, temp_project_dir, mock_config):
+        """Test error-pattern override: permission error suggests checking permissions."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        suggestion = pipeline._get_recovery_suggestion("OUTPUT", "Permission denied: cannot write")
+
+        assert "permission" in suggestion.lower()

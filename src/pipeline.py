@@ -167,6 +167,77 @@ class PipelineOrchestrator:
 
         return errors
 
+    def _get_state_summary(self) -> str:
+        """
+        Build a compact summary of current pipeline state for error context.
+
+        Returns:
+            Human-readable string summarizing segment, video, and match counts.
+        """
+        parts = []
+        segments = getattr(self.state, 'voiceover_segments', None)
+        if segments is not None:
+            parts.append(f"segments={len(segments)}")
+
+        video_ids = getattr(self.state, 'video_ids', None)
+        if video_ids is not None:
+            parts.append(f"videos={len(video_ids)}")
+
+        matches = getattr(self.state, 'matches', None)
+        if matches is not None:
+            parts.append(f"matches={len(matches)}")
+
+        caption_results = getattr(self.state, 'caption_results', None)
+        if caption_results is not None:
+            parts.append(f"captions={len(caption_results)}")
+
+        if self.current_stage:
+            parts.append(f"current_stage={self.current_stage}")
+
+        return ", ".join(parts) if parts else "empty state"
+
+    def _get_recovery_suggestion(self, stage_name: str, error: str) -> str:
+        """
+        Return an actionable recovery suggestion based on stage name and error.
+
+        Args:
+            stage_name: The name of the failed stage.
+            error: The error message string.
+
+        Returns:
+            A recovery suggestion string, or empty string if none applicable.
+        """
+        error_lower = (error or "").lower()
+
+        # Stage-specific recovery hints
+        suggestions = {
+            "ANALYZE": "Try: --fresh to re-analyze, or check that voiceover file exists and is readable.",
+            "VIDEO_SEARCH": "Try: --fresh to re-run from start, or check network connectivity and API keys.",
+            "CAPTION": "Try: --resume to retry captions, or increase retry_budget.max_attempts in config.",
+            "MATCH": "Try: --match-only to re-run matching, or --fresh if video data is stale.",
+            "ITERATIVE_MATCH": "Try: --match-only to re-run matching from MATCH stage.",
+            "DOWNLOAD_SEGMENTS": "Try: --resume to retry downloads. Check disk space and network.",
+            "OUTPUT": "Try: --output-only to regenerate output files, or --resume.",
+        }
+
+        # Error-pattern-specific hints (override stage defaults when more specific)
+        if "no voiceover" in error_lower or "voiceover_path" in error_lower or "voiceover file" in error_lower:
+            return "Provide a voiceover file with --voiceover <path>."
+        if "no keywords" in error_lower:
+            return "Run ANALYZE stage first, or use --use-keywords <preset> to load saved keywords."
+        if "no matches" in error_lower:
+            return "Run MATCH stage first with --match-only, or --fresh for a full re-run."
+        if "no video" in error_lower or "video_ids" in error_lower:
+            return "Run VIDEO_SEARCH stage first, or --fresh for a full re-run."
+        if "checkpoint" in error_lower or "corrupt" in error_lower:
+            return "Try: --fresh to discard checkpoint and start over."
+        if "permission" in error_lower or "writable" in error_lower:
+            return "Check file/directory permissions for the project folder."
+        if "embedding" in error_lower or "provider" in error_lower:
+            return "Configure embedding.provider in config.yaml (e.g., 'sentence-transformers')."
+
+        return suggestions.get(stage_name, "Try: --fresh to restart the pipeline from scratch.")
+
     def run(
         self,
         resume: bool = True,
@@ -270,7 +341,13 @@ class PipelineOrchestrator:
             # Validate inputs
             validation_error = stage.validate_inputs(self.state, self.config)
             if validation_error:
-                logger.error(f"Stage {stage_name} validation failed: {validation_error}")
+                recovery = self._get_recovery_suggestion(stage_name, validation_error)
+                state_ctx = self._get_state_summary()
+                logger.error(
+                    f"Stage {stage_name} validation failed: {validation_error} "
+                    f"[state: {state_ctx}] "
+                    f"Recovery: {recovery}"
+                )
                 return False
 
             # Run the stage
@@ -309,7 +386,13 @@ class PipelineOrchestrator:
 
             # Handle result
             if not result.success:
-                logger.error(f"Stage {stage_name} failed: {result.error}")
+                state_ctx = self._get_state_summary()
+                recovery = self._get_recovery_suggestion(stage_name, result.error or "")
+                logger.error(
+                    f"Stage {stage_name} failed: {result.error} "
+                    f"[state: {state_ctx}] "
+                    f"Recovery: {recovery}"
+                )
                 for warning in result.warnings:
                     logger.warning(f"  Warning: {warning}")
                 return False
