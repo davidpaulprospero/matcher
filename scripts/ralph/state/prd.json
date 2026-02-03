@@ -105,8 +105,8 @@
             "id": "US-45-007",
             "title": "Add STAGE_ORDER sync validation test between checkpoint.py and ralph-config.json",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T1 (test addition). Files: src/checkpoint.py:25-33 (STAGE_ORDER), scripts/ralph/config/ralph-config.json:77-79 (pipelineStages.order). CLAUDE.md Rule 31 says checkpoint.py is the source of truth, but there is no automated check. If these diverge, Ralph Loop will plan sprints with wrong stage understanding. This is a pure test story — no production code changes.",
+            "passes": true,
+            "notes": "Added tests/test_stage_order_sync.py with 5 tests: stage order match, length, exact sequence, legacy match, legacy content. All pass. Committed as f88ed51.",
             "acceptanceCriteria": [
                 "Add test in tests/ that loads STAGE_ORDER from src/checkpoint.py and pipelineStages.order from scripts/ralph/config/ralph-config.json",
                 "Test asserts the two lists are identical in content and order",
@@ -119,8 +119,8 @@
             "id": "US-45-008",
             "title": "Add state snapshot before stage execution for rollback capability",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T3 (architecture enhancement). File: src/pipeline.py, lines 290-400 (stage execution loop in run()). Currently if a stage fails partway through, PipelineState may be left in an inconsistent state (partially modified by the failed stage). The only recovery is --fresh. Add a shallow copy of state before each stage runs, and restore it on failure. This is not full transactional rollback, but prevents the most common corruption scenarios.",
+            "passes": true,
+            "notes": "Added _snapshot_state()/_rollback_state() methods to PipelineOrchestrator. Before each stage.run(), shallow copies matches/alternatives/downloaded_segments/output_files. On failure (result.success==False), restores snapshot and logs warning with stage name and fields. 5 tests in tests/test_pipeline_state_rollback.py: state restored after failure, state unchanged on success, shallow copy identity, rollback logging, empty state rollback.",
             "acceptanceCriteria": [
                 "Before each stage.run() call in PipelineOrchestrator.run(), create a shallow copy of critical state fields (matches, alternatives, downloaded_segments, output_files)",
                 "On stage failure (result.success == False), restore the state to the pre-stage snapshot",

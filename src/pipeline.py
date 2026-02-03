@@ -12,12 +12,13 @@ for automatic error recovery. Controlled via config.healing settings.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .state import PipelineState
@@ -166,6 +167,31 @@ class PipelineOrchestrator:
                 )
 
         return errors
+
+    # Fields to snapshot before each stage for rollback on failure
+    _SNAPSHOT_FIELDS = ('matches', 'alternatives', 'downloaded_segments', 'output_files')
+
+    def _snapshot_state(self) -> Dict[str, Any]:
+        """Create a shallow copy of critical state fields before stage execution."""
+        snapshot = {}
+        for field_name in self._SNAPSHOT_FIELDS:
+            value = getattr(self.state, field_name, None)
+            if value is not None:
+                snapshot[field_name] = copy.copy(value)
+            else:
+                snapshot[field_name] = None
+        return snapshot
+
+    def _rollback_state(self, snapshot: Dict[str, Any], stage_name: str) -> None:
+        """Restore state from a pre-stage snapshot after a failure."""
+        restored_fields = []
+        for field_name, saved_value in snapshot.items():
+            setattr(self.state, field_name, saved_value)
+            restored_fields.append(field_name)
+        logger.warning(
+            f"State rollback after {stage_name} failure: "
+            f"restored fields: {restored_fields}"
+        )
 
     def _get_state_summary(self) -> str:
         """
@@ -354,6 +380,9 @@ class PipelineOrchestrator:
             self.current_stage = stage_name
             start_time = time.time()
 
+            # Snapshot critical state fields before execution for rollback on failure
+            state_snapshot = self._snapshot_state()
+
             # Invoke on_stage_start callback
             if on_stage_start:
                 try:
@@ -386,6 +415,9 @@ class PipelineOrchestrator:
 
             # Handle result
             if not result.success:
+                # Rollback state to pre-stage snapshot
+                self._rollback_state(state_snapshot, stage_name)
+
                 # Mark metrics as failed (metrics already stored above)
                 if stage_name in self.stage_metrics:
                     self.stage_metrics[stage_name].failed = True
