@@ -148,7 +148,7 @@
             "id": "US-47-010",
             "title": "Add PipelineState serialization roundtrip tests",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test that every PipelineState field survives checkpoint save and load roundtrip",
                 "Add test for to_checkpoint_dict() including all Optional fields when set to None",
@@ -156,7 +156,7 @@
                 "Add test for PipelineState with complex nested field types (lists of dataclasses, dicts with special keys)",
                 "All tests in tests/test_pipeline_state_roundtrip.py must pass"
             ],
-            "notes": "Tier: T3 (hardening). Source files: src/state.py:240-430 (PipelineState), src/checkpoint.py (save/load logic). Existing tests in test_checkpoint_stage_data_roundtrip.py cover stage data but not full PipelineState field coverage. A comprehensive roundtrip test would catch serialization issues (e.g., numpy.float32 not JSON-serializable per Rule 7, Optional fields defaulting incorrectly)."
+            "notes": "38 tests in 6 classes: TestPipelineStateFieldRoundtrip (9), TestToCheckpointDictOptionalNone (5), TestFromCheckpointDictMissingFields (8), TestComplexNestedTypes (10), TestNumpySerializationSafety (2), TestFullCheckpointRoundtrip (4). Covers asdict/JSON roundtrip for all field types, numpy float32 safety (Rule 7), backward compat with missing fields, CheckpointManager integration."
         },
         {
             "id": "US-47-011",
