@@ -71,6 +71,12 @@ def _is_network_failure(error_msg: str) -> bool:
 # Default threshold for consecutive network failures before aborting
 NETWORK_FAILURE_THRESHOLD = 3
 
+# Default threshold for total bot-detection errors before aborting the stage.
+# When YouTube is broadly blocking (broken cookies, defeated impersonation),
+# every remaining segment hits the block wall with doomed Tier 1 requests.
+# This threshold triggers an early abort with actionable guidance.
+BOT_DETECTION_ABORT_THRESHOLD = 10
+
 
 def classify_error_category(error_msg: str) -> str:
     """Classify an error as 'network_systemic' or 'video_specific'.
@@ -440,6 +446,13 @@ class DownloadVideoSegmentsStage(Stage):
                 _dl_cfg_top, 'bot_detection_tier_floor_threshold', 5
             ))
 
+        # US-49-008: Read bot-detection abort threshold from config
+        _bot_abort_threshold = BOT_DETECTION_ABORT_THRESHOLD  # module-level default
+        if _dl_cfg_top:
+            _bot_abort_threshold = int(getattr(
+                _dl_cfg_top, 'bot_detection_abort_threshold', BOT_DETECTION_ABORT_THRESHOLD
+            ))
+
         for idx, seg in enumerate(segments, 1):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
@@ -673,6 +686,40 @@ class DownloadVideoSegmentsStage(Stage):
                             f"{consecutive_bot_detections} consecutive bot-detection "
                             f"errors across video IDs — new downloads start at max tier"
                         )
+
+                    # US-49-008: Abort stage when total bot-detection errors exceed threshold
+                    if (
+                        _bot_abort_threshold > 0
+                        and consecutive_bot_detections >= _bot_abort_threshold
+                    ):
+                        remaining = total - idx
+                        logger.error(
+                            f"Aborting download loop: {consecutive_bot_detections} "
+                            f"consecutive bot-detection errors (threshold: "
+                            f"{_bot_abort_threshold}). YouTube is broadly blocking "
+                            f"requests. Skipping {remaining} remaining segment(s)."
+                        )
+                        logger.error(
+                            "Suggested actions to resolve bot-detection:\n"
+                            "  1. Check/refresh your browser cookies "
+                            "(cookies_from_browser or cookies_path in config.yaml)\n"
+                            "  2. Enable Mullvad VPN rotation "
+                            "(download.mullvad.enabled: true)\n"
+                            "  3. Wait 15-30 minutes before retrying "
+                            "(YouTube rate limits are temporary)\n"
+                            "  4. Run with --resume to continue from this checkpoint"
+                        )
+                        print(
+                            f"  !! Bot-detection abort — {consecutive_bot_detections} "
+                            f"bot errors exceeded threshold ({_bot_abort_threshold}). "
+                            f"{remaining} segments skipped.\n"
+                            f"     Fix: check cookies, enable VPN, or wait before "
+                            f"--resume"
+                        )
+                        # Checkpoint progress before aborting so --resume works
+                        if progress_callback:
+                            progress_callback(idx, total, downloaded)
+                        break
 
                 # Track consecutive network failures for early abort
                 # US-49-005: Bot-detection errors do NOT reset the network failure counter

@@ -120,7 +120,7 @@
             "id": "US-49-008",
             "title": "Add bot-detection abort threshold to download_segments stage",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add a BOT_DETECTION_ABORT_THRESHOLD constant (default 10) — when total bot-detection errors exceed this across all videos, abort the stage with a clear message",
                 "Add configurable 'bot_detection_abort_threshold' to DownloadConfig with the default value",
