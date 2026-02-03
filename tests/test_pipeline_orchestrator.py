@@ -2249,59 +2249,33 @@ class TestConfigValidation:
 
     @pytest.mark.fast
     def test_non_writable_cache_dir_fails(self, temp_project_dir, mock_config):
-        """Test that a non-writable cache dir produces a validation error."""
-        # Use a path that exists but is not writable
+        """Test that a non-writable cache dir raises ValueError at construction (US-45-010)."""
         non_writable = str(temp_project_dir / "readonly_cache")
         os.makedirs(non_writable)
 
-        # Make it read-only
-        if os.name == 'nt':
-            # Windows: use icacls to deny write (or just use a mock)
-            # Simpler: mock os.access to return False for this path
-            mock_config.cache.cache_dir = non_writable
-            pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
-            pipeline.add_stage(MockStage("ANALYZE"))
+        mock_config.cache.cache_dir = non_writable
 
-            with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
-                errors = pipeline._validate_config()
-        else:
-            os.chmod(non_writable, 0o444)
-            mock_config.cache.cache_dir = non_writable
-            pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
-            pipeline.add_stage(MockStage("ANALYZE"))
-
-            errors = pipeline._validate_config()
-            # Restore permissions for cleanup
-            os.chmod(non_writable, 0o755)
-
-        assert len(errors) >= 1
-        assert any("not writable" in e for e in errors)
+        # Mock os.access to simulate non-writable dir (works on all platforms)
+        with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
+            with pytest.raises(ValueError, match="not writable"):
+                PipelineOrchestrator(mock_config, temp_project_dir)
 
     @pytest.mark.fast
     def test_non_creatable_cache_dir_fails(self, temp_project_dir, mock_config):
-        """Test that a cache dir whose parent is not writable fails validation."""
-        # Path that doesn't exist and parent is not writable
+        """Test that a cache dir whose parent is not writable raises ValueError at construction (US-45-010)."""
         mock_config.cache.cache_dir = str(temp_project_dir / "new_cache")
-        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
-        pipeline.add_stage(MockStage("ANALYZE"))
 
         with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
-            errors = pipeline._validate_config()
-
-        assert len(errors) >= 1
-        assert any("Cannot create cache directory" in e for e in errors)
+            with pytest.raises(ValueError, match="Cannot create cache directory"):
+                PipelineOrchestrator(mock_config, temp_project_dir)
 
     @pytest.mark.fast
     def test_no_cache_dir_configured_fails(self, temp_project_dir, mock_config):
-        """Test that missing cache_dir config produces a validation error."""
+        """Test that missing cache_dir config raises ValueError at construction time (US-45-010)."""
         mock_config.cache.cache_dir = None
-        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
-        pipeline.add_stage(MockStage("ANALYZE"))
 
-        errors = pipeline._validate_config()
-
-        assert len(errors) >= 1
-        assert any("No cache directory configured" in e for e in errors)
+        with pytest.raises(ValueError, match="No cache directory configured"):
+            PipelineOrchestrator(mock_config, temp_project_dir)
 
     @pytest.mark.fast
     def test_missing_embedding_provider_with_matching_stages(self, temp_project_dir, mock_config):
@@ -2341,30 +2315,23 @@ class TestConfigValidation:
 
     @pytest.mark.fast
     def test_pipeline_run_fails_fast_on_invalid_config(self, temp_project_dir, mock_config):
-        """Test that pipeline.run() returns False and does not execute stages on invalid config."""
+        """Test that invalid config raises ValueError at construction, not during run() (US-45-010)."""
         mock_config.cache.cache_dir = None
-        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
-        stage = MockStage("ANALYZE")
-        pipeline.add_stage(stage)
 
-        with patch('src.pipeline.logger'):
-            result = pipeline.run(resume=False)
-
-        assert result is False
-        assert stage._run_called is False
+        with pytest.raises(ValueError, match="Pipeline config validation failed"):
+            PipelineOrchestrator(mock_config, temp_project_dir)
 
     @pytest.mark.fast
-    def test_pipeline_run_logs_validation_errors(self, temp_project_dir, mock_config):
-        """Test that pipeline.run() logs validation errors before failing."""
+    def test_pipeline_construction_raises_with_clear_error_message(self, temp_project_dir, mock_config):
+        """Test that construction raises ValueError with descriptive error message (US-45-010)."""
         mock_config.cache.cache_dir = None
-        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
-        pipeline.add_stage(MockStage("ANALYZE"))
 
-        with patch('src.pipeline.logger') as mock_logger:
-            pipeline.run(resume=False)
+        with pytest.raises(ValueError) as exc_info:
+            PipelineOrchestrator(mock_config, temp_project_dir)
 
-        error_calls = [str(call) for call in mock_logger.error.call_args_list]
-        assert any("Config validation error" in call for call in error_calls)
+        error_msg = str(exc_info.value)
+        assert "Pipeline config validation failed" in error_msg
+        assert "No cache directory configured" in error_msg
 
     @pytest.mark.fast
     def test_valid_config_allows_pipeline_to_run(self, temp_project_dir, mock_config):
@@ -2380,18 +2347,82 @@ class TestConfigValidation:
 
     @pytest.mark.fast
     def test_validate_config_returns_multiple_errors(self, temp_project_dir, mock_config):
-        """Test that _validate_config can return multiple errors at once."""
+        """Test that construction raises with multiple validation errors at once (US-45-010)."""
         mock_config.cache.cache_dir = None
         mock_config.embedding.provider = None
+
+        # Cache dir error is caught at __init__ (no stages needed for that check)
+        with pytest.raises(ValueError) as exc_info:
+            PipelineOrchestrator(mock_config, temp_project_dir)
+
+        error_msg = str(exc_info.value)
+        assert "cache" in error_msg.lower()
+
+
+@pytest.mark.fast
+class TestConfigValidationAtConstruction:
+    """
+    US-45-010: Config validation runs at construction time, before checkpoint loading.
+
+    Ensures invalid config raises ValueError in __init__(), not during run(),
+    so that expensive checkpoint I/O is never reached with invalid config.
+    """
+
+    @pytest.mark.fast
+    def test_invalid_config_raises_before_checkpoint_init(self, temp_project_dir, mock_config):
+        """Test that invalid config raises ValueError before CheckpointManager is created."""
+        mock_config.cache.cache_dir = None
+
+        with pytest.raises(ValueError, match="Pipeline config validation failed"):
+            pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+            # checkpoint should never have been created
+            assert not hasattr(pipeline, 'checkpoint')
+
+    @pytest.mark.fast
+    def test_valid_config_creates_checkpoint_manager(self, temp_project_dir, mock_config):
+        """Test that valid config allows normal construction including checkpoint manager."""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        assert hasattr(pipeline, 'checkpoint')
+        assert pipeline.checkpoint is not None
+
+    @pytest.mark.fast
+    def test_embedding_check_in_run_catches_post_init_stages(self, temp_project_dir, mock_config):
+        """Test that run() re-validates to catch stage-dependent issues added post-init."""
+        mock_config.embedding.provider = None
+        # Construction passes (no matching stages yet)
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        # Add matching stage after construction
         pipeline.add_stage(MockStage("MATCH"))
 
-        errors = pipeline._validate_config()
+        with patch('src.pipeline.logger'):
+            result = pipeline.run(resume=False)
 
-        # Should have both cache dir and embedding provider errors
-        assert len(errors) >= 2
-        assert any("cache" in e.lower() for e in errors)
-        assert any("embedding" in e.lower() for e in errors)
+        assert result is False
+
+    @pytest.mark.fast
+    def test_valid_config_with_stages_runs_successfully(self, temp_project_dir, mock_config):
+        """Test that valid config with stages works end-to-end unchanged."""
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage = MockStage("ANALYZE")
+        pipeline.add_stage(stage)
+
+        result = pipeline.run(resume=False)
+
+        assert result is True
+        assert stage._run_called is True
+
+    @pytest.mark.fast
+    def test_error_messages_preserved_in_valueerror(self, temp_project_dir, mock_config):
+        """Test that original validation error messages are preserved in the ValueError."""
+        mock_config.cache.cache_dir = None
+
+        with pytest.raises(ValueError) as exc_info:
+            PipelineOrchestrator(mock_config, temp_project_dir)
+
+        # Original error message content should be in the ValueError
+        assert "No cache directory configured" in str(exc_info.value)
+        assert "config.cache.cache_dir" in str(exc_info.value)
 
 
 class TestErrorMessageEnrichment:

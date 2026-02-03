@@ -66,6 +66,12 @@ class PipelineOrchestrator:
         self.state = PipelineState()
         self.stages = stages or []
 
+        # Validate config before any I/O (US-45-010: fail-fast on invalid config)
+        config_errors = self._validate_config()
+        if config_errors:
+            error_detail = "; ".join(config_errors)
+            raise ValueError(f"Pipeline config validation failed: {error_detail}")
+
         # Initialize checkpoint manager
         config_hash = getattr(config, '_config_hash', '')
         self.checkpoint = CheckpointManager(project_dir, config_hash, config=config)
@@ -134,7 +140,7 @@ class PipelineOrchestrator:
 
         # Check cache_dir is writable or can be created
         cache_dir = getattr(getattr(self.config, 'cache', None), 'cache_dir', None)
-        if cache_dir:
+        if cache_dir and isinstance(cache_dir, str):
             cache_path = Path(cache_dir)
             if cache_path.exists():
                 if not os.access(str(cache_path), os.W_OK):
@@ -148,7 +154,7 @@ class PipelineOrchestrator:
                     errors.append(
                         f"Cannot create cache directory (parent not writable): {cache_dir}"
                     )
-        else:
+        elif not cache_dir:
             errors.append("No cache directory configured (config.cache.cache_dir)")
 
         # Check embedding provider when matching stages are enabled
@@ -297,7 +303,9 @@ class PipelineOrchestrator:
         skip_stages = set(skip_stages or [])
         only_stages = set(only_stages) if only_stages else None
 
-        # Validate config before running any stages (US-44-003: fail-fast)
+        # Re-validate config with stages present (US-44-003 + US-45-010)
+        # __init__ validates config-only checks; this catches stage-dependent checks
+        # (e.g., embedding provider required when matching stages are added post-init)
         config_errors = self._validate_config()
         if config_errors:
             for error in config_errors:
