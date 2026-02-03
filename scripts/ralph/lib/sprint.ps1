@@ -436,6 +436,12 @@ function Write-JsonNoBom {
         [string]$Content
     )
 
+    # Ensure parent directory exists
+    $parentDir = Split-Path -Parent $Path
+    if ($parentDir -and -not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+
     # Atomic write: temp file -> rename (no BOM via .NET)
     $tempPath = "$Path.tmp"
     [System.IO.File]::WriteAllText($tempPath, $Content)

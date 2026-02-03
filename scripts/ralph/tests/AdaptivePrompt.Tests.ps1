@@ -30,7 +30,9 @@ BeforeAll {
     }
     $script:SessionLogDir = Join-Path $TestDrive 'session_logs'
     $script:ProjectRoot = $TestDrive
+    $script:StateDir = Join-Path $TestDrive 'state'
     New-Item -ItemType Directory -Path $script:SessionLogDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
 
     @{
         flags = @{ llmAsJudgeQuality = $false; acceptanceDrivenBackpressure = $false }
@@ -46,7 +48,7 @@ BeforeAll {
 Describe 'Build-StoryPrompt' -Tag 'Unit', 'Phase3' {
     It 'Returns basic prompt when no features enabled' {
         $result = Build-StoryPrompt -StoryId 'US-001' -Story $null
-        $result | Should -Match 'Work on story US-001'
+        $result | Should -Match 'STORY: US-001'
         $result | Should -Match 'prd.json'
     }
 
@@ -172,7 +174,7 @@ Describe 'Measure-CodebaseHealth' -Tag 'Unit', 'Phase3' {
 
 Describe 'Compare-HealthMetrics' -Tag 'Unit', 'Phase3' {
     It 'Returns baseline when no previous data' {
-        Remove-Item (Join-Path $TestDrive 'health_metrics.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'health_metrics.json') -ErrorAction SilentlyContinue
         $current = @{
             tests = @{ total = 50; passed = 48; failed = 2; passRate = 0.96 }
             codebase = @{ pyFiles = 30; ps1Files = 5; totalLines = 10000 }
@@ -188,7 +190,7 @@ Describe 'Compare-HealthMetrics' -Tag 'Unit', 'Phase3' {
             tests = @{ total = 50; passed = 50; failed = 0; passRate = 1.0 }
             codebase = @{ pyFiles = 30; ps1Files = 5; totalLines = 10000 }
             techDebt = @{ todoCount = 3; fixmeCount = 1; hackCount = 0 }
-        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $TestDrive 'health_metrics.json')
+        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:StateDir 'health_metrics.json')
 
         $current = @{
             tests = @{ total = 50; passed = 45; failed = 5; passRate = 0.9 }
@@ -200,7 +202,7 @@ Describe 'Compare-HealthMetrics' -Tag 'Unit', 'Phase3' {
         $downTrends = @($result.trends | Where-Object { $_.direction -eq 'down' })
         $downTrends.Count | Should -BeGreaterThan 0
 
-        Remove-Item (Join-Path $TestDrive 'health_metrics.json') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $script:StateDir 'health_metrics.json') -ErrorAction SilentlyContinue
     }
 }
 

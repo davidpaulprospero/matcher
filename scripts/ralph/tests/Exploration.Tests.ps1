@@ -12,7 +12,7 @@
 #>
 
 BeforeAll {
-    $script:RalphDir = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $script:RalphDir = Split-Path -Parent $PSScriptRoot  # scripts/ralph
     $script:TestDataDir = Join-Path $PSScriptRoot "testdata"
 
     if (-not (Test-Path $script:TestDataDir)) {

@@ -1153,6 +1153,71 @@ function Get-ProcessMetrics {
     return @{ cpu = 0; memoryMB = 0; handles = 0; threads = 0; timestamp = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ") }
 }
 
+function Get-ChildProcessActivity {
+    <#
+    .SYNOPSIS
+        Detect child processes (like pytest) and their CPU activity.
+        Used to extend stall timeout when tests are running.
+    .PARAMETER ParentProcessId
+        Parent process ID (typically Claude)
+    .RETURNS
+        Hashtable with: hasTestRunner, testRunnerName, totalChildCpu, childCount
+    #>
+    param([int]$ParentProcessId)
+
+    $result = @{
+        hasTestRunner = $false
+        testRunnerName = $null
+        totalChildCpu = 0
+        childCount = 0
+        childProcesses = @()
+    }
+
+    try {
+        # Get child processes using WMI (more reliable for process tree)
+        $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentProcessId" -ErrorAction SilentlyContinue
+
+        if ($children) {
+            $result.childCount = @($children).Count
+
+            foreach ($child in $children) {
+                $childName = $child.Name.ToLower()
+                $result.childProcesses += $childName
+
+                # Check for test runners
+                if ($childName -match 'pytest|python|py\.exe|node') {
+                    # Get the process to check CPU and command line
+                    $proc = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue
+                    if ($proc) {
+                        $result.totalChildCpu += $proc.CPU
+
+                        # Check command line for pytest indicators
+                        $cmdLine = $child.CommandLine
+                        if ($cmdLine -and ($cmdLine -match 'pytest|test_|tests/' -or $childName -eq 'pytest.exe')) {
+                            $result.hasTestRunner = $true
+                            $result.testRunnerName = if ($cmdLine -match 'pytest') { 'pytest' } else { $childName }
+                        }
+                    }
+                }
+
+                # Recursively check grandchildren
+                $grandchildren = Get-ChildProcessActivity -ParentProcessId $child.ProcessId
+                if ($grandchildren.hasTestRunner) {
+                    $result.hasTestRunner = $true
+                    $result.testRunnerName = $grandchildren.testRunnerName
+                }
+                $result.totalChildCpu += $grandchildren.totalChildCpu
+                $result.childCount += $grandchildren.childCount
+            }
+        }
+    }
+    catch {
+        # Ignore errors - process may have exited
+    }
+
+    return $result
+}
+
 function Log-ResourceUsage {
     <#
     .SYNOPSIS

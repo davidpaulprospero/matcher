@@ -436,6 +436,14 @@ function Invoke-ClaudeSubprocess {
         $cpuActivityEnabled = if ($cpuActivityConfig -and $null -ne $cpuActivityConfig.enabled) { $cpuActivityConfig.enabled } else { $true }
         $cpuActivityThreshold = if ($cpuActivityConfig -and $cpuActivityConfig.threshold) { $cpuActivityConfig.threshold } else { 0.5 }
 
+        # Subprocess detection config (6th signal - pytest/test runner)
+        $subprocConfig = $script:Config.stallDetection.subprocessDetection
+        $subprocEnabled = if ($subprocConfig -and $null -ne $subprocConfig.enabled) { $subprocConfig.enabled } else { $true }
+        $pytestTimeoutMultiplier = if ($subprocConfig -and $subprocConfig.pytestTimeoutMultiplier) { $subprocConfig.pytestTimeoutMultiplier } else { 3.0 }
+        $lastChildCpuTime = 0
+        $testRunnerDetected = $false
+        $testRunnerAnnounced = $false
+
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
             $timeSinceProgress += $checkIntervalSec
@@ -465,11 +473,32 @@ function Invoke-ClaudeSubprocess {
                     $lastCpuTime = $sample.cpu
                 }
 
-                if ($prdUpdated -or $progressUpdated -or $gitChanged -or $bufferGrowing -or $cpuActive) {
+                # Subprocess detection (6th signal - pytest/test runner)
+                $testRunnerActive = $false
+                $childCpuDelta = 0
+                if ($subprocEnabled) {
+                    $childActivity = Get-ChildProcessActivity -ParentProcessId $process.Id
+                    if ($childActivity.hasTestRunner) {
+                        $testRunnerDetected = $true
+                        $childCpuDelta = $childActivity.totalChildCpu - $lastChildCpuTime
+                        $testRunnerActive = $childCpuDelta -gt $cpuActivityThreshold
+                        $lastChildCpuTime = $childActivity.totalChildCpu
+
+                        # Announce test runner detection once
+                        if (-not $testRunnerAnnounced) {
+                            $extendedKill = [math]::Round($stallThresholds.killThreshold * $pytestTimeoutMultiplier / 60, 1)
+                            Write-Host "  [INFO] Test runner detected ($($childActivity.testRunnerName)) - extending kill threshold to ${extendedKill}min" -ForegroundColor Cyan
+                            $testRunnerAnnounced = $true
+                        }
+                    }
+                }
+
+                if ($prdUpdated -or $progressUpdated -or $gitChanged -or $bufferGrowing -or $cpuActive -or $testRunnerActive) {
                     $reason = if ($prdUpdated) { "prd.json" } `
                         elseif ($progressUpdated) { "progress.txt" } `
                         elseif ($gitChanged) { "git changes" } `
                         elseif ($cpuActive) { "CPU active (+$([math]::Round($cpuDelta, 1))s)" } `
+                        elseif ($testRunnerActive) { "pytest running (+$([math]::Round($childCpuDelta, 1))s CPU)" } `
                         else { "claude output" }
                     Write-Host "  [$mins min] Activity detected ($reason)" -ForegroundColor DarkGreen
                     $timeSinceProgress = 0
@@ -494,10 +523,18 @@ function Invoke-ClaudeSubprocess {
                     $lastHeartbeatUpdate = $totalElapsed
 
                     # Check for stall condition and log to healing system (use focus-area-specific thresholds)
+                    # Extend thresholds if test runner is detected
+                    $effectiveStallThreshold = $stallThresholds.stallThreshold
+                    $effectiveKillThreshold = $stallThresholds.killThreshold
+                    if ($testRunnerDetected) {
+                        $effectiveStallThreshold = [math]::Round($stallThresholds.stallThreshold * $pytestTimeoutMultiplier)
+                        $effectiveKillThreshold = [math]::Round($stallThresholds.killThreshold * $pytestTimeoutMultiplier)
+                    }
                     $stallCheck = Test-ClaudeStall -WaitingSeconds $totalElapsed -TimeSinceActivity $timeSinceProgress `
-                        -StallThreshold $stallThresholds.stallThreshold -KillThreshold $stallThresholds.killThreshold
+                        -StallThreshold $effectiveStallThreshold -KillThreshold $effectiveKillThreshold
                     if ($stallCheck.ShouldKill) {
-                        Write-Host "  [HEALING] Stall threshold exceeded (${timeSinceProgress}s without activity) - killing process" -ForegroundColor Red
+                        $thresholdInfo = if ($testRunnerDetected) { " (extended for pytest)" } else { "" }
+                        Write-Host "  [HEALING] Stall threshold exceeded (${timeSinceProgress}s without activity${thresholdInfo}) - killing process" -ForegroundColor Red
                         # Kill immediately instead of just breaking the loop
                         $treePid = $process.Id
                         try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}

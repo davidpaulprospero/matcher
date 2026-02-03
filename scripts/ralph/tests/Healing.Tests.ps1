@@ -78,11 +78,15 @@ Describe 'Invoke-FastHealthCheck (Tier 1)' -Tag 'Unit', 'Healing' {
     }
 
     It 'detects config validation failures' {
+        # Create the validate_config.py script so Test-Path passes
+        New-Item -Path (Join-Path $TestDrive "scripts") -ItemType Directory -Force | Out-Null
+        New-Item -Path (Join-Path $TestDrive "scripts/validate_config.py") -ItemType File -Force | Out-Null
+
         Mock Invoke-Expression { return "" } -ParameterFilter { $Command -like '*py_compile*' }
         Mock Invoke-Expression {
             $global:LASTEXITCODE = 1
             return "Error: invalid YAML in config.yaml"
-        } -ParameterFilter { $Command -like '*validate-config*' }
+        } -ParameterFilter { $Command -like '*validate_config*' }
         Mock git { return $null }
 
         $result = Invoke-FastHealthCheck -ChangedFiles @() -CriticalFiles @()
