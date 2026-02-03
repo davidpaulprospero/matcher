@@ -395,8 +395,6 @@ def test_logger_stats_tracking(temp_dir: Path):
         videos_downloaded=50,
         videos_skipped=10,
         videos_failed=5,
-        videos_transcribed=45,
-        transcription_cache_hits=15,
         embeddings_computed=1000,
         embedding_cache_hits=200,
         entity_images_downloaded=25,
