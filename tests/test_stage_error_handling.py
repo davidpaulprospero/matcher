@@ -347,6 +347,7 @@ class TestStageMetricsClass:
         assert metrics.items_processed == 0
         assert metrics.items_failed == 0
         assert metrics.duration_seconds == 0.0
+        assert metrics.failed is False
 
     @pytest.mark.fast
     def test_stage_metrics_to_dict(self):

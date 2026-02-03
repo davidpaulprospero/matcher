@@ -386,6 +386,9 @@ class PipelineOrchestrator:
 
             # Handle result
             if not result.success:
+                # Mark metrics as failed (metrics already stored above)
+                if stage_name in self.stage_metrics:
+                    self.stage_metrics[stage_name].failed = True
                 state_ctx = self._get_state_summary()
                 recovery = self._get_recovery_suggestion(stage_name, result.error or "")
                 logger.error(
@@ -610,21 +613,26 @@ class PipelineOrchestrator:
             - total_items_processed: Sum of items_processed across all stages
             - total_items_failed: Sum of items_failed across all stages
             - total_duration_seconds: Sum of duration_seconds across all stages
+            - failed_stages: List of stage names that failed
             - stages: Dict mapping stage_name to StageMetrics
         """
         total_processed = 0
         total_failed = 0
         total_duration = 0.0
+        failed_stages = []
 
         for stage_name, metrics in self.stage_metrics.items():
             total_processed += metrics.items_processed
             total_failed += metrics.items_failed
             total_duration += metrics.duration_seconds
+            if metrics.failed:
+                failed_stages.append(stage_name)
 
         return {
             'total_items_processed': total_processed,
             'total_items_failed': total_failed,
             'total_duration_seconds': total_duration,
+            'failed_stages': failed_stages,
             'stages': self.stage_metrics
         }
 
