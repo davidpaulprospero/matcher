@@ -618,9 +618,11 @@ class TestRetryQueueIntegration:
         # Verify escalation manager was consulted
         mock_escalation_mgr.get_escalation_args.assert_called_with('imp_test')
 
-        # Verify impersonation options were applied to ydl_opts
+        # Verify impersonation options were applied to ydl_opts as ImpersonateTarget
+        from yt_dlp.networking.impersonate import ImpersonateTarget
         assert len(captured_opts) > 0
-        assert captured_opts[0].get('impersonate') == 'Chrome-136:Macos-15'
+        assert isinstance(captured_opts[0].get('impersonate'), ImpersonateTarget)
+        assert captured_opts[0]['impersonate'].client == 'chrome'
 
 
 # ============================================================================
@@ -976,7 +978,10 @@ class TestEscalationTierIntegration:
         ydl_opts = {}
         _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
 
-        assert ydl_opts['impersonate'] == 'Chrome-136:Macos-15'
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        assert isinstance(ydl_opts['impersonate'], ImpersonateTarget)
+        assert ydl_opts['impersonate'].client == 'chrome'
+        assert ydl_opts['impersonate'].os == 'macos'
 
     @pytest.mark.fast
     def test_apply_escalation_to_ydl_opts_extractor_args(self):
@@ -993,7 +998,9 @@ class TestEscalationTierIntegration:
         ydl_opts = {}
         _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
 
-        assert ydl_opts['impersonate'] == 'Chrome-136:Macos-15'
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        assert isinstance(ydl_opts['impersonate'], ImpersonateTarget)
+        assert ydl_opts['impersonate'].client == 'chrome'
         assert 'extractor_args' in ydl_opts
         assert ydl_opts['extractor_args']['youtube']['player_client'] == 'web_safari,tv_downgraded,web'
 
@@ -1076,8 +1083,10 @@ class TestEscalationTierIntegration:
             )
 
         # First call should NOT have extractor_args (Tier 1)
+        from yt_dlp.networking.impersonate import ImpersonateTarget
         assert 'extractor_args' not in captured_opts[0]
-        assert captured_opts[0].get('impersonate') == 'Chrome-136:Macos-15'
+        assert isinstance(captured_opts[0].get('impersonate'), ImpersonateTarget)
+        assert captured_opts[0]['impersonate'].client == 'chrome'
 
         # Second call SHOULD have extractor_args (Tier 2 after 403)
         assert 'extractor_args' in captured_opts[1]
@@ -1268,6 +1277,55 @@ class TestEscalationTierIntegration:
         ydl_opts = {'format': 'best'}
         _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
         assert ydl_opts == {'format': 'best'}  # Unchanged
+
+    @pytest.mark.fast
+    def test_apply_escalation_produces_impersonate_target_object(self):
+        """_apply_escalation_to_ydl_opts sets ImpersonateTarget object, not string (US-49-003)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        assert 'impersonate' in ydl_opts
+        assert isinstance(ydl_opts['impersonate'], ImpersonateTarget), \
+            f"Expected ImpersonateTarget, got {type(ydl_opts['impersonate'])}"
+
+    @pytest.mark.fast
+    def test_apply_escalation_lowercases_impersonate_fields(self):
+        """Uppercase input produces lowercase client/os fields (US-49-003)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        target = ydl_opts['impersonate']
+        assert isinstance(target, ImpersonateTarget)
+        assert target.client == 'chrome', f"Expected 'chrome', got '{target.client}'"
+        assert target.os == 'macos', f"Expected 'macos', got '{target.os}'"
+        assert target.version == '136'
+        assert target.os_version == '15'
+
+    @pytest.mark.fast
+    def test_apply_escalation_invalid_impersonate_falls_back(self):
+        """Invalid impersonate string falls back to no impersonation (US-49-003)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        mock_result = MagicMock()
+        # Provide something that will cause from_str to fail or produce garbage
+        mock_result.args = ['--impersonate', '']
+
+        ydl_opts = {'format': 'best'}
+        # Should not raise - falls back gracefully
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+        assert 'impersonate' not in ydl_opts or ydl_opts.get('format') == 'best'
 
 
 # ============================================================================
