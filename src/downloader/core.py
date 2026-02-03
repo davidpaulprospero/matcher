@@ -1734,6 +1734,9 @@ class VideoDownloader:
         'http error 502',
         'socket timeout',
         'read timed out',
+        'getaddrinfo failed',       # DNS resolution failure
+        'name or service not known', # DNS resolution failure (Linux)
+        'nodename nor servname',     # DNS resolution failure (macOS)
     ]
 
     # Permanent errors: fail immediately, no retry
