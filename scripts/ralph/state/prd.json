@@ -92,7 +92,7 @@
             "id": "US-48-006",
             "title": "Add network-aware error classification to retry queue for download_segments",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add DNS/network error patterns to download_segments error handling that classify errors as 'network_systemic' vs 'video_specific'",
                 "When adding to retry queue, tag items with error_category so retry logic can skip network_systemic items",
@@ -100,7 +100,7 @@
                 "Add unit test verifying DNS resolution failure is classified as 'network_systemic'",
                 "Add unit test verifying 403 Forbidden is classified as 'video_specific' (retryable with escalation)"
             ],
-            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:240-252 (error handler), src/downloader/retry_queue.py (RetryQueue.add() method), src/downloader/core.py:1719-1765 (error pattern lists). Currently all errors are treated equally - added to retry queue with just the error message string. Network-systemic errors (DNS failure, no connectivity) should not be retried because the underlying issue affects all segments, not just one. Video-specific errors (403, unavailable) may succeed on retry with escalation. The retry_queue.add() accepts error_message but doesn't classify it."
+            "notes": "Added classify_error_category() to download_segments.py using existing _is_network_failure() patterns. Added error_category field to RetryItem (default: video_specific). RetryQueue.add() accepts error_category param, tags items on add. Added get_retryable_items() to filter out network_systemic. Checkpoint serialization includes error_category with backward compat. Added getaddrinfo/DNS patterns to TRANSIENT_ERROR_PATTERNS in core.py. 24 new tests in test_error_classification.py, all 170 related tests pass."
         },
         {
             "id": "US-48-007",

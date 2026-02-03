@@ -65,6 +65,24 @@ def _is_network_failure(error_msg: str) -> bool:
 NETWORK_FAILURE_THRESHOLD = 3
 
 
+def classify_error_category(error_msg: str) -> str:
+    """Classify an error as 'network_systemic' or 'video_specific'.
+
+    Network-systemic errors (DNS failure, no connectivity) affect ALL
+    downloads and retrying individual items won't help. Video-specific
+    errors (403, removed, age-gated) may succeed on retry with escalation.
+
+    Args:
+        error_msg: The exception message string.
+
+    Returns:
+        'network_systemic' for DNS/connectivity failures, 'video_specific' otherwise.
+    """
+    if _is_network_failure(error_msg):
+        return 'network_systemic'
+    return 'video_specific'
+
+
 def _is_escalation_error(error_msg: str) -> bool:
     """Check if an error message indicates a 403/bot-detection/auth error.
 
@@ -431,13 +449,17 @@ class DownloadVideoSegmentsStage(Stage):
 
                 # Add failed download to retry queue for batch retry later
                 if self.downloader and self.downloader.retry_queue:
+                    category = classify_error_category(error_msg)
                     self.downloader.retry_queue.add(
                         video_id=f"{video_id}_{int(start)}_{int(end)}",
                         keyword='segment',
                         tier='segment',
-                        error_message=error_msg
+                        error_message=error_msg,
+                        error_category=category,
                     )
-                    logger.debug(f"Added {video_id} to retry queue")
+                    logger.debug(
+                        f"Added {video_id} to retry queue (category={category})"
+                    )
 
             # Checkpoint progress
             if progress_callback:

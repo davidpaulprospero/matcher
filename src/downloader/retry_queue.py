@@ -106,6 +106,7 @@ class RetryItem:
     retry_count: int = 0
     added_at: float = field(default_factory=time.time)
     severity: str = 'medium'  # low, medium, high - determines delay multiplier
+    error_category: str = 'video_specific'  # 'network_systemic' or 'video_specific'
 
 
 class RetryQueue:
@@ -340,7 +341,8 @@ class RetryQueue:
         video_id: str,
         keyword: str,
         tier: str,
-        error_message: str
+        error_message: str,
+        error_category: str = 'video_specific'
     ) -> bool:
         """Add a failed video to the retry queue.
 
@@ -349,6 +351,10 @@ class RetryQueue:
             keyword: Search keyword that found this video
             tier: Duration tier (short, medium, long, longer)
             error_message: Error message from the failure
+            error_category: 'network_systemic' or 'video_specific'.
+                Network-systemic errors (DNS, no connectivity) affect all
+                segments and should not be retried. Video-specific errors
+                (403, unavailable) may succeed on retry with escalation.
 
         Returns:
             True if added to queue, False if disabled or already in queue.
@@ -361,9 +367,10 @@ class RetryQueue:
 
         # Check if already in queue
         if video_id in self.items:
-            # Update error message and severity but don't re-add
+            # Update error message, severity, and category but don't re-add
             self.items[video_id].error_message = error_message
             self.items[video_id].severity = classify_error_severity(error_message)
+            self.items[video_id].error_category = error_category
             logger.debug(f"Retry queue: {video_id} already queued, updated error")
             return False
 
@@ -381,14 +388,15 @@ class RetryQueue:
             tier=tier,
             error_message=error_message,
             retry_count=0,
-            severity=severity
+            severity=severity,
+            error_category=error_category,
         )
         self._total_added += 1
         self._stats.record_failure(video_id, error_message)
 
         logger.debug(
-            f"Retry queue: added {video_id} ({keyword}/{tier}) severity={severity} - "
-            f"queue size now {len(self.items)}"
+            f"Retry queue: added {video_id} ({keyword}/{tier}) severity={severity} "
+            f"category={error_category} - queue size now {len(self.items)}"
         )
         return True
 
@@ -399,6 +407,21 @@ class RetryQueue:
             List of RetryItem objects in the queue.
         """
         return list(self.items.values())
+
+    def get_retryable_items(self) -> List[RetryItem]:
+        """Get items that are worth retrying (excludes network_systemic errors).
+
+        Network-systemic errors (DNS failure, no connectivity) affect all
+        segments and won't resolve by retrying individual items. Only
+        video-specific errors (403, removed) may succeed with escalation.
+
+        Returns:
+            List of RetryItem objects with error_category != 'network_systemic'.
+        """
+        return [
+            item for item in self.items.values()
+            if item.error_category != 'network_systemic'
+        ]
 
     def mark_success(self, video_id: str) -> None:
         """Mark a video as successfully retried.
@@ -560,6 +583,7 @@ class RetryQueue:
                     'tier': item.tier,
                     'error_message': item.error_message,
                     'retry_count': item.retry_count,
+                    'error_category': item.error_category,
                 }
                 for item in self.items.values()
             ],
@@ -593,6 +617,7 @@ class RetryQueue:
                     tier=item_data.get('tier', 'short'),
                     error_message=item_data.get('error_message', ''),
                     retry_count=item_data.get('retry_count', 0),
+                    error_category=item_data.get('error_category', 'video_specific'),
                 )
 
         # Restore state
