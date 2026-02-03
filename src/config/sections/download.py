@@ -1113,6 +1113,11 @@ class DownloadConfig:
     # Default: same as tier timeout (uses download_timeout/download_timeouts values)
     stall_timeout: int = 60  # Seconds of zero yt-dlp output before killing (0 = tier timeout, not recommended)
 
+    # Socket timeout: seconds before yt-dlp gives up on a stalled TCP connection.
+    # Used by both subprocess calls (--socket-timeout) and Python API calls (socket_timeout key).
+    # Without this, ydl.download() can block indefinitely on stalled connections.
+    socket_timeout: int = 30
+
     # Tier-specific download timeouts (longer videos need more time)
     # Keys: 'short', 'medium', 'long', 'longer'
     download_timeouts: Dict[str, int] = field(default_factory=lambda: {

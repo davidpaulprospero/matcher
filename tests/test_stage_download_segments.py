@@ -522,3 +522,160 @@ class TestRetryQueueIntegration:
         # Verify impersonation options were applied
         assert len(captured_opts) > 0
         assert captured_opts[0].get('impersonate') == 'Chrome-136:Macos-15'
+
+
+# ============================================================================
+# Socket Timeout in ydl_opts (US-48-002)
+# ============================================================================
+
+class TestSocketTimeoutInYdlOpts:
+    """Test that socket_timeout, retries, and fragment_retries are set in ydl_opts"""
+
+    @pytest.mark.fast
+    def test_socket_timeout_present_in_ydl_opts(self, stage, tmp_path):
+        """socket_timeout, retries, and fragment_retries are present in ydl_opts
+        when calling yt-dlp Python API"""
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'timeout_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['socket_timeout'] == 30
+        assert captured_opts[0]['retries'] == 10
+        assert captured_opts[0]['fragment_retries'] == 10
+
+    @pytest.mark.fast
+    def test_socket_timeout_reads_from_config(self, stage, tmp_path):
+        """socket_timeout value is read from download config, not hardcoded"""
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 60  # Custom value
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'config_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert captured_opts[0]['socket_timeout'] == 60
+
+    @pytest.mark.fast
+    def test_socket_timeout_fallback_default(self, stage, tmp_path):
+        """socket_timeout defaults to 30 when downloader has no config"""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': 'fallback_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert captured_opts[0]['socket_timeout'] == 30
+
+    @pytest.mark.fast
+    def test_socket_timeout_in_retry_queue_ydl_opts(self, stage, tmp_path):
+        """socket_timeout is also applied in retry queue ydl_opts"""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 45
+
+        retry_queue = RetryQueue(BatchRetryConfig(
+            enabled=True, delay_seconds=0, max_passes=1
+        ))
+        retry_queue.add(
+            video_id='retry_timeout_0_10',
+            keyword='segment',
+            tier='segment',
+            error_message='Initial failure'
+        )
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.retry_queue = retry_queue
+        mock_downloader.impersonation_manager = None
+
+        stage.downloader = mock_downloader
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=MagicMock())
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._process_retry_queue(tmp_path, 5.0, [], 1, None)
+
+        assert len(captured_opts) > 0
+        assert captured_opts[0]['socket_timeout'] == 45
+        assert captured_opts[0]['retries'] == 10
+        assert captured_opts[0]['fragment_retries'] == 10

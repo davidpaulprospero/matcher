@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 47,
-    "focusArea": "testing",
-    "branchName": "ralph/sprint-47",
+    "sprintNumber": 48,
+    "focusArea": "download",
+    "branchName": "ralph/sprint-48",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,180 +11,185 @@
     },
     "userStories": [
         {
-            "id": "US-47-001",
-            "title": "Generate sprint stories for testing focus area",
+            "id": "US-48-001",
+            "title": "Generate sprint stories for download focus area",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'testing' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'testing'",
-                "Add stories US-47-002 through US-47-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'download'",
+                "Add stories US-48-002 through US-48-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-47-NNN to be unique across sprints",
-                "Mark this story (US-47-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-48-NNN to be unique across sprints",
+                "Mark this story (US-48-001) as passes: true when done"
             ],
-            "notes": "Planning story completed. Generated 11 stories (US-47-002 through US-47-012) covering: match stage contract validation, stale state reference audit, scene_detection module tests, EmbeddingSearch contract tests, match_all_segments integration tests, downloader cache module tests, agent module test coverage, config post_init edge case tests, PipelineState serialization roundtrip tests, stage error propagation tests, and matching metrics edge case tests. Analysis: 13,790 existing tests, but specific gaps in scene_detection (0 tests), downloader caches, agent internals, and match stage contract validation."
+            "notes": "Planning story completed. Generated 11 stories (US-48-002 through US-48-012) covering three user-reported bugs (socket timeout hang, iterative_match serialization mismatch, DNS circuit breaker) plus download infrastructure improvements (escalation integration in download_segments, retry queue network-aware classification, download progress reporting, segment deduplication, checkpoint restoration validation, config defaults for download_segments, download metrics collection, audio_first socket timeout parity). Analysis: download_segments.py bypasses core.py's subprocess+stall-detection by using yt-dlp Python API directly without socket_timeout; iterative_match.py:427 uses getattr(match, 'video_file', '') on MatchResult objects which lack that attribute; no circuit breaker in download_segments loop for systemic network failures."
         },
         {
-            "id": "US-47-002",
-            "title": "Add match stage stale state reference regression tests",
+            "id": "US-48-002",
+            "title": "Add socket timeout to download_segments yt-dlp Python API calls",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Add tests verifying _run_matching() in match.py does NOT access state.embeddings or state.embedding_index directly",
-                "Add test confirming video embeddings are computed locally (lines 498-507 pattern) not read from PipelineState",
-                "Add test that match_all_segments receives embedding_index=None and location_chapters from getattr fallback",
-                "Add test that _run_matching() succeeds with a minimal PipelineState that has no extra fields beyond the dataclass definition",
-                "All tests in new file tests/test_match_stage_state_refs.py must pass"
+                "Add 'socket_timeout' key to ydl_opts dict in _download_segments() at line 209-217 with configurable value from download config",
+                "Add 'socket_timeout' key to ydl_opts dict in _process_retry_queue() at line 318-325 with same configurable value",
+                "Add 'retries' and 'fragment_retries' keys to both ydl_opts dicts to match core.py subprocess args (--retries 10, --fragment-retries 10)",
+                "Add unit test verifying socket_timeout is present in ydl_opts when calling yt-dlp Python API",
+                "Add unit test verifying timeout value is read from config with fallback default of 30 seconds"
             ],
-            "notes": "COMPLETED. 13 tests in tests/test_match_stage_state_refs.py: TestNoStaleStateAccess (3 tests: source code inspection for state.embeddings, state.embedding_index, and limited state attribute access), TestLocalEmbeddingComputation (3 tests: compute_embeddings called twice, no embeddings/embedding_index fields on PipelineState), TestMatchAllSegmentsParameters (4 tests: embedding_index=None, location_chapters from state, fallback when missing, face_preference), TestMinimalPipelineState (3 tests: defaults-only state, fresh state no AttributeError, no stale dataclass fields)."
+            "notes": "Completed. Added socket_timeout (configurable, default 30s), retries (10), and fragment_retries (10) to both _download_segments() and _process_retry_queue() ydl_opts dicts. Added socket_timeout field to DownloadConfig dataclass in src/config/sections/download.py and config.yaml. Added 4 unit tests: socket_timeout present in ydl_opts, reads from config, fallback default of 30, and retry queue also gets timeout. All 22 tests pass."
         },
         {
-            "id": "US-47-003",
-            "title": "Add stale PipelineState attribute access audit test",
+            "id": "US-48-003",
+            "title": "Fix iterative_match serialization to extract video_file from MatchResult structure",
             "priority": "high",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add AST-based or grep-based test that scans all files in src/stages/ for state.FIELD_NAME attribute access",
-                "Test validates every accessed field actually exists on PipelineState dataclass in src/state.py",
-                "Test catches getattr(state, 'field', default) patterns and validates field exists",
-                "Test catches hasattr(state, 'field') patterns and validates field exists",
-                "Test fails with clear message listing file, line number, and invalid field name if a stale reference is found",
-                "All tests in tests/test_state_attribute_audit.py must pass"
+                "Change serialization at iterative_match.py:427 to drill into match.primary_match.video_segment.source_file instead of getattr(match, 'video_file', '')",
+                "Follow the same pattern used in match.py:160-167 for extracting source_file from MatchResult objects",
+                "Add unit test with a MatchResult object (from src/utils.py:507) verifying serialized output contains non-empty video_file/source_file",
+                "Add unit test verifying restore_matches_from_dicts() accepts the corrected serialization format",
+                "Add unit test confirming the old format (empty video_file) is detected and logged as a warning during restore"
             ],
-            "notes": "12 tests in tests/test_state_attribute_audit.py - AST-based scan of src/stages/*.py for state.FIELD_NAME, getattr(state, 'field'), hasattr(state, 'field'). Validates against PipelineState dataclass fields. Known legacy exceptions tracked with bidirectional enforcement. Caught 5 real stale references (downloaded_videos, downloaded_audio, pending_streams, project_dir)."
+            "notes": "Tier: bug fix (user-reported Issue 2). Files: src/stages/iterative_match.py:421-436 (serialization loop), src/stages/match.py:157-182 (correct pattern), src/utils.py:507-517 (MatchResult dataclass). The MATCH stage correctly serializes using match.primary_match.video_segment.source_file (match.py:167), but ITERATIVE_MATCH uses getattr(match, 'video_file', '') which always returns '' because MatchResult has no video_file attribute. This causes all 566 matches to be saved with empty video_file, and Match.from_dict() rejects them all on checkpoint restore. Also need to serialize video_start/video_end from primary_match.video_segment.start_time/end_time instead of getattr(match, 'video_start', 0.0)."
         },
         {
-            "id": "US-47-004",
-            "title": "Add unit tests for scene_detection module",
+            "id": "US-48-004",
+            "title": "Add network failure circuit breaker to download_segments stage",
             "priority": "high",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add tests for sanitize_path_for_url() function covering Windows paths, spaces, and special characters",
-                "Add tests for SceneDetectionCache (BaseCache subclass) including cache hit/miss and serialization",
-                "Add tests for detect_scenes_for_video() with mocked cv2 and scenedetect to verify scene boundary extraction",
-                "Add tests for batch scene detection with ThreadPoolExecutor mocked to verify parallel execution logic",
-                "All tests in tests/test_scene_detection.py must pass"
+                "Add consecutive network failure tracking to _download_segments() loop with configurable threshold (default: 3)",
+                "Detect DNS resolution failures (Errno 11001, 'getaddrinfo failed', 'Name or service not known') and network unreachable errors as systemic failures",
+                "Abort the download loop early when consecutive network failures exceed threshold, logging clear message about systemic network issue",
+                "Reset the consecutive failure counter on any successful download",
+                "Add unit test verifying early abort after 3 consecutive DNS failures with remaining segments skipped",
+                "Add unit test verifying counter resets after a successful download between failures"
             ],
-            "notes": "COMPLETED. 50 tests in tests/test_scene_detection.py covering 12 test classes: TestSanitizePathForUrl (9 tests: Windows backslashes, extended-length prefix, spaces, special chars, unicode, Path objects), TestSceneInfo (3 tests: to_dict, broll fields, JSON serialization), TestVideoSceneData (5 tests: round-trip, missing fields, old cache format, post_init defaults, JSON), TestSceneCache (7 tests: set/get, miss, get_all, persistence, delete, overwrite, stats), TestSceneDetectorInit (3 tests: presets, config override), TestDetectScenesInVideo (2 tests: scene detection with mocked scenedetect, no-scenes case), TestSceneListToInfo (3 tests: empty list, multiple scenes, zero framerate), TestProcessVideo (3 tests: end-to-end with OTIO mock, caching, error handling), TestProcessAllVideos (3 tests: empty dir, multiple videos, extension filtering), TestGetSceneClips (2 tests: clip generation, empty index), TestEnrichVideoMetadata (2 tests), TestGetStats (2 tests), plus utility tests for get_file_hash, PRESETS, VIDEO_EXTENSIONS."
+            "notes": "Tier: bug fix (user-reported Issue 3). Files: src/stages/download_segments.py:240-252 (exception handler in download loop), src/stages/download_segments.py:188-257 (full download loop). Currently each failure is caught individually and added to retry queue, but the loop continues trying every remaining segment. For systemic issues (DNS down, no internet), this wastes time on hundreds of segments that will all fail. The existing CircuitBreaker in src/downloader/circuit_breaker.py is designed for search failures in core.py and uses time.sleep() pauses, which is wrong for download_segments (should abort, not pause). Need a lightweight consecutive-failure counter specific to this stage. Also detect ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as network-related."
         },
         {
-            "id": "US-47-005",
-            "title": "Add EmbeddingSearch contract validation tests",
+            "id": "US-48-005",
+            "title": "Integrate escalation tiers into download_segments stage",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add test that EmbeddingSearch.from_matching_config() accepts embedding_index=None without error",
-                "Add test that EmbeddingSearch.search() returns valid candidates when embedding_index is None (brute-force fallback)",
-                "Add test that EmbeddingSearch handles empty video_embeddings list gracefully",
-                "Add test that EmbeddingSearch handles mismatched video_segments and video_embeddings lengths",
-                "All tests in tests/test_embedding_search_contract.py must pass"
+                "Apply EscalationManager tier progression to download_segments ydl_opts, not just Tier 1 impersonation",
+                "Add extractor_args for Tier 2 escalation when 403/bot errors are detected in download_segments",
+                "Add cookie rotation support for Tier 3 escalation in download_segments",
+                "Track escalation state per-segment so retries use the escalated tier",
+                "Add unit test verifying Tier 2 extractor_args are added to ydl_opts after 403 error",
+                "Add unit test verifying cookie method is advanced after auth error in download_segments"
             ],
-            "notes": "COMPLETED. 14 tests in tests/test_embedding_search_contract.py across 4 test classes: TestFromMatchingConfigNoneIndex (3 tests: explicit None, default None, functional instance with brute-force search), TestSearchBruteForceWithNoneIndex (4 tests: returns candidates, sorted by similarity, identical vector has ~1.0 score, valid segment references), TestEmptyVideoEmbeddings (3 tests: empty returns empty list, from_matching_config with empty, empty + None index - uses mocked find_top_k_similar since embeddings.py has an AxisError bug on empty arrays), TestMismatchedSegmentsAndEmbeddings (4 tests: more segments than embeddings, more embeddings than segments, mismatch does not raise, all out-of-range returns empty). Discovery: find_top_k_similar in embeddings.py crashes on empty embedding arrays (numpy AxisError on axis=1 for 1D empty array)."
+            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:219-225 (current Tier 1 only impersonation), src/downloader/escalation_manager.py (4-tier escalation logic), src/downloader/core.py:1583-1584 (_add_escalation_to_cmd and _add_cookies_to_cmd patterns). Currently download_segments.py only applies Tier 1 impersonation (lines 220-225) but ignores Tiers 2-4. The core downloader has full escalation via _add_escalation_to_cmd() which adds extractor_args at Tier 2 and cookie rotation at Tier 3. Since download_segments uses the Python API (ydl_opts dict) instead of subprocess (cmd list), the escalation needs to be translated to ydl_opts keys: 'extractor_args' for Tier 2, cookie path for Tier 3."
         },
         {
-            "id": "US-47-006",
-            "title": "Add match_all_segments integration tests for parameter contracts",
+            "id": "US-48-006",
+            "title": "Add network-aware error classification to retry queue for download_segments",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add test that match_all_segments succeeds with location_chapters=None and video_locations=None",
-                "Add test that match_all_segments succeeds with embedding_index=None",
-                "Add test that match_all_segments handles empty voiceover_segments list (returns empty list)",
-                "Add test that match_all_segments handles empty video_segments list gracefully",
-                "Add test verifying face_preference parameter flows through correctly to TieredMatcher",
-                "All tests in tests/test_match_all_segments_contract.py must pass"
+                "Add DNS/network error patterns to download_segments error handling that classify errors as 'network_systemic' vs 'video_specific'",
+                "When adding to retry queue, tag items with error_category so retry logic can skip network_systemic items",
+                "Add 'dns_failure', 'network_unreachable', 'connection_refused' to the TRANSIENT_ERROR_PATTERNS in core.py if not already present",
+                "Add unit test verifying DNS resolution failure is classified as 'network_systemic'",
+                "Add unit test verifying 403 Forbidden is classified as 'video_specific' (retryable with escalation)"
             ],
-            "notes": "7 tests in tests/test_match_all_segments_contract.py — all passing. Tests: location_chapters=None + video_locations=None optional, embedding_index=None works, empty voiceover_segments returns [], empty video_segments handled, face_preference flows through to TieredMatcher. Discovery: Fixed ZeroDivisionError in variety metrics dashboard (src/matching/main.py:406-442) when voiceover_segments is empty."
+            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:240-252 (error handler), src/downloader/retry_queue.py (RetryQueue.add() method), src/downloader/core.py:1719-1765 (error pattern lists). Currently all errors are treated equally - added to retry queue with just the error message string. Network-systemic errors (DNS failure, no connectivity) should not be retried because the underlying issue affects all segments, not just one. Video-specific errors (403, unavailable) may succeed on retry with escalation. The retry_queue.add() accepts error_message but doesn't classify it."
         },
         {
-            "id": "US-47-007",
-            "title": "Add unit tests for downloader cache modules",
+            "id": "US-48-007",
+            "title": "Add download progress reporting and ETA to download_segments stage",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add tests for LLMFilterCache in src/downloader/llm_filter_cache.py covering cache set, get, and expiry",
-                "Add tests for SearchCache in src/downloader/search_cache.py covering search result caching and invalidation",
-                "Add tests for cache serialization roundtrip (save to disk and reload)",
-                "Add tests for cache size limits and eviction behavior if applicable",
-                "All tests in tests/test_downloader_caches.py must pass"
+                "Add success/failure/skip counters displayed after each segment download attempt",
+                "Display running success rate (downloaded/attempted) during the download loop",
+                "Add summary at end of stage: total attempted, succeeded, failed, skipped (cached), total time",
+                "Use existing ProgressBar from src/utils.py (line 534) or print-based progress consistent with other stages",
+                "Add unit test verifying progress callback is called with correct current/total values",
+                "Add unit test verifying final summary includes all counter categories"
             ],
-            "notes": "COMPLETED. 38 tests in tests/test_downloader_caches.py across 9 test classes: TestLLMFilterCacheSetGet (6 tests: set/get, miss, separate keywords, separate video sets, case insensitive, empty approved list), TestLLMFilterCacheExpiry (3 tests: expired returns None, fresh valid, zero TTL never expires), TestLLMFilterCacheInvalidation (3 tests: invalidate removes entries, nonexistent returns 0, clear removes all), TestSearchCacheSetGet (6 tests: set/get, miss, different tiers, different pool sizes, case insensitive, empty list), TestSearchCacheExpiry (3 tests: expired, fresh, zero TTL), TestSearchCacheInvalidation (3 tests: invalidate, nonexistent, clear), TestSerializationRoundtrip (5 tests: LLM persist to disk, search persist to disk, valid JSON index, corrupted index recovery), TestEvictionBehavior (4 tests: cleanup_expired, evict_to_size, dry_run, under target), TestStatistics (2 tests: hit/miss tracking, hit_rate), TestDataclassHelpers (3 tests: CachedLLMFilterResult roundtrip, CachedSearchResult roundtrip, extra fields ignored)."
+            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:188-261 (download loop), src/utils.py:534-569 (ProgressBar class). Currently the stage only prints '[idx/total] Downloaded video_id' on success (line 236) and logs warnings on failure. No running totals, no success rate, no time tracking. Other stages like iterative_match.py have detailed summaries (lines 415-419). The checkpoint_progress callback at lines 93-101 only saves to checkpoint, doesn't display anything."
         },
         {
-            "id": "US-47-008",
-            "title": "Add unit tests for agent module internals",
+            "id": "US-48-008",
+            "title": "Improve segment deduplication in download_segments to handle multi-segment videos",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add tests for HealingLogger in src/agents/healing_logger.py covering JSONL log writing and reading",
-                "Add tests for agent strategy selection in src/agents/strategy.py covering strategy ranking and selection",
-                "Add tests for agent watcher in src/agents/watcher.py covering health check detection and alerting",
-                "Add tests for fallback behavior in src/agents/fallback.py covering graceful degradation paths",
-                "All tests in tests/test_agent_internals.py must pass"
+                "Fix deduplication key in _collect_matched_segments() to handle video IDs with underscores (e.g., 'abc_def') by using video_id directly instead of round(start_time)",
+                "Add overlap detection: if two segments from same video overlap or are adjacent (gap < 2*buffer), merge them into one download",
+                "Add unit test verifying segments with overlapping time ranges from same video are merged",
+                "Add unit test verifying segments from different videos with same timestamps are NOT merged",
+                "Add unit test verifying video IDs containing underscores are deduplicated correctly"
             ],
-            "notes": "97 tests in tests/test_agent_internals.py covering HealingLogger (JSONL write/read, truncation, thread safety, report generation), HealingStrategy (factory methods, mode selection, priority ordering), WatcherAgent (escalation logic, healer priority, response parsing), and FallbackChain (circuit breaker, pattern routing, graceful degradation). All passing."
+            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:129-168 (_collect_matched_segments), src/stages/download_segments.py:157 (dedup key using round()). Current dedup uses key=(video_id, round(start_time), round(end_time)) which has two issues: (1) round() loses precision for segments that differ by <0.5s, (2) adjacent segments from the same video result in multiple downloads that could be merged into one larger segment download. Merging overlapping/adjacent segments would reduce the number of yt-dlp calls and improve reliability. Also, the _update_matches_with_local_paths at line 369 splits filename on '_' to extract video_id which breaks for IDs containing underscores."
         },
         {
-            "id": "US-47-009",
-            "title": "Add config section post_init edge case tests",
+            "id": "US-48-009",
+            "title": "Add checkpoint restore validation for download_segments stage",
             "priority": "medium",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add tests for IterativeMatchingConfig post_init with boundary values (0, negative, very large numbers)",
-                "Add tests for DownloadConfig post_init with nested dataclass fields passed as raw dicts",
-                "Add tests for MatchingConfig post_init clamping behavior (values outside valid ranges)",
-                "Add tests verifying config sections handle missing optional fields with correct defaults",
-                "All tests in tests/test_config_post_init_edge_cases.py must pass"
+                "Validate restored segment files actually exist on disk and have non-zero size in restore() method",
+                "Filter out restored segments where the file has been deleted or is empty (0 bytes)",
+                "Log count of valid vs invalid restored segments for debugging",
+                "Cross-reference restored segments against state.matches to identify segments that still need downloading",
+                "Add unit test verifying restore() filters out non-existent files from restored segments list",
+                "Add unit test verifying restore() filters out zero-byte files"
             ],
-            "notes": "71 tests in tests/test_config_post_init_edge_cases.py across 7 test classes: TestIterativeMatchingConfigBoundaryValues (21 tests: clamping for target_confidence, source_spacing_seconds, max_iterations, min_gap_percentage, search_results_per_gap, max_new_videos_per_pass, caption_batch_size, caption_fetch_delay with 0/negative/very-large values), TestDownloadConfigNestedDictCoercion (15 tests: all 15 nested config classes coerced from raw dicts including deeply-nested caption_first with circuit_breaker/retry_budget dicts), TestMatchingConfigPostInitClamping (9 tests: None-to-default, dict-to-dataclass, identity preservation for location_matching and chapter_detection), TestCaptionRetryBudgetConfigValidation (13 tests: ValueError on max_attempts<10, attempts_per_video<1.0, max_backoff<30, plus boundary valid values), TestCookieRotationConfigValidation (2 tests), TestMissingOptionalFieldDefaults (11 tests: all config sections create correct defaults with no args). All passing."
+            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:392-416 (restore method). Current restore() at line 406 blindly creates DownloadedVideo for every *_*_*.mp4 file found in the output directory without checking if files are valid (non-zero size) or complete. A corrupted/partial download could result in a zero-byte .mp4 file that passes the glob but is unusable. Also, restored segments have source='restored' but no URL, making it impossible to re-download if the file is corrupt. The glob pattern '*_*_*.mp4' could also match non-segment files."
         },
         {
-            "id": "US-47-010",
-            "title": "Add PipelineState serialization roundtrip tests",
+            "id": "US-48-010",
+            "title": "Add configurable defaults for download_segments stage options",
             "priority": "low",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add test that every PipelineState field survives checkpoint save and load roundtrip",
-                "Add test for to_checkpoint_dict() including all Optional fields when set to None",
-                "Add test for from_checkpoint_dict() with missing fields to verify backward compatibility",
-                "Add test for PipelineState with complex nested field types (lists of dataclasses, dicts with special keys)",
-                "All tests in tests/test_pipeline_state_roundtrip.py must pass"
+                "Add segment_buffer, segment_format, segment_max_resolution, and segment_socket_timeout fields to DownloadConfig dataclass",
+                "Wire segment_buffer from config instead of hardcoded getattr fallback at download_segments.py:73",
+                "Wire segment_max_resolution into format string (currently hardcoded 'best[height<=1080]' at line 210)",
+                "Add __post_init__ for any nested dataclass fields per CLAUDE.md Rule 2",
+                "Add unit test verifying DownloadConfig loads segment_ prefixed fields from config dict",
+                "Add unit test verifying default values match current hardcoded values (buffer=5.0, resolution=1080)"
             ],
-            "notes": "38 tests in 6 classes: TestPipelineStateFieldRoundtrip (9), TestToCheckpointDictOptionalNone (5), TestFromCheckpointDictMissingFields (8), TestComplexNestedTypes (10), TestNumpySerializationSafety (2), TestFullCheckpointRoundtrip (4). Covers asdict/JSON roundtrip for all field types, numpy float32 safety (Rule 7), backward compat with missing fields, CheckpointManager integration."
+            "notes": "Tier: enhancement. Files: src/config/sections/download.py (DownloadConfig dataclass, currently ~500 lines), src/stages/download_segments.py:73 (segment_buffer hardcoded fallback), src/stages/download_segments.py:210 (format string hardcoded). Currently download_segments.py reads segment_buffer via getattr(download_config, 'segment_buffer', 5.0) but the field doesn't exist on DownloadConfig. Other options like format='best[height<=1080]' and force_keyframes_at_cuts=True are hardcoded in the ydl_opts dict. Making these configurable follows the pattern established by other download config options."
         },
         {
-            "id": "US-47-011",
-            "title": "Add stage error propagation integration tests",
+            "id": "US-48-011",
+            "title": "Add download_segments metrics collection for pipeline observability",
             "priority": "low",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add test that stage failure in MATCH stage produces correct error in checkpoint",
-                "Add test that validate_required_state_attrs() raises clear errors for missing fields",
-                "Add test that pipeline.run() handles stage exceptions without losing prior checkpoint data",
-                "Add test that --resume correctly skips already-completed stages after a mid-pipeline failure",
-                "All tests in tests/test_stage_error_propagation.py must pass"
+                "Track per-segment download duration and report average/median in stage summary",
+                "Track total bytes downloaded (from output file sizes) and report in stage summary",
+                "Return StageMetrics from run() method with items_processed, items_failed, duration_seconds",
+                "Add retry_count to checkpoint data showing how many segments needed retry",
+                "Add unit test verifying StageMetrics is populated with correct counts after successful run",
+                "Add unit test verifying retry_count in checkpoint data reflects actual retry attempts"
             ],
-            "notes": "COMPLETED. 20 tests in tests/test_stage_error_propagation.py across 5 test classes: TestMatchStageFailureCheckpoint (4 tests: prior stages preserved, match data not checkpointed, returns false, state rollback), TestValidateRequiredStateAttrs (6 tests: missing attr initialized, multiple missing, existing preserved, PipelineState.validate_state_attributes, empty when valid, unknown attr gets None), TestPipelineRunExceptionHandling (5 tests: fail preserves checkpoint, unhandled exception propagates, checkpoint written to disk, validation failure safe, progressive checkpointing), TestResumeAfterMidPipelineFailure (3 tests: skips completed stages, resume from disk, empty checkpoint runs all), TestStageMetricsOnFailure (2 tests: failed flag true, successful unfailed)."
+            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:54-127 (run method, currently returns StageResult.ok with minimal checkpoint_data), src/stages/__init__.py (StageResult, StageMetrics classes). The iterative_match stage returns StageMetrics (line 462-466) but download_segments doesn't. Adding metrics would enable pipeline observability dashboards and help diagnose slow downloads. The existing checkpoint_data at lines 118-121 only tracks segment_count and total_matches."
         },
         {
-            "id": "US-47-012",
-            "title": "Add matching metrics edge case and histogram tests",
+            "id": "US-48-012",
+            "title": "Add socket timeout and stall detection parity to audio_first pipeline yt-dlp calls",
             "priority": "low",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Add tests for calculate_match_quality_metrics with numpy.float32 confidence values (Rule 7)",
-                "Add tests for calculate_match_quality_metrics with single match (std=0.0 edge case)",
-                "Add tests for log_confidence_histogram with empty list, single value, and all-same-bucket distribution",
-                "Add tests for MatchQualityMetrics.from_dict() with missing fields and extra fields",
-                "All tests in tests/test_matching_metrics_edge_cases.py must pass"
+                "Audit all yt-dlp subprocess calls in audio_first.py and verify --socket-timeout is present (lines ~241, ~427, ~591)",
+                "Add --socket-timeout 10 to any subprocess calls missing it, matching core.py pattern",
+                "Verify --retries 10 and --fragment-retries 10 are present on all subprocess calls",
+                "Add stall detection timeout via _wait_for_process_with_progress if not already used",
+                "Add unit test verifying all yt-dlp subprocess command lists in audio_first.py contain --socket-timeout",
+                "Add unit test verifying subprocess calls include encoding='utf-8' and errors='replace' per CLAUDE.md Rule 27"
             ],
-            "notes": "COMPLETED. 24 tests in tests/test_matching_metrics_edge_cases.py across 8 test classes: TestNumpyFloat32Confidences (4 tests: float32 conversion, JSON serialization, std calculation, float64 handling), TestSingleMatchStdZero (3 tests: MatchResult std=0, direct Match std=0, avg==min==max), TestEmptyMatchList (3 tests: positive segments, zero segments, negative segments), TestHasGapScenarios (3 tests: all gaps, mixed gap/no-gap, no primary_match as gap), TestHistogramEdgeCasesExtended (6 tests: empty list, single value, all-same-bucket 100%, all zeros, all ones, returns string), TestFromDictEdgeCases (5 tests: empty dict defaults, partial dict, extra fields ignored, numpy roundtrip, int-for-float coercion)."
+            "notes": "Tier: hardening. Files: src/downloader/audio_first.py:241 (audio download subprocess), src/downloader/audio_first.py:427 (segment download subprocess), src/downloader/audio_first.py:591 (full video fallback subprocess), src/downloader/core.py:1571,1690 (reference pattern with --socket-timeout 10). The audio_first pipeline has 3 yt-dlp subprocess call sites that may or may not have socket timeout. Per prompt.md, there are 8 total call sites across the downloader. Core.py uses _wait_for_process_with_progress() for stall detection, but audio_first.py may use subprocess.communicate() with a fixed timeout instead, which kills slow-but-progressing downloads."
         }
     ]
 }
