@@ -1356,6 +1356,79 @@ class TestEscalationTierIntegration:
         _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
         assert 'impersonate' not in ydl_opts or ydl_opts.get('format') == 'best'
 
+    @pytest.mark.fast
+    def test_apply_escalation_import_error_logs_warning_and_omits_impersonate(self):
+        """When ImpersonateTarget is unavailable, log warning and skip impersonation (US-50-003)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        import src.stages.download_segments as ds_module
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {'format': 'best'}
+
+        # Patch the import inside the function to raise ImportError
+        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        def mock_import(name, *args, **kwargs):
+            if name == 'yt_dlp.networking.impersonate':
+                raise ImportError("No module named 'yt_dlp.networking.impersonate'")
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            # Clear any cached import of the module
+            import sys
+            cached = sys.modules.pop('yt_dlp.networking.impersonate', None)
+            try:
+                _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+            finally:
+                if cached is not None:
+                    sys.modules['yt_dlp.networking.impersonate'] = cached
+
+        # impersonate should NOT be in ydl_opts
+        assert 'impersonate' not in ydl_opts, \
+            "impersonate should be omitted when ImpersonateTarget is unavailable"
+        # Other opts should be preserved
+        assert ydl_opts.get('format') == 'best'
+
+    @pytest.mark.fast
+    def test_apply_escalation_mixed_case_firefox_lowercased(self):
+        """Mixed-case 'FIREFOX-130:WINDOWS-11' is properly lowercased (US-50-003)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'FIREFOX-130:WINDOWS-11']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        target = ydl_opts.get('impersonate')
+        assert target is not None, "impersonate should be set"
+        assert isinstance(target, ImpersonateTarget)
+        assert target.client == 'firefox', f"Expected 'firefox', got '{target.client}'"
+        assert target.os == 'windows', f"Expected 'windows', got '{target.os}'"
+        assert target.version == '130', f"Expected '130', got '{target.version}'"
+        assert target.os_version == '11', f"Expected '11', got '{target.os_version}'"
+
+    @pytest.mark.fast
+    def test_apply_escalation_chrome_136_macos_15_conversion(self):
+        """'Chrome-136:Macos-15' converts to ImpersonateTarget with correct lowercase fields (US-50-003)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        target = ydl_opts['impersonate']
+        assert isinstance(target, ImpersonateTarget)
+        assert target.client == 'chrome', f"Expected 'chrome', got '{target.client}'"
+        assert target.version == '136'
+        assert target.os == 'macos', f"Expected 'macos', got '{target.os}'"
+        assert target.os_version == '15'
+
 
 # ============================================================================
 # Download Progress Reporting (US-48-007)
