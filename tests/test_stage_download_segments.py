@@ -1323,3 +1323,230 @@ class TestDownloadProgressReporting:
         assert stats['succeeded'] == 0
         assert stats['failed'] == 0
         assert stats['attempted'] == 3
+
+
+# ============================================================================
+# Segment Deduplication & Merging (US-48-008)
+# ============================================================================
+
+class TestSegmentDeduplicationAndMerging:
+    """Test improved deduplication and overlap merging in _collect_matched_segments.
+
+    US-48-008: Verifies that:
+    - Overlapping/adjacent segments from the same video are merged
+    - Segments from different videos with same timestamps are NOT merged
+    - Video IDs containing underscores are deduplicated correctly
+    """
+
+    @pytest.mark.fast
+    def test_overlapping_segments_same_video_merged(self, stage):
+        """Two overlapping segments from the same video are merged into one."""
+        state = PipelineState()
+
+        # Segment 1: 10-30s, Segment 2: 25-50s (overlap at 25-30)
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "vid_overlap"
+        match1.video_start = 10.0
+        match1.video_end = 30.0
+
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "vid_overlap"
+        match2.video_start = 25.0
+        match2.video_end = 50.0
+
+        state.matches = [match1, match2]
+
+        segments = stage._collect_matched_segments(state, buffer_seconds=5.0)
+
+        # Should merge into one segment: 10-50
+        assert len(segments) == 1
+        assert segments[0]['video_id'] == "vid_overlap"
+        assert segments[0]['start'] == 10.0
+        assert segments[0]['end'] == 50.0
+
+    @pytest.mark.fast
+    def test_adjacent_segments_same_video_merged(self, stage):
+        """Adjacent segments (gap < 2*buffer) from same video are merged."""
+        state = PipelineState()
+
+        # Segment 1: 10-20s, Segment 2: 25-35s (gap=5s, 2*buffer=10s → merge)
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "vid_adj"
+        match1.video_start = 10.0
+        match1.video_end = 20.0
+
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "vid_adj"
+        match2.video_start = 25.0
+        match2.video_end = 35.0
+
+        state.matches = [match1, match2]
+
+        segments = stage._collect_matched_segments(state, buffer_seconds=5.0)
+
+        # Gap (5s) < 2*buffer (10s) → merged into one: 10-35
+        assert len(segments) == 1
+        assert segments[0]['video_id'] == "vid_adj"
+        assert segments[0]['start'] == 10.0
+        assert segments[0]['end'] == 35.0
+
+    @pytest.mark.fast
+    def test_distant_segments_same_video_not_merged(self, stage):
+        """Distant segments from same video (gap > 2*buffer) stay separate."""
+        state = PipelineState()
+
+        # Segment 1: 10-20s, Segment 2: 100-110s (gap=80s >> 2*buffer=10s)
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "vid_dist"
+        match1.video_start = 10.0
+        match1.video_end = 20.0
+
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "vid_dist"
+        match2.video_start = 100.0
+        match2.video_end = 110.0
+
+        state.matches = [match1, match2]
+
+        segments = stage._collect_matched_segments(state, buffer_seconds=5.0)
+
+        # Gap (80s) > 2*buffer (10s) → NOT merged
+        assert len(segments) == 2
+
+    @pytest.mark.fast
+    def test_different_videos_same_timestamps_not_merged(self, stage):
+        """Segments from different videos with identical timestamps stay separate."""
+        state = PipelineState()
+
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "video_alpha"
+        match1.video_start = 10.0
+        match1.video_end = 25.0
+
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "video_beta"
+        match2.video_start = 10.0
+        match2.video_end = 25.0
+
+        state.matches = [match1, match2]
+
+        segments = stage._collect_matched_segments(state, buffer_seconds=5.0)
+
+        # Different videos → NOT merged
+        assert len(segments) == 2
+        video_ids = {s['video_id'] for s in segments}
+        assert video_ids == {"video_alpha", "video_beta"}
+
+    @pytest.mark.fast
+    def test_underscore_video_ids_deduplicated(self, stage):
+        """Video IDs containing underscores are correctly deduplicated."""
+        state = PipelineState()
+
+        # Same video ID with underscores, same timestamps → should dedup
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "abc_def_ghi"
+        match1.video_start = 10.0
+        match1.video_end = 25.0
+
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "abc_def_ghi"
+        match2.video_start = 10.0
+        match2.video_end = 25.0
+
+        state.matches = [match1, match2]
+
+        segments = stage._collect_matched_segments(state, buffer_seconds=5.0)
+
+        # Exact duplicate → only 1 segment
+        assert len(segments) == 1
+        assert segments[0]['video_id'] == "abc_def_ghi"
+
+    @pytest.mark.fast
+    def test_underscore_video_id_local_path_mapping(self, stage):
+        """_update_matches_with_local_paths correctly parses video IDs with underscores."""
+        from src.state import DownloadedVideo
+
+        state = PipelineState()
+
+        match1 = Mock()
+        match1.video_file = "abc_def"
+        match1.primary_match = None
+
+        state.matches = [match1]
+
+        # Filename format: {video_id}_{start}_{end}.mp4
+        downloaded = [
+            DownloadedVideo(
+                file="/tmp/segments/abc_def_5_30.mp4",
+                source='segment_download'
+            )
+        ]
+
+        stage._update_matches_with_local_paths(state, downloaded)
+
+        # Should map abc_def correctly (rsplit from right, not split from left)
+        assert match1.video_file == "/tmp/segments/abc_def_5_30.mp4"
+
+    @pytest.mark.fast
+    def test_precision_dedup_preserves_close_segments(self, stage):
+        """Segments differing by <0.5s are NOT incorrectly deduped (unlike round()).
+
+        Old code used round() which would treat (10.0, 20.0) and (10.3, 20.3)
+        as duplicates. New code uses exact floats for dedup keys.
+        """
+        state = PipelineState()
+
+        # Two non-overlapping segments with start/end that round() to the same int
+        match1 = Mock()
+        match1.primary_match = None
+        match1.video_file = "precision_vid"
+        match1.video_start = 10.0
+        match1.video_end = 20.0
+
+        match2 = Mock()
+        match2.primary_match = None
+        match2.video_file = "precision_vid"
+        match2.video_start = 50.3
+        match2.video_end = 60.3
+
+        state.matches = [match1, match2]
+
+        # With buffer=0 and distant segments, they should NOT merge
+        segments = stage._collect_matched_segments(state, buffer_seconds=0.0)
+        assert len(segments) == 2
+
+        # Verify that the old round()-based dedup would have collapsed
+        # segments with close start/end values. These two segments have
+        # different exact values but round() to the same ints.
+        match3 = Mock()
+        match3.primary_match = None
+        match3.video_file = "precision_vid2"
+        match3.video_start = 10.0
+        match3.video_end = 20.0
+
+        match4 = Mock()
+        match4.primary_match = None
+        match4.video_file = "precision_vid2"
+        match4.video_start = 10.4   # round(10.4) == 10 == round(10.0)
+        match4.video_end = 20.4     # round(20.4) == 20 == round(20.0)
+
+        state.matches = [match3, match4]
+        segments = stage._collect_matched_segments(state, buffer_seconds=0.0)
+
+        # New code: these are distinct (10.0 != 10.4, 20.0 != 20.4)
+        # but they overlap (10.4 < 20.0) so they merge. This is correct —
+        # old code would have SILENTLY DROPPED match4 as a "duplicate".
+        # New code properly merges to [10.0, 20.4].
+        assert len(segments) == 1
+        assert segments[0]['start'] == 10.0
+        assert segments[0]['end'] == 20.4  # Extended, not dropped

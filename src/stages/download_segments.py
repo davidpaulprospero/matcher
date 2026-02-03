@@ -200,8 +200,8 @@ class DownloadVideoSegmentsStage(Stage):
             print(f"  Downloading matched segments")
             print(f"    Buffer: {buffer_seconds}s before/after each match")
 
-            # Collect segments to download
-            segments_to_download = self._collect_matched_segments(state)
+            # Collect segments to download (US-48-008: merge overlapping/adjacent)
+            segments_to_download = self._collect_matched_segments(state, buffer_seconds)
 
             if not segments_to_download:
                 print("  ! No valid segments to download")
@@ -256,10 +256,16 @@ class DownloadVideoSegmentsStage(Stage):
             logger.exception(f"Video segment download failed: {e}")
             return StageResult.fail(str(e), warnings)
 
-    def _collect_matched_segments(self, state: 'PipelineState') -> List[Dict[str, Any]]:
-        """Collect segment info from matches for downloading"""
-        segments = []
-        seen = set()  # Avoid duplicate downloads
+    def _collect_matched_segments(
+        self, state: 'PipelineState', buffer_seconds: float = 5.0
+    ) -> List[Dict[str, Any]]:
+        """Collect segment info from matches for downloading.
+
+        US-48-008: Uses exact float values for dedup keys (not round()) to
+        preserve precision for segments differing by <0.5s. Also merges
+        overlapping/adjacent segments from the same video to reduce downloads.
+        """
+        raw_segments = []
 
         for match in state.matches:
             # Handle MatchResult structure (has primary_match)
@@ -283,19 +289,67 @@ class DownloadVideoSegmentsStage(Stage):
             if not video_id:
                 continue
 
-            # Create unique key for deduplication
-            key = (video_id, round(start_time), round(end_time))
-            if key in seen:
-                continue
-            seen.add(key)
-
-            segments.append({
+            raw_segments.append({
                 'video_id': video_id,
                 'start': start_time,
                 'end': end_time,
             })
 
-        return segments
+        # Deduplicate exact matches using (video_id, start, end) tuple
+        seen = set()
+        deduped = []
+        for seg in raw_segments:
+            key = (seg['video_id'], seg['start'], seg['end'])
+            if key not in seen:
+                seen.add(key)
+                deduped.append(seg)
+
+        # Merge overlapping/adjacent segments from the same video
+        return self._merge_segments(deduped, buffer_seconds)
+
+    @staticmethod
+    def _merge_segments(
+        segments: List[Dict[str, Any]], buffer_seconds: float
+    ) -> List[Dict[str, Any]]:
+        """Merge overlapping or adjacent segments from the same video.
+
+        Two segments from the same video are merged if they overlap or
+        the gap between them is less than 2 * buffer_seconds (since both
+        would have buffer applied, their downloaded ranges would overlap).
+
+        Args:
+            segments: Deduplicated segment list.
+            buffer_seconds: Per-segment buffer (used to compute merge threshold).
+
+        Returns:
+            Merged segment list.
+        """
+        if not segments:
+            return []
+
+        # Group by video_id
+        by_video: Dict[str, List[Dict[str, Any]]] = {}
+        for seg in segments:
+            by_video.setdefault(seg['video_id'], []).append(seg)
+
+        merged = []
+        merge_gap = 2 * buffer_seconds
+
+        for video_id, segs in by_video.items():
+            # Sort by start time
+            segs.sort(key=lambda s: s['start'])
+
+            current = dict(segs[0])  # copy first segment
+            for seg in segs[1:]:
+                # Merge if overlapping or gap < 2*buffer
+                if seg['start'] <= current['end'] + merge_gap:
+                    current['end'] = max(current['end'], seg['end'])
+                else:
+                    merged.append(current)
+                    current = dict(seg)
+            merged.append(current)
+
+        return merged
 
     def _download_segments(
         self,
@@ -573,6 +627,7 @@ class DownloadVideoSegmentsStage(Stage):
 
         for item in pending:
             # Parse video_id from the retry item (format: video_id_start_end)
+            # US-48-008: Use rsplit to handle video IDs with underscores
             parts = item.video_id.rsplit('_', 2)
             if len(parts) < 3:
                 logger.warning(f"Invalid retry item format: {item.video_id}")
@@ -667,14 +722,23 @@ class DownloadVideoSegmentsStage(Stage):
         state: 'PipelineState',
         downloaded_segments: List['DownloadedVideo']
     ):
-        """Update match objects to reference local file paths"""
+        """Update match objects to reference local file paths.
+
+        US-48-008: Uses rsplit('_', 2) to extract video_id from filename
+        format '{video_id}_{start}_{end}.mp4', correctly handling video IDs
+        that contain underscores (e.g., 'abc_def_0_15.mp4' → 'abc_def').
+        """
         # Build mapping from video_id to local file
         file_map = {}
         for seg in downloaded_segments:
-            # Extract video_id from filename
+            # Extract video_id from filename: {video_id}_{start}_{end}.mp4
             filename = Path(seg.file).stem
-            parts = filename.split('_')
-            if parts:
+            parts = filename.rsplit('_', 2)
+            if len(parts) == 3:
+                video_id = parts[0]
+                file_map[video_id] = seg.file
+            elif parts:
+                # Fallback for unexpected format
                 video_id = parts[0]
                 file_map[video_id] = seg.file
 

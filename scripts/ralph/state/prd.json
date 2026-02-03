@@ -121,7 +121,7 @@
             "id": "US-48-008",
             "title": "Improve segment deduplication in download_segments to handle multi-segment videos",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Fix deduplication key in _collect_matched_segments() to handle video IDs with underscores (e.g., 'abc_def') by using video_id directly instead of round(start_time)",
                 "Add overlap detection: if two segments from same video overlap or are adjacent (gap < 2*buffer), merge them into one download",
@@ -129,7 +129,7 @@
                 "Add unit test verifying segments from different videos with same timestamps are NOT merged",
                 "Add unit test verifying video IDs containing underscores are deduplicated correctly"
             ],
-            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:129-168 (_collect_matched_segments), src/stages/download_segments.py:157 (dedup key using round()). Current dedup uses key=(video_id, round(start_time), round(end_time)) which has two issues: (1) round() loses precision for segments that differ by <0.5s, (2) adjacent segments from the same video result in multiple downloads that could be merged into one larger segment download. Merging overlapping/adjacent segments would reduce the number of yt-dlp calls and improve reliability. Also, the _update_matches_with_local_paths at line 369 splits filename on '_' to extract video_id which breaks for IDs containing underscores."
+            "notes": "Implemented: (1) Replaced round()-based dedup key with exact float tuple (video_id, start, end). (2) Added _merge_segments() that groups by video_id and merges overlapping/adjacent segments (gap < 2*buffer). (3) Fixed _update_matches_with_local_paths to use rsplit('_', 2) for correct underscore video ID parsing. (4) Added 7 tests in TestSegmentDeduplicationAndMerging. All 47 stage tests + 126 related tests pass."
         },
         {
             "id": "US-48-009",
