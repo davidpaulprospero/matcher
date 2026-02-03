@@ -90,8 +90,8 @@
             "id": "US-45-006",
             "title": "Add stage registration validation to prevent orphan stages",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T2 (architecture improvement). File: src/stages/__init__.py, lines 236-240. The @register_stage decorator silently accepts any stage class with no validation. EntityImagesStage and EntityVideosStage (src/stages/entity_images.py, src/stages/entity_videos.py) are registered but not in STAGE_ORDER (src/checkpoint.py:25-33), making them orphan stages with no checkpoint support. Add a warning log when a stage is registered whose name is not in STAGE_ORDER, and add a utility function to detect orphan registrations.",
+            "passes": true,
+            "notes": "Added orphan stage warning, duplicate registration warning, and get_orphan_stages() to register_stage in src/stages/__init__.py. Added 7 tests in TestOrphanStageDetection and TestDuplicateStageRegistration classes. Entity stages (ENTITY_IMAGES, ENTITY_VIDEOS) correctly detected as orphans. All 31 stage init tests pass. 2 pre-existing entity stage test failures unrelated to changes.",
             "acceptanceCriteria": [
                 "register_stage in src/stages/__init__.py logs a warning when the stage name is not in STAGE_ORDER",
                 "Add get_orphan_stages() function that returns registered stages not in STAGE_ORDER",
