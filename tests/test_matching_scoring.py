@@ -566,5 +566,205 @@ class TestMatchScoringIntegration:
             assert matcher.scoring.config == mock_config
 
 
+# ============================================================================
+# Test Cascading Confidence Penalties (US-46-004)
+# ============================================================================
+
+class TestCascadingConfidencePenalties:
+    """Test guards against cascading confidence penalties"""
+
+    @pytest.mark.fast
+    def test_confidence_floor_prevents_near_zero(self, mock_config, sample_vo_segment, sample_video_segment):
+        """
+        Test that cascading penalties cannot reduce confidence below the floor.
+
+        Scenario: confidence 0.8 * caption_quality 0.9 * timing 0.6 = 0.432
+        This should stay above the confidence floor (0.05).
+        """
+        scoring = MatchScoring(mock_config)
+
+        # Set up multiplicative caption quality weights
+        mock_config.matching.caption_quality_weights = {'low': 0.5, 'medium': 0.9, 'high': 1.0}
+        sample_video_segment.caption_quality = 'low'  # x0.5 multiplier
+        sample_video_segment.timing_penalty = 0.3      # x0.3 multiplier (severe)
+
+        adjusted, reason = scoring.apply_all_adjustments(
+            confidence=0.8,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment
+        )
+
+        # 0.8 * 0.5 * 0.3 = 0.12, which is above floor but below warning threshold
+        assert adjusted >= scoring.CONFIDENCE_FLOOR
+        assert adjusted > 0.0
+
+    @pytest.mark.fast
+    def test_confidence_floor_enforced_at_extreme_penalties(self, mock_config, sample_vo_segment, sample_video_segment):
+        """
+        Test confidence floor is enforced when extreme penalties would reduce to near-zero.
+        """
+        scoring = MatchScoring(mock_config)
+
+        # Set up extreme multiplicative penalties
+        mock_config.matching.caption_quality_weights = {'low': 0.1}
+        sample_video_segment.caption_quality = 'low'    # x0.1
+        sample_video_segment.timing_penalty = 0.1       # x0.1
+        sample_video_segment.source = 'global_cache'     # -0.1 additive
+
+        adjusted, reason = scoring.apply_all_adjustments(
+            confidence=0.5,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment
+        )
+
+        # 0.5 * 0.1 * 0.1 = 0.005 < floor, should be clamped to 0.05
+        assert adjusted >= scoring.CONFIDENCE_FLOOR
+        assert "confidence floor applied" in reason
+
+    @pytest.mark.fast
+    def test_caption_quality_09_timing_06_stays_above_floor(self, mock_config, sample_vo_segment, sample_video_segment):
+        """
+        AC4: caption quality 0.9 multiplier + timing penalty 0.6 should not
+        reduce 0.8 confidence below floor.
+        """
+        scoring = MatchScoring(mock_config)
+
+        mock_config.matching.caption_quality_weights = {'medium': 0.9, 'high': 1.0, 'low': 0.75}
+        sample_video_segment.caption_quality = 'medium'  # x0.9
+        sample_video_segment.timing_penalty = 0.6        # x0.6
+
+        adjusted, reason = scoring.apply_all_adjustments(
+            confidence=0.8,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment
+        )
+
+        # 0.8 * 0.9 = 0.72, then 0.72 * 0.6 = 0.432
+        assert adjusted >= scoring.CONFIDENCE_FLOOR
+        # The result should be approximately 0.432
+        assert 0.40 <= adjusted <= 0.46
+        assert "caption quality" in reason
+        assert "timing penalty" in reason
+
+    @pytest.mark.fast
+    def test_low_confidence_warning_logged(self, mock_config, sample_vo_segment, sample_video_segment):
+        """
+        Test that a warning is logged when confidence drops below 0.15 after penalties.
+        """
+        scoring = MatchScoring(mock_config)
+
+        mock_config.matching.caption_quality_weights = {'low': 0.3}
+        sample_video_segment.caption_quality = 'low'  # x0.3
+        sample_video_segment.timing_penalty = 0.5     # x0.5
+
+        with patch('src.matching.scoring.logger') as mock_logger:
+            adjusted, reason = scoring.apply_all_adjustments(
+                confidence=0.8,
+                vo_segment=sample_vo_segment,
+                video_segment=sample_video_segment
+            )
+
+            # 0.8 * 0.3 = 0.24, then 0.24 * 0.5 = 0.12 < 0.15 threshold
+            assert adjusted < scoring.LOW_CONFIDENCE_WARNING_THRESHOLD
+            mock_logger.warning.assert_called()
+            warning_msg = mock_logger.warning.call_args[0][0]
+            assert "Over-penalized match" in warning_msg
+
+    @pytest.mark.fast
+    def test_no_floor_when_original_already_below(self, mock_config, sample_vo_segment, sample_video_segment):
+        """
+        Test that floor is NOT applied when original confidence is already below the floor.
+        This prevents artificially boosting genuinely low-confidence matches.
+        """
+        scoring = MatchScoring(mock_config)
+
+        adjusted, reason = scoring.apply_all_adjustments(
+            confidence=0.03,  # Already below floor
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment
+        )
+
+        # Should NOT be raised to the floor - original was already low
+        assert adjusted <= 0.05
+        assert "confidence floor applied" not in reason
+
+
+class TestCaptionQualityModeExclusivity:
+    """Test that only one caption quality mode applies per match (US-46-004)"""
+
+    @pytest.mark.fast
+    def test_multiplicative_mode_takes_precedence(self, mock_config, sample_video_segment):
+        """
+        AC5: When caption_quality_weights is set (multiplicative mode),
+        the additive mode should NOT also apply.
+        """
+        from src.matching.scoring import apply_caption_quality_adjustment
+
+        # Configure both modes
+        mock_config.matching.caption_quality_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+        mock_config.matching.caption_quality_high_boost = 0.05
+        mock_config.matching.caption_quality_low_penalty = 0.1
+
+        sample_video_segment.caption_quality = 'low'
+
+        adjusted, reason = apply_caption_quality_adjustment(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        # Should use multiplicative (0.8 * 0.75 = 0.6), NOT additive (0.8 - 0.1 = 0.7)
+        assert abs(adjusted - 0.6) < 0.001
+        assert "multiplicative" in reason
+        assert "additive" not in reason
+
+    @pytest.mark.fast
+    def test_additive_mode_only_when_no_weights(self, mock_config, sample_video_segment):
+        """
+        When caption_quality_weights is None, additive mode applies.
+        """
+        from src.matching.scoring import apply_caption_quality_adjustment
+
+        mock_config.matching.caption_quality_weights = None
+        mock_config.matching.caption_quality_low_penalty = 0.1
+
+        sample_video_segment.caption_quality = 'low'
+
+        adjusted, reason = apply_caption_quality_adjustment(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            config=mock_config
+        )
+
+        # Should use additive (0.8 - 0.1 = 0.7)
+        assert abs(adjusted - 0.7) < 0.001
+        assert "additive" in reason
+        assert "multiplicative" not in reason
+
+    @pytest.mark.fast
+    def test_multiplicative_and_additive_never_both_apply(self, mock_config, sample_video_segment):
+        """
+        Verify that the reason string never contains both 'multiplicative' and 'additive'.
+        """
+        from src.matching.scoring import apply_caption_quality_adjustment
+
+        for quality in ['high', 'medium', 'low']:
+            sample_video_segment.caption_quality = quality
+
+            # Test with weights set (multiplicative mode)
+            mock_config.matching.caption_quality_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+            _, reason_mult = apply_caption_quality_adjustment(0.8, sample_video_segment, mock_config)
+
+            # Test without weights (additive mode)
+            mock_config.matching.caption_quality_weights = None
+            _, reason_add = apply_caption_quality_adjustment(0.8, sample_video_segment, mock_config)
+
+            # Neither reason should contain both modes
+            if reason_mult:
+                assert "additive" not in reason_mult, f"Multiplicative reason contains 'additive': {reason_mult}"
+            if reason_add:
+                assert "multiplicative" not in reason_add, f"Additive reason contains 'multiplicative': {reason_add}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

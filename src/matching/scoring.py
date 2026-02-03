@@ -248,13 +248,17 @@ def apply_caption_quality_adjustment(
     """
     Apply confidence adjustment based on caption quality (US-007, US-006).
 
-    Supports two modes:
+    Supports two modes (mutually exclusive - multiplicative takes precedence):
     1. Multiplicative weights (US-006): When caption_quality_weights dict is set,
        applies: adjusted = raw_confidence * weight
        Example: {high: 1.0, medium: 0.9, low: 0.75}
 
     2. Additive boost/penalty (US-007): When caption_quality_weights is None,
        uses high_boost and low_penalty for additive adjustments.
+
+    Only ONE mode applies per match - multiplicative mode takes precedence when
+    caption_quality_weights is configured. This prevents cascading penalties from
+    both modes running on the same match.
 
     Caption quality levels:
     - 'high': Human-uploaded captions
@@ -285,33 +289,34 @@ def apply_caption_quality_adjustment(
     quality_weights = getattr(mc, 'caption_quality_weights', None)
 
     if quality_weights is not None and isinstance(quality_weights, dict):
-        # Multiplicative weights mode (US-006)
+        # Multiplicative weights mode (US-006) - takes precedence over additive
         # Default weights if not specified: high=1.0, medium=0.9, low=0.75
         default_weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
         weight = quality_weights.get(caption_quality, default_weights.get(caption_quality, 1.0))
 
         if weight != 1.0:
             adjusted = max(0.0, min(1.0, confidence * weight))
-            reason = f"caption quality {caption_quality}: x{weight:.2f}"
+            reason = f"caption quality {caption_quality}: x{weight:.2f} (multiplicative)"
             # US-006: Specific log format requested
             logger.info(f"Confidence adjusted {confidence:.2f} -> {adjusted:.2f} ({caption_quality} quality caption)")
             return adjusted, reason
 
         return confidence, ""
 
-    # Legacy additive mode (US-007) - when caption_quality_weights is None
+    # Legacy additive mode (US-007) - only when caption_quality_weights is None
+    # This ensures mutual exclusivity: only one mode applies per match
     high_boost = getattr(mc, 'caption_quality_high_boost', 0.05)
     low_penalty = getattr(mc, 'caption_quality_low_penalty', 0.1)
 
     if caption_quality == 'high' and high_boost > 0:
         adjusted = min(1.0, confidence + high_boost)
-        reason = f"caption quality high: +{high_boost:.2f}"
+        reason = f"caption quality high: +{high_boost:.2f} (additive)"
         logger.debug(f"Caption quality boost applied: {confidence:.2f} -> {adjusted:.2f}")
         return adjusted, reason
 
     elif caption_quality == 'low' and low_penalty > 0:
         adjusted = max(0.0, confidence - low_penalty)
-        reason = f"caption quality low: -{low_penalty:.2f}"
+        reason = f"caption quality low: -{low_penalty:.2f} (additive)"
         logger.debug(f"Caption quality penalty applied: {confidence:.2f} -> {adjusted:.2f}")
         return adjusted, reason
 
@@ -1563,6 +1568,13 @@ class MatchScoring:
             logger.warning(f"Unknown penalty type: {penalty_type}")
             return confidence, ""
 
+    # Minimum confidence floor to prevent cascading multiplicative penalties
+    # from reducing confidence to near-zero (US-46-004)
+    CONFIDENCE_FLOOR = 0.05
+
+    # Threshold below which over-penalized matches are logged as warnings
+    LOW_CONFIDENCE_WARNING_THRESHOLD = 0.15
+
     def apply_all_adjustments(
         self,
         confidence: float,
@@ -1576,6 +1588,8 @@ class MatchScoring:
         Apply all scoring adjustments in the correct order.
 
         Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty -> project_boost
+        After all adjustments, a minimum confidence floor is enforced to prevent
+        cascading multiplicative penalties from reducing confidence to near-zero.
 
         Args:
             confidence: Base confidence score
@@ -1588,6 +1602,7 @@ class MatchScoring:
         Returns:
             Tuple of (adjusted_confidence, combined_reason)
         """
+        original_confidence = confidence
         reasons = []
 
         # 1. Topic penalty
@@ -1627,6 +1642,20 @@ class MatchScoring:
         )
         if project_reason:
             reasons.append(project_reason)
+
+        # 6. Enforce minimum confidence floor (US-46-004)
+        # Prevents cascading multiplicative penalties from reducing confidence to near-zero
+        if confidence < self.CONFIDENCE_FLOOR and original_confidence > self.CONFIDENCE_FLOOR:
+            confidence = self.CONFIDENCE_FLOOR
+            reasons.append(f"confidence floor applied: {self.CONFIDENCE_FLOOR}")
+
+        # 7. Log warning for over-penalized matches (US-46-004)
+        if confidence < self.LOW_CONFIDENCE_WARNING_THRESHOLD and original_confidence >= self.LOW_CONFIDENCE_WARNING_THRESHOLD:
+            logger.warning(
+                f"Over-penalized match: {original_confidence:.2f} -> {confidence:.2f} "
+                f"(video={getattr(video_segment, 'source_file', 'unknown')}, "
+                f"adjustments: {' | '.join(reasons)})"
+            )
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
