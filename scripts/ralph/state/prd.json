@@ -180,7 +180,7 @@
       "id": "US-48-012",
       "title": "Add socket timeout and stall detection parity to audio_first pipeline yt-dlp calls",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Audit all yt-dlp subprocess calls in audio_first.py and verify --socket-timeout is present (lines ~241, ~427, ~591)",
         "Add --socket-timeout 10 to any subprocess calls missing it, matching core.py pattern",
@@ -189,7 +189,7 @@
         "Add unit test verifying all yt-dlp subprocess command lists in audio_first.py contain --socket-timeout",
         "Add unit test verifying subprocess calls include encoding='utf-8' and errors='replace' per CLAUDE.md Rule 27"
       ],
-      "notes": "Tier: hardening. Files: src/downloader/audio_first.py:241 (audio download subprocess), src/downloader/audio_first.py:427 (segment download subprocess), src/downloader/audio_first.py:591 (full video fallback subprocess), src/downloader/core.py:1571,1690 (reference pattern with --socket-timeout 10). The audio_first pipeline has 3 yt-dlp subprocess call sites that may or may not have socket timeout. Per prompt.md, there are 8 total call sites across the downloader. Core.py uses _wait_for_process_with_progress() for stall detection, but audio_first.py may use subprocess.communicate() with a fixed timeout instead, which kills slow-but-progressing downloads."
+      "notes": "All 3 yt-dlp call sites now have --socket-timeout 10, --retries 10, --fragment-retries 10. Segment download and full video fallback converted from subprocess.run to subprocess.Popen + _wait_for_process_with_progress stall detection (matching core.py pattern). Audio download keeps subprocess.run (fast enough). 13 new tests in test_audio_first_socket_timeout.py. Updated 6 existing tests in test_audio_first_coverage.py and 5 in test_audio_first_escalation.py to use Popen mocks. All 77 tests pass."
     }
   ]
 }

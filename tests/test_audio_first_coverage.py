@@ -36,6 +36,29 @@ def _sr(videos):
     return SearchResult(videos=videos)
 
 
+def _make_mock_popen(returncode=0):
+    """Create a mock subprocess.Popen that completes immediately.
+
+    Used for segment/fallback download tests that now use Popen + stall detection
+    instead of subprocess.run.
+    """
+    proc = Mock()
+    proc.pid = 12345
+    proc.returncode = returncode
+    proc.poll = Mock(return_value=0)  # Process finished immediately
+    proc.wait = Mock()
+    proc.kill = Mock()
+    proc.stdout = Mock()
+    proc.stdout.readline = Mock(return_value='')
+    proc.stdout.closed = False
+    proc.stdout.close = Mock()
+    proc.stderr = Mock()
+    proc.stderr.readline = Mock(return_value='')
+    proc.stderr.closed = False
+    proc.stderr.close = Mock()
+    return proc
+
+
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -76,6 +99,8 @@ def mock_config():
     download.cookies_path = ''  # Empty string, not None (real attr type is str)
     download.max_retries = 3
     download.retry_delay = 2.0
+    download.stall_timeout = 60
+    download.checkpoint_interval = 10
 
     config.download = download
     return config
@@ -619,14 +644,14 @@ class TestEmptySegmentsHandling:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = _make_mock_popen(returncode=0)
 
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
                 # Should only process vid2, not crash on empty vid1
-                assert mock_run.call_count == 1
+                assert mock_popen.call_count == 1
 
 
 # ============================================================================
@@ -638,7 +663,7 @@ class TestSegmentDownloadTimeout:
 
     @pytest.mark.integration
     def test_segment_download_timeout(self, audio_pipeline, temp_dir, capsys):
-        """Test that segment download timeout is handled correctly"""
+        """Test that segment download stall timeout is handled correctly"""
         merged_segments = [
             MergedSegment(
                 video_id='vid1',
@@ -650,19 +675,22 @@ class TestSegmentDownloadTimeout:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=300)
+        # Mock _wait_for_process_with_progress to simulate stall timeout
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = _make_mock_popen(returncode=1)
 
-            with patch.object(audio_pipeline, '_download_full_video_fallback', return_value=[]):
-                result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
+            with patch.object(audio_pipeline, '_wait_for_process_with_progress',
+                            return_value=('', '', 'stall')):
+                with patch.object(audio_pipeline, '_download_full_video_fallback', return_value=[]):
+                    result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                # Should print timeout message
-                captured = capsys.readouterr()
-                assert 'Timeout' in captured.out
+                    # Should print stall timeout message
+                    captured = capsys.readouterr()
+                    assert 'timeout' in captured.out.lower() or 'Stall' in captured.out
 
     @pytest.mark.integration
     def test_segment_download_timeout_triggers_fallback(self, audio_pipeline, temp_dir):
-        """Test that timeout triggers fallback to full video download"""
+        """Test that stall timeout triggers fallback to full video download"""
         merged_segments = [
             MergedSegment(
                 video_id='vid1',
@@ -680,13 +708,15 @@ class TestSegmentDownloadTimeout:
             fallback_called[0] = True
             return []
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=300)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = _make_mock_popen(returncode=1)
 
-            with patch.object(audio_pipeline, '_download_full_video_fallback', side_effect=mock_fallback):
-                audio_pipeline.download_video_segments(merged_segments, temp_dir)
+            with patch.object(audio_pipeline, '_wait_for_process_with_progress',
+                            return_value=('', '', 'stall')):
+                with patch.object(audio_pipeline, '_download_full_video_fallback', side_effect=mock_fallback):
+                    audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                assert fallback_called[0], "Fallback should be called on timeout"
+                    assert fallback_called[0], "Fallback should be called on stall timeout"
 
     @pytest.mark.integration
     def test_segment_download_generic_error(self, audio_pipeline, temp_dir, capsys):
@@ -702,8 +732,8 @@ class TestSegmentDownloadTimeout:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = OSError("Network unreachable")
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.side_effect = OSError("Network unreachable")
 
             with patch.object(audio_pipeline, '_download_full_video_fallback', return_value=[]):
                 result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
@@ -737,8 +767,8 @@ class TestFullVideoFallbackCoverage:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = OSError("Permission denied")
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.side_effect = OSError("Permission denied")
 
             result = audio_pipeline._download_full_video_fallback(
                 video_id='vid1',
@@ -792,25 +822,28 @@ class TestFullVideoFallbackCoverage:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        with patch('subprocess.Popen') as mock_popen:
+            proc = _make_mock_popen(returncode=0)
+            mock_popen.return_value = proc
 
             output_file = video_dir / "vid1_0000.mp4"
             output_file.write_bytes(b'video data')
 
-            with patch.object(audio_pipeline, '_get_video_duration', return_value=60.0):
-                result = audio_pipeline._download_full_video_fallback(
-                    video_id='vid1',
-                    video_url='https://youtube.com/watch?v=vid1',
-                    video_dir=video_dir,
-                    segments=segments,
-                    keyword='travel'
-                )
+            with patch.object(audio_pipeline, '_wait_for_process_with_progress',
+                            return_value=('', '', None)):
+                with patch.object(audio_pipeline, '_get_video_duration', return_value=60.0):
+                    result = audio_pipeline._download_full_video_fallback(
+                        video_id='vid1',
+                        video_url='https://youtube.com/watch?v=vid1',
+                        video_dir=video_dir,
+                        segments=segments,
+                        keyword='travel'
+                    )
 
-                assert len(result) == 1
-                assert len(result[0].matches) == 2
-                assert match1 in result[0].matches
-                assert match2 in result[0].matches
+                    assert len(result) == 1
+                    assert len(result[0].matches) == 2
+                    assert match1 in result[0].matches
+                    assert match2 in result[0].matches
 
 
 # ============================================================================
@@ -864,13 +897,18 @@ class TestFfmpegLocationConfig:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        captured_cmds = []
 
+        def capture_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _make_mock_popen(returncode=0)
+
+        with patch('subprocess.Popen', side_effect=capture_popen):
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                call_args = mock_run.call_args[0][0]
+                assert len(captured_cmds) >= 1
+                call_args = captured_cmds[0]
                 assert '--ffmpeg-location' in call_args
                 assert '/custom/ffmpeg' in call_args
 
@@ -914,11 +952,11 @@ class TestMultipleVideosProcessing:
 
         call_count = [0]
 
-        def mock_run(*args, **kwargs):
+        def mock_popen_factory(cmd, **kwargs):
             call_count[0] += 1
-            return Mock(returncode=0)
+            return _make_mock_popen(returncode=0)
 
-        with patch('subprocess.run', side_effect=mock_run):
+        with patch('subprocess.Popen', side_effect=mock_popen_factory):
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
@@ -939,13 +977,18 @@ class TestMultipleVideosProcessing:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        captured_cmds = []
 
+        def capture_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _make_mock_popen(returncode=0)
+
+        with patch('subprocess.Popen', side_effect=capture_popen):
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                call_args = mock_run.call_args[0][0]
+                assert len(captured_cmds) >= 1
+                call_args = captured_cmds[0]
 
                 # Should have --download-sections with formatted time
                 assert '--download-sections' in call_args
