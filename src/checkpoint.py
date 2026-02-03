@@ -209,9 +209,10 @@ class CheckpointManager:
     
     def load(self) -> Optional[CheckpointData]:
         """
-        Load existing checkpoint with corruption detection.
+        Load existing checkpoint with corruption detection and timestamp comparison.
 
         If the main checkpoint is corrupt, attempts to restore from backup.
+        If both are valid, compares timestamps and uses the newer one.
         Validates required fields and version compatibility.
         """
         start_time = time.perf_counter()
@@ -220,19 +221,15 @@ class CheckpointManager:
             return None
 
         # Try main checkpoint first
-        data = self._try_load_file(self.checkpoint_path)
+        main_data = self._try_load_file(self.checkpoint_path)
 
-        # If main is corrupt, try backup
-        if data is None and self.backup_path.exists():
-            logger.warning("Main checkpoint corrupted, trying backup...")
-            data = self._try_load_file(self.backup_path)
-            if data is not None:
-                # Restore backup to main
-                try:
-                    shutil.copy2(self.backup_path, self.checkpoint_path)
-                    logger.info("Restored checkpoint from backup")
-                except Exception as e:
-                    logger.warning(f"Could not restore backup: {e}")
+        # Try backup if it exists
+        backup_data = None
+        if self.backup_path.exists():
+            backup_data = self._try_load_file(self.backup_path)
+
+        # Decide which checkpoint to use based on validity and timestamps
+        data = self._select_checkpoint(main_data, backup_data)
 
         if data is None:
             return None
@@ -290,6 +287,79 @@ class CheckpointManager:
         except Exception as e:
             logger.warning(f"Failed to load checkpoint from {path}: {e}")
             return None
+
+    def _get_checkpoint_timestamp(self, data: CheckpointData) -> Optional[datetime]:
+        """Extract the most recent timestamp from checkpoint data."""
+        timestamp_str = data.updated_at or data.created_at
+        if not timestamp_str:
+            return None
+        try:
+            return datetime.fromisoformat(timestamp_str)
+        except (ValueError, TypeError):
+            return None
+
+    def _select_checkpoint(
+        self, main_data: Optional[CheckpointData], backup_data: Optional[CheckpointData]
+    ) -> Optional[CheckpointData]:
+        """
+        Select the best checkpoint based on validity and timestamps (US-44-011).
+
+        Logic:
+        - If only one is valid, use it (with appropriate logging).
+        - If both are valid, compare timestamps and use the newer one.
+        - If backup is newer than main, warn about possible mid-save crash.
+        """
+        if main_data is not None and backup_data is None:
+            # Main valid, no backup — use main
+            return main_data
+
+        if main_data is None and backup_data is None:
+            # Both invalid
+            return None
+
+        if main_data is None and backup_data is not None:
+            # Main corrupt, backup valid — restore from backup
+            main_ts = "corrupt"
+            backup_ts = self._get_checkpoint_timestamp(backup_data)
+            backup_ts_str = backup_ts.isoformat() if backup_ts else "unknown"
+            logger.warning(
+                f"Main checkpoint corrupted, restoring from backup "
+                f"(main: {main_ts}, backup: {backup_ts_str})"
+            )
+            self._restore_backup_to_main()
+            return backup_data
+
+        # Both are valid — compare timestamps to pick the newer one
+        main_ts = self._get_checkpoint_timestamp(main_data)
+        backup_ts = self._get_checkpoint_timestamp(backup_data)
+
+        main_ts_str = main_ts.isoformat() if main_ts else "unknown"
+        backup_ts_str = backup_ts.isoformat() if backup_ts else "unknown"
+
+        if backup_ts and main_ts and backup_ts > main_ts:
+            # Backup is newer — indicates a mid-save crash where main was
+            # written but backup wasn't yet overwritten, or main got corrupted
+            # after the backup was made
+            logger.warning(
+                f"Backup checkpoint is newer than main (main: {main_ts_str}, "
+                f"backup: {backup_ts_str}) — possible mid-save crash. Using backup."
+            )
+            self._restore_backup_to_main()
+            return backup_data
+
+        # Main is valid and newer (or same age) — use main
+        logger.debug(
+            f"Using main checkpoint (main: {main_ts_str}, backup: {backup_ts_str})"
+        )
+        return main_data
+
+    def _restore_backup_to_main(self):
+        """Copy backup checkpoint over main checkpoint."""
+        try:
+            shutil.copy2(self.backup_path, self.checkpoint_path)
+            logger.info("Restored checkpoint from backup")
+        except Exception as e:
+            logger.warning(f"Could not restore backup: {e}")
 
     def _validate_checkpoint_structure(self, data: dict) -> List[str]:
         """
