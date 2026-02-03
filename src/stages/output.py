@@ -18,7 +18,7 @@ from pathlib import Path
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, NamedTuple
 
-from . import Stage, StageResult, register_stage
+from . import Stage, StageResult, register_stage, validate_required_state_attrs
 
 
 class SegmentInfo(NamedTuple):
@@ -273,7 +273,15 @@ class OutputStage(Stage):
         config: 'Config',
         checkpoint: 'CheckpointManager'
     ) -> StageResult:
-        """Execute the output stage"""
+        """Execute the output stage.
+
+        US-44-002: Validates required state attributes exist.
+        """
+        # US-44-002: Validate required attributes exist
+        validate_required_state_attrs(
+            state, ['matches', 'voiceover_segments'], self.name
+        )
+
         warnings = []
 
         try:

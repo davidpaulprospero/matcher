@@ -257,6 +257,8 @@ _STATE_ATTR_DEFAULTS = {
     'keywords': [],
     'alternatives': {},
     'location_chapters': [],
+    'voiceover_path': None,
+    'video_ids': [],
 }
 
 

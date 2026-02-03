@@ -1,184 +1,191 @@
-﻿{
-    "sprintNumber":  43,
-    "focusArea":  "quality",
-    "branchName":  "ralph/sprint-43",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-43-001",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for 'quality'",
-                                                       "Add stories US-43-002 through US-43-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-43-NNN to be unique across sprints",
-                                                       "Mark this story (US-43-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Generate sprint stories for quality focus area",
-                            "notes":  "Generated 10 stories (US-43-002 through US-43-011) to fix caption retry budget exhaustion and text_metadata AttributeError issues."
-                        },
-                        {
-                            "id":  "US-43-002",
-                            "title": "Add unit test for ensure_scaled with checkpoint restore scenario",
-                            "acceptanceCriteria": [
-                                "Create test in tests/test_caption_retry_budget.py: test_ensure_scaled_after_checkpoint_restore_with_insufficient_max",
-                                "Test scenario: budget restored from checkpoint with batch_size=175, max_attempts=100 (config default)",
-                                "Verify ensure_scaled() detects max_attempts < required (175*2.0=350) and scales up",
-                                "Verify scaling occurs even when batch_size already matches",
-                                "Run: pytest tests/test_caption_retry_budget.py::TestEnsureScaledCheckpoint -v --tb=short",
-                                "Commit: test: [US-43-002] Add test for ensure_scaled checkpoint restore scenario"
-                            ],
-                            "passes": true,
-                            "priority": 43002,
-                            "notes": "Tier 1 (test-first). File: tests/test_caption_retry_budget.py. Created TestEnsureScaledCheckpoint class with 5 tests covering checkpoint restore scenarios. All tests pass - the fix from US-42-004 was already implemented."
-                        },
-                        {
-                            "id":  "US-43-003",
-                            "title": "Fix ensure_scaled to detect insufficient max_attempts after checkpoint restore",
-                            "acceptanceCriteria": [
-                                "Modify ensure_scaled() in src/caption/retry_budget.py lines 1103-1217",
-                                "Add check: if batch_size matches but max_attempts < required_attempts, force scale",
-                                "Log diagnostic when this scenario is detected: '[US-43-003] Force scaling: batch_size matches but max_attempts insufficient'",
-                                "Verify test from US-43-002 passes",
-                                "Run: pytest tests/test_caption_retry_budget.py::TestEnsureScaledCheckpoint -v --tb=short",
-                                "Commit: fix: [US-43-003] Fix ensure_scaled to detect insufficient max_attempts after checkpoint restore"
-                            ],
-                            "passes": true,
-                            "priority": 43003,
-                            "notes": "Tier 1 (bug fix). Fixed by adding [US-43-003] diagnostic log in ensure_scaled() when batch_size matches but max_attempts is insufficient. Added test_ensure_scaled_logs_us_43_003_when_batch_matches_but_max_insufficient to verify the log message. Commit: 1961c5f"
-                        },
-                        {
-                            "id":  "US-43-004",
-                            "title": "Add integration test for caption stage checkpoint restore with scaling",
-                            "acceptanceCriteria": [
-                                "Create test in tests/test_caption_stage.py: test_caption_stage_scales_budget_on_checkpoint_restore",
-                                "Mock checkpoint with batch_size=175, max_attempts=100, attempts=0",
-                                "Call caption stage run() with 175 video IDs",
-                                "Verify retry_budget.max_attempts >= 350 (175 * 2.0)",
-                                "Run: pytest tests/test_caption_stage.py::test_caption_stage_scales_budget -v --tb=short",
-                                "Commit: test: [US-43-004] Add integration test for caption stage checkpoint restore scaling"
-                            ],
-                            "passes": true,
-                            "priority": 43004,
-                            "notes": "Tier 2 (integration test). File: tests/test_caption_stage.py. Created TestCaptionStageCheckpointRestoreScaling class with 3 tests: main test verifies end-to-end flow from checkpoint restore through scaling, additional tests for attempts preservation and no-scale when sufficient."
-                        },
-                        {
-                            "id":  "US-43-005",
-                            "title": "Add defensive text_metadata initialization in CaptionStage.run()",
-                            "acceptanceCriteria": [
-                                "Add defensive check at start of CaptionStage.run() in src/stages/caption_stage.py",
-                                "Check: if not hasattr(state, 'text_metadata') or state.text_metadata is None: state.text_metadata = []",
-                                "Add this check BEFORE any operations that might use text_metadata",
-                                "Log warning when this fallback triggers: '[US-43-005] Defensive init: text_metadata was missing/None'",
-                                "Run: pytest tests/test_caption_stage.py -v --tb=short -x",
-                                "Commit: fix: [US-43-005] Add defensive text_metadata initialization in CaptionStage.run()"
-                            ],
-                            "passes": true,
-                            "priority": 43005,
-                            "notes": "Tier 1 (defensive fix). Added defensive check at very start of run() before try block - ensures text_metadata exists before _validate_state_type or _preflight_check could fail. Logs warning with [US-43-005] tag when triggered. All tests pass."
-                        },
-                        {
-                            "id":  "US-43-006",
-                            "title": "Add unit test for PipelineState checkpoint deserialization with missing fields",
-                            "acceptanceCriteria": [
-                                "Create test in tests/test_state.py: test_pipeline_state_deserialize_missing_text_metadata",
-                                "Test deserializing checkpoint data that lacks 'text_metadata' key",
-                                "Verify state.text_metadata is [] after deserialization (not None, not missing)",
-                                "Test both direct construction and checkpoint restore paths",
-                                "Run: pytest tests/test_state.py::test_pipeline_state_deserialize -v --tb=short",
-                                "Commit: test: [US-43-006] Add test for PipelineState deserialization with missing fields"
-                            ],
-                            "passes": true,
-                            "priority": 43006,
-                            "notes": "Tier 1 (test). File: tests/test_state_dataclasses.py (not test_state.py as originally noted). Created TestPipelineStateDeserializeMissingFields with 6 tests covering: missing text_metadata key, explicit None, validate_state_attributes(), CheckpointManager.restore_state() path, data preservation, and construction/restore parity. All tests pass - commit ccf34ba."
-                        },
-                        {
-                            "id":  "US-43-007",
-                            "title": "Fix PipelineState checkpoint restore to call __post_init__",
-                            "acceptanceCriteria": [
-                                "Investigate checkpoint restore path in src/checkpoint.py restore_state()",
-                                "Ensure PipelineState.__post_init__() is called after field assignment",
-                                "Alternative: Add explicit text_metadata=[] in restore_state() field assignments",
-                                "Verify test from US-43-006 passes",
-                                "Run: pytest tests/test_state.py tests/test_checkpoint.py -v --tb=short -x",
-                                "Commit: fix: [US-43-007] Fix PipelineState checkpoint restore to initialize required fields"
-                            ],
-                            "passes": true,
-                            "priority": 43007,
-                            "notes": "Tier 1 (bug fix). INVESTIGATION COMPLETE: The restore_state() at checkpoint.py:390-426 already creates PipelineState() which DOES call __post_init__. The __post_init__ at state.py:172-177 handles text_metadata=None. Additionally, validate_state_attributes() provides a second layer of defense. The US-43-006 tests verify this works correctly. Also fixed 7 outdated tests in test_state_dataclasses.py to match current simplified PipelineState API (video_ids instead of downloaded_videos, etc)."
-                        },
-                        {
-                            "id":  "US-43-008",
-                            "title": "Add log message showing auto_scale decision in ensure_scaled",
-                            "acceptanceCriteria": [
-                                "Modify ensure_scaled() in src/caption/retry_budget.py",
-                                "Add INFO log at decision point: 'ensure_scaled: batch_size={}, required={}, current_max={}, will_scale={}'",
-                                "Log this BEFORE the scaling decision, not just after",
-                                "Helps diagnose why scaling didn't trigger in production",
-                                "Run: pytest tests/test_caption_retry_budget.py -v --tb=short",
-                                "Commit: feat: [US-43-008] Add diagnostic logging to ensure_scaled decision point"
-                            ],
-                            "passes": true,
-                            "priority": 43008,
-                            "notes": "Tier 2 (observability). Added INFO log at decision point BEFORE scaling logic: '[US-43-008] ensure_scaled: batch_size={batch_size}, required={required_attempts}, current_max={max_attempts}, will_scale={will_scale}'. Moved required_attempts calculation to top of method so it's available for the log. All 303 tests pass."
-                        },
-                        {
-                            "id":  "US-43-009",
-                            "title": "Add validation that batch_size is set before ensure_scaled returns",
-                            "acceptanceCriteria": [
-                                "Modify ensure_scaled() in src/caption/retry_budget.py",
-                                "Add assertion or warning if batch_size is still None after method completes",
-                                "Ensure batch_size is ALWAYS set even if scaling is skipped",
-                                "Add test verifying batch_size is set after ensure_scaled(N) regardless of scaling outcome",
-                                "Run: pytest tests/test_caption_retry_budget.py::test_ensure_scaled -v --tb=short",
-                                "Commit: fix: [US-43-009] Ensure batch_size is always set in ensure_scaled"
-                            ],
-                            "passes": true,
-                            "priority": 43009,
-                            "notes": "Tier 1 (robustness). Modified ensure_scaled() to set batch_size in ALL code paths: (1) when auto_scale disabled, (2) when already scaled, (3) when scaling occurs. Added 4 tests: test_ensure_scaled_always_sets_batch_size_when_scaling/when_not_scaling/when_auto_scale_disabled/when_already_scaled. All 24 ensure_scaled tests pass."
-                        },
-                        {
-                            "id":  "US-43-010",
-                            "title": "Add fail-fast check for budget exhaustion before batch start",
-                            "acceptanceCriteria": [
-                                "Add check in CaptionStage.run() after ensure_scaled() call",
-                                "If budget_exhausted() is already True, log ERROR and skip batch processing",
-                                "Log: '[US-43-010] Budget already exhausted at batch start - check checkpoint restore'",
-                                "Return early with appropriate warnings about skipped videos",
-                                "Run: pytest tests/test_caption_stage.py -v --tb=short",
-                                "Commit: fix: [US-43-010] Add fail-fast check for budget exhaustion before batch start"
-                            ],
-                            "passes": true,
-                            "priority": 43010,
-                            "notes": "Tier 2 (fail-fast). File: src/stages/caption_stage.py. Added fail-fast check after ensure_scaled() - if budget_exhausted() is True, logs ERROR with [US-43-010] tag, marks all videos as skipped with reason='budget_exhausted_at_start', and returns early with warning. Added 3 tests: test_fail_fast_when_budget_exhausted_at_start, test_no_fail_fast_when_budget_has_remaining_attempts, test_fail_fast_when_backoff_time_exhausted. All 6 tests pass. Commit: 6dec2a9"
-                        },
-                        {
-                            "id":  "US-43-011",
-                            "title": "Sprint 43 verification",
-                            "acceptanceCriteria": [
-                                "Verify all Sprint 43 stories US-43-002 through US-43-010 are complete",
-                                "Run: pytest tests/test_caption_retry_budget.py tests/test_caption_stage.py tests/test_state.py -v --tb=short",
-                                "Verify no regressions in existing tests: pytest tests/ -v --tb=short -x",
-                                "Document any patterns or learnings in scripts/ralph/session/prompt.md",
-                                "Update CLAUDE.md if any new rules discovered",
-                                "Commit: chore: [US-43-011] Sprint 43 verification complete"
-                            ],
-                            "passes": false,
-                            "priority": 43011,
-                            "notes": "Final verification story. Ensures all fixes are complete and tests pass."
-                        }
-                    ]
+{
+    "sprintNumber": 44,
+    "focusArea": "pipeline",
+    "branchName": "ralph/sprint-44",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-44-001",
+            "title": "Generate sprint stories for pipeline focus area",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
+                "Add stories US-44-002 through US-44-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-44-NNN to be unique across sprints",
+                "Mark this story (US-44-001) as passes: true when done"
+            ],
+            "notes": "Seed story completed. Generated 11 pipeline-focused stories (US-44-002 through US-44-012) based on comprehensive codebase analysis. Key themes: state validation consistency, checkpoint integrity, error context, config validation, code deduplication, cross-stage data flow testing, and match serialization consistency."
+        },
+        {
+            "id": "US-44-002",
+            "title": "Add validate_required_state_attrs calls to all pipeline stages missing them",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "CAPTION stage (src/stages/caption_stage.py) calls validate_required_state_attrs with ['video_ids'] at run() entry",
+                "VIDEO_SEARCH stage (src/stages/video_search.py) calls validate_required_state_attrs with ['keywords'] at run() entry",
+                "ANALYZE stage (src/stages/analyze.py) calls validate_required_state_attrs with ['voiceover_path'] at run() entry",
+                "DOWNLOAD_SEGMENTS stage (src/stages/download_segments.py) calls validate_required_state_attrs with ['matches'] at run() entry",
+                "OUTPUT stage (src/stages/output.py) calls validate_required_state_attrs with ['matches', 'voiceover_segments'] at run() entry",
+                "Tests verify that each stage initializes missing attributes instead of crashing with AttributeError"
+            ],
+            "notes": "Tier: T2 (hardening). Implemented: Added validate_required_state_attrs import and call to all 5 missing stages. Added voiceover_path and video_ids to _STATE_ATTR_DEFAULTS. Created tests/test_stage_validate_attrs_us44_002.py with 6 tests verifying each stage initializes missing attrs gracefully. All 7 stages now have consistent validation at run() entry."
+        },
+        {
+            "id": "US-44-003",
+            "title": "Add pipeline-level config validation at startup before any stage runs",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Pipeline.__init__ or run() calls a new _validate_config() method before iterating stages",
+                "_validate_config() checks that config.cache.cache_dir path is writable (or can be created)",
+                "_validate_config() checks that the embedding provider is configured when matching stages are enabled",
+                "_validate_config() returns a list of validation errors; pipeline logs them and returns False if critical errors exist",
+                "Tests verify that an invalid config (e.g., non-writable cache dir) causes pipeline to fail fast with a descriptive error"
+            ],
+            "notes": "Tier: T2 (reliability). Source file: src/pipeline.py, lines 48-70 (__init__) and 155-170 (run entry). Currently the pipeline starts running stages without validating that config paths are valid, embedding providers are available, or required directories exist. Stages discover these issues mid-execution, producing confusing errors. Adding upfront validation follows the fail-fast principle."
+        },
+        {
+            "id": "US-44-004",
+            "title": "Enrich pipeline error messages with recovery suggestions and state context",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When a stage fails, the error log includes current state summary (segment count, video count, match count)",
+                "When validate_inputs fails, the error message includes which CLI flag or checkpoint reset would fix it (e.g., '--fresh', '--match-only')",
+                "Pipeline.run() at src/pipeline.py:254-258 augments result.error with state context before logging",
+                "At least 3 common failure scenarios produce actionable recovery suggestions in their error output",
+                "Tests verify that error messages contain recovery hints for known failure patterns"
+            ],
+            "notes": "Tier: T2 (developer experience). Source file: src/pipeline.py:213-258 (validation and error handling block). Currently line 255 logs 'Stage {name} failed: {error}' with no context about what state the pipeline was in or how to recover. The validate_inputs failure at line 216 also gives no hint about which flag to use. This change adds structured error context without changing control flow."
+        },
+        {
+            "id": "US-44-005",
+            "title": "Persist failed stage metrics in pipeline instead of only successful ones",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When a stage fails, its metrics (duration, items processed before failure) are still stored in self.stage_metrics",
+                "StageMetrics dataclass has a new 'failed' boolean field (default False) to distinguish failed from successful metrics",
+                "Pipeline.run() stores metrics for failed stages with failed=True before returning False",
+                "The final pipeline summary (if any) includes failed stage metrics alongside successful ones",
+                "Tests verify that after a stage failure, stage_metrics[failed_stage] exists and has failed=True"
+            ],
+            "notes": "Tier: T2 (observability). Source files: src/pipeline.py:237-244 (metrics storage), src/stages/__init__.py (StageMetrics dataclass). Currently at pipeline.py:254 when a stage fails, the code returns False without storing any metrics. The elapsed time is computed at line 233 but only stored for successful stages. This makes post-mortem debugging harder since we lose how long the failed stage ran and how much work it completed."
+        },
+        {
+            "id": "US-44-006",
+            "title": "Add checkpoint data schema validation to prevent silent corruption",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "CheckpointData.from_dict() validates that stage data dicts contain expected keys (at minimum, non-empty for stages before last_completed_stage)",
+                "A new validate() method on CheckpointData checks internal consistency: all stages before last_completed_stage have non-empty data",
+                "CheckpointManager.load() calls validate() after from_dict() and logs warnings for any inconsistencies found",
+                "CheckpointManager.save() validates that the stage_key maps to an actual field on CheckpointData before writing",
+                "Tests verify that loading a checkpoint with missing intermediate stage data produces a warning"
+            ],
+            "notes": "Tier: T2 (reliability). Source file: src/checkpoint.py:62-85 (CheckpointData), 150-194 (load), 440+ (save). Currently CheckpointData.from_dict() at line 84 filters to known fields but doesn't validate contents. The save() method uses stage.lower() to find the field name but has no guard against unknown stage names. If someone adds a stage without adding a field to CheckpointData, save() silently drops data."
+        },
+        {
+            "id": "US-44-007",
+            "title": "Extract duplicated video ID extraction logic into a shared utility",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "A new function extract_video_id(path_or_id: str) -> Optional[str] exists in src/utils.py (or appropriate shared module)",
+                "The function uses the YouTube 11-character regex pattern r'([a-zA-Z0-9_-]{11})' with proper validation",
+                "src/stages/iterative_match.py replaces its inline _extract_video_id() and _extract_video_id_from_path() with the shared utility",
+                "src/state.py from_legacy_pipeline() (line 287) uses the shared utility instead of inline regex",
+                "All existing tests still pass after the refactor"
+            ],
+            "notes": "Tier: T3 (code quality). Source files: src/stages/iterative_match.py (two methods: _extract_video_id around line 652-674, _extract_video_id_from_path around line 1318-1322), src/state.py:287 (inline regex in from_legacy_pipeline). All three locations use the same regex pattern r'([a-zA-Z0-9_-]{11})' for YouTube ID extraction. Consolidating prevents drift between implementations."
+        },
+        {
+            "id": "US-44-008",
+            "title": "Add cross-stage data flow integration tests for the full pipeline sequence",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "A new test file tests/integration/test_stage_transitions.py exists",
+                "Test verifies ANALYZE output (keywords, voiceover_segments) is valid input for VIDEO_SEARCH",
+                "Test verifies VIDEO_SEARCH output (video_ids, video_search_results) is valid input for CAPTION",
+                "Test verifies CAPTION output (text_metadata, caption_results) is valid input for MATCH",
+                "Test verifies MATCH output (matches, alternatives) is valid input for ITERATIVE_MATCH",
+                "All tests use mock data and do not require network access or API keys"
+            ],
+            "notes": "Tier: T2 (test coverage). While individual stage tests are thorough (362 caption tests, 158 match tests, etc.), there are no tests verifying that one stage's output format is compatible with the next stage's expected input. This is how the stale PipelineState reference bug (state.embeddings) went undetected. Each test should create minimal mock output from stage N and pass it through stage N+1's validate_inputs() and initial state checks."
+        },
+        {
+            "id": "US-44-009",
+            "title": "Harmonize match serialization and deserialization validation between MATCH and ITERATIVE_MATCH stages",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "ITERATIVE_MATCH restore (src/stages/iterative_match.py) applies the same confidence clamping [0,1] as MATCH restore (src/stages/match.py:284-286)",
+                "ITERATIVE_MATCH restore validates video_file is not empty string, matching MATCH stage behavior",
+                "A shared helper function (or base class method) handles match dict-to-object conversion used by both stages",
+                "Tests verify that both stages produce identical Match objects from the same checkpoint dict input",
+                "Tests verify that out-of-range confidence values (negative, >1) are clamped consistently"
+            ],
+            "notes": "Tier: T2 (consistency). Source files: src/stages/match.py:246-314 (MATCH restore with extensive validation including confidence clamping), src/stages/iterative_match.py:496-519 (ITERATIVE_MATCH restore with minimal validation). The asymmetry means invalid data that MATCH would catch and fix can slip through ITERATIVE_MATCH restore unchecked. The confidence clamping is at match.py:284-286; iterative_match.py has no equivalent."
+        },
+        {
+            "id": "US-44-010",
+            "title": "Add video count consistency assertion between video_ids, caption_results, and text_metadata",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "MATCH stage validate_inputs() checks that len(state.caption_results) > 0 when text_metadata is populated",
+                "A warning is logged if len(state.video_ids) differs from len(state.caption_results) by more than 10%",
+                "The consistency check accounts for expected drops (failed captions, filtered videos) and only warns, does not fail",
+                "Tests verify the warning triggers when video_ids has 100 entries but caption_results only has 50",
+                "Tests verify no warning when counts differ by less than 10%"
+            ],
+            "notes": "Tier: T3 (defensive). Source files: src/stages/match.py:326+ (validate_inputs), src/state.py:148-155 (the three fields). Currently there are three independent sources of truth for video counts: state.video_ids (from VIDEO_SEARCH), state.caption_results (from CAPTION, keyed by video_id), and state.text_metadata (populated from caption_results). No assertion checks that these are consistent, so silent data loss between stages goes undetected."
+        },
+        {
+            "id": "US-44-011",
+            "title": "Add checkpoint backup timestamp comparison before restore",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "CheckpointManager.load() compares timestamps of main checkpoint and backup before selecting which to restore",
+                "If backup is newer than main (indicating a mid-save crash), a warning is logged explaining the situation",
+                "If main checkpoint is corrupt, load falls back to backup with a clear log message including both timestamps",
+                "Tests verify that when main checkpoint has an older timestamp than backup, the backup is preferred",
+                "Tests verify that when main is valid and newer, main is used even if backup also exists"
+            ],
+            "notes": "Tier: T3 (robustness). Source file: src/checkpoint.py:152-194 (load method). Currently at line 173-175, if the main checkpoint fails to load, the backup is restored without comparing timestamps. This means if the backup is actually older/staler than the (slightly corrupt) main, we may lose more progress than necessary. The timestamps are already present in CheckpointData fields created_at and updated_at (lines 65-66)."
+        },
+        {
+            "id": "US-44-012",
+            "title": "Add _STATE_ATTR_DEFAULTS entries for missing state fields to prevent None fallbacks",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "_STATE_ATTR_DEFAULTS in src/stages/__init__.py includes 'video_ids': [] entry",
+                "_STATE_ATTR_DEFAULTS includes 'video_search_results': [] entry",
+                "_STATE_ATTR_DEFAULTS includes 'downloaded_segments': [] entry",
+                "_STATE_ATTR_DEFAULTS includes 'output_files': [] entry",
+                "All entries in _STATE_ATTR_DEFAULTS match the default_factory types defined in PipelineState (src/state.py:131-171)",
+                "Tests verify that validate_required_state_attrs initializes missing fields to the correct type (list, dict) not None"
+            ],
+            "notes": "Tier: T2 (defensive). Source file: src/stages/__init__.py:249-260 (_STATE_ATTR_DEFAULTS dict). Currently the defaults dict has entries for text_metadata, caption_results, voiceover_segments, matches, embeddings, videos, keywords, alternatives, location_chapters. Missing: video_ids, video_search_results, downloaded_segments, output_files, otio_files, search_failed_keywords, face_preference, topic_context, extracted_entities. When validate_required_state_attrs encounters a missing attr not in this dict, it falls back to None (line 288), which can cause downstream TypeError when code expects a list."
+        }
+    ]
 }
