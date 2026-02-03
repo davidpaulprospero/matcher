@@ -234,9 +234,33 @@ _stage_registry: Dict[str, type] = {}
 
 
 def register_stage(stage_class: type) -> type:
-    """Decorator to register a stage class"""
+    """Decorator to register a stage class.
+
+    Logs warnings for:
+    - Duplicate registration (last-wins behavior preserved)
+    - Orphan stages whose name is not in STAGE_ORDER
+    """
     if hasattr(stage_class, 'name') and stage_class.name:
-        _stage_registry[stage_class.name] = stage_class
+        stage_name = stage_class.name
+
+        # Warn on duplicate registration
+        if stage_name in _stage_registry:
+            _stages_logger.warning(
+                f"Duplicate stage registration: '{stage_name}' "
+                f"(replacing {_stage_registry[stage_name].__name__} "
+                f"with {stage_class.__name__})"
+            )
+
+        _stage_registry[stage_name] = stage_class
+
+        # Warn if stage name is not in STAGE_ORDER (orphan stage)
+        from ..checkpoint import STAGE_ORDER
+        if stage_name not in STAGE_ORDER:
+            _stages_logger.warning(
+                f"Orphan stage registered: '{stage_name}' is not in STAGE_ORDER "
+                f"(no checkpoint support)"
+            )
+
     return stage_class
 
 
@@ -248,6 +272,22 @@ def get_stage(name: str) -> Optional[type]:
 def list_stages() -> List[str]:
     """List all registered stage names"""
     return list(_stage_registry.keys())
+
+
+def get_orphan_stages() -> Dict[str, type]:
+    """Return registered stages whose names are not in STAGE_ORDER.
+
+    Orphan stages have no checkpoint support and won't be executed
+    by the standard pipeline runner.
+
+    Returns:
+        Dict mapping orphan stage names to their classes.
+    """
+    from ..checkpoint import STAGE_ORDER
+    return {
+        name: cls for name, cls in _stage_registry.items()
+        if name not in STAGE_ORDER
+    }
 
 
 # Default values for state attributes when missing

@@ -4,10 +4,14 @@ Tests for src/stages/__init__.py coverage gaps.
 Targets:
 - Line 47: StageResult.__bool__ returns self.success
 - Line 168: list_stages returns registered stage names
+- US-45-006: Orphan stage detection and duplicate registration warnings
 """
 
 import pytest
-from src.stages import StageResult, Stage, register_stage, get_stage, list_stages
+from src.stages import (
+    StageResult, Stage, register_stage, get_stage, list_stages,
+    get_orphan_stages,
+)
 
 
 class TestStageResultBool:
@@ -490,3 +494,192 @@ class TestValidateRequiredStateAttrs:
         # Only missing attribute logged
         assert "'matches'" not in caplog.text
         assert "'text_metadata'" in caplog.text
+
+
+class TestOrphanStageDetection:
+    """Test orphan stage detection (US-45-006)."""
+
+    @pytest.mark.fast
+    def test_register_stage_warns_on_orphan(self, caplog):
+        """Test register_stage logs warning when stage name is not in STAGE_ORDER."""
+        import logging
+        from src.stages import _stage_registry
+
+        @register_stage
+        class OrphanTestStage(Stage):
+            name = "ORPHAN_TEST_STAGE_006"
+            description = "Orphan test stage"
+
+            def run(self, state, config, checkpoint):
+                return StageResult.ok()
+
+            def can_skip(self, state, checkpoint):
+                return False
+
+            def restore(self, state, checkpoint):
+                return False
+
+        # Verify warning was logged
+        assert "Orphan stage registered: 'ORPHAN_TEST_STAGE_006'" in caplog.text
+        assert "not in STAGE_ORDER" in caplog.text
+
+        # Clean up
+        del _stage_registry["ORPHAN_TEST_STAGE_006"]
+
+    @pytest.mark.fast
+    def test_register_stage_no_warning_for_known_stage(self, caplog):
+        """Test register_stage does NOT warn for stages in STAGE_ORDER."""
+        import logging
+        from src.stages import _stage_registry
+        from src.checkpoint import STAGE_ORDER
+
+        # Save existing registration for ANALYZE (it's already registered)
+        original = _stage_registry.get("ANALYZE")
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            # Re-register ANALYZE - should warn about duplicate but NOT orphan
+            @register_stage
+            class AnalyzeReplacement(Stage):
+                name = "ANALYZE"
+                description = "Replacement analyze"
+
+                def run(self, state, config, checkpoint):
+                    return StageResult.ok()
+
+                def can_skip(self, state, checkpoint):
+                    return False
+
+                def restore(self, state, checkpoint):
+                    return False
+
+        # Should NOT have orphan warning for ANALYZE
+        assert "Orphan stage registered: 'ANALYZE'" not in caplog.text
+
+        # Restore original
+        if original:
+            _stage_registry["ANALYZE"] = original
+
+    @pytest.mark.fast
+    def test_get_orphan_stages_identifies_entity_stages(self):
+        """Test get_orphan_stages correctly identifies entity stages as orphans."""
+        # Force import so @register_stage fires for entity stages
+        from src.stages.entity_images import EntityImagesStage  # noqa: F401
+        from src.stages.entity_videos import EntityVideosStage  # noqa: F401
+
+        orphans = get_orphan_stages()
+
+        # Entity stages are registered but not in STAGE_ORDER
+        assert "ENTITY_IMAGES" in orphans
+        assert "ENTITY_VIDEOS" in orphans
+
+        # Pipeline stages should NOT be in orphans
+        assert "ANALYZE" not in orphans
+        assert "MATCH" not in orphans
+        assert "OUTPUT" not in orphans
+
+    @pytest.mark.fast
+    def test_get_orphan_stages_returns_classes(self):
+        """Test get_orphan_stages returns stage classes, not just names."""
+        from src.stages.entity_images import EntityImagesStage
+        from src.stages.entity_videos import EntityVideosStage
+
+        orphans = get_orphan_stages()
+
+        assert orphans["ENTITY_IMAGES"] is EntityImagesStage
+        assert orphans["ENTITY_VIDEOS"] is EntityVideosStage
+
+    @pytest.mark.fast
+    def test_get_orphan_stages_empty_when_all_in_order(self):
+        """Test get_orphan_stages with a registry containing only STAGE_ORDER names."""
+        from src.stages import _stage_registry
+        from src.checkpoint import STAGE_ORDER
+
+        # Temporarily remove orphan entries
+        saved = {}
+        orphan_names = [n for n in _stage_registry if n not in STAGE_ORDER]
+        for name in orphan_names:
+            saved[name] = _stage_registry.pop(name)
+
+        try:
+            orphans = get_orphan_stages()
+            assert len(orphans) == 0
+        finally:
+            # Restore
+            _stage_registry.update(saved)
+
+
+class TestDuplicateStageRegistration:
+    """Test duplicate stage registration warning (US-45-006)."""
+
+    @pytest.mark.fast
+    def test_duplicate_registration_warns(self, caplog):
+        """Test register_stage logs warning on duplicate name."""
+        import logging
+        from src.stages import _stage_registry
+
+        @register_stage
+        class DupStageA(Stage):
+            name = "DUP_TEST_STAGE_006"
+            description = "First registration"
+
+            def run(self, state, config, checkpoint):
+                return StageResult.ok()
+
+            def can_skip(self, state, checkpoint):
+                return False
+
+            def restore(self, state, checkpoint):
+                return False
+
+        caplog.clear()
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            @register_stage
+            class DupStageB(Stage):
+                name = "DUP_TEST_STAGE_006"
+                description = "Second registration"
+
+                def run(self, state, config, checkpoint):
+                    return StageResult.ok()
+
+                def can_skip(self, state, checkpoint):
+                    return False
+
+                def restore(self, state, checkpoint):
+                    return False
+
+        # Should warn about duplicate
+        assert "Duplicate stage registration: 'DUP_TEST_STAGE_006'" in caplog.text
+        assert "replacing DupStageA with DupStageB" in caplog.text
+
+        # Last-wins: registry should have the second class
+        assert _stage_registry["DUP_TEST_STAGE_006"] is DupStageB
+
+        # Clean up
+        del _stage_registry["DUP_TEST_STAGE_006"]
+
+    @pytest.mark.fast
+    def test_first_registration_no_duplicate_warning(self, caplog):
+        """Test first-time registration does NOT produce duplicate warning."""
+        import logging
+        from src.stages import _stage_registry
+
+        with caplog.at_level(logging.WARNING, logger='src.stages'):
+            @register_stage
+            class UniqueStage006(Stage):
+                name = "UNIQUE_STAGE_006"
+                description = "Unique stage"
+
+                def run(self, state, config, checkpoint):
+                    return StageResult.ok()
+
+                def can_skip(self, state, checkpoint):
+                    return False
+
+                def restore(self, state, checkpoint):
+                    return False
+
+        assert "Duplicate stage registration: 'UNIQUE_STAGE_006'" not in caplog.text
+
+        # Clean up
+        del _stage_registry["UNIQUE_STAGE_006"]
