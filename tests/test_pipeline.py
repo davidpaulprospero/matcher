@@ -287,9 +287,11 @@ class TestPipelineRun:
             assert stages[0]._run_called is True
             assert stages[1]._run_called is False  # Validation failed before run
             assert stages[2]._run_called is False
-            mock_logger.error.assert_called_with(
-                "Stage stage2 validation failed: Missing required input"
-            )
+            # US-44-004: Error now includes state context and recovery suggestion
+            error_call_args = mock_logger.error.call_args[0][0]
+            assert "Stage stage2 validation failed: Missing required input" in error_call_args
+            assert "state:" in error_call_args
+            assert "Recovery:" in error_call_args
 
 
 class TestPipelineStageFiltering:
