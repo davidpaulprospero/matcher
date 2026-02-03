@@ -404,7 +404,7 @@ class TestRetryQueueIntegration:
             mock_ydl_class.return_value.__exit__.return_value = False
 
             # Call download (will fail and add to retry queue)
-            result = stage._download_segments(
+            result, _stats = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -471,7 +471,7 @@ class TestRetryQueueIntegration:
             mock_ydl_class.return_value.__exit__.return_value = False
 
             # Should not raise even without retry queue
-            result = stage._download_segments(
+            result, _stats = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -738,7 +738,7 @@ class TestNetworkFailureCircuitBreaker:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            result = stage._download_segments(
+            result, _stats = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -782,7 +782,7 @@ class TestNetworkFailureCircuitBreaker:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            result = stage._download_segments(
+            result, _stats = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -811,7 +811,7 @@ class TestNetworkFailureCircuitBreaker:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            result = stage._download_segments(
+            result, _stats = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -1169,3 +1169,157 @@ class TestEscalationTierIntegration:
         ydl_opts = {'format': 'best'}
         _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
         assert ydl_opts == {'format': 'best'}  # Unchanged
+
+
+# ============================================================================
+# Download Progress Reporting (US-48-007)
+# ============================================================================
+
+class TestDownloadProgressReporting:
+    """Test progress counters, running success rate, and end-of-stage summary.
+
+    US-48-007: Verifies that _download_segments tracks success/failure/cached
+    counters and that a summary is printed at end of stage.
+    """
+
+    @pytest.mark.fast
+    def test_progress_callback_called_with_correct_values(self, stage, tmp_path):
+        """Progress callback receives correct current/total values for each segment."""
+        stage.downloader = None
+
+        segments = [
+            {'video_id': f'prog_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(3)
+        ]
+
+        progress_calls = []
+
+        def track_progress(current, total, downloaded):
+            progress_calls.append((current, total))
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("Test error")
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0,
+                progress_callback=track_progress
+            )
+
+        # Each of the 3 segments should trigger a progress callback
+        assert len(progress_calls) == 3
+        assert progress_calls[0] == (1, 3)
+        assert progress_calls[1] == (2, 3)
+        assert progress_calls[2] == (3, 3)
+
+    @pytest.mark.fast
+    def test_stats_returned_with_correct_counters(self, stage, tmp_path):
+        """_download_segments returns stats dict with succeeded/failed/cached counts."""
+        stage.downloader = None
+
+        # Pre-create a cached file for segment 0
+        (tmp_path / "cached_vid_0_15.mp4").write_text("fake")
+
+        segments = [
+            {'video_id': 'cached_vid', 'start': 0.0, 'end': 10.0},  # cached
+            {'video_id': 'success_vid', 'start': 0.0, 'end': 10.0},  # will succeed
+            {'video_id': 'fail_vid', 'start': 0.0, 'end': 10.0},  # will fail
+        ]
+
+        call_idx = [0]
+
+        def mock_download(urls):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            if idx == 0:
+                # success_vid — create output file
+                (tmp_path / "success_vid_0_15.mp4").write_text("fake")
+                return
+            raise Exception("HTTP Error 403: Forbidden")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            _downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert stats['cached'] == 1
+        assert stats['succeeded'] == 1
+        assert stats['failed'] == 1
+        assert stats['attempted'] == 3
+        assert stats['total'] == 3
+
+    @pytest.mark.fast
+    def test_summary_includes_all_categories(self, stage, capsys):
+        """_print_summary outputs all counter categories and time."""
+        stats = {
+            'succeeded': 5,
+            'failed': 2,
+            'cached': 3,
+            'attempted': 10,
+            'total': 10,
+        }
+
+        stage._print_summary(stats, elapsed=125.3)
+        captured = capsys.readouterr().out
+
+        assert 'Attempted: 10/10' in captured
+        assert 'Succeeded: 5' in captured
+        assert 'Cached:    3' in captured
+        assert 'Failed:    2' in captured
+        assert 'Success rate: 80%' in captured
+        assert '2m 5s' in captured
+
+    @pytest.mark.fast
+    def test_print_progress_displays_running_rate(self, stage, capsys):
+        """_print_progress shows running success rate."""
+        stats = {
+            'succeeded': 2,
+            'failed': 1,
+            'cached': 1,
+            'attempted': 4,
+            'total': 6,
+        }
+
+        stage._print_progress(4, 6, stats)
+        captured = capsys.readouterr().out
+
+        assert '[4/6]' in captured
+        assert 'ok=3' in captured  # succeeded + cached
+        assert 'fail=1' in captured
+        assert 'cached=1' in captured
+        assert '75% success' in captured
+
+    @pytest.mark.fast
+    def test_cached_segments_counted_in_stats(self, stage, tmp_path):
+        """Cached (already-existing) segments are counted in stats."""
+        stage.downloader = None
+
+        # Pre-create all files so all are cached
+        for i in range(3):
+            (tmp_path / f"cache_{i}_0_15.mp4").write_text("fake")
+
+        segments = [
+            {'video_id': f'cache_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(3)
+        ]
+
+        with patch.object(stage, '_process_retry_queue'):
+            _downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert stats['cached'] == 3
+        assert stats['succeeded'] == 0
+        assert stats['failed'] == 0
+        assert stats['attempted'] == 3
