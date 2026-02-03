@@ -5,6 +5,8 @@ Stage 6 of the simplified 7-stage pipeline:
 - Downloads only the matched video segments (not full videos)
 - Runs after MATCH and ITERATIVE_MATCH stages
 - Efficient: only downloads portions of videos that are actually used
+- US-48-005: Integrates 4-tier escalation (impersonation, extractor_args,
+  cookie rotation) via EscalationManager for resilient downloading
 """
 
 from __future__ import annotations
@@ -61,6 +63,70 @@ def _is_network_failure(error_msg: str) -> bool:
 
 # Default threshold for consecutive network failures before aborting
 NETWORK_FAILURE_THRESHOLD = 3
+
+
+def _is_escalation_error(error_msg: str) -> bool:
+    """Check if an error message indicates a 403/bot-detection/auth error.
+
+    These errors warrant escalation to a higher bypass tier via the
+    EscalationManager (Tier 2 extractor_args, Tier 3 cookies).
+
+    Args:
+        error_msg: The exception message string.
+
+    Returns:
+        True if the error matches 403/bot/auth patterns.
+    """
+    try:
+        from ..downloader.escalation_manager import is_escalation_trigger
+        return is_escalation_trigger(error_msg)
+    except ImportError:
+        # Fallback: simple pattern match if escalation_manager unavailable
+        lower = error_msg.lower()
+        return any(p in lower for p in ('403', 'forbidden', 'sign in', 'bot', 'captcha'))
+
+
+def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -> None:
+    """Translate EscalationResult CLI args to yt-dlp Python API ydl_opts.
+
+    The EscalationManager returns CLI args (e.g., ['--impersonate', 'X',
+    '--extractor-args', 'youtube:player_client=a,b']). This function
+    translates them to ydl_opts dict keys for the Python API.
+
+    Translation:
+        --impersonate X           → ydl_opts['impersonate'] = 'X'
+        --extractor-args youtube:player_client=X  → ydl_opts['extractor_args'] = {'youtube': {'player_client': 'X'}}
+
+    Cookie rotation is handled separately via cookiefile, not via CLI args.
+
+    Args:
+        ydl_opts: The yt-dlp options dict to modify in-place.
+        escalation_result: EscalationResult from EscalationManager.get_escalation_args().
+    """
+    if not escalation_result or not escalation_result.args:
+        return
+
+    args = escalation_result.args
+    i = 0
+    while i < len(args):
+        if args[i] == '--impersonate' and i + 1 < len(args):
+            ydl_opts['impersonate'] = args[i + 1]
+            i += 2
+        elif args[i] == '--extractor-args' and i + 1 < len(args):
+            # Parse "youtube:player_client=X,Y,Z" format
+            raw = args[i + 1]
+            if ':' in raw:
+                namespace, kv = raw.split(':', 1)
+                if '=' in kv:
+                    key, value = kv.split('=', 1)
+                    if 'extractor_args' not in ydl_opts:
+                        ydl_opts['extractor_args'] = {}
+                    if namespace not in ydl_opts['extractor_args']:
+                        ydl_opts['extractor_args'][namespace] = {}
+                    ydl_opts['extractor_args'][namespace][key] = value
+            i += 2
+        else:
+            i += 1
 
 
 @register_stage
@@ -218,6 +284,10 @@ class DownloadVideoSegmentsStage(Stage):
 
         Uses the downloader's impersonation, escalation, and retry queue
         infrastructure instead of raw yt-dlp calls.
+
+        US-48-005: Uses EscalationManager for per-segment tier progression.
+        On 403/bot errors, escalates to Tier 2 (extractor_args) and Tier 3
+        (cookie rotation). Escalation state is tracked per video_id.
         """
         from ..state import DownloadedVideo
         import yt_dlp
@@ -225,6 +295,13 @@ class DownloadVideoSegmentsStage(Stage):
         downloaded = []
         total = len(segments)
         consecutive_network_failures = 0
+
+        # Get escalation manager and cookie rotator from downloader
+        escalation_mgr = None
+        cookie_rotator = None
+        if self.downloader:
+            escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
+            cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
 
         for idx, seg in enumerate(segments, 1):
             video_id = seg['video_id']
@@ -267,11 +344,32 @@ class DownloadVideoSegmentsStage(Stage):
                     'fragment_retries': 10,
                 }
 
-                # Apply impersonation from downloader if available
-                if self.downloader and self.downloader.impersonation_manager:
+                # US-48-005: Apply escalation tiers (impersonation + extractor_args + cookies)
+                escalation_result = None
+                if escalation_mgr:
                     try:
-                        imp_opts = self.downloader.impersonation_manager.get_ydl_options(tier=1)
-                        ydl_opts.update(imp_opts)
+                        escalation_result = escalation_mgr.get_escalation_args(video_id)
+                        _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
+
+                        # Tier 3: apply cookie rotation
+                        if escalation_result.rotate_cookies and cookie_rotator:
+                            cookie_path = cookie_rotator.get_current_cookie()
+                            if cookie_path:
+                                ydl_opts['cookiefile'] = cookie_path
+
+                        if escalation_result.tier.value > 1:
+                            logger.info(
+                                f"Segment {video_id}: using escalation tier "
+                                f"{escalation_result.tier.name}"
+                            )
+                    except Exception as esc_err:
+                        logger.debug(f"Escalation lookup failed for {video_id}: {esc_err}")
+                elif self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+                    # Fallback: direct impersonation only (no escalation manager)
+                    try:
+                        imp_args = self.downloader.impersonation_manager.get_impersonate_args()
+                        if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
+                            ydl_opts['impersonate'] = imp_args[1]
                     except Exception:
                         pass
 
@@ -286,12 +384,23 @@ class DownloadVideoSegmentsStage(Stage):
                     ))
                     print(f"  [{idx}/{total}] Downloaded {video_id} ({start:.0f}s-{end:.0f}s)")
                     consecutive_network_failures = 0  # Reset on success
+                    # Record success with escalation manager
+                    if escalation_mgr:
+                        escalation_mgr.record_success(video_id)
                 else:
                     logger.warning(f"Download succeeded but file not found: {output_file}")
 
             except Exception as e:
                 error_msg = str(e)
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
+
+                # US-48-005: Record failure with escalation manager for tier progression
+                if escalation_mgr and _is_escalation_error(error_msg):
+                    escalation_mgr.record_failure(video_id, error_msg)
+                    # Advance cookie rotation on Tier 3+ auth errors
+                    if cookie_rotator and getattr(cookie_rotator, 'should_rotate', None):
+                        if cookie_rotator.should_rotate(error_msg):
+                            cookie_rotator.rotate()
 
                 # Track consecutive network failures for early abort
                 if _is_network_failure(error_msg):
@@ -350,7 +459,9 @@ class DownloadVideoSegmentsStage(Stage):
         """Process any failed downloads in the retry queue.
 
         Attempts to retry failed segment downloads using the downloader's
-        retry queue infrastructure.
+        retry queue infrastructure. US-48-005: Uses escalation tiers for
+        retries (items that originally failed at Tier 1 will retry at
+        the escalated tier).
         """
         from ..state import DownloadedVideo
         import yt_dlp
@@ -367,6 +478,10 @@ class DownloadVideoSegmentsStage(Stage):
 
         # Start retry pass (applies configured delay)
         retry_queue.start_retry_pass()
+
+        # Get escalation manager and cookie rotator for retry pass
+        escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
+        cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
 
         for item in pending:
             # Parse video_id from the retry item (format: video_id_start_end)
@@ -412,11 +527,22 @@ class DownloadVideoSegmentsStage(Stage):
                     'fragment_retries': 10,
                 }
 
-                # Apply impersonation
-                if self.downloader.impersonation_manager:
+                # US-48-005: Apply escalation tiers for retry
+                if escalation_mgr:
                     try:
-                        imp_opts = self.downloader.impersonation_manager.get_ydl_options(tier=1)
-                        ydl_opts.update(imp_opts)
+                        escalation_result = escalation_mgr.get_escalation_args(video_id)
+                        _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
+                        if escalation_result.rotate_cookies and cookie_rotator:
+                            cookie_path = cookie_rotator.get_current_cookie()
+                            if cookie_path:
+                                ydl_opts['cookiefile'] = cookie_path
+                    except Exception:
+                        pass
+                elif self.downloader.impersonation_manager:
+                    try:
+                        imp_args = self.downloader.impersonation_manager.get_impersonate_args()
+                        if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
+                            ydl_opts['impersonate'] = imp_args[1]
                     except Exception:
                         pass
 
@@ -430,13 +556,19 @@ class DownloadVideoSegmentsStage(Stage):
                         source='segment_retry'
                     ))
                     retry_queue.mark_success(item.video_id)
+                    if escalation_mgr:
+                        escalation_mgr.record_success(video_id)
                     logger.info(f"Retry succeeded for {video_id}")
                 else:
                     retry_queue.mark_failed(item.video_id)
 
             except Exception as e:
-                logger.warning(f"Retry failed for {video_id}: {e}")
+                error_msg = str(e)
+                logger.warning(f"Retry failed for {video_id}: {error_msg}")
                 retry_queue.mark_failed(item.video_id)
+                # Record failure for escalation progression on next retry
+                if escalation_mgr and _is_escalation_error(error_msg):
+                    escalation_mgr.record_failure(video_id, error_msg)
 
             # Update checkpoint with retry progress
             if progress_callback:

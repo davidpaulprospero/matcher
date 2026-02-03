@@ -479,15 +479,24 @@ class TestRetryQueueIntegration:
         assert result == []
 
     def test_retry_queue_uses_downloader_impersonation(self, stage, tmp_path):
-        """Retry queue downloads use downloader's impersonation manager"""
+        """Downloads use escalation manager for impersonation args (US-48-005)"""
         from src.downloader import RetryQueue, BatchRetryConfig
+        from src.downloader.types import EscalationTier
 
-        mock_impersonation = MagicMock()
-        mock_impersonation.get_ydl_options.return_value = {'impersonate': 'Chrome-136:Macos-15'}
+        # Set up escalation manager that returns Tier 1 impersonation
+        mock_escalation_mgr = MagicMock()
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+        mock_result.tier = EscalationTier.IMPERSONATE_ONLY
+        mock_result.rotate_cookies = False
+        mock_result.rotate_vpn = False
+        mock_escalation_mgr.get_escalation_args.return_value = mock_result
 
         mock_downloader = MagicMock()
         mock_downloader.retry_queue = RetryQueue(BatchRetryConfig(enabled=True))
-        mock_downloader.impersonation_manager = mock_impersonation
+        mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader.impersonation_manager = None
 
         stage.downloader = mock_downloader
 
@@ -516,10 +525,10 @@ class TestRetryQueueIntegration:
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
-        # Verify impersonation was requested
-        mock_impersonation.get_ydl_options.assert_called()
+        # Verify escalation manager was consulted
+        mock_escalation_mgr.get_escalation_args.assert_called_with('imp_test')
 
-        # Verify impersonation options were applied
+        # Verify impersonation options were applied to ydl_opts
         assert len(captured_opts) > 0
         assert captured_opts[0].get('impersonate') == 'Chrome-136:Macos-15'
 
@@ -842,3 +851,321 @@ class TestNetworkFailureCircuitBreaker:
         # Last call should be for segment 3 of 5
         assert progress_calls[-1][0] == 3
         assert progress_calls[-1][1] == 5
+
+
+# ============================================================================
+# Escalation Tier Integration (US-48-005)
+# ============================================================================
+
+class TestEscalationTierIntegration:
+    """Test EscalationManager integration with download_segments stage.
+
+    US-48-005: Verifies that download_segments applies escalation tiers
+    (impersonation, extractor_args, cookie rotation) via EscalationManager
+    instead of only Tier 1 impersonation.
+    """
+
+    @pytest.mark.fast
+    def test_apply_escalation_to_ydl_opts_impersonation(self):
+        """_apply_escalation_to_ydl_opts translates --impersonate to ydl_opts"""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        # Simulate EscalationResult with Tier 1 impersonation args
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        assert ydl_opts['impersonate'] == 'Chrome-136:Macos-15'
+
+    @pytest.mark.fast
+    def test_apply_escalation_to_ydl_opts_extractor_args(self):
+        """_apply_escalation_to_ydl_opts translates --extractor-args to ydl_opts"""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        # Simulate EscalationResult with Tier 2 args
+        mock_result = MagicMock()
+        mock_result.args = [
+            '--impersonate', 'Chrome-136:Macos-15',
+            '--extractor-args', 'youtube:player_client=web_safari,tv_downgraded,web',
+        ]
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        assert ydl_opts['impersonate'] == 'Chrome-136:Macos-15'
+        assert 'extractor_args' in ydl_opts
+        assert ydl_opts['extractor_args']['youtube']['player_client'] == 'web_safari,tv_downgraded,web'
+
+    @pytest.mark.fast
+    def test_tier2_extractor_args_added_after_403(self, stage, tmp_path):
+        """After a 403 error, EscalationManager escalates and Tier 2 extractor_args
+        are applied to ydl_opts on the next download attempt."""
+        from src.downloader.types import EscalationTier
+
+        # Create mock escalation manager that starts at Tier 1 then escalates to Tier 2
+        mock_escalation_mgr = MagicMock()
+
+        # Track calls to get_escalation_args to return different tiers
+        call_count = [0]
+
+        def mock_get_escalation_args(keyword):
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] == 1:
+                # First call: Tier 1 (will fail with 403)
+                result.args = ['--impersonate', 'Chrome-136:Macos-15']
+                result.tier = EscalationTier.IMPERSONATE_ONLY
+                result.rotate_cookies = False
+                result.rotate_vpn = False
+            else:
+                # Second call: Tier 2 (after 403 triggered escalation)
+                result.args = [
+                    '--impersonate', 'Chrome-136:Macos-15',
+                    '--extractor-args', 'youtube:player_client=web_safari,tv_downgraded,web',
+                ]
+                result.tier = EscalationTier.EXTRACTOR_ARGS
+                result.rotate_cookies = False
+                result.rotate_vpn = False
+            return result
+
+        mock_escalation_mgr.get_escalation_args.side_effect = mock_get_escalation_args
+
+        mock_downloader = MagicMock()
+        mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+        mock_downloader.impersonation_manager = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'esc_test_1', 'start': 0.0, 'end': 10.0},
+            {'video_id': 'esc_test_2', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        download_call = [0]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+
+            def mock_download(urls):
+                download_call[0] += 1
+                if download_call[0] == 1:
+                    raise Exception("HTTP Error 403: Forbidden")
+                # Second download succeeds — create the output file
+                vid_id = segments[1]['video_id']
+                out = tmp_path / f"{vid_id}_0_15.mp4"
+                out.write_text("fake")
+
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # First call should NOT have extractor_args (Tier 1)
+        assert 'extractor_args' not in captured_opts[0]
+        assert captured_opts[0].get('impersonate') == 'Chrome-136:Macos-15'
+
+        # Second call SHOULD have extractor_args (Tier 2 after 403)
+        assert 'extractor_args' in captured_opts[1]
+        assert captured_opts[1]['extractor_args']['youtube']['player_client'] == 'web_safari,tv_downgraded,web'
+
+        # Verify record_failure was called for the 403 error
+        mock_escalation_mgr.record_failure.assert_called_once()
+        call_args = mock_escalation_mgr.record_failure.call_args
+        assert call_args[0][0] == 'esc_test_1'
+        assert '403' in call_args[0][1]
+
+    @pytest.mark.fast
+    def test_cookie_rotation_on_auth_error(self, stage, tmp_path):
+        """Cookie rotator is advanced when escalation reaches Tier 3 and auth error occurs."""
+        from src.downloader.types import EscalationTier
+
+        mock_escalation_mgr = MagicMock()
+
+        # Return Tier 3 (full bypass with cookies) for all calls
+        mock_result = MagicMock()
+        mock_result.args = [
+            '--impersonate', 'Chrome-136:Macos-15',
+            '--extractor-args', 'youtube:player_client=web_safari,tv_downgraded,web',
+        ]
+        mock_result.tier = EscalationTier.FULL_BYPASS
+        mock_result.rotate_cookies = True
+        mock_result.rotate_vpn = False
+        mock_escalation_mgr.get_escalation_args.return_value = mock_result
+
+        mock_cookie_rotator = MagicMock()
+        mock_cookie_rotator.get_current_cookie.return_value = '/tmp/cookies_1.txt'
+        mock_cookie_rotator.should_rotate.return_value = True
+
+        mock_downloader = MagicMock()
+        mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.cookie_rotator = mock_cookie_rotator
+        mock_downloader.retry_queue = None
+        mock_downloader.impersonation_manager = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'cookie_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        captured_opts = []
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("HTTP Error 403: Forbidden")
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+
+            def capture_init(opts):
+                captured_opts.append(opts.copy())
+                return mock_cm
+
+            mock_ydl_class.side_effect = capture_init
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Verify cookie was applied to ydl_opts
+        assert captured_opts[0].get('cookiefile') == '/tmp/cookies_1.txt'
+
+        # Verify escalation manager recorded failure
+        mock_escalation_mgr.record_failure.assert_called_once()
+
+        # Verify cookie rotator was advanced after auth error
+        mock_cookie_rotator.should_rotate.assert_called_once()
+        mock_cookie_rotator.rotate.assert_called_once()
+
+    @pytest.mark.fast
+    def test_escalation_state_tracked_per_segment(self, stage, tmp_path):
+        """Escalation state is tracked per video_id (different segments get
+        different escalation lookups)."""
+        from src.downloader.types import EscalationTier
+
+        mock_escalation_mgr = MagicMock()
+
+        # Track which video_ids are passed to get_escalation_args
+        called_keywords = []
+
+        def mock_get_escalation_args(keyword):
+            called_keywords.append(keyword)
+            result = MagicMock()
+            result.args = ['--impersonate', 'Chrome-136:Macos-15']
+            result.tier = EscalationTier.IMPERSONATE_ONLY
+            result.rotate_cookies = False
+            result.rotate_vpn = False
+            return result
+
+        mock_escalation_mgr.get_escalation_args.side_effect = mock_get_escalation_args
+
+        mock_downloader = MagicMock()
+        mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+        mock_downloader.impersonation_manager = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'vid_alpha', 'start': 0.0, 'end': 10.0},
+            {'video_id': 'vid_beta', 'start': 0.0, 'end': 10.0},
+            {'video_id': 'vid_gamma', 'start': 0.0, 'end': 10.0},
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception("Test error")
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Each video_id should have its own escalation lookup
+        assert called_keywords == ['vid_alpha', 'vid_beta', 'vid_gamma']
+
+    @pytest.mark.fast
+    def test_record_success_called_on_successful_download(self, stage, tmp_path):
+        """EscalationManager.record_success() is called when download succeeds."""
+        from src.downloader.types import EscalationTier
+
+        mock_escalation_mgr = MagicMock()
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+        mock_result.tier = EscalationTier.IMPERSONATE_ONLY
+        mock_result.rotate_cookies = False
+        mock_result.rotate_vpn = False
+        mock_escalation_mgr.get_escalation_args.return_value = mock_result
+
+        mock_downloader = MagicMock()
+        mock_downloader.escalation_manager = mock_escalation_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+        mock_downloader.impersonation_manager = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'success_vid', 'start': 0.0, 'end': 10.0},
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+
+            def mock_download(urls):
+                # Create output file to simulate success
+                out = tmp_path / "success_vid_0_15.mp4"
+                out.write_text("fake")
+
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        mock_escalation_mgr.record_success.assert_called_once_with('success_vid')
+
+    @pytest.mark.fast
+    def test_apply_escalation_handles_none_result(self):
+        """_apply_escalation_to_ydl_opts handles None result gracefully."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        ydl_opts = {'format': 'best'}
+        _apply_escalation_to_ydl_opts(ydl_opts, None)
+        assert ydl_opts == {'format': 'best'}  # Unchanged
+
+    @pytest.mark.fast
+    def test_apply_escalation_handles_empty_args(self):
+        """_apply_escalation_to_ydl_opts handles empty args list."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        mock_result = MagicMock()
+        mock_result.args = []
+
+        ydl_opts = {'format': 'best'}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+        assert ydl_opts == {'format': 'best'}  # Unchanged
