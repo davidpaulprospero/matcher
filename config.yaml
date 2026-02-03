@@ -1346,6 +1346,12 @@ download:
   # including ffmpeg merging/remuxing. 0 = no stall detection.
   segment_stall_timeout: 120
 
+  # Bot-detection tier floor: after N consecutive 403/bot-detection errors across
+  # ALL video IDs (stage-level), new downloads start at max escalation tier instead
+  # of Tier 1. Prevents wasting time on Tier 1 when YouTube is broadly blocking.
+  # Resets on any successful download. 0 = disabled.
+  bot_detection_tier_floor_threshold: 5
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

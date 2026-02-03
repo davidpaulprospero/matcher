@@ -232,6 +232,7 @@ class EscalationManager:
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
+        self._tier_floor: Optional[EscalationTier] = None
         self._total_403s: int = 0
         self._total_successes: int = 0
         self._total_escalations: int = 0
@@ -251,10 +252,41 @@ class EscalationManager:
             return self._keyword_locks[keyword]
 
     def _get_state(self, keyword: str) -> EscalationState:
-        """Get or create the escalation state for a keyword."""
+        """Get or create the escalation state for a keyword.
+
+        When a tier floor is set, newly created states start at the floor tier
+        instead of Tier 1. Existing states below the floor are elevated.
+        """
         if keyword not in self._keyword_states:
-            self._keyword_states[keyword] = EscalationState()
+            state = EscalationState()
+            if self._tier_floor is not None and state.current_tier < self._tier_floor:
+                state.current_tier = self._tier_floor
+            self._keyword_states[keyword] = state
+        else:
+            state = self._keyword_states[keyword]
+            if self._tier_floor is not None and state.current_tier < self._tier_floor:
+                state.current_tier = self._tier_floor
         return self._keyword_states[keyword]
+
+    def set_tier_floor(self, tier: EscalationTier) -> None:
+        """Set a global minimum escalation tier for all keywords.
+
+        When set, all new and existing keywords will start at this tier
+        instead of Tier 1. Used by download_segments stage to propagate
+        broad bot-detection signals across all video IDs.
+
+        Args:
+            tier: The minimum escalation tier to enforce.
+        """
+        with self._global_lock:
+            self._tier_floor = tier
+            logger.info(f"Global tier floor set to {tier.name}")
+
+    def clear_tier_floor(self) -> None:
+        """Remove the global tier floor, allowing new keywords to start at Tier 1."""
+        with self._global_lock:
+            self._tier_floor = None
+            logger.info("Global tier floor cleared")
 
     def set_circuit_breaker(self, circuit_breaker: "CircuitBreaker") -> None:
         """Link a CircuitBreaker for coordinated rate-limiting.

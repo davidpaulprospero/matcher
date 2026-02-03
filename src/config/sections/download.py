@@ -1191,6 +1191,12 @@ class DownloadConfig:
     # ydl.download() call including ffmpeg merging/remuxing. 0 = no stall detection.
     segment_stall_timeout: int = 120
 
+    # Bot-detection tier floor: after N consecutive 403/bot-detection errors across
+    # ALL video IDs (stage-level), new downloads start at max escalation tier instead
+    # of Tier 1. This prevents wasting time on doomed Tier 1 requests when YouTube
+    # is broadly blocking. Resets on any successful download. 0 = disabled.
+    bot_detection_tier_floor_threshold: int = 5
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
