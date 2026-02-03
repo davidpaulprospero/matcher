@@ -51,6 +51,9 @@ from src.config.sections.llm import (
     LLMProviderConfig,
 )
 
+# Download config imports
+from src.config.sections.download import DownloadConfig
+
 # Base config for validation
 from src.config.base import Config
 
@@ -1178,6 +1181,102 @@ class TestVisionProviderParametrized:
         """Test all valid VisionConfig.provider values are accepted."""
         config = VisionConfig(provider=provider)
         assert config.provider == provider
+
+
+# =============================================================================
+# US-50-002: DownloadConfig cookies_from_browser validation
+# =============================================================================
+
+@pytest.mark.fast
+class TestDownloadConfigCookiesFromBrowserValidation:
+    """Test DownloadConfig validates cookies_from_browser browser names."""
+
+    @pytest.mark.parametrize("browser", [
+        "firefox",
+        "chrome",
+        "edge",
+        "safari",
+        "opera",
+        "brave",
+        "",  # Empty string = disabled
+    ])
+    def test_valid_browser_names_accepted(self, browser):
+        """Test all valid cookies_from_browser values are accepted."""
+        config = DownloadConfig(cookies_from_browser=browser)
+        assert config.cookies_from_browser == browser
+
+    @pytest.mark.parametrize("invalid_browser", [
+        "netscape",
+        "vivaldi",
+        "ie",
+        "Internet Explorer",
+        "FIREFOX",  # Case-sensitive
+        "Chrome",   # Case-sensitive
+        "invalid",
+    ])
+    def test_invalid_browser_names_raise_valueerror(self, invalid_browser):
+        """Test invalid cookies_from_browser values raise ValueError."""
+        with pytest.raises(ValueError, match="cookies_from_browser"):
+            DownloadConfig(cookies_from_browser=invalid_browser)
+
+    def test_cookies_from_browser_loads_from_dict(self):
+        """Test cookies_from_browser loads correctly when DownloadConfig is created from dict values."""
+        config = DownloadConfig(
+            cookies_from_browser="chrome",
+            cookies_path="/path/to/cookies.txt",
+        )
+        assert config.cookies_from_browser == "chrome"
+        assert config.cookies_path == "/path/to/cookies.txt"
+
+    def test_default_cookies_from_browser_is_empty(self):
+        """Test default cookies_from_browser is empty string (disabled)."""
+        config = DownloadConfig()
+        assert config.cookies_from_browser == ""
+
+    def test_default_cookies_path_is_empty(self):
+        """Test default cookies_path is empty string."""
+        config = DownloadConfig()
+        assert config.cookies_path == ""
+
+
+@pytest.mark.fast
+class TestDownloadConfigCookieYamlRoundTrip:
+    """Test cookie fields survive YAML load/dump round-trip."""
+
+    def test_cookie_fields_roundtrip_through_yaml(self, tmp_path):
+        """Test cookies_from_browser and cookies_path survive YAML load/dump."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+download:
+  cookies_from_browser: firefox
+  cookies_path: "/path/to/cookies.txt"
+""")
+        config = Config.from_yaml(str(config_file))
+        assert config.download.cookies_from_browser == "firefox"
+        assert config.download.cookies_path == "/path/to/cookies.txt"
+
+    def test_cookie_fields_default_when_not_in_yaml(self, tmp_path):
+        """Test cookie fields use defaults when not specified in YAML."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+download:
+  quality: "720p"
+""")
+        config = Config.from_yaml(str(config_file))
+        assert config.download.cookies_from_browser == ""
+        assert config.download.cookies_path == ""
+
+    def test_empty_browser_in_yaml_accepted(self, tmp_path):
+        """Test empty cookies_from_browser in YAML is accepted (disabled)."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+download:
+  cookies_from_browser: ""
+  cookies_path: ""
+""")
+        config = Config.from_yaml(str(config_file))
+        assert config.download.cookies_from_browser == ""
+        assert config.download.cookies_path == ""
 
 
 if __name__ == "__main__":

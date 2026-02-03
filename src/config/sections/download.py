@@ -1254,6 +1254,15 @@ class DownloadConfig:
         if isinstance(self.rate_limit_budget, dict):
             self.rate_limit_budget = RateLimitBudgetConfig(**self.rate_limit_budget)
 
+        # Validate cookies_from_browser is a known browser or empty (disabled)
+        _valid_browsers = {'firefox', 'chrome', 'edge', 'safari', 'opera', 'brave', ''}
+        if self.cookies_from_browser not in _valid_browsers:
+            raise ValueError(
+                f"DownloadConfig.cookies_from_browser must be one of {sorted(_valid_browsers - {''})} "
+                f"or '' (empty to disable), got '{self.cookies_from_browser}'. "
+                f"Check config.yaml under download.cookies_from_browser"
+            )
+
 
 @dataclass
 class DownloadingConfig:

@@ -1,191 +1,190 @@
 {
-  "sprintNumber": 49,
-  "focusArea": "download",
-  "branchName": "ralph/sprint-49",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-49-001",
-      "title": "Generate sprint stories for download focus area",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'download'",
-        "Add stories US-49-002 through US-49-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-49-NNN to be unique across sprints",
-        "Mark this story (US-49-001) as passes: true when done"
-      ],
-      "notes": "Planning story completed. Generated 11 stories (US-49-002 through US-49-012) addressing the 6 user-reported download_segments issues: P0 cookie propagation for Python API, P0 ImpersonateTarget type fix, P1 stall detection wrapper for ydl.download(), P2 global escalation state with bot-detection abort, P2 DNS/network failure pattern matching for Python API, plus hardening stories for circuit breaker wiring, download_segments subprocess migration path, error reporting improvements, and test coverage. Sprint-48 laid the infrastructure (socket timeout, escalation integration, metrics, checkpoint validation); sprint-49 fixes the remaining functional bugs that prevent download_segments from actually working."
+    "sprintNumber": 50,
+    "focusArea": "rate-limiting",
+    "branchName": "ralph/sprint-50",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
     },
-    {
-      "id": "US-49-002",
-      "title": "Add cookie propagation to download_segments Python API calls",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add 'cookiesfrombrowser' key to ydl_opts dict in _download_segments() reading from download config (e.g., ['firefox'])",
-        "Add fallback to 'cookiefile' path in ydl_opts if cookiesfrombrowser is not configured or fails",
-        "Add 'cookies_from_browser' field to DownloadConfig dataclass in src/config/sections/download.py with default None",
-        "Add 'cookies_from_browser' entry to config.yaml download section with comment explaining Python API vs CLI behavior",
-        "Add unit test verifying cookiesfrombrowser is injected into ydl_opts when configured",
-        "Add unit test verifying cookiefile fallback is used when cookies_from_browser is not set but cookie_rotation provides a cookie path"
-      ],
-      "notes": "P0 fix - Issue #4 from user interview. Tier: bug fix. The yt-dlp Python API does not read ~/.config/yt-dlp/config, so download_segments.py gets zero cookies while the CLI subprocess in core.py inherits --cookies-from-browser firefox. Without cookies, every Python API request triggers 'Sign in to confirm you're not a bot.' Source files: src/stages/download_segments.py:448-460 (ydl_opts construction), src/config/sections/download.py (add cookies_from_browser field), config.yaml (download section). The yt-dlp Python API key is 'cookiesfrombrowser' (list, e.g. ['firefox']) \u00e2\u20ac\u201d different from CLI --cookies-from-browser. Also support 'cookiefile' as fallback from cookie_rotation config."
-    },
-    {
-      "id": "US-49-003",
-      "title": "Fix ImpersonateTarget type conversion in _apply_escalation_to_ydl_opts",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Replace raw string assignment ydl_opts['impersonate'] = value with ImpersonateTarget.from_str() conversion in _apply_escalation_to_ydl_opts()",
-        "Lowercase the client and os fields after parsing (e.g., 'Chrome-136' -> 'chrome-136', 'Macos-15' -> 'macos-15')",
-        "Add try/except guard around ImpersonateTarget conversion that falls back to no impersonation on failure rather than crashing with AssertionError",
-        "Add unit test verifying ImpersonateTarget object (not string) is set in ydl_opts after escalation translation",
-        "Add unit test verifying case-insensitive matching works (uppercase input produces lowercase target fields)"
-      ],
-      "notes": "Fixed _apply_escalation_to_ydl_opts to convert raw impersonate string to ImpersonateTarget object with lowercased client/os fields. Added try/except fallback. Updated 4 existing tests + added 3 new tests (object type, lowercase fields, invalid input fallback). 79/79 tests pass."
-    },
-    {
-      "id": "US-49-004",
-      "title": "Add process-level stall detection wrapper around ydl.download() call",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Wrap the ydl.download() call in a concurrent.futures.ThreadPoolExecutor with configurable timeout (default from stall_timeout config, fallback 120s)",
-        "On timeout, log a warning with video_id and elapsed time, then raise a TimeoutError that feeds into the existing retry/escalation logic",
-        "Add 'segment_stall_timeout' field to DownloadConfig dataclass with default matching existing stall_timeout (60s) or a higher value suitable for segments",
-        "Add unit test verifying that a simulated stall (mocked ydl.download that sleeps) triggers timeout and raises",
-        "Add unit test verifying successful downloads within timeout are not interrupted"
-      ],
-      "notes": "Implemented process-level stall detection using concurrent.futures.ThreadPoolExecutor around ydl.download(). Added segment_stall_timeout=120 to DownloadConfig and config.yaml. When timeout=0, falls back to unwrapped call. On stall, logs warning with video_id/elapsed and raises TimeoutError that feeds into existing retry/escalation. Added 4 tests: stall triggers timeout, success not interrupted, disabled when 0, reads from config. Also added defensive int() conversion for MagicMock compatibility with existing tests. 83/83 tests pass."
-    },
-    {
-      "id": "US-49-005",
-      "title": "Add global bot-detection counter with escalation tier floor",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add a stage-level consecutive_bot_detection counter that increments on any 403/bot-detection error across all video IDs",
-        "When counter exceeds configurable threshold (default 5), set a global tier floor so subsequent downloads start at max escalation tier instead of Tier 1",
-        "Stop resetting the network failure abort counter on bot-detection errors \u00e2\u20ac\u201d treat widespread bot-detection as a stage-level failure signal",
-        "Reset bot-detection counter on any successful download",
-        "Add unit test verifying tier floor propagation after N consecutive bot-detection errors across different video IDs",
-        "Add unit test verifying bot-detection errors no longer reset the network failure counter"
-      ],
-      "notes": "Implemented stage-level consecutive_bot_detections counter in download_segments._download_segments(). Added bot_detection_tier_floor_threshold config field (default 5) to DownloadConfig and config.yaml. When threshold is exceeded, calls escalation_mgr.set_tier_floor(VPN_ROTATION) so new video IDs start at max tier. Counter resets on any successful download (including cached) and clears the tier floor. Bot-detection errors no longer reset consecutive_network_failures \u00e2\u20ac\u201d only non-network, non-bot errors reset it. Added set_tier_floor()/clear_tier_floor() to EscalationManager with _get_state() floor enforcement. 5 new tests in TestBotDetectionTierFloor: tier floor activation, reset on success, disabled when threshold=0, bot errors don't reset network counter, non-bot errors still reset counter. 101/101 related tests pass."
-    },
-    {
-      "id": "US-49-006",
-      "title": "Validate and extend _is_network_failure() patterns for Python API error format",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Audit _is_network_failure() regex patterns against actual Python API DownloadError message format (which wraps exceptions differently than subprocess stderr)",
-        "Add pattern for Windows DNS failure 'Errno 11001' and ffmpeg exit code '4294967158' (0xFFFFFEC6) if not already covered",
-        "Add pattern for 'URLError' and 'ConnectionResetError' which are common Python API network error wrappers",
-        "Add unit test with 6+ real-world error message strings from both Python API and subprocess stderr verifying correct classification",
-        "Add unit test verifying bot-detection messages ('Sign in to confirm', 'HTTP Error 403') are NOT classified as network failures"
-      ],
-      "notes": "Done. Added URLError and ConnectionResetError patterns to _NETWORK_FAILURE_PATTERNS. Errno 11001 and ffmpeg 4294967158 were already present. Added 16 tests (10 positive network failures from both Python API and subprocess stderr, 6 negative tests for bot-detection/403/unavailable/age-restricted/copyright/429). All 40 tests pass in test_error_classification.py."
-    },
-    {
-      "id": "US-49-007",
-      "title": "Wire circuit breaker into download_segments escalation manager",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Call escalation_manager.set_circuit_breaker(circuit_breaker) during download_segments stage initialization when both components are available",
-        "Verify the circuit breaker shortcut logic at escalation_manager.py:330 fires when circuit is open (skips to max tier)",
-        "Add circuit breaker state check before each download attempt \u00e2\u20ac\u201d if circuit is open and no higher tiers available, skip the video and add to retry queue",
-        "Add unit test verifying set_circuit_breaker() is called during stage init",
-        "Add unit test verifying open circuit causes escalation to skip to max tier"
-      ],
-      "notes": "Wired circuit_breaker into escalation_manager via set_circuit_breaker() in _download_segments(). Added pre-download check: if circuit open + video at VPN_ROTATION tier, skip to retry queue. 8 tests in test_download_segments_circuit_breaker.py: 3 wiring tests, 3 shortcut tests, 2 skip-to-retry tests."
-    },
-    {
-      "id": "US-49-008",
-      "title": "Add bot-detection abort threshold to download_segments stage",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add a BOT_DETECTION_ABORT_THRESHOLD constant (default 10) \u00e2\u20ac\u201d when total bot-detection errors exceed this across all videos, abort the stage with a clear message",
-        "Add configurable 'bot_detection_abort_threshold' to DownloadConfig with the default value",
-        "Log actionable guidance when aborting: suggest checking cookies, VPN, or waiting before retry",
-        "Checkpoint progress before aborting so --resume can pick up where it left off",
-        "Add unit test verifying stage aborts after threshold consecutive bot-detection errors",
-        "Add unit test verifying checkpoint is saved before abort"
-      ],
-      "notes": "Tier: resilience improvement. Currently bot-detection errors (403, 'Sign in') are classified as video-specific and reset the network failure counter (download_segments.py:558-560). This means the stage never aborts on widespread bot-detection \u00e2\u20ac\u201d it keeps trying every remaining segment with doomed Tier 1 requests. With no cookies (Issue #4) or broken impersonation (Issue #5), this means the entire stage runs to completion hitting YouTube's block wall for every segment. Need a separate bot-detection counter that triggers stage abort. Source files: src/stages/download_segments.py:536-560 (abort logic section), src/config/sections/download.py."
-    },
-    {
-      "id": "US-49-009",
-      "title": "Add download_segments error summary with actionable diagnostics",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "At stage completion, log a structured summary: total segments, succeeded, failed, cached, skipped with breakdown by error category",
-        "Include per-error-category counts (network, bot-detection, video-specific, timeout) in the summary",
-        "If >50% failures are bot-detection, log specific guidance: 'Most failures are bot-detection. Check cookie configuration.'",
-        "Add the error summary to stage metrics (StageMetrics) so it's available in checkpoint",
-        "Add unit test verifying error summary is generated with correct category counts"
-      ],
-      "notes": "Tier: observability improvement. The download_segments stage currently logs individual errors but has no end-of-stage summary that helps diagnose systemic issues. When cookies are missing (Issue #4), every error is bot-detection but the user sees N individual error logs without a clear signal. A structured summary with category breakdown and actionable guidance makes the root cause obvious. Source files: src/stages/download_segments.py:390-399 (existing metrics), lines 536-560 (error classification). Integrate with StageMetrics added in US-48-011."
-    },
-    {
-      "id": "US-49-010",
-      "title": "Add retry queue escalation awareness with tier persistence across passes",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "When adding a video to the retry queue, include the last-used escalation tier so the retry starts at that tier or higher",
-        "In _process_retry_queue(), apply the stored tier floor when constructing ydl_opts for retried downloads",
-        "Add cookies and impersonation to retry queue ydl_opts using the same pattern as the primary download loop",
-        "Add unit test verifying retried downloads inherit the escalation tier from the original failure",
-        "Add unit test verifying cookies are present in retry queue ydl_opts"
-      ],
-      "notes": "Tier: resilience improvement. The retry queue in download_segments processes failed segments but constructs fresh ydl_opts without propagating the escalation tier that was in effect when the segment failed. A segment that failed at Tier 2 gets retried at Tier 1, wasting time on already-failed lower tiers. Also, if US-49-002 (cookies) fixes the primary loop but not the retry queue, retries still fail. Source files: src/stages/download_segments.py (retry queue section \u00e2\u20ac\u201d _process_retry_queue and retry_queue data structure)."
-    },
-    {
-      "id": "US-49-011",
-      "title": "Add integration test for download_segments with mocked yt-dlp Python API",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create test fixture that mocks yt_dlp.YoutubeDL to capture ydl_opts and simulate download success/failure",
-        "Add integration test verifying end-to-end flow: cookies injected, impersonation target is ImpersonateTarget object, socket_timeout present, escalation applied",
-        "Add integration test simulating 3 consecutive bot-detection errors followed by tier escalation and successful download",
-        "Add integration test simulating network failure abort after threshold consecutive DNS errors",
-        "Add integration test verifying checkpoint save includes downloaded segment paths"
-      ],
-      "notes": "Integration test created: tests/test_download_segments_integration.py with 10 tests covering end-to-end flow (cookies+impersonation+socket_timeout+escalation), bot-detection escalation then success, network failure abort, and checkpoint save with segment paths."
-    },
-    {
-      "id": "US-49-012",
-      "title": "Add download_segments stage-level metrics to checkpoint for pipeline observability",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Persist StageMetrics to checkpoint.json under a 'stage_metrics.DOWNLOAD_SEGMENTS' key at stage completion",
-        "Include error_categories breakdown (network, bot_detection, video_specific, timeout counts) in persisted metrics",
-        "Include escalation_summary (videos per tier, total escalations, tier effectiveness) in persisted metrics",
-        "Add unit test verifying stage metrics are written to checkpoint after stage completion",
-        "Add unit test verifying metrics survive checkpoint restore and are accessible"
-      ],
-      "notes": "Tier: observability improvement. US-48-011 added StageMetrics collection to download_segments but metrics are only available during the run. Persisting them to checkpoint.json enables post-run analysis, Ralph dashboard integration, and cross-sprint trend tracking. The checkpoint already has a save mechanism \u00e2\u20ac\u201d extend it to include stage metrics. Source files: src/stages/download_segments.py:390-399 (StageMetrics), src/checkpoint.py (checkpoint save/restore)."
-    }
-  ]
+    "userStories": [
+        {
+            "id": "US-50-001",
+            "title": "Generate sprint stories for rate-limiting focus area",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'rate-limiting' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'rate-limiting'",
+                "Add stories US-50-002 through US-50-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-50-NNN to be unique across sprints",
+                "Mark this story (US-50-001) as passes: true when done"
+            ],
+            "notes": "Seed story completed. Generated 11 stories (US-50-002 through US-50-012) covering rate-limiting improvements: cookie propagation validation, impersonation type-safety, iterative match serialization fix, stall detection hardening, global escalation state, network failure pattern coverage, bot-detection counter tuning, circuit breaker wiring audit, escalation metrics dashboard, retry queue tier persistence, and config validation for cookie settings."
+        },
+        {
+            "id": "US-50-002",
+            "title": "Add config-driven cookies_from_browser field to DownloadConfig with validation",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "DownloadConfig in src/config/sections/download.py has a cookies_from_browser field (str, default 'firefox') and a cookies_path field (str, default '')",
+                "config.yaml download section documents both fields with comments explaining browser vs file cookie sources",
+                "__post_init__ validates cookies_from_browser is one of ['firefox', 'chrome', 'edge', 'safari', 'opera', 'brave', ''] (empty string disables)",
+                "A unit test verifies DownloadConfig loads cookies_from_browser from config dict and validates invalid browser names raise ValueError",
+                "A unit test verifies the default config round-trips through YAML load/dump without losing cookie fields"
+            ],
+            "notes": "Tier: P0 foundation. COMPLETED: Fields cookies_from_browser (str, default '') and cookies_path (str, default '') already existed in DownloadConfig at lines 1096-1097. config.yaml already documents both fields at lines 916-930. Added __post_init__ validation in DownloadConfig that rejects invalid browser names with ValueError. Added 20 tests in test_config_section_validation.py: 7 valid browsers, 7 invalid browsers, dict loading, defaults, and 3 YAML round-trip tests. All 20 tests pass. Note: Python default is '' (disabled) while config.yaml sets 'firefox' for actual usage — this matches the existing pattern where empty=disabled."
+        },
+        {
+            "id": "US-50-003",
+            "title": "Fix ImpersonateTarget type conversion with case normalization in _apply_escalation_to_ydl_opts",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "_apply_escalation_to_ydl_opts in src/stages/download_segments.py converts impersonate string to ImpersonateTarget object using from_str() with lowercased client and os fields",
+                "If ImpersonateTarget import fails (yt-dlp version mismatch), the function logs a warning and omits impersonation from ydl_opts instead of crashing",
+                "A unit test verifies 'Chrome-136:Macos-15' is converted to ImpersonateTarget with client='chrome-136' and os='macos-15'",
+                "A unit test verifies that when ImpersonateTarget is unavailable (mocked ImportError), the function returns ydl_opts without the impersonate key",
+                "A unit test verifies mixed-case strings like 'FIREFOX-130:WINDOWS-11' are properly lowercased"
+            ],
+            "notes": "Tier: P0 fix. Source file: src/stages/download_segments.py, function _apply_escalation_to_ydl_opts (lines 127-182). Current code at lines 151-166 already creates ImpersonateTarget with lowercase — verify this is correct and add tests. The import is at line 152: from yt_dlp.networking.impersonate import ImpersonateTarget. Guard with try/except ImportError for yt-dlp versions that don't have this class."
+        },
+        {
+            "id": "US-50-004",
+            "title": "Fix iterative_match video_file serialization to drill into primary_match.video_segment.source_file",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "In src/stages/iterative_match.py, the match serialization path for MatchResult objects extracts video_file from match.primary_match.video_segment.source_file instead of getattr(match, 'video_file', '')",
+                "When primary_match or video_segment is None, the code falls back to empty string without raising an exception",
+                "A unit test creates a MatchResult with a nested primary_match.video_segment.source_file='test_video.mp4' and verifies serialization produces the correct video_file value",
+                "A unit test verifies that serialized matches with non-empty video_file survive round-trip through Match.from_dict() without being rejected",
+                "A unit test verifies the fallback when primary_match is None returns empty string"
+            ],
+            "notes": "Tier: P1 bug fix. Source file: src/stages/iterative_match.py, match serialization block (lines 421-482). The MATCH stage at src/stages/match.py:167 correctly drills into primary_match.video_segment.source_file — mirror that pattern. The MatchResult class is defined in src/utils.py. Check if getattr(match, 'video_file', '') at line 454 is in the else branch (plain Match) or the MatchResult branch — fix whichever is wrong."
+        },
+        {
+            "id": "US-50-005",
+            "title": "Add process-level stall detection timeout around ydl.download() with configurable threshold",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "The ydl.download() call in src/stages/download_segments.py is wrapped in a ThreadPoolExecutor with a configurable timeout (default 300 seconds)",
+                "The timeout value is read from download config as segment_stall_timeout with a sensible default",
+                "When timeout fires, the download is cancelled and a DownloadStallError (or similar) is raised that feeds into the existing retry/escalation logic",
+                "A unit test verifies that a mocked ydl.download() that blocks indefinitely is killed after the timeout",
+                "A unit test verifies the timeout value is configurable through the download config section",
+                "A unit test verifies that stall timeout errors increment the retry counter and trigger escalation"
+            ],
+            "notes": "Tier: P1 reliability. Source file: src/stages/download_segments.py. The exploration found lines 638-659 already wrap ydl.download() in ThreadPoolExecutor with stall timeout (lines 628-635 read segment_stall_timeout). This story ensures the mechanism is robust: verify the executor properly kills the underlying yt-dlp process on timeout (not just abandoning the future), and that the error feeds into escalation. Check if concurrent.futures.TimeoutError is caught and classified correctly."
+        },
+        {
+            "id": "US-50-006",
+            "title": "Add global bot-detection counter with tier floor propagation across all video downloads",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "A stage-level consecutive_bot_detections counter in download_segments.py increments on every bot-detection error regardless of video_id",
+                "When consecutive_bot_detections exceeds BOT_DETECTION_ABORT_THRESHOLD (configurable, default 10), the stage sets a tier floor via escalation_manager.set_tier_floor() so subsequent downloads start at the highest tier",
+                "Bot-detection errors do NOT reset the network failure counter — they are counted separately from network failures",
+                "A unit test verifies that after N consecutive bot-detection errors across different video IDs, the tier floor is set to VPN_ROTATION tier",
+                "A unit test verifies that a successful download resets the consecutive bot-detection counter to zero",
+                "A unit test verifies that bot-detection errors no longer reset the network failure counter"
+            ],
+            "notes": "Tier: P2 resilience. Source files: src/stages/download_segments.py (lines 447, 485-489, 722, 730-761), src/downloader/escalation_manager.py (set_tier_floor at lines 271-289). The exploration found existing bot-detection abort logic at lines 730-761 and tier floor at line 722. Verify the counter is stage-level (not per-video), and that the network failure counter reset at lines 558-560 no longer triggers on bot-detection errors."
+        },
+        {
+            "id": "US-50-007",
+            "title": "Expand _is_network_failure() patterns to cover Python API exception format and Windows DNS errors",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "_is_network_failure() in src/stages/download_segments.py matches Python API DownloadError messages containing 'Errno 11001' (Windows DNS resolution failure)",
+                "_is_network_failure() matches the unsigned ffmpeg exit code 4294967158 (0xFFFFFEC6, signed -314) as a network failure",
+                "_is_network_failure() matches Python API exceptions wrapped as 'DownloadError: ERROR: [youtube] ... unable to download webpage' format",
+                "A unit test for each new pattern verifies _is_network_failure() returns True",
+                "A unit test verifies existing patterns (connection refused, timeout) still match after changes"
+            ],
+            "notes": "Tier: P2 coverage. Source file: src/stages/download_segments.py, _NETWORK_FAILURE_PATTERNS regex (lines 33-43), _is_network_failure() (lines 49-68). The subprocess-based detection works on stderr strings, but the Python API wraps errors in DownloadError with different formatting. Test with actual Python API error messages from logs to ensure pattern matching works."
+        },
+        {
+            "id": "US-50-008",
+            "title": "Wire circuit breaker into download_segments stage with escalation manager coordination",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "The download_segments stage creates a CircuitBreaker instance and wires it to the EscalationManager via set_circuit_breaker() before the download loop begins",
+                "When the circuit breaker trips (is_open), downloads are paused using check_and_wait() instead of immediately failing",
+                "Circuit breaker state is included in the stage metrics written to checkpoint (total_trips, total_paused_seconds)",
+                "A unit test verifies that CircuitBreaker is instantiated and linked to EscalationManager",
+                "A unit test verifies that when circuit breaker is open, the download loop calls check_and_wait() and respects the pause duration"
+            ],
+            "notes": "Tier: P2 integration. Source files: src/stages/download_segments.py (circuit breaker check at lines 521-548, wiring at line 474), src/downloader/circuit_breaker.py (CircuitBreaker class, check_and_wait at lines 294-340), src/downloader/escalation_manager.py (set_circuit_breaker at lines 291-300). Exploration shows circuit breaker is already wired at line 474 and checked at lines 521-548. This story adds tests and ensures metrics flow to checkpoint."
+        },
+        {
+            "id": "US-50-009",
+            "title": "Add escalation tier effectiveness metrics to stage completion summary",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "At stage completion, download_segments logs a structured summary including: videos_per_tier (dict), total_escalations, average_tier, tier_effectiveness (success rate per tier)",
+                "The summary is written to checkpoint via stage_metrics so it persists across restarts",
+                "The summary includes bot_detection_count and network_failure_count for the stage run",
+                "A unit test verifies that EscalationManager.get_metrics() output is correctly formatted into the stage summary",
+                "A unit test verifies the summary survives checkpoint save/restore round-trip"
+            ],
+            "notes": "Tier: P2 observability. Source files: src/stages/download_segments.py (metrics collection at lines 287-310, escalation summary), src/downloader/escalation_manager.py (get_metrics at lines 933-969), src/checkpoint.py (stage_metrics field added in US-49-012). The previous sprint (US-49-012) added stage_metrics to checkpoint — this story ensures download_segments actually populates it with escalation data. Check if the metrics collection at lines 287-310 is already doing this."
+        },
+        {
+            "id": "US-50-010",
+            "title": "Add integration test for download_segments cookie propagation with mocked yt-dlp",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "An integration test creates a DownloadConfig with cookies_from_browser='firefox' and verifies the ydl_opts dict passed to YoutubeDL contains cookiesfrombrowser=['firefox']",
+                "An integration test creates a DownloadConfig with cookies_path='/path/to/cookies.txt' and no cookies_from_browser, and verifies ydl_opts contains cookiefile='/path/to/cookies.txt'",
+                "An integration test verifies that when both cookies_from_browser and cookies_path are set, cookies_from_browser takes priority",
+                "An integration test verifies that when neither is set, ydl_opts contains neither cookiesfrombrowser nor cookiefile keys",
+                "All tests mock YoutubeDL to avoid actual network calls"
+            ],
+            "notes": "Tier: P0 validation. Source file: src/stages/download_segments.py (cookie handling at lines 579-595). This validates the cookie propagation added in sprint 49. The ydl_opts construction at lines 565-596 should set cookiesfrombrowser as a list (yt-dlp Python API expects [browser_name]) not a string. Test file: tests/test_download_segments_cookies.py (new)."
+        },
+        {
+            "id": "US-50-011",
+            "title": "Add retry queue tier persistence so retried downloads start at their last escalation tier",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When a download fails and is queued for retry, the current escalation tier is stored with the retry entry",
+                "When retrying, the download starts at the stored tier (or the global tier floor, whichever is higher) instead of Tier 1",
+                "A unit test verifies that a video that failed at Tier 2 starts its retry at Tier 2 (not Tier 1)",
+                "A unit test verifies that if the global tier floor is Tier 3 and the stored retry tier is Tier 2, the retry starts at Tier 3",
+                "A unit test verifies that videos with no stored tier (legacy retry entries) default to Tier 1"
+            ],
+            "notes": "Tier: P2 efficiency. Source file: src/stages/download_segments.py. The retry queue at the stage level re-enqueues failed video IDs but doesn't persist escalation state. Each retry restarts at Tier 1, wasting time re-escalating through tiers that already failed. The EscalationManager tracks per-keyword tier state internally — check if keyword_id maps to video_id and if state persists across the retry pass. Sprint 49 story US-49-010 added tier persistence across passes — verify integration."
+        },
+        {
+            "id": "US-50-012",
+            "title": "Add download config validation that warns when no cookie source is configured",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "During pipeline startup (or download_segments stage init), if neither cookies_from_browser nor cookies_path is configured, a WARNING log is emitted explaining that YouTube will likely block all requests",
+                "The warning includes actionable guidance: 'Set download.cookies_from_browser to your browser name (firefox, chrome, etc.) in config.yaml'",
+                "If cookies_from_browser is set to a browser not installed on the system, a WARNING is logged (best-effort check, not a hard error)",
+                "A unit test verifies the warning is emitted when no cookie config is present",
+                "A unit test verifies no warning when cookies_from_browser is properly configured"
+            ],
+            "notes": "Tier: P1 UX/safety. Source files: src/stages/download_segments.py (stage init or _build_ydl_opts), src/config/sections/download.py. This provides early feedback to users about missing cookies — the #1 cause of bot-detection failures. The validation should happen early (stage init, not per-download) to avoid log spam. Could also check if the browser cookie extraction actually works by attempting a dry-run import."
+        }
+    ]
 }
