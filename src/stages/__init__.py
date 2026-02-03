@@ -251,18 +251,36 @@ def list_stages() -> List[str]:
 
 
 # Default values for state attributes when missing
+# Must match default_factory types from PipelineState (src/state.py)
 _STATE_ATTR_DEFAULTS = {
-    'text_metadata': [],
-    'caption_results': {},
+    # INPUT STATE
+    'voiceover_path': '',
     'voiceover_segments': [],
-    'matches': [],
-    'embeddings': None,
-    'videos': [],
     'keywords': [],
-    'alternatives': {},
-    'location_chapters': [],
-    'voiceover_path': None,
+    'topic_context': '',
+    'extracted_entities': [],
+    # VIDEO SEARCH STATE
     'video_ids': [],
+    'video_search_results': [],
+    'search_failed_keywords': [],
+    # CAPTION STATE
+    'caption_results': {},
+    'text_metadata': [],
+    # MATCHING STATE
+    'matches': [],
+    'alternatives': {},
+    # DOWNLOAD STATE
+    'downloaded_segments': [],
+    # OUTPUT STATE
+    'output_files': [],
+    'otio_files': [],
+    # RUNTIME STATE
+    'face_preference': 'neutral',
+    'location_chapters': [],
+    'stage_timings': {},
+    'embeddings': None,
+    # Legacy (not in PipelineState but kept for backward compat)
+    'videos': [],
 }
 
 

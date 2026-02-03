@@ -163,7 +163,7 @@
             "id": "US-44-011",
             "title": "Add checkpoint backup timestamp comparison before restore",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "CheckpointManager.load() compares timestamps of main checkpoint and backup before selecting which to restore",
                 "If backup is newer than main (indicating a mid-save crash), a warning is logged explaining the situation",
@@ -171,13 +171,13 @@
                 "Tests verify that when main checkpoint has an older timestamp than backup, the backup is preferred",
                 "Tests verify that when main is valid and newer, main is used even if backup also exists"
             ],
-            "notes": "Tier: T3 (robustness). Source file: src/checkpoint.py:152-194 (load method). Currently at line 173-175, if the main checkpoint fails to load, the backup is restored without comparing timestamps. This means if the backup is actually older/staler than the (slightly corrupt) main, we may lose more progress than necessary. The timestamps are already present in CheckpointData fields created_at and updated_at (lines 65-66)."
+            "notes": "Done. Refactored CheckpointManager.load() to use new _select_checkpoint() method that compares timestamps between main and backup files. Added _get_checkpoint_timestamp() helper to safely extract updated_at from checkpoint JSON, and _restore_backup_to_main() helper for backup-to-main restoration. When both main and backup exist, the newer file is preferred; if backup is newer (indicating mid-save crash), a warning is logged. Corrupt main falls back to backup with timestamps in the log message. 10 tests across 4 classes in tests/test_checkpoint_backup_timestamp.py covering all acceptance criteria."
         },
         {
             "id": "US-44-012",
             "title": "Add _STATE_ATTR_DEFAULTS entries for missing state fields to prevent None fallbacks",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "_STATE_ATTR_DEFAULTS in src/stages/__init__.py includes 'video_ids': [] entry",
                 "_STATE_ATTR_DEFAULTS includes 'video_search_results': [] entry",
@@ -186,7 +186,7 @@
                 "All entries in _STATE_ATTR_DEFAULTS match the default_factory types defined in PipelineState (src/state.py:131-171)",
                 "Tests verify that validate_required_state_attrs initializes missing fields to the correct type (list, dict) not None"
             ],
-            "notes": "Tier: T2 (defensive). Source file: src/stages/__init__.py:249-260 (_STATE_ATTR_DEFAULTS dict). Currently the defaults dict has entries for text_metadata, caption_results, voiceover_segments, matches, embeddings, videos, keywords, alternatives, location_chapters. Missing: video_ids, video_search_results, downloaded_segments, output_files, otio_files, search_failed_keywords, face_preference, topic_context, extracted_entities. When validate_required_state_attrs encounters a missing attr not in this dict, it falls back to None (line 288), which can cause downstream TypeError when code expects a list."
+            "notes": "Complete. Added all missing PipelineState fields to _STATE_ATTR_DEFAULTS: video_search_results, downloaded_segments, output_files, otio_files, search_failed_keywords, face_preference, topic_context, extracted_entities, stage_timings. Organized entries by pipeline stage groups with comments. 28 tests in test_state_attr_defaults_us44_012.py verify type matching and correct initialization."
         }
     ]
 }
