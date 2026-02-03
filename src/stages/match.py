@@ -168,10 +168,9 @@ class MatchStage(Stage):
                             start_time = getattr(pm.video_segment, 'start_time', 0.0)
 
                         conf = getattr(pm, 'confidence', 0.0)
-                        # Get confidence variance from MatchResult
-                        conf_variance = getattr(m, 'confidence_variance', 0.0)
-                        # Get matched keywords from MatchResult
-                        matched_kws = getattr(m, 'matched_keywords', [])
+                        # confidence_variance and matched_keywords always present on MatchResult (dataclass defaults)
+                        conf_variance = m.confidence_variance
+                        matched_kws = m.matched_keywords
 
                         serialized_matches.append({
                             'segment_index': i,
