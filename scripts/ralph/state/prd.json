@@ -149,7 +149,7 @@
             "id": "US-44-010",
             "title": "Add video count consistency assertion between video_ids, caption_results, and text_metadata",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "MATCH stage validate_inputs() checks that len(state.caption_results) > 0 when text_metadata is populated",
                 "A warning is logged if len(state.video_ids) differs from len(state.caption_results) by more than 10%",
@@ -157,7 +157,7 @@
                 "Tests verify the warning triggers when video_ids has 100 entries but caption_results only has 50",
                 "Tests verify no warning when counts differ by less than 10%"
             ],
-            "notes": "Tier: T3 (defensive). Source files: src/stages/match.py:326+ (validate_inputs), src/state.py:148-155 (the three fields). Currently there are three independent sources of truth for video counts: state.video_ids (from VIDEO_SEARCH), state.caption_results (from CAPTION, keyed by video_id), and state.text_metadata (populated from caption_results). No assertion checks that these are consistent, so silent data loss between stages goes undetected."
+            "notes": "Added two warn-only checks in validate_inputs(): (1) warns when text_metadata populated but caption_results empty, (2) warns when video_ids/caption_results drift exceeds 10%. 9 tests in tests/test_video_count_consistency.py cover threshold boundaries, empty states, and pipeline non-blocking behavior."
         },
         {
             "id": "US-44-011",
