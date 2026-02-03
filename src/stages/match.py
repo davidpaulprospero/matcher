@@ -35,7 +35,7 @@ class MatchStage(Stage):
     Inputs:
         - state.voiceover_segments: List of VoiceoverSegment
         - state.caption_results: Dict of video_id -> caption data (from CAPTION stage)
-        - (Optional) state.embeddings, state.text_metadata: For embedding-based matching
+        - (Optional) state.text_metadata: For embedding-based matching
 
     Outputs:
         - state.matches: List of Match objects
@@ -532,6 +532,20 @@ class MatchStage(Stage):
             print("  ! Failed to compute voiceover embeddings")
             return []
 
+        # Compute video embeddings locally (no longer stored on PipelineState)
+        print(f"  Computing video embeddings...")
+        vid_texts = [seg.text for seg in video_segments]
+
+        video_embeddings = compute_embeddings(
+            texts=vid_texts,
+            provider=provider,
+            cache=cache,
+            cache_key="video_segments"
+        )
+
+        if video_embeddings is None or len(video_embeddings) == 0:
+            logger.warning("Failed to compute video embeddings, matching will rely on text-only strategies")
+
         # Run matching
         print(f"  Running two-stage matching...")
 
@@ -539,14 +553,14 @@ class MatchStage(Stage):
             voiceover_segments=vo_segments,
             video_segments=video_segments,
             voiceover_embeddings=vo_embeddings,
-            video_embeddings=state.embeddings,
+            video_embeddings=video_embeddings,
             scenes=None,
             config=config,
             cache=cache,
-            embedding_index=state.embedding_index,
+            embedding_index=None,
             face_preference=state.face_preference,
             video_topics=None,
-            location_chapters=state.location_chapters or None,
+            location_chapters=getattr(state, 'location_chapters', None),
             video_locations=None
         )
 

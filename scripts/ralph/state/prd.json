@@ -161,9 +161,9 @@
                                 "Run: pytest tests/test_caption_stage.py -v --tb=short",
                                 "Commit: fix: [US-43-010] Add fail-fast check for budget exhaustion before batch start"
                             ],
-                            "passes": false,
+                            "passes": true,
                             "priority": 43010,
-                            "notes": "Tier 2 (fail-fast). File: src/stages/caption_stage.py. If checkpoint restores budget with 100/100 attempts already used, the batch will immediately skip all videos. Better to detect and report this early."
+                            "notes": "Tier 2 (fail-fast). File: src/stages/caption_stage.py. Added fail-fast check after ensure_scaled() - if budget_exhausted() is True, logs ERROR with [US-43-010] tag, marks all videos as skipped with reason='budget_exhausted_at_start', and returns early with warning. Added 3 tests: test_fail_fast_when_budget_exhausted_at_start, test_no_fail_fast_when_budget_has_remaining_attempts, test_fail_fast_when_backoff_time_exhausted. All 6 tests pass. Commit: 6dec2a9"
                         },
                         {
                             "id":  "US-43-011",

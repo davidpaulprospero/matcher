@@ -359,14 +359,12 @@ class TestMatchingExecution:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
-        # Mock voiceover embeddings
+        # Mock voiceover + video embeddings (called twice)
         vo_embeddings = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
-        mock_compute.return_value = vo_embeddings
+        vid_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        mock_compute.side_effect = [vo_embeddings, vid_embeddings]
         mock_provider.return_value = Mock()
         mock_cache_class.return_value = Mock()
 
@@ -402,8 +400,6 @@ class TestMatchingExecution:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
 
         # Mock embedding failure
         mock_compute.return_value = None
@@ -510,13 +506,12 @@ class TestMatchStageExecution:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
-        # Mock embeddings
-        mock_compute.return_value = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
+        # Mock voiceover + video embeddings (called twice)
+        vo_embeddings = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
+        vid_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        mock_compute.side_effect = [vo_embeddings, vid_embeddings]
         mock_provider.return_value = Mock()
         mock_cache_class.return_value = Mock()
 
@@ -546,8 +541,6 @@ class TestMatchStageExecution:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
 
         # Mock provider and matching to raise exception
         mock_provider.side_effect = Exception("Provider failed")
@@ -849,12 +842,9 @@ class TestConfidenceCalculation:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
-        mock_compute.return_value = np.array([[0.2, 0.3, 0.4]])
+        mock_compute.side_effect = [np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]
         mock_provider.return_value = Mock()
         mock_cache_class.return_value = Mock()
 
@@ -887,12 +877,9 @@ class TestConfidenceCalculation:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
-        mock_compute.return_value = np.array([[0.2, 0.3, 0.4]])
+        mock_compute.side_effect = [np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]
         mock_provider.return_value = Mock()
         mock_cache_class.return_value = Mock()
 
@@ -939,13 +926,10 @@ class TestMatchEdgeCases:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
         with patch('src.matching.match_all_segments', return_value=[]):
-            with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
+            with patch('src.embeddings.compute_embeddings', side_effect=[np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]):
                 with patch('src.embeddings.get_embedding_provider', return_value=Mock()):
                     with patch('src.utils.CacheManager', return_value=Mock()):
                         result = stage.run(state, mock_config, mock_checkpoint)
@@ -979,16 +963,13 @@ class TestMatchEdgeCases:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
         # Mock matches without proper attributes
         mock_matches = [Mock(spec=[])]  # No confidence attribute
 
         with patch('src.matching.match_all_segments', return_value=mock_matches):
-            with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
+            with patch('src.embeddings.compute_embeddings', side_effect=[np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]):
                 with patch('src.embeddings.get_embedding_provider', return_value=Mock()):
                     with patch('src.utils.CacheManager', return_value=Mock()):
                         result = stage.run(state, mock_config, mock_checkpoint)
@@ -1008,8 +989,6 @@ class TestMatchEdgeCases:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
 
         # Return empty array
         mock_compute.return_value = np.array([])
@@ -1032,13 +1011,10 @@ class TestMatchEdgeCases:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
         with patch('src.matching.match_all_segments', return_value=[]) as mock_match:
-            with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
+            with patch('src.embeddings.compute_embeddings', side_effect=[np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]):
                 with patch('src.embeddings.get_embedding_provider', return_value=Mock()):
                     with patch('src.utils.CacheManager', return_value=Mock()):
                         vo_segs, vid_segs, video_paths = stage._prepare_segments(state)
@@ -1060,12 +1036,10 @@ class TestMatchEdgeCases:
         state = PipelineState()
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = mock_text_metadata
-        state.embeddings = np.array([[0.1, 0.2, 0.3]])
-        state.embedding_index = Mock()
         state.location_chapters = [{'location': 'Paris', 'start_index': 0}]
 
         with patch('src.matching.match_all_segments', return_value=[]) as mock_match:
-            with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
+            with patch('src.embeddings.compute_embeddings', side_effect=[np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]):
                 with patch('src.embeddings.get_embedding_provider', return_value=Mock()):
                     with patch('src.utils.CacheManager', return_value=Mock()):
                         vo_segs, vid_segs, video_paths = stage._prepare_segments(state)
@@ -1649,13 +1623,10 @@ class TestTextMetadataFallback:
         state.voiceover_segments = mock_voiceover_segments
         state.text_metadata = []  # Empty - should trigger recovery
         state.caption_results = mock_caption_results
-        state.embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
-        state.embedding_index = Mock()
         state.face_preference = 'neutral'
-        state.location_chapters = []
 
         with patch('src.matching.match_all_segments', return_value=[]):
-            with patch('src.embeddings.compute_embeddings', return_value=np.array([[0.2, 0.3, 0.4]])):
+            with patch('src.embeddings.compute_embeddings', side_effect=[np.array([[0.2, 0.3, 0.4]]), np.array([[0.1, 0.2, 0.3]])]):
                 with patch('src.embeddings.get_embedding_provider', return_value=Mock()):
                     with patch('src.utils.CacheManager', return_value=Mock()):
                         result = stage.run(state, mock_config, mock_checkpoint)
@@ -1734,3 +1705,180 @@ class TestTextMetadataFallback:
         assert meta['caption_auto_generated'] is True
         assert meta['caption_quality'] == 'low'
         assert meta['timing_penalty'] == 0.8
+
+
+# ============================================================================
+# Regression Test: No Stale PipelineState Attributes (US-44-001)
+# ============================================================================
+
+class TestNoStalePipelineStateAttributes:
+    """
+    Regression tests for US-44-001: _run_matching() must not reference
+    state.embeddings, state.embedding_index, or state.location_chapters
+    directly. These fields were removed from PipelineState during the
+    7-stage pipeline simplification.
+    """
+
+    @patch('src.matching.match_all_segments')
+    @patch('src.embeddings.compute_embeddings')
+    @patch('src.embeddings.get_embedding_provider')
+    @patch('src.utils.CacheManager')
+    @pytest.mark.fast
+    def test_run_matching_with_vanilla_pipeline_state(
+        self, mock_cache_class, mock_provider, mock_compute,
+        mock_match_all, mock_voiceover_segments, mock_text_metadata
+    ):
+        """
+        Regression: _run_matching() must work with a vanilla PipelineState
+        that has no dynamically-set embeddings, embedding_index, or
+        location_chapters attributes.
+        """
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = mock_text_metadata
+        # Deliberately do NOT set state.embeddings, state.embedding_index,
+        # or state.location_chapters — these don't exist on PipelineState
+
+        vo_embeddings = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
+        vid_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        mock_compute.side_effect = [vo_embeddings, vid_embeddings]
+        mock_provider.return_value = Mock()
+        mock_cache_class.return_value = Mock()
+
+        mock_matches = [
+            Match(segment_index=0, video_file='video1.mp4', video_start=0.0,
+                  video_end=3.0, confidence=0.9, strategy='primary'),
+        ]
+        mock_match_all.return_value = mock_matches
+
+        vo_segs, vid_segs, video_paths = stage._prepare_segments(state)
+        matches = stage._run_matching(
+            vo_segs, vid_segs, video_paths, state,
+            Mock(cache=Mock(cache_dir=".cache")),
+            delta_enabled=False, force_rematch=False
+        )
+
+        assert len(matches) == 1
+        # Verify compute_embeddings was called twice: voiceover + video
+        assert mock_compute.call_count == 2
+        # Verify embedding_index=None was passed (not state.embedding_index)
+        call_kwargs = mock_match_all.call_args[1]
+        assert call_kwargs['embedding_index'] is None
+
+    @patch('src.matching.match_all_segments')
+    @patch('src.embeddings.compute_embeddings')
+    @patch('src.embeddings.get_embedding_provider')
+    @patch('src.utils.CacheManager')
+    @pytest.mark.fast
+    def test_run_matching_passes_location_chapters_via_getattr(
+        self, mock_cache_class, mock_provider, mock_compute,
+        mock_match_all, mock_voiceover_segments, mock_text_metadata
+    ):
+        """
+        Regression: location_chapters should be retrieved via getattr
+        (set dynamically by AnalyzeStage) and default to None.
+        """
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = mock_text_metadata
+        # Simulate AnalyzeStage having set location_chapters dynamically
+        state.location_chapters = [{'location': 'Paris', 'start_index': 0}]
+
+        vo_embeddings = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
+        vid_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        mock_compute.side_effect = [vo_embeddings, vid_embeddings]
+        mock_provider.return_value = Mock()
+        mock_cache_class.return_value = Mock()
+        mock_match_all.return_value = []
+
+        vo_segs, vid_segs, video_paths = stage._prepare_segments(state)
+        stage._run_matching(
+            vo_segs, vid_segs, video_paths, state,
+            Mock(cache=Mock(cache_dir=".cache")),
+            delta_enabled=False, force_rematch=False
+        )
+
+        call_kwargs = mock_match_all.call_args[1]
+        assert call_kwargs['location_chapters'] == [{'location': 'Paris', 'start_index': 0}]
+
+    @patch('src.matching.match_all_segments')
+    @patch('src.embeddings.compute_embeddings')
+    @patch('src.embeddings.get_embedding_provider')
+    @patch('src.utils.CacheManager')
+    @pytest.mark.fast
+    def test_run_matching_computes_video_embeddings_locally(
+        self, mock_cache_class, mock_provider, mock_compute,
+        mock_match_all, mock_voiceover_segments, mock_text_metadata
+    ):
+        """
+        Regression: video embeddings must be computed locally in
+        _run_matching(), not read from state.embeddings.
+        """
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = mock_text_metadata
+
+        vo_embeddings = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
+        vid_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        mock_compute.side_effect = [vo_embeddings, vid_embeddings]
+        mock_provider.return_value = Mock()
+        mock_cache_class.return_value = Mock()
+        mock_match_all.return_value = []
+
+        vo_segs, vid_segs, video_paths = stage._prepare_segments(state)
+        stage._run_matching(
+            vo_segs, vid_segs, video_paths, state,
+            Mock(cache=Mock(cache_dir=".cache")),
+            delta_enabled=False, force_rematch=False
+        )
+
+        # Second call should be for video embeddings with cache_key="video_segments"
+        second_call_kwargs = mock_compute.call_args_list[1][1]
+        assert second_call_kwargs['cache_key'] == 'video_segments'
+        # video_embeddings passed to match_all_segments should be the locally computed ones
+        call_kwargs = mock_match_all.call_args[1]
+        assert np.array_equal(call_kwargs['video_embeddings'], vid_embeddings)
+
+    @patch('src.matching.match_all_segments')
+    @patch('src.embeddings.compute_embeddings')
+    @patch('src.embeddings.get_embedding_provider')
+    @patch('src.utils.CacheManager')
+    @pytest.mark.fast
+    def test_full_stage_run_with_vanilla_state_no_attribute_error(
+        self, mock_cache_class, mock_provider, mock_compute,
+        mock_match_all, mock_config, mock_checkpoint,
+        mock_voiceover_segments, mock_text_metadata
+    ):
+        """
+        Regression: full stage.run() must not raise AttributeError when
+        PipelineState has no embeddings/embedding_index/location_chapters.
+        """
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = mock_text_metadata
+        # Only set fields that actually exist on PipelineState
+        state.face_preference = 'neutral'
+
+        vo_embeddings = np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7], [0.8, 0.9, 1.0]])
+        vid_embeddings = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        mock_compute.side_effect = [vo_embeddings, vid_embeddings]
+        mock_provider.return_value = Mock()
+        mock_cache_class.return_value = Mock()
+
+        mock_matches = [
+            Match(segment_index=0, video_file='video1.mp4', video_start=0.0,
+                  video_end=3.0, confidence=0.85, strategy='primary'),
+            Match(segment_index=1, video_file='video1.mp4', video_start=5.0,
+                  video_end=8.0, confidence=0.80, strategy='primary'),
+        ]
+        mock_match_all.return_value = mock_matches
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success is True
+        assert len(state.matches) == 2
+        assert result.data['match_count'] == 2
