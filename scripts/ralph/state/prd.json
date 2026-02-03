@@ -76,8 +76,8 @@
             "id": "US-45-005",
             "title": "Fix TYPE_CHECKING import path in stages/__init__.py",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T1 (quick fix). File: src/stages/__init__.py, line 18. The TYPE_CHECKING block imports 'from .state import PipelineState' but there is no state.py inside src/stages/. It should be 'from ..state import PipelineState' (parent directory). This is benign at runtime since TYPE_CHECKING is False, but it breaks type checking tools (mypy, pyright) and IDE navigation. The correct import pattern is already used elsewhere in the file at the runtime import on line ~209.",
+            "passes": true,
+            "notes": "Fixed 'from .state import PipelineState' to 'from ..state import PipelineState' in TYPE_CHECKING block (line 18). Compiles clean, runtime imports unaffected, 192 tests pass.",
             "acceptanceCriteria": [
                 "Change 'from .state import PipelineState' to 'from ..state import PipelineState' in the TYPE_CHECKING block of src/stages/__init__.py (line 18)",
                 "Verify the file compiles without error: python -m py_compile src/stages/__init__.py",
