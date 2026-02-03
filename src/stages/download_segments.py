@@ -516,6 +516,7 @@ class DownloadVideoSegmentsStage(Stage):
                             tier='segment',
                             error_message='circuit_breaker_open_max_tier',
                             error_category='video_specific',
+                            escalation_tier=int(kw_state.current_tier),
                         )
                     self._print_progress(idx, total, stats)
                     continue
@@ -767,15 +768,26 @@ class DownloadVideoSegmentsStage(Stage):
                 # Add failed download to retry queue for batch retry later
                 if self.downloader and self.downloader.retry_queue:
                     category = classify_error_category(error_msg)
+                    # US-49-010: Capture current escalation tier so retry starts
+                    # at this tier or higher (avoids wasting time on lower tiers)
+                    _esc_tier = 1
+                    if escalation_mgr:
+                        try:
+                            _esc_state = escalation_mgr._get_state(video_id)
+                            _esc_tier = int(_esc_state.current_tier)
+                        except Exception:
+                            pass
                     self.downloader.retry_queue.add(
                         video_id=f"{video_id}_{int(start)}_{int(end)}",
                         keyword='segment',
                         tier='segment',
                         error_message=error_msg,
                         error_category=category,
+                        escalation_tier=_esc_tier,
                     )
                     logger.debug(
-                        f"Added {video_id} to retry queue (category={category})"
+                        f"Added {video_id} to retry queue "
+                        f"(category={category}, escalation_tier={_esc_tier})"
                     )
 
             # Checkpoint progress
@@ -983,6 +995,23 @@ class DownloadVideoSegmentsStage(Stage):
                                     _cookies_path = _cookie_files[0]
                         if _cookies_path:
                             ydl_opts['cookiefile'] = _cookies_path
+
+                # US-49-010: Apply stored escalation tier floor before getting args.
+                # This ensures the retry starts at the tier where the original
+                # download failed (or higher), avoiding wasted lower-tier attempts.
+                if escalation_mgr and item.escalation_tier > 1:
+                    try:
+                        from ..downloader.types import EscalationTier
+                        stored_tier = EscalationTier(item.escalation_tier)
+                        esc_state = escalation_mgr._get_state(video_id)
+                        if esc_state.current_tier < stored_tier:
+                            esc_state.current_tier = stored_tier
+                            logger.debug(
+                                f"Retry {video_id}: elevated escalation tier to "
+                                f"{stored_tier.name} (from retry queue)"
+                            )
+                    except (ValueError, Exception):
+                        pass
 
                 # US-48-005: Apply escalation tiers for retry
                 if escalation_mgr:

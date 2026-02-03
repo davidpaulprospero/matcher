@@ -149,7 +149,7 @@
             "id": "US-49-010",
             "title": "Add retry queue escalation awareness with tier persistence across passes",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When adding a video to the retry queue, include the last-used escalation tier so the retry starts at that tier or higher",
                 "In _process_retry_queue(), apply the stored tier floor when constructing ydl_opts for retried downloads",

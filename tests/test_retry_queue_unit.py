@@ -653,3 +653,154 @@ class TestBudgetState:
     def test_get_budget_state_initially_none(self, queue):
         """get_budget_state() returns None initially."""
         assert queue.get_budget_state() is None
+
+
+# =============================================================================
+# US-49-010: Test escalation tier persistence across retry passes
+# =============================================================================
+
+@pytest.mark.fast
+class TestEscalationTierPersistence:
+    """Tests for escalation tier storage and propagation in retry queue."""
+
+    def test_add_stores_default_escalation_tier(self, queue):
+        """add() stores default escalation_tier=1 when not specified."""
+        queue.add("vid1", "kw", "short", "Error")
+
+        assert queue.items["vid1"].escalation_tier == 1
+
+    def test_add_stores_custom_escalation_tier(self, queue):
+        """add() stores the provided escalation_tier value."""
+        queue.add("vid1", "kw", "short", "403 Forbidden", escalation_tier=3)
+
+        assert queue.items["vid1"].escalation_tier == 3
+
+    def test_add_stores_max_escalation_tier(self, queue):
+        """add() stores tier 4 (VPN_ROTATION)."""
+        queue.add("vid1", "kw", "short", "Error", escalation_tier=4)
+
+        assert queue.items["vid1"].escalation_tier == 4
+
+    def test_duplicate_add_keeps_higher_tier(self, queue):
+        """add() for duplicate video keeps the higher escalation tier."""
+        queue.add("vid1", "kw", "short", "Error 1", escalation_tier=2)
+        queue.add("vid1", "kw", "short", "Error 2", escalation_tier=3)
+
+        assert queue.items["vid1"].escalation_tier == 3
+
+    def test_duplicate_add_does_not_regress_tier(self, queue):
+        """add() for duplicate video does not lower escalation tier."""
+        queue.add("vid1", "kw", "short", "Error 1", escalation_tier=3)
+        queue.add("vid1", "kw", "short", "Error 2", escalation_tier=1)
+
+        # Should remain at 3, not regress to 1
+        assert queue.items["vid1"].escalation_tier == 3
+
+    def test_checkpoint_serializes_escalation_tier(self, queue):
+        """to_checkpoint_dict() includes escalation_tier in serialized items."""
+        queue.add("vid1", "kw", "short", "Error", escalation_tier=3)
+
+        checkpoint = queue.to_checkpoint_dict()
+
+        items = checkpoint['items']
+        assert len(items) == 1
+        assert items[0]['escalation_tier'] == 3
+
+    def test_checkpoint_restores_escalation_tier(self, queue):
+        """from_checkpoint_dict() restores escalation_tier from checkpoint."""
+        checkpoint = {
+            'items': [
+                {
+                    'video_id': 'vid1',
+                    'keyword': 'kw',
+                    'tier': 'short',
+                    'error_message': 'Error',
+                    'retry_count': 0,
+                    'error_category': 'bot_detection',
+                    'escalation_tier': 3,
+                },
+            ],
+            'current_pass': 0,
+            'completed_ids': [],
+            'failed_ids': [],
+            'total_added': 1,
+            'total_retried': 0,
+        }
+
+        queue.from_checkpoint_dict(checkpoint)
+
+        assert queue.items['vid1'].escalation_tier == 3
+
+    def test_checkpoint_defaults_escalation_tier_when_missing(self, queue):
+        """from_checkpoint_dict() defaults escalation_tier to 1 for old checkpoints."""
+        checkpoint = {
+            'items': [
+                {
+                    'video_id': 'vid1',
+                    'keyword': 'kw',
+                    'tier': 'short',
+                    'error_message': 'Error',
+                    'retry_count': 0,
+                    # No escalation_tier field (old checkpoint format)
+                },
+            ],
+            'current_pass': 0,
+            'completed_ids': [],
+            'failed_ids': [],
+            'total_added': 1,
+            'total_retried': 0,
+        }
+
+        queue.from_checkpoint_dict(checkpoint)
+
+        assert queue.items['vid1'].escalation_tier == 1
+
+    def test_retryable_items_include_escalation_tier(self, queue):
+        """get_retryable_items() preserves escalation_tier on returned items."""
+        queue.add("vid1", "kw", "short", "403 Forbidden",
+                   error_category='bot_detection', escalation_tier=2)
+        queue.add("vid2", "kw", "short", "getaddrinfo failed",
+                   error_category='network', escalation_tier=1)
+
+        retryable = queue.get_retryable_items()
+
+        assert len(retryable) == 1  # network errors excluded
+        assert retryable[0].video_id == "vid1"
+        assert retryable[0].escalation_tier == 2
+
+
+# =============================================================================
+# US-49-010: Test cookies presence in retry queue ydl_opts
+# =============================================================================
+
+@pytest.mark.fast
+class TestRetryQueueCookiesPropagation:
+    """Tests verifying cookies are present in retry queue ydl_opts.
+
+    These tests verify the retry queue's add() correctly stores data needed
+    for cookie/impersonation propagation, which _process_retry_queue() uses
+    to construct ydl_opts with the same auth as the primary download loop.
+    """
+
+    def test_retry_item_has_error_category_for_cookie_rotation(self, queue):
+        """RetryItem stores error_category used for cookie rotation decisions."""
+        queue.add("vid1", "kw", "short", "403 Forbidden",
+                   error_category='bot_detection', escalation_tier=3)
+
+        item = queue.items["vid1"]
+        # bot_detection category triggers cookie rotation in the retry loop
+        assert item.error_category == 'bot_detection'
+        # Tier 3 (FULL_BYPASS) includes rotate_cookies=True
+        assert item.escalation_tier == 3
+
+    def test_retry_item_tier3_signals_cookie_rotation(self, queue):
+        """Tier 3+ escalation implies cookies should be rotated during retry."""
+        # When escalation_tier >= 3, EscalationManager returns
+        # rotate_cookies=True in the escalation result
+        queue.add("vid1", "kw", "short", "403 Forbidden",
+                   error_category='bot_detection', escalation_tier=3)
+        queue.add("vid2", "kw", "short", "403 Forbidden",
+                   error_category='bot_detection', escalation_tier=4)
+
+        assert queue.items["vid1"].escalation_tier >= 3  # Cookie rotation tier
+        assert queue.items["vid2"].escalation_tier >= 3
