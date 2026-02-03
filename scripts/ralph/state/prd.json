@@ -77,7 +77,7 @@
             "id": "US-48-005",
             "title": "Integrate escalation tiers into download_segments stage",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Apply EscalationManager tier progression to download_segments ydl_opts, not just Tier 1 impersonation",
                 "Add extractor_args for Tier 2 escalation when 403/bot errors are detected in download_segments",
@@ -86,7 +86,7 @@
                 "Add unit test verifying Tier 2 extractor_args are added to ydl_opts after 403 error",
                 "Add unit test verifying cookie method is advanced after auth error in download_segments"
             ],
-            "notes": "Tier: enhancement. Files: src/stages/download_segments.py:219-225 (current Tier 1 only impersonation), src/downloader/escalation_manager.py (4-tier escalation logic), src/downloader/core.py:1583-1584 (_add_escalation_to_cmd and _add_cookies_to_cmd patterns). Currently download_segments.py only applies Tier 1 impersonation (lines 220-225) but ignores Tiers 2-4. The core downloader has full escalation via _add_escalation_to_cmd() which adds extractor_args at Tier 2 and cookie rotation at Tier 3. Since download_segments uses the Python API (ydl_opts dict) instead of subprocess (cmd list), the escalation needs to be translated to ydl_opts keys: 'extractor_args' for Tier 2, cookie path for Tier 3."
+            "notes": "Integrated 4-tier escalation (EscalationManager) into download_segments stage. Added _apply_escalation_to_ydl_opts() to translate CLI args to Python API dict keys. On 403/bot errors, record_failure() triggers tier progression. Tier 2 adds extractor_args, Tier 3 adds cookie rotation. Per-segment escalation state tracking via video_id. Also updated _process_retry_queue with escalation support. 8 new tests added, all 35 pass."
         },
         {
             "id": "US-48-006",
