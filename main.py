@@ -455,8 +455,6 @@ def main():
     save_keywords = getattr(args, 'save_keywords', None)
 
     # Create pipeline
-    audio_first = getattr(config.download.audio_first, 'enabled', False) if hasattr(config.download, 'audio_first') else False
-
     if args.match_only:
         pipeline = create_match_only_pipeline(config, PROJECT_DIR)
         # Match-only requires checkpoint data - force resume mode
@@ -501,7 +499,7 @@ def main():
         # Preload cached data for match-only mode (fallback when checkpoint is incomplete)
         _preload_cached_data_for_match_only(pipeline, config)
     else:
-        pipeline = create_default_pipeline(config, PROJECT_DIR, audio_first_mode=audio_first)
+        pipeline = create_default_pipeline(config, PROJECT_DIR)
 
     # Initialize state
     pipeline.state.voiceover_path = str(vo_path)

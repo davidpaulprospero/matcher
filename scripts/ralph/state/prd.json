@@ -133,8 +133,8 @@
             "id": "US-45-009",
             "title": "Remove deprecated audio_first_mode parameter from create_default_pipeline",
             "priority": "low",
-            "passes": false,
-            "notes": "Tier: T1 (dead code removal). File: src/pipeline.py, line 648. The create_default_pipeline() function still accepts audio_first_mode: bool = False with a comment 'Deprecated: now always uses caption-first'. Caption-first mode is always on (CLAUDE.md confirms this). The parameter should be removed along with any callers passing it. Also check create_match_only_pipeline and other pipeline factory functions for the same deprecated parameter.",
+            "passes": true,
+            "notes": "Removed audio_first_mode from create_default_pipeline, create_healing_pipeline, run_pipeline_with_healing (src/pipeline.py), create_resilient_pipeline, create_orchestrated_pipeline (src/agents/runner.py), create_orchestrated_pipeline (src/agents/orchestrator.py). Updated callers in main.py. Removed audio_first variable from main.py. Removed test_create_default_pipeline_audio_first from test_pipeline.py and test_e2e_pipeline.py. Updated remaining test calls. Only remaining 'audio_first_mode' is test_otio_timeline.py method name (unrelated). 186 pipeline tests pass.",
             "acceptanceCriteria": [
                 "Remove audio_first_mode parameter from create_default_pipeline() in src/pipeline.py",
                 "Remove audio_first_mode parameter from any other pipeline factory functions that have it",
