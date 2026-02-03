@@ -8,10 +8,12 @@
     - Post-cancel async handler drain (500ms sleep at line 506)
     - Buffer stabilization polling (lines 515-527)
     - Console flush after success message (line 703)
+    - Timeout-protected Remove-Job cleanup (pipe handle deadlock prevention)
 
     These tests verify the fix for the issue where "Story completed successfully"
     didn't appear until spacebar press due to race condition between async
-    event handlers and PowerShell's console output system.
+    event handlers and PowerShell's console output system, and the fix for
+    Remove-Job deadlocking when child processes inherit pipe handles.
 #>
 
 BeforeAll {
@@ -372,21 +374,23 @@ Describe 'Source code structure verification' -Tag 'Unit', 'RaceCondition' {
         $sleepPos | Should -BeLessThan $exitCodePos
     }
 
-    It 'has correct order: Unregister events -> Remove jobs -> Buffer poll -> Write files' {
+    It 'has correct order: Unregister events -> Stop jobs -> Remove jobs (in runspace) -> Buffer poll -> Write files' {
         $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
 
         # Extract finally block
         $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
         $finallyBlock = $finallyMatch.Groups[1].Value
 
-        # Verify sequence
-        $unregisterPos = $finallyBlock.IndexOf('Unregister-Event')
-        $removeJobPos = $finallyBlock.IndexOf('Remove-Job')
+        # Verify sequence using regex to match commands (not comments)
+        $unregisterPos = [regex]::Match($finallyBlock, '^\s+Unregister-Event', 'Multiline').Index
+        $stopJobPos = [regex]::Match($finallyBlock, '^\s+Stop-Job', 'Multiline').Index
+        $removeJobPos = [regex]::Match($finallyBlock, '^\s+Remove-Job', 'Multiline').Index
         $pollCommentPos = $finallyBlock.IndexOf('Poll until output buffer stabilizes')
         $writeFilePos = $finallyBlock.IndexOf('Set-Content $OutFile')
 
         $unregisterPos | Should -BeGreaterThan -1
-        $removeJobPos | Should -BeGreaterThan $unregisterPos
+        $stopJobPos | Should -BeGreaterThan $unregisterPos
+        $removeJobPos | Should -BeGreaterThan $stopJobPos
         $pollCommentPos | Should -BeGreaterThan $removeJobPos
         $writeFilePos | Should -BeGreaterThan $pollCommentPos
     }
@@ -541,5 +545,172 @@ Describe 'Integration: End-to-end timing simulation' -Tag 'Integration', 'RaceCo
 
         # Verify we got the data (async completed before we checked)
         $jobResult | Should -Be "late data"
+    }
+}
+
+Describe 'Remove-Job deadlock prevention' -Tag 'Unit', 'RaceCondition', 'PipeDeadlock' {
+    It 'has Stop-Job calls before Remove-Job to signal event jobs to stop' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        # Stop-Job must precede Remove-Job in the finally block
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        # Use regex to find actual Stop-Job/Remove-Job commands (not comments)
+        $stopJobMatch = [regex]::Match($finallyBlock, '^\s+Stop-Job\s', 'Multiline')
+        $removeJobMatch = [regex]::Match($finallyBlock, '^\s+Remove-Job\s', 'Multiline')
+
+        $stopJobMatch.Success | Should -BeTrue -Because 'Stop-Job must exist in finally block'
+        $removeJobMatch.Success | Should -BeTrue -Because 'Remove-Job must exist in finally block'
+        $stopJobMatch.Index | Should -BeLessThan $removeJobMatch.Index -Because 'Stop-Job must come before Remove-Job'
+    }
+
+    It 'wraps Remove-Job in a [powershell]::Create() runspace for timeout protection' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        # Verify [powershell]::Create() wrapping Remove-Job (not raw .NET Thread)
+        $finallyBlock | Should -Match '\[powershell\]::Create\(\)'
+        $finallyBlock | Should -Match 'BeginInvoke\(\)'
+        $finallyBlock | Should -Match 'WaitOne\(\d+\)'
+        $finallyBlock | Should -Match '\.Dispose\(\)'
+    }
+
+    It 'uses 5000ms timeout for async Remove-Job wait' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        $waitMatch = [regex]::Match($finallyBlock, 'WaitOne\((\d+)\)')
+        $waitMatch.Success | Should -BeTrue -Because 'async wait must have a timeout'
+        [int]$waitMatch.Groups[1].Value | Should -Be 5000
+    }
+
+    It 'logs warning when cleanup times out (does not silently hang)' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        $finallyBlock | Should -Match 'pipe handle deadlock avoided'
+    }
+
+    It 'has correct order: Unregister -> Stop-Job -> powershell::Create(Remove-Job) -> WaitOne -> Buffer poll' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        $unregisterPos = $finallyBlock.IndexOf('Unregister-Event')
+        $stopJobPos = $finallyBlock.IndexOf('Stop-Job')
+        $psCreatePos = $finallyBlock.IndexOf('[powershell]::Create()')
+        $waitPos = $finallyBlock.IndexOf('WaitOne(')
+        $pollPos = $finallyBlock.IndexOf('Poll until output buffer stabilizes')
+
+        $unregisterPos | Should -BeGreaterThan -1
+        $stopJobPos | Should -BeGreaterThan $unregisterPos
+        $psCreatePos | Should -BeGreaterThan $stopJobPos
+        $waitPos | Should -BeGreaterThan $psCreatePos
+        $pollPos | Should -BeGreaterThan $waitPos
+    }
+
+    It 'does NOT call Remove-Job directly in the finally block (only inside runspace)' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        # Remove-Job should only appear inside the AddScript scriptblock
+        $scriptBlock = [regex]::Match($finallyBlock, 'AddScript\(\{([\s\S]*?)\}\)')
+        $scriptBlock.Success | Should -BeTrue
+
+        $removeJobInScript = [regex]::Matches($scriptBlock.Groups[1].Value, 'Remove-Job').Count
+        $removeJobInScript | Should -Be 2 -Because 'two Remove-Job calls (out + err) inside runspace script'
+
+        # Count actual Remove-Job command calls (lines starting with whitespace+Remove-Job, not comments)
+        $removeJobCommands = [regex]::Matches($finallyBlock, '^\s+Remove-Job\s', 'Multiline').Count
+        $removeJobCommands | Should -Be 2 -Because 'Remove-Job commands should ONLY appear inside the runspace'
+    }
+}
+
+Describe 'Mutation testing - deadlock prevention values' -Tag 'Mutation', 'RaceCondition', 'PipeDeadlock' {
+    It 'WaitOne timeout is exactly 5000ms (not 1000, 2000, or 10000)' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        $waitMatch = [regex]::Match($finallyBlock, 'WaitOne\((\d+)\)')
+        [int]$waitMatch.Groups[1].Value | Should -Be 5000
+        [int]$waitMatch.Groups[1].Value | Should -Not -Be 1000
+        [int]$waitMatch.Groups[1].Value | Should -Not -Be 2000
+        [int]$waitMatch.Groups[1].Value | Should -Not -Be 10000
+    }
+
+    It 'Stop-Job uses -ErrorAction SilentlyContinue (must not throw)' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        $stopJobLines = [regex]::Matches($finallyBlock, 'Stop-Job.*')
+        foreach ($line in $stopJobLines) {
+            $line.Value | Should -Match 'SilentlyContinue' -Because 'Stop-Job must not throw in finally block'
+        }
+    }
+
+    It 'Remove-Job inside runspace uses -Force flag' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $scriptBlock = [regex]::Match($finallyMatch.Groups[1].Value, 'AddScript\(\{([\s\S]*?)\}\)')
+
+        $removeJobLines = [regex]::Matches($scriptBlock.Groups[1].Value, 'Remove-Job.*')
+        foreach ($line in $removeJobLines) {
+            $line.Value | Should -Match '-Force' -Because 'Remove-Job must use -Force inside cleanup runspace'
+        }
+    }
+}
+
+Describe 'Remove-Job deadlock: production code correctness' -Tag 'Unit', 'RaceCondition', 'PipeDeadlock' {
+    # These tests verify that if Thread.Join times out, the code still reaches
+    # the file-writing and process-cleanup steps (no infinite hang).
+
+    It 'file writing happens AFTER WaitOne block (reachable even on timeout)' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        $waitPos = $finallyBlock.IndexOf('WaitOne(')
+        $writePos = $finallyBlock.IndexOf('Set-Content $OutFile')
+        $disposePos = $finallyBlock.IndexOf('$process.Dispose()')
+
+        $waitPos | Should -BeGreaterThan -1
+        $writePos | Should -BeGreaterThan $waitPos -Because 'file writing must happen after WaitOne (even on timeout)'
+        $disposePos | Should -BeGreaterThan $writePos -Because 'Dispose must happen after file writing'
+    }
+
+    It 'timeout warning message includes actionable context' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        # Warning must explain WHAT happened and WHY it's OK
+        $claudeSource | Should -Match 'pipe handle deadlock avoided'
+        $claudeSource | Should -Match 'Warning.*Event cleanup timed out'
+    }
+
+    It 'comment documents the .NET pipe handle root cause' {
+        $claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+
+        $finallyMatch = [regex]::Match($claudeSource, 'finally\s*\{([\s\S]*?)^\s{4}\}', 'Multiline')
+        $finallyBlock = $finallyMatch.Groups[1].Value
+
+        # Verify the comment explains the root cause for future maintainers
+        $finallyBlock | Should -Match 'child processes'
+        $finallyBlock | Should -Match 'pipe handles'
+        $finallyBlock | Should -Match 'WaitForExit'
     }
 }
