@@ -127,23 +127,23 @@ class CheckpointHealer(Healer):
         if not cache_dir.exists():
             return self._start_fresh(error, state)
 
-        # Look for cached stage data
+        # Look for cached stage data matching the current 7-stage pipeline
         rebuilt_stages = []
 
-        # Check for transcriptions
-        trans_cache = cache_dir / "transcriptions"
-        if trans_cache.exists() and any(trans_cache.iterdir()):
-            rebuilt_stages.append("TRANSCRIBE")
+        # Check for captions cache (CAPTION stage)
+        caption_cache = cache_dir / "captions"
+        if caption_cache.exists() and any(caption_cache.iterdir()):
+            rebuilt_stages.append("CAPTION")
 
-        # Check for embeddings
+        # Check for LLM response cache (used by ANALYZE, MATCH stages)
+        llm_cache = cache_dir / "llm_responses"
+        if llm_cache.exists() and any(llm_cache.iterdir()):
+            rebuilt_stages.append("ANALYZE")
+
+        # Check for embeddings cache (used by MATCH, not a stage itself)
         embed_cache = cache_dir / "embeddings"
         if embed_cache.exists() and any(embed_cache.iterdir()):
-            rebuilt_stages.append("EMBEDDINGS")
-
-        # Check for scene detection
-        scene_cache = cache_dir / "scene_detection"
-        if scene_cache.exists() and any(scene_cache.iterdir()):
-            rebuilt_stages.append("SCENE_DETECTION")
+            rebuilt_stages.append("MATCH")
 
         if rebuilt_stages:
             self.log_success(f"Found cached data for stages: {rebuilt_stages}")

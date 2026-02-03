@@ -244,15 +244,15 @@ class TestCheckpointHealer:
         healer = CheckpointHealer(mock_config, project_dir)
         state = Mock()
 
-        # Create cache directories with data
-        trans_cache = project_dir / ".cache" / "transcriptions"
-        trans_cache.mkdir(parents=True)
-        (trans_cache / "test.json").write_text("{}")
+        # Create cache directories with data (current pipeline caches)
+        caption_cache = project_dir / ".cache" / "captions"
+        caption_cache.mkdir(parents=True)
+        (caption_cache / "test.json").write_text("{}")
 
         result = healer._rebuild_checkpoint(Exception("test"), state)
 
         assert result.success
-        assert "TRANSCRIBE" in result.details.get("cached_stages", [])
+        assert "CAPTION" in result.details.get("cached_stages", [])
 
 
 # =============================================================================
