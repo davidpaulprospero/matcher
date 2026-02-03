@@ -283,6 +283,30 @@ class MatchStage(Stage):
         if not has_text_data:
             return "Missing text_metadata or caption_results. Suggestion: run CAPTION stage first"
 
+        # US-44-010: Warn if caption_results is empty when text_metadata is populated
+        caption_results = getattr(state, 'caption_results', {})
+        if state.text_metadata and not caption_results:
+            logger.warning(
+                "text_metadata is populated but caption_results is empty — "
+                "data may have been loaded from a legacy checkpoint"
+            )
+
+        # US-44-010: Warn on video count drift between video_ids and caption_results
+        video_ids = getattr(state, 'video_ids', [])
+        if video_ids and caption_results:
+            vid_count = len(video_ids)
+            cap_count = len(caption_results)
+            if vid_count > 0:
+                drift_pct = abs(vid_count - cap_count) / vid_count
+                if drift_pct > 0.10:
+                    logger.warning(
+                        f"Video count drift detected: video_ids={vid_count}, "
+                        f"caption_results={cap_count} "
+                        f"(drift={drift_pct:.0%}, threshold=10%%). "
+                        f"Expected drops from failed captions or filtered videos, "
+                        f"but large drift may indicate silent data loss between stages."
+                    )
+
         return None
 
     # === Helper Methods ===
