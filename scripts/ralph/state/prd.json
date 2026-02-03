@@ -106,7 +106,7 @@
             "id": "US-49-007",
             "title": "Wire circuit breaker into download_segments escalation manager",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Call escalation_manager.set_circuit_breaker(circuit_breaker) during download_segments stage initialization when both components are available",
                 "Verify the circuit breaker shortcut logic at escalation_manager.py:330 fires when circuit is open (skips to max tier)",
@@ -114,7 +114,7 @@
                 "Add unit test verifying set_circuit_breaker() is called during stage init",
                 "Add unit test verifying open circuit causes escalation to skip to max tier"
             ],
-            "notes": "Tier: infrastructure wiring. The EscalationManager has set_circuit_breaker() and shortcut-to-max-tier logic at escalation_manager.py:330, but it's never called — self._circuit_breaker is always None. The circuit breaker (added in US-48-004) and escalation integration (US-48-005) exist independently but aren't connected. Wiring them together means the circuit breaker's failure tracking informs escalation decisions. Source files: src/stages/download_segments.py (stage init where escalation_manager and circuit_breaker are both available), src/downloader/escalation_manager.py:259-268 (set_circuit_breaker), lines 330-337 (shortcut logic)."
+            "notes": "Wired circuit_breaker into escalation_manager via set_circuit_breaker() in _download_segments(). Added pre-download check: if circuit open + video at VPN_ROTATION tier, skip to retry queue. 8 tests in test_download_segments_circuit_breaker.py: 3 wiring tests, 3 shortcut tests, 2 skip-to-retry tests."
         },
         {
             "id": "US-49-008",
