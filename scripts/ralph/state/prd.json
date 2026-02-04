@@ -91,7 +91,7 @@
             "id": "US-55-006",
             "title": "Add tests for download_segments bot-detection abort counter behavior",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test class TestBotDetectionAbortCounter in tests/test_stage_download_segments.py verifying that consecutive bot-detection errors (403, 'Sign in') increment a shared counter across video IDs",
                 "Add test that when bot-detection counter exceeds BOT_DETECTION_ABORT_THRESHOLD (default 10), the download loop aborts early with appropriate logging",
@@ -99,7 +99,7 @@
                 "Add test that bot-detection errors do NOT reset the network failure counter (verifying the counter interaction described in Issue 6)",
                 "All new tests must be marked @pytest.mark.fast and pass independently"
             ],
-            "notes": "Tier: T2 (P2 bug coverage). Source files: src/stages/download_segments.py:464-466 (per-video escalation state), src/stages/download_segments.py:536-560 (network failure counter + bot-detection counter reset logic). Issue 6 describes that bot-detection errors reset the network failure abort counter at lines 558-560, preventing the stage from ever aborting on widespread bot-detection. Tests should mock the download loop to simulate sequences of bot-detection and network errors and verify counter behavior."
+            "notes": "Added TestBotDetectionAbortCounter class with 6 tests in tests/test_stage_download_segments.py. Tests cover: shared counter across video IDs (403 + Sign-in errors), abort with logging when threshold exceeded, error_categories recording, counter reset on success, and bot-detection errors NOT resetting network failure counter. All @pytest.mark.fast."
         },
         {
             "id": "US-55-007",
