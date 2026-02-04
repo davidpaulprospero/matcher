@@ -1397,6 +1397,11 @@ download:
   # before aborting so --resume picks up where it left off. 0 = disabled.
   bot_detection_abort_threshold: 10
 
+  # Network failure threshold: consecutive network failures (DNS, connection refused,
+  # etc.) before aborting the download loop. Indicates systemic network issues that
+  # won't resolve by retrying more videos. Resets on any successful download.
+  network_failure_threshold: 3
+
   # FFmpeg location (required for segment downloads if not in PATH)
   # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
   ffmpeg_location: "C:/ffmpeg/bin"

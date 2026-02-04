@@ -118,8 +118,8 @@
             "id": "US-53-008",
             "title": "Make segment_stall_timeout and bot-detection thresholds configurable in config.yaml",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T1 (small, config additions). Source files: src/stages/download_segments.py (lines 684-691 where _stall_timeout read with hardcoded fallback 120, lines 586-597 where bot thresholds read), src/config/sections/download.py (download config dataclass), src/downloader/error_classification.py (module-level NETWORK_FAILURE_THRESHOLD=3, BOT_DETECTION_ABORT_THRESHOLD). The stall timeout and bot-detection abort/floor thresholds are read from config with getattr fallback, but the actual config.yaml entries may not exist. This story ensures they're documented and present.",
+            "passes": true,
+            "notes": "segment_stall_timeout, bot_detection_tier_floor_threshold, bot_detection_abort_threshold were already in DownloadConfig dataclass and config.yaml. Added network_failure_threshold (default: 3) to DownloadConfig dataclass, config.yaml, and updated download_segments.py to read it from config via getattr instead of using module-level constant directly. Updated 6 test mock helpers to include the new field. All 305 tests pass.",
             "acceptanceCriteria": [
                 "Add segment_stall_timeout (default: 120), bot_detection_tier_floor_threshold (default: 5), bot_detection_abort_threshold (default: 15) fields to download config dataclass if not already present",
                 "Add these fields to config.yaml download section with comments explaining each threshold's purpose",
