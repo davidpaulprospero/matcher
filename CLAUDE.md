@@ -83,6 +83,8 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 32 | Ralph file paths | Always use `state/prd.json`, `state/queue.json`, `session/prompt.md`, `config/ralph-config.json` — never root-level |
 | 33 | Ralph seed story prompts | In `Build-StoryPrompt`, seed stories emit instructions+criteria BEFORE notes (notes are background context, safe to truncate) |
 | 34 | Ralph prompt maxLength | `ralph-config.json` `prompts.maxLength` (default 10000) truncates story prompts — if stories fail mysteriously, check truncation first |
+| 35 | PowerShell threading | Never use `[System.Threading.Thread]` with PS cmdlets — use `[powershell]::Create()` with `.AddArgument()` for background work; raw threads crash the host process |
+| 36 | Console Quick Edit | Ralph disables Quick Edit Mode at startup (`Disable-QuickEditMode`) — clicking the console window freezes ALL `Write-Host` calls, blocking the monitoring loop, stall detection, and heartbeat while Claude keeps running |
 
 ### Config Access Pattern
 
@@ -392,6 +394,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-04 | Fix: Ralph monitoring loop freeze — disable Console Quick Edit Mode at startup (Rule 36) |
 | 2026-02-02 | Removed project_config.yaml auto-merge — use `--config` flag for per-project settings |
 | 2026-02-01 | Caption-first always on, removed `--caption-first` flag, cookie rotation in caption fetcher, removed max_keywords param, fixed LLM text response format |
 | 2026-01-29 | Streamlined CLAUDE.md: consolidated rules, reduced verbosity |
