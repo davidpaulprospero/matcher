@@ -532,12 +532,24 @@ def _serialize_match(match, index=0):
             'face_score': getattr(match, 'face_score', 0.5),
         }
     else:
+        video_file = getattr(match, 'video_file', '')
+        video_start = getattr(match, 'video_start', 0.0)
+        video_end = getattr(match, 'video_end', 0.0)
+        confidence = getattr(match, 'confidence', 0.0)
+
+        if not video_file:
+            import logging
+            logging.getLogger('stages.iterative_match').warning(
+                f"Match {index} serialized with empty video_file "
+                f"(type={type(match).__name__})"
+            )
+
         return {
             'segment_index': getattr(match, 'segment_index', index),
-            'video_file': getattr(match, 'video_file', ''),
-            'video_start': getattr(match, 'video_start', 0.0),
-            'video_end': getattr(match, 'video_end', 0.0),
-            'confidence': getattr(match, 'confidence', 0.0),
+            'video_file': video_file,
+            'video_start': float(video_start),
+            'video_end': float(video_end),
+            'confidence': float(confidence),
             'strategy': getattr(match, 'strategy', ''),
             'reason': getattr(match, 'reason', ''),
             'face_score': getattr(match, 'face_score', 0.5),
@@ -613,3 +625,103 @@ class TestVideoFileSerializationDrillDown:
         assert serialized['video_file'] == ''
         assert serialized['segment_index'] == 3
         # Must not raise an exception (implicit: we got here)
+
+
+# ============================================================================
+# US-51-003: else-branch match serialization for plain Match and MatchResult
+# ============================================================================
+
+class TestElseBranchMatchSerialization:
+    """US-51-003: Verify else-branch correctly handles Match and MatchResult objects."""
+
+    def test_plain_match_serializes_via_else_branch(self):
+        """state.Match object (has video_file) serializes correctly via else branch."""
+        match = Match(
+            segment_index=2,
+            video_file='vid_plain_abc',
+            video_start=3.0,
+            video_end=13.0,
+            confidence=0.75,
+            strategy='keyword',
+            reason='keyword match',
+            face_score=0.4,
+        )
+        # state.Match has no primary_match, so _serialize_match takes the else branch
+        serialized = _serialize_match(match, index=2)
+
+        assert serialized['segment_index'] == 2
+        assert serialized['video_file'] == 'vid_plain_abc'
+        assert serialized['video_start'] == 3.0
+        assert serialized['video_end'] == 13.0
+        assert serialized['confidence'] == 0.75
+        assert serialized['strategy'] == 'keyword'
+        assert serialized['reason'] == 'keyword match'
+        assert serialized['face_score'] == 0.4
+
+    def test_plain_match_round_trips_through_from_dict(self):
+        """state.Match serialized via else branch survives Match.from_dict()."""
+        match = Match(
+            segment_index=5,
+            video_file='vid_roundtrip',
+            video_start=10.0,
+            video_end=20.0,
+            confidence=0.9,
+            strategy='semantic',
+            reason='high similarity',
+            face_score=0.6,
+        )
+        serialized = _serialize_match(match, index=5)
+
+        restored = Match.from_dict(serialized)
+        assert restored.video_file == 'vid_roundtrip'
+        assert restored.video_start == 10.0
+        assert restored.video_end == 20.0
+        assert restored.confidence == 0.9
+
+    def test_matchresult_no_primary_match_logs_warning(self, caplog):
+        """MatchResult with primary_match=None logs warning about empty video_file."""
+        import logging
+        from src.utils import SRTSegment, Match as UtilsMatch, MatchResult
+
+        dummy_vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy')
+        dummy_vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy',
+                               source_file='dummy.mp4')
+        dummy_match = UtilsMatch(
+            voiceover_segment=dummy_vo, video_segment=dummy_vid,
+            video_scene=None, confidence=0.0, reasoning='',
+        )
+        mr = MatchResult(primary_match=dummy_match)
+        mr.primary_match = None  # Force into else branch
+
+        with caplog.at_level(logging.WARNING):
+            serialized = _serialize_match(mr, index=7)
+
+        assert serialized['video_file'] == ''
+        assert serialized['segment_index'] == 7
+
+        # Verify warning was logged about empty video_file
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any('empty video_file' in msg for msg in warning_messages), \
+            f"Expected warning about empty video_file, got: {warning_messages}"
+
+    def test_matchresult_no_primary_match_warning_includes_type(self, caplog):
+        """Warning message includes the type name (MatchResult) for debugging."""
+        import logging
+        from src.utils import SRTSegment, Match as UtilsMatch, MatchResult
+
+        dummy_vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy')
+        dummy_vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy',
+                               source_file='dummy.mp4')
+        dummy_match = UtilsMatch(
+            voiceover_segment=dummy_vo, video_segment=dummy_vid,
+            video_scene=None, confidence=0.0, reasoning='',
+        )
+        mr = MatchResult(primary_match=dummy_match)
+        mr.primary_match = None
+
+        with caplog.at_level(logging.WARNING):
+            _serialize_match(mr, index=0)
+
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any('MatchResult' in msg for msg in warning_messages), \
+            f"Expected type 'MatchResult' in warning, got: {warning_messages}"

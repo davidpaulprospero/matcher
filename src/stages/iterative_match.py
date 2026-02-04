@@ -448,13 +448,25 @@ class IterativeMatchStage(Stage):
                             'face_score': getattr(match, 'face_score', 0.5),
                         })
                     # Handle simple Match structure (state.Match with video_file directly)
+                    # or MatchResult with primary_match=None (gap/fallback)
                     else:
+                        video_file = getattr(match, 'video_file', '')
+                        video_start = getattr(match, 'video_start', 0.0)
+                        video_end = getattr(match, 'video_end', 0.0)
+                        confidence = getattr(match, 'confidence', 0.0)
+
+                        if not video_file:
+                            logger.warning(
+                                f"Match {i} serialized with empty video_file "
+                                f"(type={type(match).__name__})"
+                            )
+
                         serialized_matches.append({
                             'segment_index': getattr(match, 'segment_index', i),
-                            'video_file': getattr(match, 'video_file', ''),
-                            'video_start': getattr(match, 'video_start', 0.0),
-                            'video_end': getattr(match, 'video_end', 0.0),
-                            'confidence': getattr(match, 'confidence', 0.0),
+                            'video_file': video_file,
+                            'video_start': float(video_start),
+                            'video_end': float(video_end),
+                            'confidence': float(confidence),
                             'strategy': getattr(match, 'strategy', ''),
                             'reason': getattr(match, 'reason', ''),
                             'face_score': getattr(match, 'face_score', 0.5),
