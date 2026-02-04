@@ -743,8 +743,12 @@ class TestNetworkFailurePythonApiPatterns:
 
 from src.downloader.error_classification import (
     classify_error_severity,
+    classify_network_subcategory,
     ERROR_SEVERITY_PATTERNS,
     SEVERITY_MULTIPLIERS,
+    ERROR_PATTERNS,
+    NETWORK_ERROR_PATTERNS,
+    NETWORK_FAILURE_PATTERNS,
 )
 
 
@@ -998,3 +1002,181 @@ class TestClassificationEdgeCases:
     def test_classify_error_severity_numbers_only(self):
         """classify_error_severity handles numeric-only string."""
         assert classify_error_severity('12345') == 'medium'
+
+
+# =============================================================================
+# US-57-008: Categorized network error patterns and sub-category classification
+# =============================================================================
+
+
+@pytest.mark.fast
+class TestNetworkErrorPatternCategories:
+    """US-57-008: Verify NETWORK_ERROR_PATTERNS categorized dict structure
+    and classify_network_subcategory() sub-category classification.
+    """
+
+    # --- Sub-category classification ---
+
+    @pytest.mark.fast
+    def test_getaddrinfo_failed_is_dns(self):
+        """'getaddrinfo failed' is classified under the 'dns' sub-category."""
+        error = "urllib3.exceptions.NewConnectionError: getaddrinfo failed"
+        assert classify_network_subcategory(error) == 'dns'
+
+    @pytest.mark.fast
+    def test_name_not_known_is_dns(self):
+        """'Name or service not known' is classified under 'dns'."""
+        error = "socket.gaierror: [Errno -2] Name or service not known"
+        assert classify_network_subcategory(error) == 'dns'
+
+    @pytest.mark.fast
+    def test_errno_11001_is_dns(self):
+        """Windows DNS failure 'Errno 11001' is classified under 'dns'."""
+        error = "socket.gaierror: [Errno 11001] getaddrinfo failed"
+        assert classify_network_subcategory(error) == 'dns'
+
+    @pytest.mark.fast
+    def test_failed_to_resolve_is_dns(self):
+        """'Failed to resolve' is classified under 'dns'."""
+        error = "curl_cffi.requests.errors.ConnectionError: Failed to resolve 'www.youtube.com'"
+        assert classify_network_subcategory(error) == 'dns'
+
+    @pytest.mark.fast
+    def test_temp_name_resolution_is_dns(self):
+        """'Temporary failure in name resolution' is classified under 'dns'."""
+        error = "socket.gaierror: Temporary failure in name resolution"
+        assert classify_network_subcategory(error) == 'dns'
+
+    @pytest.mark.fast
+    def test_connection_refused_is_tcp(self):
+        """'Connection refused' is classified under the 'tcp' sub-category."""
+        error = "ConnectionRefusedError: [Errno 111] Connection refused"
+        assert classify_network_subcategory(error) == 'tcp'
+
+    @pytest.mark.fast
+    def test_connection_timed_out_is_tcp(self):
+        """'Connection timed out' is classified under 'tcp'."""
+        error = "ERROR: [youtube] vid1: Connection timed out"
+        assert classify_network_subcategory(error) == 'tcp'
+
+    @pytest.mark.fast
+    def test_connection_reset_is_tcp(self):
+        """'ConnectionResetError' is classified under 'tcp'."""
+        error = "ConnectionResetError: [Errno 104] Connection reset by peer"
+        assert classify_network_subcategory(error) == 'tcp'
+
+    @pytest.mark.fast
+    def test_network_unreachable_is_tcp(self):
+        """'Network is unreachable' is classified under 'tcp'."""
+        error = "OSError: [Errno 101] Network is unreachable"
+        assert classify_network_subcategory(error) == 'tcp'
+
+    @pytest.mark.fast
+    def test_urlerror_is_http(self):
+        """'URLError' is classified under the 'http' sub-category."""
+        error = "URLError: <urlopen error timed out>"
+        assert classify_network_subcategory(error) == 'http'
+
+    @pytest.mark.fast
+    def test_ffmpeg_exit_code_is_ffmpeg(self):
+        """ffmpeg exit code 4294967158 is classified under 'ffmpeg'."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158"
+        assert classify_network_subcategory(error) == 'ffmpeg'
+
+    @pytest.mark.fast
+    def test_ffmpeg_signed_exit_code_is_ffmpeg(self):
+        """ffmpeg exit code -314 is classified under 'ffmpeg'."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code -314"
+        assert classify_network_subcategory(error) == 'ffmpeg'
+
+    @pytest.mark.fast
+    def test_http_error_403_is_http(self):
+        """'HTTP Error 403' is classified under the 'http' sub-category."""
+        error = "ERROR: [youtube] abc123: HTTP Error 403: Forbidden"
+        assert classify_network_subcategory(error) == 'http'
+
+    @pytest.mark.fast
+    def test_http_error_429_is_http(self):
+        """'HTTP Error 429' is classified under 'http'."""
+        error = "HTTP Error 429: Too Many Requests"
+        assert classify_network_subcategory(error) == 'http'
+
+    @pytest.mark.fast
+    def test_http_error_500_is_http(self):
+        """'HTTP Error 500' is classified under 'http'."""
+        error = "HTTP Error 500: Internal Server Error"
+        assert classify_network_subcategory(error) == 'http'
+
+    @pytest.mark.fast
+    def test_video_unavailable_returns_none(self):
+        """Non-pattern errors return None from classify_network_subcategory."""
+        error = "Video unavailable: This video has been removed"
+        assert classify_network_subcategory(error) is None
+
+    @pytest.mark.fast
+    def test_empty_string_returns_none(self):
+        """Empty string returns None."""
+        assert classify_network_subcategory('') is None
+
+    # --- Flattened tuple backward compatibility ---
+
+    @pytest.mark.fast
+    def test_flattened_tuple_contains_all_network_patterns(self):
+        """NETWORK_FAILURE_PATTERNS flat tuple contains all patterns from
+        dns, tcp, tls categories plus URLError from http."""
+        for category in ('dns', 'tcp', 'tls'):
+            for pattern in ERROR_PATTERNS[category]:
+                assert pattern in NETWORK_FAILURE_PATTERNS, (
+                    f"Pattern '{pattern}' from '{category}' missing from NETWORK_FAILURE_PATTERNS"
+                )
+        # URLError is the transport-level http pattern included in the flat tuple
+        assert 'URLError' in NETWORK_FAILURE_PATTERNS
+
+    @pytest.mark.fast
+    def test_flattened_tuple_count_matches_network_categories(self):
+        """Flat tuple length equals dns+tcp+tls patterns plus URLError."""
+        expected_count = sum(
+            len(patterns)
+            for cat, patterns in ERROR_PATTERNS.items()
+            if cat in ('dns', 'tcp', 'tls')
+        ) + 1  # +1 for URLError
+        assert len(NETWORK_FAILURE_PATTERNS) == expected_count
+
+    @pytest.mark.fast
+    def test_flattened_tuple_is_tuple(self):
+        """NETWORK_FAILURE_PATTERNS remains a tuple for backward compat."""
+        assert isinstance(NETWORK_FAILURE_PATTERNS, tuple)
+
+    # --- Categorized dict structure ---
+
+    @pytest.mark.fast
+    def test_error_patterns_has_required_categories(self):
+        """ERROR_PATTERNS has dns, tcp, tls, http, ffmpeg keys."""
+        required = {'dns', 'tcp', 'tls', 'http', 'ffmpeg'}
+        assert required == set(ERROR_PATTERNS.keys())
+
+    @pytest.mark.fast
+    def test_network_error_patterns_is_alias(self):
+        """NETWORK_ERROR_PATTERNS is an alias for ERROR_PATTERNS."""
+        assert NETWORK_ERROR_PATTERNS is ERROR_PATTERNS
+
+    @pytest.mark.fast
+    def test_dns_category_not_empty(self):
+        """DNS category has patterns."""
+        assert len(ERROR_PATTERNS['dns']) > 0
+
+    @pytest.mark.fast
+    def test_tcp_category_not_empty(self):
+        """TCP category has patterns."""
+        assert len(ERROR_PATTERNS['tcp']) > 0
+
+    @pytest.mark.fast
+    def test_http_category_not_empty(self):
+        """HTTP category has patterns."""
+        assert len(ERROR_PATTERNS['http']) > 0
+
+    @pytest.mark.fast
+    def test_ffmpeg_category_has_exit_codes(self):
+        """ffmpeg category contains the expected exit codes."""
+        assert '4294967158' in ERROR_PATTERNS['ffmpeg']
+        assert '-314' in ERROR_PATTERNS['ffmpeg']

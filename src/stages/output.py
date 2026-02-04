@@ -745,7 +745,7 @@ class OutputStage(Stage):
 
         This method converts simple Match objects to MatchResult objects.
         """
-        from ..utils import Match as UtilsMatch, MatchResult, SRTSegment
+        from ..utils import Match as UtilsMatch, MatchResult, SRTSegment, AlternativeMatch, StrategyMatch
 
         if not state.matches:
             return []
@@ -758,9 +758,13 @@ class OutputStage(Stage):
 
         # Need to convert simple Match objects to MatchResult
         logger.info("Converting checkpoint matches to MatchResult format")
-        normalized = []
 
-        for match in state.matches:
+        # Get raw checkpoint dicts stashed during restore (for multi-track data)
+        raw_dicts = getattr(state, '_raw_match_dicts', None) or []
+        normalized = []
+        multi_track_stats = {'alternatives': 0, 'secondary': 0, 'strategy': 0}
+
+        for i, match in enumerate(state.matches):
             if not match:
                 continue
 
@@ -805,15 +809,64 @@ class OutputStage(Stage):
                 reasoning=reasoning
             )
 
+            # Restore multi-track data from raw checkpoint dicts
+            alternatives = []
+            secondary_matches = []
+            strategy_matches = []
+            has_gap = False
+            gap_reason = ''
+
+            if i < len(raw_dicts):
+                raw = raw_dicts[i]
+                for alt_data in raw.get('alternatives', []):
+                    try:
+                        alternatives.append(AlternativeMatch.from_dict(alt_data))
+                    except Exception as e:
+                        logger.debug(f"Match {i}: failed to restore alternative: {e}")
+                for sec_data in raw.get('secondary_matches', []):
+                    try:
+                        secondary_matches.append(AlternativeMatch.from_dict(sec_data))
+                    except Exception as e:
+                        logger.debug(f"Match {i}: failed to restore secondary match: {e}")
+                for strat_data in raw.get('strategy_matches', []):
+                    try:
+                        strategy_matches.append(StrategyMatch.from_dict(strat_data))
+                    except Exception as e:
+                        logger.debug(f"Match {i}: failed to restore strategy match: {e}")
+                has_gap = bool(raw.get('has_gap', False))
+                gap_reason = raw.get('gap_reason', '') or ''
+
+            multi_track_stats['alternatives'] += len(alternatives)
+            multi_track_stats['secondary'] += len(secondary_matches)
+            multi_track_stats['strategy'] += len(strategy_matches)
+
             # Wrap in MatchResult
             match_result = MatchResult(
                 primary_match=utils_match,
-                alternatives=[],
-                secondary_matches=[],
-                strategy_matches=[]
+                alternatives=alternatives,
+                secondary_matches=secondary_matches,
+                strategy_matches=strategy_matches,
+                has_gap=has_gap,
+                gap_reason=gap_reason,
             )
 
             normalized.append(match_result)
+
+        # Clean up stashed raw dicts
+        if hasattr(state, '_raw_match_dicts'):
+            del state._raw_match_dicts
+
+        # Log multi-track restoration stats
+        total_extras = sum(multi_track_stats.values())
+        if total_extras > 0:
+            logger.info(
+                f"Restored multi-track data: "
+                f"{multi_track_stats['alternatives']} alternatives (V2-V3), "
+                f"{multi_track_stats['secondary']} secondary (V4-V6), "
+                f"{multi_track_stats['strategy']} strategy (V7-V8)"
+            )
+        else:
+            logger.info("No multi-track data in checkpoint (old format or no extras)")
 
         logger.info(f"Converted {len(normalized)} matches to MatchResult format")
         return normalized

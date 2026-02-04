@@ -41,6 +41,26 @@ from ..downloader.error_classification import (
 
 
 @dataclass
+class _DownloadLoopContext:
+    """Internal shared state for the download loop sub-methods.
+
+    US-57-007: Holds references that the decomposed loop methods need,
+    avoiding long parameter lists while keeping each method focused.
+    """
+
+    stats: 'SegmentDownloadStats'
+    escalation_mgr: Any = None
+    cookie_rotator: Any = None
+    circuit_breaker: Any = None
+    download_config: Any = None
+    bot_floor_threshold: int = 5
+    bot_abort_threshold: int = 0
+    network_failure_threshold: int = 0
+    consecutive_network_failures: int = 0
+    consecutive_bot_detections: int = 0
+
+
+@dataclass
 class SegmentDownloadStats:
     """Typed container for segment download statistics.
 
@@ -260,6 +280,16 @@ class DownloadVideoSegmentsStage(Stage):
                 return StageResult.ok({'skipped': True, 'reason': 'no_matches'}, warnings)
 
             print(f"\n  --- Stage 6: DOWNLOAD VIDEO SEGMENTS ---")
+
+            # US-59-011: Check caption_batch_low_yield flag from CAPTION stage
+            # If set, many videos will need transcription after download
+            caption_batch_low_yield = getattr(state, 'caption_batch_low_yield', False)
+            if caption_batch_low_yield:
+                logger.warning(
+                    "US-59-011: caption_batch_low_yield=True - many videos in the batch had no "
+                    "captions available. These videos will require transcription after download."
+                )
+                print("  ! Warning: Many videos have no captions - transcription will be needed")
 
             # Get download settings from config
             download_config = config.download
@@ -544,73 +574,24 @@ class DownloadVideoSegmentsStage(Stage):
         buffer_seconds: float,
         progress_callback
     ):
-        """Download video segments using VideoDownloader's retry queue.
+        """Download video segments via sub-methods: prepare, check, execute, handle.
 
-        Uses the downloader's impersonation, escalation, and retry queue
-        infrastructure instead of raw yt-dlp calls.
-
-        US-48-005: Uses EscalationManager for per-segment tier progression.
-        On 403/bot errors, escalates to Tier 2 (extractor_args) and Tier 3
-        (cookie rotation). Escalation state is tracked per video_id.
-
-        Returns:
-            Tuple of (downloaded_segments list, SegmentDownloadStats).
+        US-57-007: Returns (downloaded_segments list, SegmentDownloadStats).
         """
         from ..state import DownloadedVideo
-        import yt_dlp
 
         downloaded = []
         total = len(segments)
-        consecutive_network_failures = 0
-        consecutive_bot_detections = 0  # US-49-005: stage-level bot-detection counter
-
-        # Progress counters — US-52-010: typed dataclass replaces raw dict
         stats = SegmentDownloadStats(total=total)
-
-        # Get escalation manager, circuit breaker, and cookie rotator from downloader
-        escalation_mgr = None
-        cookie_rotator = None
-        circuit_breaker = None
-        if self.downloader:
-            escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
-            cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
-            circuit_breaker = getattr(self.downloader, 'circuit_breaker', None)
-
-            # US-49-007: Wire circuit breaker into escalation manager so that
-            # open-circuit state informs escalation decisions (skip to max tier)
-            if escalation_mgr and circuit_breaker:
-                escalation_mgr.set_circuit_breaker(circuit_breaker)
-
-        # US-49-005: Read bot-detection tier floor threshold from config
-        _dl_cfg_top = getattr(self.downloader, 'download_config', None) if self.downloader else None
-        _bot_floor_threshold = 5  # default
-        if _dl_cfg_top:
-            _bot_floor_threshold = int(getattr(
-                _dl_cfg_top, 'bot_detection_tier_floor_threshold', 5
-            ))
-
-        # US-49-008: Read bot-detection abort threshold from config
-        _bot_abort_threshold = BOT_DETECTION_ABORT_THRESHOLD  # module-level default
-        if _dl_cfg_top:
-            _bot_abort_threshold = int(getattr(
-                _dl_cfg_top, 'bot_detection_abort_threshold', BOT_DETECTION_ABORT_THRESHOLD
-            ))
-
-        # US-53-008: Read network failure threshold from config
-        _network_failure_threshold = NETWORK_FAILURE_THRESHOLD  # module-level default
-        if _dl_cfg_top:
-            _network_failure_threshold = int(getattr(
-                _dl_cfg_top, 'network_failure_threshold', NETWORK_FAILURE_THRESHOLD
-            ))
+        ctx = self._prepare_download_context(stats)
 
         for idx, seg in enumerate(segments, 1):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
             end = seg['end'] + buffer_seconds
-
-            # Create output filename
             output_file = output_dir / f"{video_id}_{int(start)}_{int(end)}.mp4"
 
+            # Check cache hit
             if output_file.exists():
                 logger.info(f"Segment already exists: {output_file}")
                 downloaded.append(DownloadedVideo(
@@ -623,266 +604,33 @@ class DownloadVideoSegmentsStage(Stage):
                 except OSError:
                     _cached_bytes = 0
                 stats.increment_cached(file_bytes=_cached_bytes)
-                consecutive_network_failures = 0  # Cached file counts as success
-                # US-49-005: Reset bot-detection counter on success
-                if consecutive_bot_detections > 0:
-                    consecutive_bot_detections = 0
-                    if escalation_mgr:
-                        escalation_mgr.clear_tier_floor()
+                ctx.consecutive_network_failures = 0
+                if ctx.consecutive_bot_detections > 0:
+                    ctx.consecutive_bot_detections = 0
+                    if ctx.escalation_mgr:
+                        ctx.escalation_mgr.clear_tier_floor()
                 self._print_progress(idx, total, stats)
                 continue
 
-            # US-50-008: Check circuit breaker before download attempt.
-            # If open, pause using check_and_wait() to wait for recovery.
-            # If open AND escalation is already at max tier, skip to retry queue.
-            if circuit_breaker and circuit_breaker.is_open:
-                at_max_tier = False
-                if escalation_mgr:
-                    from ..downloader.types import EscalationTier
-                    kw_state = escalation_mgr._get_state(video_id)
-                    at_max_tier = kw_state.current_tier >= EscalationTier.VPN_ROTATION
-
-                if at_max_tier:
-                    stats.increment_failure()
-                    logger.info(
-                        f"Circuit breaker open + max tier reached for {video_id} "
-                        f"— skipping to retry queue"
-                    )
-                    if self.downloader and self.downloader.retry_queue:
-                        self.downloader.retry_queue.add(
-                            video_id=f"{video_id}_{int(start)}_{int(end)}",
-                            keyword='segment',
-                            tier='segment',
-                            error_message='circuit_breaker_open_max_tier',
-                            error_category='video_specific',
-                            escalation_tier=int(kw_state.current_tier),
-                        )
-                    self._print_progress(idx, total, stats)
-                    continue
-                else:
-                    # Not at max tier — pause and wait for circuit recovery
-                    circuit_breaker.check_and_wait()
-
-            try:
-                # Download segment using yt-dlp with downloader's infrastructure
-                url = f"https://www.youtube.com/watch?v={video_id}"
-
-                # US-52-005: Build ydl_opts via builder (config, cookies, escalation)
-                _dl_cfg = getattr(self.downloader, 'download_config', None) if self.downloader else None
-                _progress_hook = self._make_progress_hook(video_id, stats)
-
-                ydl_opts, escalation_result = self._build_ydl_opts(
-                    video_id=video_id,
-                    start=start,
-                    end=end,
-                    output_file=output_file,
-                    download_config=_dl_cfg,
-                    escalation_mgr=escalation_mgr,
-                    cookie_rotator=cookie_rotator,
-                    progress_hooks=[_progress_hook],
-                )
-
-                if escalation_result and escalation_result.tier.value > 1:
-                    logger.info(
-                        f"Segment {video_id}: using escalation tier "
-                        f"{escalation_result.tier.name}"
-                    )
-
-                # US-49-004: Read stall timeout for process-level hang detection
-                _stall_timeout = 120  # fallback
-                if _dl_cfg:
-                    _raw_stall = getattr(_dl_cfg, 'segment_stall_timeout', 120)
-                    try:
-                        _stall_timeout = int(_raw_stall)
-                    except (TypeError, ValueError):
-                        _stall_timeout = 120
-
-                seg_start_time = time.time()
-                if _stall_timeout and _stall_timeout > 0:
-                    # US-49-004: Wrap ydl.download() in ThreadPoolExecutor to detect
-                    # process-level stalls (ffmpeg hangs, stream stalls with no data).
-                    # socket_timeout only covers HTTP sockets; this covers the entire call.
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        def _do_download():
-                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                                ydl.download([url])
-
-                        future = executor.submit(_do_download)
-                        try:
-                            future.result(timeout=_stall_timeout)
-                        except concurrent.futures.TimeoutError:
-                            elapsed = time.time() - seg_start_time
-                            logger.warning(
-                                f"Segment {video_id}: ydl.download() stalled for "
-                                f"{elapsed:.1f}s (timeout={_stall_timeout}s) — killing"
-                            )
-                            raise TimeoutError(
-                                f"ydl.download() stalled for {elapsed:.1f}s "
-                                f"(segment_stall_timeout={_stall_timeout}s)"
-                            )
-                else:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([url])
-                seg_duration = time.time() - seg_start_time
-
-                if output_file.exists():
-                    downloaded.append(DownloadedVideo(
-                        file=str(output_file),
-                        url=url,
-                        source='segment_download'
-                    ))
-                    try:
-                        _dl_bytes = output_file.stat().st_size
-                    except OSError:
-                        _dl_bytes = 0
-                    stats.increment_success(duration=seg_duration, file_bytes=_dl_bytes)
-                    consecutive_network_failures = 0  # Reset on success
-                    # US-49-005: Reset bot-detection counter on success
-                    if consecutive_bot_detections > 0:
-                        consecutive_bot_detections = 0
-                        if escalation_mgr:
-                            escalation_mgr.clear_tier_floor()
-                    self._print_progress(idx, total, stats)
-                    # Record success with escalation manager
-                    if escalation_mgr:
-                        escalation_mgr.record_success(video_id)
-                else:
-                    stats.failed += 1
-                    stats.attempted += 1
-                    stats.segment_durations.append(seg_duration)
-                    self._print_progress(idx, total, stats)
-                    logger.warning(f"Download succeeded but file not found: {output_file}")
-
-            except Exception as e:
-                error_msg = str(e)
-                # US-49-009: Track error by category for end-of-stage summary
-                _err_cat = classify_error_category(error_msg)
-                stats.increment_failure(category=_err_cat, error_msg=error_msg)
-                logger.warning(f"Failed to download segment {video_id}: {error_msg}")
-
-                # US-48-005: Record failure with escalation manager for tier progression
-                is_bot_error = _is_escalation_error(error_msg)
-                if escalation_mgr and is_bot_error:
-                    escalation_mgr.record_failure(video_id, error_msg)
-                    # Advance cookie rotation on Tier 3+ auth errors
-                    if cookie_rotator and getattr(cookie_rotator, 'should_rotate', None):
-                        if cookie_rotator.should_rotate(error_msg):
-                            cookie_rotator.rotate()
-
-                # US-49-005: Track stage-level bot-detection counter
-                if is_bot_error:
-                    consecutive_bot_detections += 1
-                    if (
-                        _bot_floor_threshold > 0
-                        and consecutive_bot_detections >= _bot_floor_threshold
-                        and escalation_mgr
-                    ):
-                        from ..downloader.types import EscalationTier
-                        escalation_mgr.set_tier_floor(EscalationTier.VPN_ROTATION)
-                        logger.warning(
-                            f"Bot-detection tier floor activated: "
-                            f"{consecutive_bot_detections} consecutive bot-detection "
-                            f"errors across video IDs — new downloads start at max tier"
-                        )
-
-                    # US-49-008: Abort stage when total bot-detection errors exceed threshold
-                    if (
-                        _bot_abort_threshold > 0
-                        and consecutive_bot_detections >= _bot_abort_threshold
-                    ):
-                        remaining = total - idx
-                        # US-52-007: Log bot-detection abort as stage-level failure category
-                        stats.error_categories['bot_detection_abort'] = 1
-                        stats.error_aggregator.record(
-                            f"Bot-detection abort: {consecutive_bot_detections} "
-                            f"consecutive bot errors exceeded threshold "
-                            f"({_bot_abort_threshold})",
-                            'bot_detection_abort',
-                        )
-                        logger.error(
-                            f"Aborting download loop: {consecutive_bot_detections} "
-                            f"consecutive bot-detection errors (threshold: "
-                            f"{_bot_abort_threshold}). YouTube is broadly blocking "
-                            f"requests. Skipping {remaining} remaining segment(s). "
-                            f"Check cookie configuration."
-                        )
-                        logger.error(
-                            "Suggested actions to resolve bot-detection:\n"
-                            "  1. Check/refresh your browser cookies "
-                            "(cookies_from_browser or cookies_path in config.yaml)\n"
-                            "  2. Enable Mullvad VPN rotation "
-                            "(download.mullvad.enabled: true)\n"
-                            "  3. Wait 15-30 minutes before retrying "
-                            "(YouTube rate limits are temporary)\n"
-                            "  4. Run with --resume to continue from this checkpoint"
-                        )
-                        print(
-                            f"  !! Bot-detection abort — {consecutive_bot_detections} "
-                            f"bot errors exceeded threshold ({_bot_abort_threshold}). "
-                            f"{remaining} segments skipped.\n"
-                            f"     Fix: check cookies, enable VPN, or wait before "
-                            f"--resume"
-                        )
-                        # Checkpoint progress before aborting so --resume works
-                        if progress_callback:
-                            progress_callback(idx, total, downloaded)
-                        break
-
-                # Track consecutive network failures for early abort
-                # US-49-005: Bot-detection errors do NOT reset the network failure counter
-                if _is_network_failure(error_msg):
-                    consecutive_network_failures += 1
-                    logger.warning(
-                        f"Network failure detected ({consecutive_network_failures}/"
-                        f"{_network_failure_threshold}): {error_msg}"
-                    )
-                    if consecutive_network_failures >= _network_failure_threshold:
-                        remaining = total - idx
-                        logger.error(
-                            f"Aborting download loop: {consecutive_network_failures} consecutive "
-                            f"network failures indicate systemic network issue. "
-                            f"Skipping {remaining} remaining segment(s)."
-                        )
-                        print(
-                            f"  !! Network unavailable — aborting after "
-                            f"{consecutive_network_failures} consecutive DNS/network failures "
-                            f"({remaining} segments skipped)"
-                        )
-                        # Checkpoint before aborting
-                        if progress_callback:
-                            progress_callback(idx, total, downloaded)
-                        break
-                elif not is_bot_error:
-                    # Only non-network, non-bot errors reset the counter
-                    # (e.g., video removed, age-gated without bot detection)
-                    consecutive_network_failures = 0
-
+            # Check preconditions (circuit breaker, etc.)
+            skip_reason = self._check_preconditions(ctx, video_id, start, end, output_file)
+            if skip_reason:
+                stats.increment_failure()
                 self._print_progress(idx, total, stats)
+                continue
 
-                # Add failed download to retry queue for batch retry later
-                if self.downloader and self.downloader.retry_queue:
-                    category = classify_error_category(error_msg)
-                    # US-49-010: Capture current escalation tier so retry starts
-                    # at this tier or higher (avoids wasting time on lower tiers)
-                    _esc_tier = 1
-                    if escalation_mgr:
-                        try:
-                            _esc_state = escalation_mgr._get_state(video_id)
-                            _esc_tier = int(_esc_state.current_tier)
-                        except Exception:
-                            pass
-                    self.downloader.retry_queue.add(
-                        video_id=f"{video_id}_{int(start)}_{int(end)}",
-                        keyword='segment',
-                        tier='segment',
-                        error_message=error_msg,
-                        error_category=category,
-                        escalation_tier=_esc_tier,
-                    )
-                    logger.debug(
-                        f"Added {video_id} to retry queue "
-                        f"(category={category}, escalation_tier={_esc_tier})"
-                    )
+            # Execute the download
+            result = self._execute_download(ctx, video_id, start, end, output_file)
+
+            # Handle the result (success, failure, abort signals)
+            abort = self._handle_result(
+                ctx, result, video_id, start, end, output_file,
+                downloaded, idx, total, progress_callback,
+            )
+            self._print_progress(idx, total, stats)
+
+            if abort:
+                break
 
             # Checkpoint progress
             if progress_callback:
@@ -895,6 +643,401 @@ class DownloadVideoSegmentsStage(Stage):
         self._log_error_summary(stats)
 
         return downloaded, stats
+
+    def _prepare_download_context(
+        self, stats: SegmentDownloadStats
+    ) -> _DownloadLoopContext:
+        """Initialise shared loop state from downloader and config.
+
+        US-57-007: Extracts the one-time setup that previously sat at the
+        top of _download_segments into its own method.
+
+        Returns:
+            A populated _DownloadLoopContext.
+        """
+        escalation_mgr = None
+        cookie_rotator = None
+        circuit_breaker = None
+        if self.downloader:
+            escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
+            cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
+            circuit_breaker = getattr(self.downloader, 'circuit_breaker', None)
+
+            # US-49-007: Wire circuit breaker into escalation manager
+            if escalation_mgr and circuit_breaker:
+                escalation_mgr.set_circuit_breaker(circuit_breaker)
+
+        dl_cfg = getattr(self.downloader, 'download_config', None) if self.downloader else None
+
+        bot_floor_threshold = 5
+        bot_abort_threshold = BOT_DETECTION_ABORT_THRESHOLD
+        network_failure_threshold = NETWORK_FAILURE_THRESHOLD
+        if dl_cfg:
+            bot_floor_threshold = int(getattr(dl_cfg, 'bot_detection_tier_floor_threshold', 5))
+            bot_abort_threshold = int(getattr(
+                dl_cfg, 'bot_detection_abort_threshold', BOT_DETECTION_ABORT_THRESHOLD
+            ))
+            network_failure_threshold = int(getattr(
+                dl_cfg, 'network_failure_threshold', NETWORK_FAILURE_THRESHOLD
+            ))
+
+        return _DownloadLoopContext(
+            stats=stats,
+            escalation_mgr=escalation_mgr,
+            cookie_rotator=cookie_rotator,
+            circuit_breaker=circuit_breaker,
+            download_config=dl_cfg,
+            bot_floor_threshold=bot_floor_threshold,
+            bot_abort_threshold=bot_abort_threshold,
+            network_failure_threshold=network_failure_threshold,
+        )
+
+    def _check_preconditions(
+        self,
+        ctx: _DownloadLoopContext,
+        video_id: str,
+        start: float,
+        end: float,
+        output_file: Path,
+    ) -> Optional[str]:
+        """Check whether the download should be skipped or paused.
+
+        US-57-007: Extracts circuit-breaker logic from the main loop.
+
+        Returns:
+            A skip reason string if the segment should be skipped,
+            or ``None`` if the download may proceed.
+        """
+        cb = ctx.circuit_breaker
+        if not cb or not cb.is_open:
+            return None
+
+        at_max_tier = False
+        if ctx.escalation_mgr:
+            from ..downloader.types import EscalationTier
+            kw_state = ctx.escalation_mgr._get_state(video_id)
+            at_max_tier = kw_state.current_tier >= EscalationTier.VPN_ROTATION
+
+        if at_max_tier:
+            logger.info(
+                f"Circuit breaker open + max tier reached for {video_id} "
+                f"— skipping to retry queue"
+            )
+            if self.downloader and self.downloader.retry_queue:
+                self.downloader.retry_queue.add(
+                    video_id=f"{video_id}_{int(start)}_{int(end)}",
+                    keyword='segment',
+                    tier='segment',
+                    error_message='circuit_breaker_open_max_tier',
+                    error_category='video_specific',
+                    escalation_tier=int(kw_state.current_tier),
+                )
+            return 'circuit_breaker_open_max_tier'
+
+        # Not at max tier — pause and wait for circuit recovery
+        cb.check_and_wait()
+        return None
+
+    def _execute_download(
+        self,
+        ctx: _DownloadLoopContext,
+        video_id: str,
+        start: float,
+        end: float,
+        output_file: Path,
+    ) -> Dict[str, Any]:
+        """Run the actual yt-dlp download for a single segment.
+
+        US-57-007: Extracts download execution from the main loop.
+
+        Returns:
+            A dict with keys ``success`` (bool), and optionally ``duration``,
+            ``error_msg``, or ``file_missing``.
+        """
+        import yt_dlp
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        _progress_hook = self._make_progress_hook(video_id, ctx.stats)
+
+        ydl_opts, escalation_result = self._build_ydl_opts(
+            video_id=video_id,
+            start=start,
+            end=end,
+            output_file=output_file,
+            download_config=ctx.download_config,
+            escalation_mgr=ctx.escalation_mgr,
+            cookie_rotator=ctx.cookie_rotator,
+            progress_hooks=[_progress_hook],
+        )
+
+        if escalation_result and escalation_result.tier.value > 1:
+            logger.info(
+                f"Segment {video_id}: using escalation tier "
+                f"{escalation_result.tier.name}"
+            )
+
+        # US-49-004: Read stall timeout for process-level hang detection
+        _stall_timeout = 120
+        if ctx.download_config:
+            _raw_stall = getattr(ctx.download_config, 'segment_stall_timeout', 120)
+            try:
+                _stall_timeout = int(_raw_stall)
+            except (TypeError, ValueError):
+                _stall_timeout = 120
+
+        seg_start_time = time.time()
+        try:
+            if _stall_timeout and _stall_timeout > 0:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    def _do_download():
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            ydl.download([url])
+
+                    future = executor.submit(_do_download)
+                    try:
+                        future.result(timeout=_stall_timeout)
+                    except concurrent.futures.TimeoutError:
+                        elapsed = time.time() - seg_start_time
+                        logger.warning(
+                            f"Segment {video_id}: ydl.download() stalled for "
+                            f"{elapsed:.1f}s (timeout={_stall_timeout}s) — killing"
+                        )
+                        raise TimeoutError(
+                            f"ydl.download() stalled for {elapsed:.1f}s "
+                            f"(segment_stall_timeout={_stall_timeout}s)"
+                        )
+            else:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+
+            duration = time.time() - seg_start_time
+            if output_file.exists():
+                return {'success': True, 'duration': duration}
+            return {'success': False, 'file_missing': True, 'duration': duration}
+        except Exception as e:
+            return {'success': False, 'error_msg': str(e)}
+
+    def _handle_result(
+        self,
+        ctx: _DownloadLoopContext,
+        result: Dict[str, Any],
+        video_id: str,
+        start: float,
+        end: float,
+        output_file: Path,
+        downloaded: list,
+        idx: int,
+        total: int,
+        progress_callback,
+    ) -> bool:
+        """Process the outcome of a single segment download attempt.
+
+        US-57-007: Dispatches to success or error handling. Returns
+        ``True`` if the loop should abort (bot / network threshold hit).
+        """
+        from ..state import DownloadedVideo
+        stats = ctx.stats
+
+        # --- success path ---
+        if result.get('success'):
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            downloaded.append(DownloadedVideo(
+                file=str(output_file), url=url, source='segment_download'
+            ))
+            try:
+                _dl_bytes = output_file.stat().st_size
+            except OSError:
+                _dl_bytes = 0
+            stats.increment_success(duration=result.get('duration', 0), file_bytes=_dl_bytes)
+            ctx.consecutive_network_failures = 0
+            if ctx.consecutive_bot_detections > 0:
+                ctx.consecutive_bot_detections = 0
+                if ctx.escalation_mgr:
+                    ctx.escalation_mgr.clear_tier_floor()
+            if ctx.escalation_mgr:
+                ctx.escalation_mgr.record_success(video_id)
+            return False
+
+        # --- file-missing edge case (download didn't error but file absent) ---
+        if result.get('file_missing'):
+            stats.failed += 1
+            stats.attempted += 1
+            stats.segment_durations.append(result.get('duration', 0))
+            logger.warning(f"Download succeeded but file not found: {output_file}")
+            return False
+
+        # --- error path (delegated) ---
+        return self._handle_download_error(
+            ctx, result.get('error_msg', 'unknown error'),
+            video_id, start, end, downloaded, idx, total, progress_callback,
+        )
+
+    def _handle_download_error(
+        self,
+        ctx: _DownloadLoopContext,
+        error_msg: str,
+        video_id: str,
+        start: float,
+        end: float,
+        downloaded: list,
+        idx: int,
+        total: int,
+        progress_callback,
+    ) -> bool:
+        """Handle a failed download: classify, escalate, and check abort thresholds.
+
+        US-57-007: Extracted from _handle_result to keep each method under 80 lines.
+
+        Returns:
+            ``True`` if the loop should abort.
+        """
+        stats = ctx.stats
+        _err_cat = classify_error_category(error_msg)
+        stats.increment_failure(category=_err_cat, error_msg=error_msg)
+        logger.warning(f"Failed to download segment {video_id}: {error_msg}")
+
+        is_bot_error = _is_escalation_error(error_msg)
+        if ctx.escalation_mgr and is_bot_error:
+            ctx.escalation_mgr.record_failure(video_id, error_msg)
+            if ctx.cookie_rotator and getattr(ctx.cookie_rotator, 'should_rotate', None):
+                if ctx.cookie_rotator.should_rotate(error_msg):
+                    ctx.cookie_rotator.rotate()
+
+        # Bot-detection tracking and abort
+        if is_bot_error:
+            ctx.consecutive_bot_detections += 1
+            if (
+                ctx.bot_floor_threshold > 0
+                and ctx.consecutive_bot_detections >= ctx.bot_floor_threshold
+                and ctx.escalation_mgr
+            ):
+                from ..downloader.types import EscalationTier
+                ctx.escalation_mgr.set_tier_floor(EscalationTier.VPN_ROTATION)
+                logger.warning(
+                    f"Bot-detection tier floor activated: "
+                    f"{ctx.consecutive_bot_detections} consecutive bot-detection "
+                    f"errors across video IDs — new downloads start at max tier"
+                )
+            if self._should_abort_bot_detection(ctx, stats, idx, total, downloaded, progress_callback):
+                return True
+
+        # Network failure tracking and abort
+        if _is_network_failure(error_msg):
+            ctx.consecutive_network_failures += 1
+            logger.warning(
+                f"Network failure detected ({ctx.consecutive_network_failures}/"
+                f"{ctx.network_failure_threshold}): {error_msg}"
+            )
+            if ctx.consecutive_network_failures >= ctx.network_failure_threshold:
+                remaining = total - idx
+                logger.error(
+                    f"Aborting download loop: {ctx.consecutive_network_failures} consecutive "
+                    f"network failures indicate systemic network issue. "
+                    f"Skipping {remaining} remaining segment(s)."
+                )
+                print(
+                    f"  !! Network unavailable — aborting after "
+                    f"{ctx.consecutive_network_failures} consecutive DNS/network failures "
+                    f"({remaining} segments skipped)"
+                )
+                if progress_callback:
+                    progress_callback(idx, total, downloaded)
+                return True
+        elif not is_bot_error:
+            ctx.consecutive_network_failures = 0
+
+        # Add to retry queue
+        self._enqueue_retry(ctx, video_id, start, end, error_msg)
+        return False
+
+    def _should_abort_bot_detection(
+        self,
+        ctx: _DownloadLoopContext,
+        stats: SegmentDownloadStats,
+        idx: int,
+        total: int,
+        downloaded: list,
+        progress_callback,
+    ) -> bool:
+        """Check whether bot-detection count has exceeded the abort threshold.
+
+        US-57-007: Extracted from _handle_download_error for line budget.
+        """
+        if ctx.bot_abort_threshold <= 0:
+            return False
+        if ctx.consecutive_bot_detections < ctx.bot_abort_threshold:
+            return False
+
+        remaining = total - idx
+        stats.error_categories['bot_detection_abort'] = 1
+        stats.error_aggregator.record(
+            f"Bot-detection abort: {ctx.consecutive_bot_detections} "
+            f"consecutive bot errors exceeded threshold "
+            f"({ctx.bot_abort_threshold})",
+            'bot_detection_abort',
+        )
+        logger.error(
+            f"Aborting download loop: {ctx.consecutive_bot_detections} "
+            f"consecutive bot-detection errors (threshold: "
+            f"{ctx.bot_abort_threshold}). YouTube is broadly blocking "
+            f"requests. Skipping {remaining} remaining segment(s). "
+            f"Check cookie configuration."
+        )
+        logger.error(
+            "Suggested actions to resolve bot-detection:\n"
+            "  1. Check/refresh your browser cookies "
+            "(cookies_from_browser or cookies_path in config.yaml)\n"
+            "  2. Enable Mullvad VPN rotation "
+            "(download.mullvad.enabled: true)\n"
+            "  3. Wait 15-30 minutes before retrying "
+            "(YouTube rate limits are temporary)\n"
+            "  4. Run with --resume to continue from this checkpoint"
+        )
+        print(
+            f"  !! Bot-detection abort — {ctx.consecutive_bot_detections} "
+            f"bot errors exceeded threshold ({ctx.bot_abort_threshold}). "
+            f"{remaining} segments skipped.\n"
+            f"     Fix: check cookies, enable VPN, or wait before "
+            f"--resume"
+        )
+        if progress_callback:
+            progress_callback(idx, total, downloaded)
+        return True
+
+    def _enqueue_retry(
+        self,
+        ctx: _DownloadLoopContext,
+        video_id: str,
+        start: float,
+        end: float,
+        error_msg: str,
+    ) -> None:
+        """Add a failed segment to the retry queue.
+
+        US-57-007: Extracted from _handle_download_error for clarity.
+        """
+        if not self.downloader or not self.downloader.retry_queue:
+            return
+        category = classify_error_category(error_msg)
+        _esc_tier = 1
+        if ctx.escalation_mgr:
+            try:
+                _esc_state = ctx.escalation_mgr._get_state(video_id)
+                _esc_tier = int(_esc_state.current_tier)
+            except Exception:
+                pass
+        self.downloader.retry_queue.add(
+            video_id=f"{video_id}_{int(start)}_{int(end)}",
+            keyword='segment',
+            tier='segment',
+            error_message=error_msg,
+            error_category=category,
+            escalation_tier=_esc_tier,
+        )
+        logger.debug(
+            f"Added {video_id} to retry queue "
+            f"(category={category}, escalation_tier={_esc_tier})"
+        )
 
     @staticmethod
     def _make_progress_hook(video_id: str, stats: SegmentDownloadStats) -> callable:

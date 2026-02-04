@@ -1,0 +1,12 @@
+﻿{
+    "mode":  "Interview",
+    "lastStory":  "US-50-005",
+    "crashTime":  "2026-02-04T08:37:16.0794376+08:00",
+    "sessionId":  "2026-02-04_053824",
+    "error":  "Cannot process argument transformation on parameter \u0027Archive\u0027. Cannot convert value \"@{statistics=; version=2026-02-03; stories=System.Object[]}\" to type \"System.Collections.Hashtable\". Error: \"Cannot convert the \"@{statistics=; version=2026-02-03; stories=System.Object[]}\" value of type \"System.Management.Automation.PSCustomObject\" to type \"System.Collections.Hashtable\".\"",
+    "nextStory":  "US-50-006",
+    "iterationCount":  16,
+    "lastSprint":  50,
+    "lastFocusArea":  "rate-limiting",
+    "stackTrace":  "at Mark-AsHardStory, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\lib\\sprint.ps1: line 1270\r\nat Invoke-ClaudeForStory, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\ralph.ps1: line 636\r\nat Start-InterviewQueueLoop, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\lib\\loops.ps1: line 210\r\nat \u003cScriptBlock\u003e, D:\\_Projects\\voiceover-matcher-subtitle\\scripts\\ralph\\ralph.ps1: line 921\r\nat \u003cScriptBlock\u003e, \u003cNo file\u003e: line 1\r\nat \u003cScriptBlock\u003e, \u003cNo file\u003e: line 1"
+}

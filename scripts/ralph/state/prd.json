@@ -70,7 +70,7 @@
                                                        "Unit test verifies that \u0027Requested format is not available\u0027 error on json3 still tries vtt/srt, while \u0027no subtitles\u0027 error on json3 stops immediately",
                                                        "Existing error categorization in src/caption/error_handling.py categorize_caption_error() handles the new error type correctly"
                                                    ],
-                            "notes":  "Implemented US-59-004: Added CaptionFormatUnavailableError (subclass of CaptionFetchError) in exceptions.py. Updated _fetch_subtitle_with_format() to detect 'requested format is not available' in stderr and raise format-specific error. Changed _fetch_subtitle() loop to re-raise CaptionUnavailableError (breaking loop) while continuing on CaptionFormatUnavailableError. Added FORMAT_UNAVAILABLE to CaptionErrorCategory enum with retry budget 0. Updated categorize_caption_error() for both instance-based and string-based detection. 21 tests pass."
+                            "notes":  "Implemented US-59-004: Added CaptionFormatUnavailableError (subclass of CaptionFetchError) in exceptions.py. Updated _fetch_subtitle_with_format() to detect \u0027requested format is not available\u0027 in stderr and raise format-specific error. Changed _fetch_subtitle() loop to re-raise CaptionUnavailableError (breaking loop) while continuing on CaptionFormatUnavailableError. Added FORMAT_UNAVAILABLE to CaptionErrorCategory enum with retry budget 0. Updated categorize_caption_error() for both instance-based and string-based detection. 21 tests pass."
                         },
                         {
                             "id":  "US-59-005",
@@ -140,13 +140,13 @@
                                                        "_fetch_subtitle_with_format() calls record_format_attempt() after each subprocess invocation",
                                                        "Unit test verifies that performance summary accurately reflects the number of subprocess calls and time spent"
                                                    ],
-                            "notes":  "Tier: observability. CaptionMetrics at src/caption_fetcher.py:6710 already tracks format_success_counts and extensive batch statistics, but doesn\u0027t track per-format attempt counts (only successes) or subprocess call timing. The generate_summary_report() method at line ~8047 outputs format stats but not performance/efficiency data. Adding this enables measuring the impact of pre-flight checks and negative caching from US-59-002 and US-59-003. Key files: src/caption_fetcher.py (lines 6710-7000 CaptionMetrics class, lines 8047-8130 generate_summary_report, line 4104 subprocess.run call in _fetch_subtitle_with_format)."
+                            "notes":  "Evidence gate: 4/5 criteria verified (80%). Minimum: 90%."
                         },
                         {
                             "id":  "US-59-010",
                             "title":  "Track retry budget consumption per subtitle format",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "CaptionRetryBudget gains a format_attempts dict tracking attempts per subtitle format (json3, vtt, srt)",
                                                        "record_attempt() accepts an optional format parameter and increments the format-specific counter",
@@ -154,13 +154,13 @@
                                                        "to_dict() and from_dict() serialize/deserialize the format_attempts field for checkpoint persistence",
                                                        "Unit test verifies that per-format tracking correctly accumulates across multiple videos and survives checkpoint round-trip"
                                                    ],
-                            "notes":  "Tier: enhancement. CaptionRetryBudget at src/caption/retry_budget.py:73 tracks global attempts, per-video attempts (attempts_per_video_id at line 147), and error categories (error_counts), but not per-format attempts. This means the budget can\u0027t detect that e.g. json3 is consistently failing across all videos (suggesting a yt-dlp or YouTube API issue with that format). Adding per-format tracking enables smarter format skipping when a format is systematically broken. Key files: src/caption/retry_budget.py (lines 73-350, especially record_attempt at 208, budget_exhausted at 341, to_dict/from_dict)."
+                            "notes":  "All 5 criteria verified. Implementation: format_attempts dict at retry_budget.py:153-159, is_format_exhausted() at :372-391, budget_exhausted(format=) at :403-468, to_dict/from_dict at :974-1072. Tests: TestPerFormatExhaustionInBudgetExhausted and TestCrossVideoAccumulationAndCheckpointRoundTrip in tests/test_format_budget_tracking.py (28 tests, all passing)."
                         },
                         {
                             "id":  "US-59-011",
                             "title":  "Coordinate caption stage with transcription fallback on batch-wide unavailability",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "CaptionStage.run() checks the batch result summary after fetch_captions_batch() completes and logs how many videos had captions vs how many fell back to unavailable",
                                                        "When more than 50% of videos in the batch have no captions, CaptionStage sets a state flag (state.caption_batch_low_yield = True) that downstream stages can read",
@@ -168,7 +168,7 @@
                                                        "DOWNLOAD_SEGMENTS stage reads caption_batch_low_yield and logs a warning that many videos will need transcription after download",
                                                        "Unit test verifies that state.caption_batch_low_yield is set when 6 out of 10 videos return no captions"
                                                    ],
-                            "notes":  "Tier: enhancement. CaptionStage at src/stages/caption_stage.py:138 runs the batch and stores results in state.text_metadata and state.caption_results, but doesn\u0027t summarize batch-wide caption availability for downstream stages. Currently, the pipeline discovers missing captions only during DOWNLOAD_SEGMENTS when it tries to use them. The state object (src/state.py) already supports arbitrary attributes. Checkpoint persistence is handled by src/checkpoint.py. Key files: src/stages/caption_stage.py (line 138 run method), src/state.py, src/stages/download_segments.py, src/checkpoint.py."
+                            "notes":  "Implemented US-59-011. Added caption_batch_low_yield flag calculation in CaptionStage.run() after batch fetch (lines 983-1008). Logs batch summary and sets state.caption_batch_low_yield=True when >50% of videos have no captions. Added flag to checkpoint_data dict (line 1162). Added restore logic in CaptionStage.restore() (lines 1265-1270). Added warning log in DOWNLOAD_SEGMENTS stage (lines 286-293) that reads the flag. Added 5 unit tests in tests/test_stage_caption.py::TestCaptionBatchLowYieldFlag verifying flag calculation, persistence, and restore."
                         },
                         {
                             "id":  "US-59-012",

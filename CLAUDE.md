@@ -394,6 +394,8 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-05 | Fix: Early exit race condition — added 30s periodic re-check of prd.json for `passes:true` regardless of file write detection; catches cases where `passes:true` written in same polling interval as prior write, reducing worst-case stall from 360s to ~45s |
+| 2026-02-05 | Fix: Phantom revalidation — exit code override in `Invoke-ClaudeSubprocess` now re-reads `prd.json` before overriding; prevents false phantom when Claude reverts `passes:true` during grace period, which caused permanent hard-story ban |
 | 2026-02-05 | Fix: PHANTOM false-positive — `Log-StoryVerification` return value leaked to pipeline in timeout/failure paths of `Resolve-ClaudeResult`, making `$resolution.Success` truthy via array member enumeration; suppressed with `$null =` |
 | 2026-02-05 | Fix: Evidence gate diff excludes Ralph metadata dirs (`state/`, `session/`, `archive/`) — `prd.json` (40K chars) consumed entire 8K truncation budget, causing 0% criteria verified on valid implementations |
 | 2026-02-04 | Feat: Replace keyword evidence gate with LLM-based criteria verification — `Confirm-CriteriaEvidence` sends single haiku call instead of per-criterion keyword matching; falls back to `Search-CriterionEvidence` when CLI unavailable |
