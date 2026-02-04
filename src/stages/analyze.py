@@ -139,6 +139,25 @@ class AnalyzeStage(Stage):
             if not data:
                 return False
 
+            # US-51-008: Validate checkpoint data schema before restoring
+            if not isinstance(data, dict):
+                logger.warning(f"ANALYZE restore: expected dict, got {type(data).__name__}")
+                return False
+
+            required_keys = {'keywords', 'segments'}
+            missing = required_keys - set(data.keys())
+            if missing:
+                logger.warning(f"ANALYZE restore: missing required keys: {missing}")
+                return False
+
+            if not isinstance(data['keywords'], list):
+                logger.warning(f"ANALYZE restore: 'keywords' expected list, got {type(data['keywords']).__name__}")
+                return False
+
+            if not isinstance(data['segments'], list):
+                logger.warning(f"ANALYZE restore: 'segments' expected list, got {type(data['segments']).__name__}")
+                return False
+
             # Restore keywords
             state.keywords = data.get('keywords', [])
             state.topic_context = data.get('topic_context', '')

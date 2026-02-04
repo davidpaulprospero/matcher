@@ -1167,6 +1167,15 @@ class CaptionStage(Stage):
                 logger.info("Restored CAPTION: no caption data (caption-first may be disabled)")
                 return True
 
+            # US-51-008: Validate checkpoint data schema before restoring
+            if not isinstance(data, dict):
+                logger.warning(f"CAPTION restore: expected dict, got {type(data).__name__}")
+                return False
+
+            if 'caption_results' in data and not isinstance(data['caption_results'], dict):
+                logger.warning(f"CAPTION restore: 'caption_results' expected dict, got {type(data['caption_results']).__name__}")
+                return False
+
             # Restore caption results to state
             caption_results = data.get('caption_results', {})
             if caption_results:

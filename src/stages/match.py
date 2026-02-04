@@ -242,6 +242,15 @@ class MatchStage(Stage):
                 logger.warning(f"No checkpoint data for {self.name}: checkpoint returned None")
                 return False
 
+            # US-51-008: Validate checkpoint data schema before restoring
+            if not isinstance(data, dict):
+                logger.warning(f"MATCH restore: expected dict, got {type(data).__name__}")
+                return False
+
+            if 'matches' in data and not isinstance(data['matches'], list):
+                logger.warning(f"MATCH restore: 'matches' expected list, got {type(data['matches']).__name__}")
+                return False
+
             # Load matches from checkpoint using shared helper
             matches_data = data.get('matches', [])
             if matches_data:

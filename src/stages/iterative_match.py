@@ -533,6 +533,15 @@ class IterativeMatchStage(Stage):
                 logger.warning(f"No checkpoint data for {self.name}")
                 return False
 
+            # US-51-008: Validate checkpoint data schema before restoring
+            if not isinstance(data, dict):
+                logger.warning(f"ITERATIVE_MATCH restore: expected dict, got {type(data).__name__}")
+                return False
+
+            if 'matches' in data and not isinstance(data['matches'], list):
+                logger.warning(f"ITERATIVE_MATCH restore: 'matches' expected list, got {type(data['matches']).__name__}")
+                return False
+
             # Restore matches using shared helper (same validation as MATCH stage)
             matches_data = data.get('matches', [])
             if matches_data:

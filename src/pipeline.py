@@ -354,11 +354,17 @@ class PipelineOrchestrator:
             # Check if stage can be skipped (checkpoint)
             if self.resume_mode and stage.can_skip(self.state, self.checkpoint):
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
-                if not stage.restore(self.state, self.checkpoint, self.config):
-                    logger.warning(f"Failed to restore {stage_name} from checkpoint")
-                # Validate state attributes after stage restoration
-                self.state.validate_state_attributes()
-                continue
+                if stage.restore(self.state, self.checkpoint, self.config):
+                    # Validate state attributes after stage restoration
+                    self.state.validate_state_attributes()
+                    continue
+                else:
+                    # US-51-008: restore failed - re-run the stage instead of
+                    # proceeding with bad/partial state
+                    logger.warning(
+                        f"Failed to restore {stage_name} from checkpoint, "
+                        f"re-running stage"
+                    )
 
             # Check if this stage should run in parallel with others
             if stage_name in parallel_groups:
