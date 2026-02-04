@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -180,7 +181,41 @@ class PipelineOrchestrator:
                     "but matching stages require embeddings"
                 )
 
+        # US-57-004: Warn if cookies_from_browser is set but browser not on PATH
+        self._warn_cookies_from_browser()
+
         return errors
+
+    def _warn_cookies_from_browser(self) -> None:
+        """Check if cookies_from_browser browser is findable on PATH.
+
+        Emits a WARNING if the configured browser cannot be found.
+        Does NOT block pipeline startup — Tier 3 cookie extraction will
+        simply fail at download time.
+        """
+        download_config = getattr(self.config, 'download', None)
+        if download_config is None:
+            return
+        browser = getattr(download_config, 'cookies_from_browser', '')
+        if not browser:
+            return
+
+        # Map browser config names to common executable names
+        _exe_map = {
+            'firefox': 'firefox',
+            'chrome': 'chrome',
+            'edge': 'msedge',
+            'safari': 'safari',
+            'opera': 'opera',
+            'brave': 'brave',
+        }
+        exe_name = _exe_map.get(browser.lower(), browser)
+        if not shutil.which(exe_name) and not shutil.which(browser):
+            logger.warning(
+                f'cookies_from_browser is set to "{browser}" but it is not '
+                f'found on PATH. Tier 3 cookie extraction will fail. '
+                f'Set download.cookies_path instead or install {browser}.'
+            )
 
     # Fields to snapshot before each stage for rollback on failure
     _SNAPSHOT_FIELDS = ('matches', 'alternatives', 'downloaded_segments', 'output_files')
