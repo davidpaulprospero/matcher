@@ -1,7 +1,7 @@
 ﻿{
-    "sprintNumber":  59,
-    "focusArea":  "caption",
-    "branchName":  "ralph/sprint-59",
+    "sprintNumber":  60,
+    "focusArea":  "transcription",
+    "branchName":  "ralph/sprint-60",
     "projectContext":  {
                            "sourceDir":  "src/",
                            "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,178 +11,178 @@
                        },
     "userStories":  [
                         {
-                            "id":  "US-59-001",
+                            "id":  "US-60-001",
+                            "title":  "Generate sprint stories for transcription focus area",
+                            "priority":  "high",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027caption\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027transcription\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027caption\u0027",
-                                                       "Add stories US-59-002 through US-59-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027transcription\u0027",
+                                                       "Add stories US-60-002 through US-60-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-59-NNN to be unique across sprints",
-                                                       "Mark this story (US-59-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-60-NNN to be unique across sprints",
+                                                       "Mark this story (US-60-001) as passes: true when done"
                                                    ],
                             "passes":  true,
+                            "notes":  "Generated 11 stories (US-60-002 through US-60-012) for transcription focus area based on codebase analysis and user interview notes about caption fallback issues."
+                        },
+                        {
+                            "id":  "US-60-002",
+                            "title":  "Add pre-flight subtitle availability check using --list-subs",
                             "priority":  "high",
-                            "title":  "Generate sprint stories for caption focus area",
-                            "notes":  "Seed story completed. Generated 11 stories (US-59-002 through US-59-012) covering: pre-flight format discovery, negative cache integration, format-specific error differentiation, FormatTimeoutPolicy integration, early termination on no-captions, auto-generated caption fallback, batch pre-flight deduplication, caption metrics dashboard, retry budget per-format tracking, caption stage transcription fallback coordination, and list-subs output caching."
+                            "acceptanceCriteria":  [
+                                                       "Add list_available_subtitles(video_id) method to CaptionFetcher that runs yt-dlp --list-subs --skip-download",
+                                                       "Parse the output to detect available manual and auto-generated subtitle tracks",
+                                                       "Return a structured result with available_manual_languages, available_auto_languages, has_any_subtitles",
+                                                       "Integrate check into fetch_captions() to fail fast when no subtitles exist before trying formats",
+                                                       "Add unit test verifying pre-flight check prevents unnecessary format attempts"
+                                                   ],
+                            "passes":  true,
+                            "notes":  "Tier 1 (core functionality). IMPLEMENTED: Added SubtitleAvailabilityResult dataclass and list_available_subtitles() method to CaptionFetcher. The method wraps list_available_languages() and returns structured result with available_manual_languages, available_auto_languages, has_any_subtitles. Pre-flight check was already integrated into _fetch_subtitle() at line 4246. Added 5 unit tests in tests/test_caption_preflight.py covering all acceptance criteria. All 12 tests pass."
                         },
                         {
-                            "id":  "US-59-002",
-                            "title":  "Wire pre-flight list-subs check into format fallback loop",
+                            "id":  "US-60-003",
+                            "title":  "Remove duplicate json3 format retry in fallback sequence",
                             "priority":  "high",
-                            "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "_fetch_subtitle() calls list_available_languages() before iterating formats when no cached language data exists for the video",
-                                                       "If list_available_languages() returns empty list, _fetch_subtitle() raises CaptionUnavailableError immediately without trying any format",
-                                                       "If list_available_languages() returns languages but none match the requested language, _fetch_subtitle() raises CaptionUnavailableError with descriptive message listing available languages",
-                                                       "Pre-flight check is skipped when caption cache already has a valid entry for the video (avoids redundant yt-dlp call)",
-                                                       "Unit test verifies that a video with no captions triggers exactly 1 yt-dlp invocation (list-subs) instead of 3+ format attempts"
+                                                       "Identify the format fallback sequence in _fetch_subtitle or equivalent method",
+                                                       "Remove the duplicate json3 entry that causes redundant retry after json3 already failed",
+                                                       "Update the fallback sequence to be json3-\u003evtt-\u003esrt (no repeat)",
+                                                       "Add auto-generated caption fallback (--write-auto-sub) as final option when manual captions unavailable",
+                                                       "Add unit test verifying each format is only tried once per fetch attempt"
                                                    ],
-                            "notes":  "All 5 criteria verified. Implementation at src/caption_fetcher.py:4041-4075 (pre-flight check with cache), tests at tests/test_caption_preflight.py (7 tests, all passing)."
+                            "passes":  true,
+                            "notes":  "PRE-IMPLEMENTED: All criteria verified. (1) Format fallback in _fetch_subtitle_formats at line 4430 in caption_fetcher.py. (2) _preferred_formats=[\u0027json3\u0027,\u0027vtt\u0027,\u0027srt\u0027] has no duplicates (line 2361). (3) Sequence verified by TestFormatOnlyTriedOnce tests. (4) Auto-generated fallback in _fetch_subtitle at lines 4407-4419. (5) TestFormatOnlyTriedOnce class in tests/test_caption_format_unavailable.py has 5 tests verifying format uniqueness. All 5 tests pass."
                         },
                         {
-                            "id":  "US-59-003",
-                            "title":  "Integrate negative cache (store_unavailable) into caption fetcher",
+                            "id":  "US-60-004",
+                            "title":  "Cache negative caption results with configurable TTL",
                             "priority":  "high",
-                            "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "When _fetch_subtitle() determines no captions exist (via pre-flight or exhausted formats), it calls cache.store_unavailable(video_id, language) before raising CaptionUnavailableError",
-                                                       "At the start of fetch_captions() or fetch_captions_with_retry(), cache.is_caption_unavailable(video_id, language) is checked and returns early if True",
-                                                       "Negative cache entries use the existing staleness policy (strict/warn/skip modes) from CaptionCache",
-                                                       "Unit test verifies that a second fetch attempt for a known-unavailable video hits the negative cache and makes zero yt-dlp subprocess calls",
-                                                       "Negative cache integration works with both single-video and batch fetch paths"
+                                                       "Verify store_unavailable() in CaptionCache persists negative results correctly",
+                                                       "Add configurable negative_cache_ttl_hours parameter to CaptionFirstConfig (default 1 hour)",
+                                                       "Ensure is_caption_unavailable() respects the TTL and returns False for expired entries",
+                                                       "Integrate negative cache check at start of fetch_captions() to short-circuit fetches for known captionless videos",
+                                                       "Add test verifying negative cache hit prevents fetch attempts and respects TTL expiration"
                                                    ],
-                            "notes":  "All 5 criteria verified. Added caption_cache param to CaptionFetcher.__init__, negative cache check at start of fetch_captions(), store_unavailable() call before raising CaptionUnavailableError. Added store_unavailable() and is_caption_unavailable() methods to CaptionCache in caption_fetcher.py with staleness policy support (strict/warn/skip). Wired caption_cache in caption_stage.py and iterative_match.py. Tests: 10 tests in tests/test_negative_cache.py, all 419 existing caption tests pass."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) store_unavailable() verified at src/caption_fetcher.py:6233-6265 and src/caption/cache.py:511-545. (2) Added negative_cache_ttl_hours to CaptionFirstConfig at src/config/sections/download.py:500-505 (default 1.0 hour). (3) Added is_negative_entry_stale() method and updated is_caption_unavailable() to use the new TTL (both in caption_fetcher.py and src/caption/cache.py). (4) Negative cache check already integrated at start of fetch_captions() at lines 4240-4252. (5) Added 10 new tests in tests/test_negative_cache.py covering TTL config, expiration, and integration. All 20 tests pass."
                         },
                         {
-                            "id":  "US-59-004",
-                            "title":  "Differentiate \u0027format unavailable\u0027 from \u0027no captions at all\u0027 in error handling",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "_fetch_subtitle_with_format() at line 4114 distinguishes between \u0027Requested format is not available\u0027 (format-specific) and \u0027no subtitles\u0027/\u0027subtitles are disabled\u0027 (video-level) in stderr parsing",
-                                                       "When stderr contains \u0027Requested format is not available\u0027, a new CaptionFormatUnavailableError is raised (subclass of CaptionFetchError) instead of generic CaptionFetchError",
-                                                       "When _fetch_subtitle() catches CaptionUnavailableError from any format attempt, it breaks the loop immediately instead of trying remaining formats (no captions means no captions in any format)",
-                                                       "Unit test verifies that \u0027Requested format is not available\u0027 error on json3 still tries vtt/srt, while \u0027no subtitles\u0027 error on json3 stops immediately",
-                                                       "Existing error categorization in src/caption/error_handling.py categorize_caption_error() handles the new error type correctly"
-                                                   ],
-                            "notes":  "Implemented US-59-004: Added CaptionFormatUnavailableError (subclass of CaptionFetchError) in exceptions.py. Updated _fetch_subtitle_with_format() to detect \u0027requested format is not available\u0027 in stderr and raise format-specific error. Changed _fetch_subtitle() loop to re-raise CaptionUnavailableError (breaking loop) while continuing on CaptionFormatUnavailableError. Added FORMAT_UNAVAILABLE to CaptionErrorCategory enum with retry budget 0. Updated categorize_caption_error() for both instance-based and string-based detection. 21 tests pass."
-                        },
-                        {
-                            "id":  "US-59-005",
-                            "title":  "Integrate FormatTimeoutPolicy into _fetch_subtitle_with_format",
+                            "id":  "US-60-005",
+                            "title":  "Consolidate yt-dlp invocations for caption fetching",
                             "priority":  "medium",
-                            "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "_fetch_subtitle_with_format() uses FormatTimeoutPolicy.get_timeout(subtitle_format, fallback_level) instead of the flat self._timeout for the subprocess.run timeout parameter",
-                                                       "fallback_level is derived from the format\u0027s position in the current preference order (0 for first format, 1 for second, etc.)",
-                                                       "CaptionFetcher.__init__() instantiates FormatTimeoutPolicy with configurable base timeouts from caption_first config section",
-                                                       "Unit test verifies that json3 gets a longer timeout (45s) than vtt/srt (25s) as defined in FormatTimeoutPolicy defaults",
-                                                       "Unit test verifies that the third format attempt gets a reduced timeout (0.8x multiplier per fallback_level)"
+                                                       "Refactor caption fetch to use single --list-subs call first, then one targeted download if subtitles exist",
+                                                       "Reduce from 4 sequential subprocess calls to maximum 2 (list + download)",
+                                                       "Use correct yt-dlp subtitle flags (--write-sub, --sub-lang, --skip-download) instead of --format",
+                                                       "Add timing metrics logging showing subprocess call reduction",
+                                                       "Add integration test verifying reduced subprocess invocation count"
                                                    ],
-                            "notes":  "Implemented US-59-005: Integrated FormatTimeoutPolicy into CaptionFetcher. _fetch_subtitle_with_format() now uses format-specific timeouts (json3=45s, srv3=30s, vtt/srt=25s) with 0.8x progressive fallback reduction. Added format_timeouts config field to CaptionFirstConfig for overrides. 12 unit tests in tests/test_format_timeout_policy_integration.py verify defaults, fallback reduction, and CaptionFetcher integration."
-                        },
-                        {
-                            "id":  "US-59-006",
-                            "title":  "Add early termination in batch fetch when all errors are \u0027no captions\u0027",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "fetch_captions_batch() tracks a counter of consecutive CaptionUnavailableError results across the batch",
-                                                       "When 80% or more of the last 10 videos return CaptionUnavailableError, a warning is logged suggesting the source may not have captions",
-                                                       "Early termination does NOT abort the batch — it logs the warning and continues, but switches remaining videos to \u0027pre-flight only\u0027 mode (list-subs check, skip format attempts if no subs found)",
-                                                       "CaptionMetrics records the unavailable_count and unavailable_rate in the batch summary",
-                                                       "Unit test verifies that a batch of 20 videos where first 10 all lack captions triggers the warning and the remaining 10 use pre-flight-only mode"
-                                                   ],
-                            "notes":  "Implemented US-59-006: Added unavailable pattern detection to BatchProcessor. Rolling window of last 10 results tracks CaptionUnavailableError rate. When 80%+ are unavailable, logs warning and switches remaining videos to preflight-only mode (has_captions check before full fetch). CaptionMetrics records unavailable_count and unavailable_rate in summary/to_dict/from_dict. 7 unit tests in TestBatchProcessorUnavailableDetection verify threshold detection, preflight switching, metrics tracking, and serialization. All 34 batch processor tests + 91 related tests pass."
-                        },
-                        {
-                            "id":  "US-59-007",
-                            "title":  "Add auto-generated caption fallback in _fetch_subtitle",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "When _fetch_subtitle() fails to find manual captions (auto_generated=False), it retries with auto_generated=True before raising CaptionUnavailableError",
-                                                       "The auto-generated fallback only triggers when the error is caption unavailability (not rate limits, timeouts, or network errors)",
-                                                       "Auto-generated fallback respects the existing allow_auto_generated config flag (default True) and skips if False",
-                                                       "CaptionResult.is_auto_generated is set to True when auto-generated fallback is used, preserving quality metadata",
-                                                       "Unit test verifies that a video with only auto-generated captions returns a CaptionResult with is_auto_generated=True after manual caption attempt fails"
-                                                   ],
-                            "notes":  "Implemented auto-generated caption fallback in _fetch_subtitle. Extracted format loop into _fetch_subtitle_formats helper. Added _is_auto_fallback_allowed config check. Added allow_auto_generated field to CaptionFirstConfig and config.yaml. 11 unit tests in test_caption_auto_fallback.py. Fixed 2 pre-existing test mocks using wrong error messages."
-                        },
-                        {
-                            "id":  "US-59-008",
-                            "title":  "Deduplicate list-subs calls for same-channel videos in batch fetch",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "fetch_captions_batch() extracts channel ID from video_search_results metadata when available",
-                                                       "A channel_caption_availability dict caches the list-subs result (available languages) per channel_id",
-                                                       "When a video\u0027s channel already has a cached list-subs result showing no captions in the requested language, the video is marked unavailable without making a yt-dlp call",
-                                                       "The channel cache is per-batch (not persisted) and only used as a heuristic — individual videos can still override if the channel cache shows \u0027unavailable\u0027 but video-specific data hasn\u0027t been checked",
-                                                       "Unit test verifies that 5 videos from the same channel result in at most 2 list-subs calls (first video + one retry after unavailable)"
-                                                   ],
-                            "notes":  "Implemented channel-based list-subs deduplication. Added _list_languages_with_channel_cache() method that wraps list_available_languages() with per-channel caching. Cache is thread-safe (uses Lock), per-batch (initialized/cleaned in fetch_captions_batch), and allows one retry per channel. caption_stage.py builds video-channel map from video_search_results. 11 unit tests in test_channel_listsubs_dedup.py. Files: src/caption_fetcher.py, src/stages/caption_stage.py, tests/test_channel_listsubs_dedup.py."
-                        },
-                        {
-                            "id":  "US-59-009",
-                            "title":  "Add caption fetch performance summary to CaptionMetrics",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "CaptionMetrics gains a record_format_attempt(video_id, format_name, success, elapsed_seconds) method that tracks per-format attempt counts and durations",
-                                                       "CaptionMetrics gains a get_performance_summary() method returning a dict with: total_subprocess_calls, total_subprocess_seconds, avg_seconds_per_call, calls_saved_by_preflight, calls_saved_by_negative_cache",
-                                                       "The performance summary is included in the existing generate_summary_report() output at line ~8047",
-                                                       "_fetch_subtitle_with_format() calls record_format_attempt() after each subprocess invocation",
-                                                       "Unit test verifies that performance summary accurately reflects the number of subprocess calls and time spent"
-                                                   ],
-                            "notes":  "Evidence gate: 4/5 criteria verified (80%). Minimum: 90%."
-                        },
-                        {
-                            "id":  "US-59-010",
-                            "title":  "Track retry budget consumption per subtitle format",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "CaptionRetryBudget gains a format_attempts dict tracking attempts per subtitle format (json3, vtt, srt)",
-                                                       "record_attempt() accepts an optional format parameter and increments the format-specific counter",
-                                                       "budget_exhausted() can optionally check per-format exhaustion (e.g., stop trying json3 after N consecutive failures across different videos)",
-                                                       "to_dict() and from_dict() serialize/deserialize the format_attempts field for checkpoint persistence",
-                                                       "Unit test verifies that per-format tracking correctly accumulates across multiple videos and survives checkpoint round-trip"
-                                                   ],
-                            "notes":  "All 5 criteria verified. Implementation: format_attempts dict at retry_budget.py:153-159, is_format_exhausted() at :372-391, budget_exhausted(format=) at :403-468, to_dict/from_dict at :974-1072. Tests: TestPerFormatExhaustionInBudgetExhausted and TestCrossVideoAccumulationAndCheckpointRoundTrip in tests/test_format_budget_tracking.py (28 tests, all passing)."
-                        },
-                        {
-                            "id":  "US-59-011",
-                            "title":  "Coordinate caption stage with transcription fallback on batch-wide unavailability",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "CaptionStage.run() checks the batch result summary after fetch_captions_batch() completes and logs how many videos had captions vs how many fell back to unavailable",
-                                                       "When more than 50% of videos in the batch have no captions, CaptionStage sets a state flag (state.caption_batch_low_yield = True) that downstream stages can read",
-                                                       "The state flag is persisted in checkpoint.json so --resume preserves it",
-                                                       "DOWNLOAD_SEGMENTS stage reads caption_batch_low_yield and logs a warning that many videos will need transcription after download",
-                                                       "Unit test verifies that state.caption_batch_low_yield is set when 6 out of 10 videos return no captions"
-                                                   ],
-                            "notes":  "Implemented US-59-011. Added caption_batch_low_yield flag calculation in CaptionStage.run() after batch fetch (lines 983-1008). Logs batch summary and sets state.caption_batch_low_yield=True when >50% of videos have no captions. Added flag to checkpoint_data dict (line 1162). Added restore logic in CaptionStage.restore() (lines 1265-1270). Added warning log in DOWNLOAD_SEGMENTS stage (lines 286-293) that reads the flag. Added 5 unit tests in tests/test_stage_caption.py::TestCaptionBatchLowYieldFlag verifying flag calculation, persistence, and restore."
-                        },
-                        {
-                            "id":  "US-59-012",
-                            "title":  "Cache list-subs output to avoid redundant pre-flight calls on resume",
-                            "priority":  "low",
                             "passes":  false,
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
+                        },
+                        {
+                            "id":  "US-60-006",
+                            "title":  "Add transcription fallback coordinator for caption stage",
+                            "priority":  "medium",
                             "acceptanceCriteria":  [
-                                                       "list_available_languages() checks a cache before making the yt-dlp --list-subs subprocess call",
-                                                       "The cache key is video_id and the cached value includes the list of AvailableLanguage objects and a timestamp",
-                                                       "Cache entries expire after a configurable TTL (default 1 hour) since subtitle availability can change",
-                                                       "The cache is stored in the existing .cache/ directory structure (not in-memory only) so it persists across --resume runs",
-                                                       "Unit test verifies that calling list_available_languages() twice for the same video within the TTL results in exactly 1 subprocess call"
+                                                       "Add needs_transcription list attribute to CaptionStage to track videos requiring Whisper fallback",
+                                                       "Populate needs_transcription with video IDs that fail caption fetch with \u0027no captions\u0027 status",
+                                                       "Persist needs_transcription in checkpoint for resume support",
+                                                       "Add state.videos_needing_transcription output for downstream TRANSCRIBE stage consumption",
+                                                       "Add test verifying caption failures populate transcription fallback list correctly"
                                                    ],
-                            "notes":  "Tier: optimization. list_available_languages() at src/caption_fetcher.py:2440 always makes a yt-dlp --list-subs call with no caching. If US-59-002 wires this into the fetch path, every video will incur an extra subprocess call (~10s) unless results are cached. The existing CaptionCache at src/caption/cache.py handles TTL-based caching for caption content but not for availability metadata. A lightweight addition to CaptionCache or a separate dict in CaptionFetcher would work. Key files: src/caption_fetcher.py (lines 2440-2483 list_available_languages), src/caption/cache.py (base cache class with TTL support)."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) Added needs_transcription list attribute to CaptionStage.__init__ at line 69. (2) Populated from live_stream_ids, upcoming_stream_ids (when skip), no_caption_ids, and batch fetch failures (unavailable/error/budget_exhausted). (3) Persisted in checkpoint_data['needs_transcription'] at line 1185. (4) Set state.videos_needing_transcription at line 1163, restored in restore() at lines 1293-1299. (5) Added TestCaptionStageTranscriptionFallback test class with 2 tests in tests/test_caption_stage.py. All 8 tests pass."
+                        },
+                        {
+                            "id":  "US-60-007",
+                            "title":  "Add GPU memory pre-check before Whisper model initialization",
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "Add get_available_gpu_memory() function to whisper_client.py that queries CUDA memory",
+                                                       "Add minimum_gpu_memory_mb config option to transcription config (default 2000MB for base model)",
+                                                       "Check available memory before WhisperModel initialization and warn if below threshold",
+                                                       "Automatically downgrade model size if memory is insufficient (e.g., base-\u003etiny)",
+                                                       "Add test verifying memory check and automatic model downgrade behavior"
+                                                   ],
+                            "passes":  false,
+                            "notes":  "Tier 2 (robustness). Target files: src/transcription/whisper_client.py (around lines 32-48, 58-158), src/config/sections/transcription.py. Existing _get_gpu_memory_mb() at lines 32-47 provides foundation."
+                        },
+                        {
+                            "id":  "US-60-008",
+                            "title":  "Add transcript cache warmup from existing project caches",
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Add warmup_from_project(project_dir) method to TranscriptCache that scans project\u0027s .cache/transcriptions",
+                                                       "Import existing transcription cache entries into global cache index",
+                                                       "Avoid duplicate entries by checking source_file in both caches",
+                                                       "Log count of entries imported during warmup",
+                                                       "Add test verifying warmup imports entries correctly without duplicates"
+                                                   ],
+                            "passes":  false,
+                            "notes":  "Tier 3 (optimization). Target file: src/transcription/cache.py (TranscriptCache class). This enables cross-project transcript reuse similar to CaptionCache\u0027s global cache pattern."
+                        },
+                        {
+                            "id":  "US-60-009",
+                            "title":  "Add batch transcription progress metrics",
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Add TranscriptionMetrics dataclass with fields: total_videos, cached_hits, transcribed_count, total_duration_s, avg_speed_ratio",
+                                                       "Update transcribe_videos_parallel() to collect and return metrics",
+                                                       "Calculate real-time speed ratio (audio duration / transcription time)",
+                                                       "Log metrics summary at end of batch transcription",
+                                                       "Add test verifying metrics calculation accuracy"
+                                                   ],
+                            "passes":  false,
+                            "notes":  "Tier 3 (observability). Target file: src/transcription/parallel_processor.py (transcribe_videos_parallel around lines 28-240). Similar pattern to CaptionMetrics in src/caption/metrics.py."
+                        },
+                        {
+                            "id":  "US-60-010",
+                            "title":  "Add configurable audio extraction parallelism",
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Add audio_extraction_workers config option to transcription config section",
+                                                       "Pass configured worker count to transcribe_videos_parallel() max_workers parameter",
+                                                       "Add config validation ensuring workers \u003c= cpu_count()",
+                                                       "Default to min(4, cpu_count()) for sensible default on various machines",
+                                                       "Add test verifying worker count is respected and validated"
+                                                   ],
+                            "passes":  false,
+                            "notes":  "Tier 3 (configuration). Target files: src/transcription/parallel_processor.py (line 33 max_workers parameter), src/config/sections/transcription.py. Currently hardcoded to 4 workers."
+                        },
+                        {
+                            "id":  "US-60-011",
+                            "title":  "Add WhisperModel cleanup hook after transcription batch",
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Add auto_cleanup_after_batch config option to transcription config (default True)",
+                                                       "Call whisper_client.cleanup() automatically at end of transcribe_videos_parallel() when enabled",
+                                                       "Log GPU memory reclaimed after cleanup",
+                                                       "Ensure cleanup is called even if batch processing raises an exception (use finally block)",
+                                                       "Add test verifying cleanup is called and GPU memory is released"
+                                                   ],
+                            "passes":  false,
+                            "notes":  "Tier 3 (resource management). Target files: src/transcription/parallel_processor.py (add finally block around lines 230-240), src/transcription/whisper_client.py (cleanup method at lines 238-279). Frees GPU memory for subsequent stages."
+                        },
+                        {
+                            "id":  "US-60-012",
+                            "title":  "Add transcription retry with exponential backoff for GPU errors",
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Add is_transient_error() function that detects CUDA out-of-memory and ctranslate2 errors",
+                                                       "Implement retry logic in transcribe_video() with configurable max_retries (default 2)",
+                                                       "Use exponential backoff (1s, 2s) between retries for transient errors only",
+                                                       "Clear CUDA cache between retries to help recover from OOM",
+                                                       "Add test verifying retry behavior for transient vs permanent errors"
+                                                   ],
+                            "passes":  false,
+                            "notes":  "Tier 3 (robustness). Target files: src/transcription/parallel_processor.py (transcribe_video around lines 243-372), src/transcription/exceptions.py (is_transient_error already exists). Existing retry logic at lines 305-341 provides foundation but may need CUDA cache clearing between retries."
                         }
                     ]
 }
