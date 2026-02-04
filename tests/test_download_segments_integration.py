@@ -179,8 +179,8 @@ class TestEndToEndFlow:
             )
 
         # Should succeed
-        assert stats['succeeded'] == 1
-        assert stats['failed'] == 0
+        assert stats.succeeded == 1
+        assert stats.failed == 0
         assert len(downloaded) == 1
 
         # Inspect captured ydl_opts
@@ -238,7 +238,7 @@ class TestEndToEndFlow:
                 progress_callback=None,
             )
 
-        assert stats['succeeded'] == 1
+        assert stats.succeeded == 1
         opts = captured_opts[0]
 
         # After 2 failures, should have escalated to Tier 2 with extractor_args
@@ -299,13 +299,13 @@ class TestBotDetectionEscalationThenSuccess:
             )
 
         # 3 failed + 1 succeeded
-        assert stats['failed'] == 3
-        assert stats['succeeded'] == 1
-        assert stats['attempted'] == 4
+        assert stats.failed == 3
+        assert stats.succeeded == 1
+        assert stats.attempted == 4
         assert len(downloaded) == 1
 
         # Verify error categories tracked correctly
-        assert stats['error_categories'].get('bot_detection', 0) == 3
+        assert stats.error_categories.get('bot_detection', 0) == 3
 
         # The 4th call's opts should show escalation was applied
         # (escalation tier should have progressed from failures)
@@ -350,13 +350,13 @@ class TestNetworkFailureAbort:
             )
 
         # Should abort after exactly 3 consecutive network failures
-        assert stats['attempted'] == 3
-        assert stats['failed'] == 3
-        assert stats['succeeded'] == 0
+        assert stats.attempted == 3
+        assert stats.failed == 3
+        assert stats.succeeded == 0
         assert len(downloaded) == 0
 
         # Error categories should all be 'network'
-        assert stats['error_categories'].get('network', 0) == 3
+        assert stats.error_categories.get('network', 0) == 3
 
     def test_network_counter_resets_on_non_network_error(self, tmp_path):
         """A non-network error between DNS failures resets the counter,
@@ -397,8 +397,8 @@ class TestNetworkFailureAbort:
             )
 
         # All 6 segments attempted (no abort)
-        assert stats['attempted'] == 6
-        assert stats['failed'] == 6
+        assert stats.attempted == 6
+        assert stats.failed == 6
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +497,7 @@ class TestCheckpointSaveWithSegmentPaths:
                 progress_callback=_progress,
             )
 
-        assert stats['succeeded'] == 3
+        assert stats.succeeded == 3
         assert len(downloaded) == 3
 
         # Should have one progress call per segment
@@ -550,9 +550,9 @@ class TestCheckpointSaveWithSegmentPaths:
             )
 
         # 1 success + 3 network failures (abort after 3 consecutive)
-        assert stats['succeeded'] == 1
-        assert stats['failed'] == 3
-        assert stats['attempted'] == 4
+        assert stats.succeeded == 1
+        assert stats.failed == 3
+        assert stats.attempted == 4
         assert len(downloaded) == 1
 
         # Last progress call should show 1 downloaded segment

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.stages.download_segments import DownloadVideoSegmentsStage
+from src.stages.download_segments import DownloadVideoSegmentsStage, SegmentDownloadStats
 
 
 pytestmark = [pytest.mark.fast, pytest.mark.unit]
@@ -34,18 +34,8 @@ def stage():
 
 @pytest.fixture
 def stats():
-    """Create a fresh stats dict like _download_all_segments uses."""
-    return {
-        'succeeded': 0,
-        'failed': 0,
-        'cached': 0,
-        'attempted': 0,
-        'total': 5,
-        'retry_count': 0,
-        'segment_durations': [],
-        'total_bytes': 0,
-        'error_categories': {},
-    }
+    """Create a fresh SegmentDownloadStats like _download_segments uses."""
+    return SegmentDownloadStats(total=5)
 
 
 # ============================================================================
@@ -60,14 +50,15 @@ class TestProgressHookCreation:
         assert callable(hook)
 
     def test_initializes_progress_hooks_data_in_stats(self, stage, stats):
-        """Hook creation adds progress_hooks_data to stats."""
-        assert 'progress_hooks_data' not in stats
-        stage._make_progress_hook('abc123', stats)
-        assert 'progress_hooks_data' in stats
-        data = stats['progress_hooks_data']
+        """Hook creation uses progress_hooks_data from stats dataclass."""
+        # progress_hooks_data is initialized by the dataclass with zeroed values
+        data = stats.progress_hooks_data
         assert data['total_downloaded_bytes'] == 0
         assert data['segments_with_progress'] == 0
         assert data['segments_finished'] == 0
+        # Creating a hook references the same dict
+        stage._make_progress_hook('abc123', stats)
+        assert stats.progress_hooks_data is data
 
     def test_multiple_hooks_share_same_progress_data(self, stage, stats):
         """Hooks for different videos accumulate into same stats dict."""
@@ -78,8 +69,8 @@ class TestProgressHookCreation:
         hook1({'status': 'finished', 'total_bytes': 1000, 'elapsed': 5.0})
         hook2({'status': 'finished', 'total_bytes': 2000, 'elapsed': 3.0})
 
-        assert stats['progress_hooks_data']['total_downloaded_bytes'] == 3000
-        assert stats['progress_hooks_data']['segments_finished'] == 2
+        assert stats.progress_hooks_data['total_downloaded_bytes'] == 3000
+        assert stats.progress_hooks_data['segments_finished'] == 2
 
 
 # ============================================================================
@@ -111,7 +102,7 @@ class TestProgressHookStatusValues:
             'elapsed': 2.5,
             'filename': '/tmp/abc123.mp4',
         })
-        assert stats['progress_hooks_data']['segments_finished'] == 1
+        assert stats.progress_hooks_data['segments_finished'] == 1
 
     def test_error_status_accepted(self, stage, stats):
         """Hook handles 'error' status without crashing."""
@@ -268,15 +259,15 @@ class TestProgressHookFinished:
         hook({'status': 'finished', 'total_bytes': 5000, 'elapsed': 2.0})
         hook({'status': 'finished', 'total_bytes': 3000, 'elapsed': 1.5})
 
-        assert stats['progress_hooks_data']['total_downloaded_bytes'] == 8000
-        assert stats['progress_hooks_data']['segments_finished'] == 2
+        assert stats.progress_hooks_data['total_downloaded_bytes'] == 8000
+        assert stats.progress_hooks_data['segments_finished'] == 2
 
     def test_finished_uses_downloaded_bytes_fallback(self, stage, stats):
         """Finished status falls back to downloaded_bytes when total_bytes missing."""
         hook = stage._make_progress_hook('abc123', stats)
         hook({'status': 'finished', 'downloaded_bytes': 7000, 'elapsed': 3.0})
 
-        assert stats['progress_hooks_data']['total_downloaded_bytes'] == 7000
+        assert stats.progress_hooks_data['total_downloaded_bytes'] == 7000
 
 
 # ============================================================================
@@ -298,7 +289,7 @@ class TestProgressHookStageMetrics:
         # vid2: fast download, just finish
         hook2({'status': 'finished', 'total_bytes': 4096, 'elapsed': 5.0})
 
-        data = stats['progress_hooks_data']
+        data = stats.progress_hooks_data
         assert data['total_downloaded_bytes'] == 2048 + 4096
         assert data['segments_finished'] == 2
         assert data['segments_with_progress'] >= 1  # vid1 had progress log
@@ -310,7 +301,7 @@ class TestProgressHookStageMetrics:
         hook({'status': 'downloading'})
         hook({'status': 'finished'})
         # No crash
-        assert stats['progress_hooks_data']['segments_finished'] == 1
+        assert stats.progress_hooks_data['segments_finished'] == 1
 
     def test_handles_none_values_gracefully(self, stage, stats):
         """Hook handles None values for bytes/speed without crashing."""
@@ -336,6 +327,6 @@ class TestProgressHookInYdlOpts:
         """_make_progress_hook is accessible as a static method on the stage class."""
         assert hasattr(DownloadVideoSegmentsStage, '_make_progress_hook')
         # It's a staticmethod, so callable on the class
-        stats = {}
+        stats = SegmentDownloadStats()
         hook = DownloadVideoSegmentsStage._make_progress_hook('test', stats)
         assert callable(hook)

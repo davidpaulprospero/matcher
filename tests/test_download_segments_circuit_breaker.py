@@ -182,7 +182,7 @@ class TestSetCircuitBreakerWiring:
             buffer_seconds=5.0,
             progress_callback=None,
         )
-        assert stats['succeeded'] == 0
+        assert stats.succeeded == 0
 
 
 # ---------------------------------------------------------------------------
@@ -311,8 +311,8 @@ class TestCircuitBreakerSkipToRetryQueue:
         )
 
         # Segment should be skipped (failed) not downloaded
-        assert stats['failed'] == 1
-        assert stats['succeeded'] == 0
+        assert stats.failed == 1
+        assert stats.succeeded == 0
         assert len(downloaded) == 0
 
         # Verify it was added to retry queue
@@ -379,7 +379,7 @@ class TestCircuitBreakerSkipToRetryQueue:
             )
 
         # Download was attempted (not skipped by circuit breaker)
-        assert stats['attempted'] == 1
+        assert stats.attempted == 1
         # yt_dlp.YoutubeDL was called (download was attempted, not skipped)
         mock_yt_dlp_cls.assert_called()
 
@@ -455,7 +455,7 @@ class TestCheckAndWaitCalledWhenOpen:
         # check_and_wait was called (paused before download)
         mock_wait.assert_called_once()
         # Download was still attempted after the wait
-        assert stats['attempted'] == 1
+        assert stats.attempted == 1
         mock_yt_dlp_cls.assert_called()
 
     @pytest.mark.fast
@@ -571,7 +571,7 @@ class TestCircuitBreakerCheckpointMetrics:
         checkpoint_data = {
             'segment_count': len(downloaded),
             'total_matches': 0,
-            'retry_count': stats.get('retry_count', 0),
+            'retry_count': stats.retry_count,
         }
 
         # US-50-008: Include circuit breaker metrics (mirroring run() logic)

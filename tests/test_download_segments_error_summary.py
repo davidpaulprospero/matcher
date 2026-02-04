@@ -16,6 +16,7 @@ import pytest
 
 from src.stages.download_segments import (
     DownloadVideoSegmentsStage,
+    SegmentDownloadStats,
     classify_error_category,
 )
 from src.stages import StageMetrics
@@ -97,17 +98,17 @@ class TestErrorSummary:
     def test_error_summary_logs_category_counts(self, caplog):
         """Error summary includes per-category counts in log output."""
         stage = DownloadVideoSegmentsStage()
-        stats = {
-            'total': 10,
-            'succeeded': 5,
-            'failed': 4,
-            'cached': 1,
-            'attempted': 10,
-            'error_categories': {
+        stats = SegmentDownloadStats(
+            total=10,
+            succeeded=5,
+            failed=4,
+            cached=1,
+            attempted=10,
+            error_categories={
                 'bot_detection': 3,
                 'video_specific': 1,
             },
-        }
+        )
         with caplog.at_level(logging.INFO, logger='src.stages.download_segments'):
             stage._log_error_summary(stats)
 
@@ -118,14 +119,13 @@ class TestErrorSummary:
     def test_no_summary_when_zero_failures(self, caplog):
         """No error summary logged when there are zero failures."""
         stage = DownloadVideoSegmentsStage()
-        stats = {
-            'total': 5,
-            'succeeded': 4,
-            'failed': 0,
-            'cached': 1,
-            'attempted': 5,
-            'error_categories': {},
-        }
+        stats = SegmentDownloadStats(
+            total=5,
+            succeeded=4,
+            failed=0,
+            cached=1,
+            attempted=5,
+        )
         with caplog.at_level(logging.INFO, logger='src.stages.download_segments'):
             stage._log_error_summary(stats)
 
@@ -135,17 +135,17 @@ class TestErrorSummary:
     def test_bot_detection_guidance_when_majority(self, caplog):
         """Log cookie guidance when >50% of failures are bot-detection."""
         stage = DownloadVideoSegmentsStage()
-        stats = {
-            'total': 10,
-            'succeeded': 3,
-            'failed': 7,
-            'cached': 0,
-            'attempted': 10,
-            'error_categories': {
+        stats = SegmentDownloadStats(
+            total=10,
+            succeeded=3,
+            failed=7,
+            cached=0,
+            attempted=10,
+            error_categories={
                 'bot_detection': 5,  # 5/7 = 71% > 50%
                 'video_specific': 2,
             },
-        }
+        )
         with caplog.at_level(logging.WARNING, logger='src.stages.download_segments'):
             stage._log_error_summary(stats)
 
@@ -161,18 +161,18 @@ class TestErrorSummary:
     def test_no_bot_guidance_when_minority(self, caplog):
         """No cookie guidance when bot-detection is <=50% of failures."""
         stage = DownloadVideoSegmentsStage()
-        stats = {
-            'total': 10,
-            'succeeded': 4,
-            'failed': 6,
-            'cached': 0,
-            'attempted': 10,
-            'error_categories': {
+        stats = SegmentDownloadStats(
+            total=10,
+            succeeded=4,
+            failed=6,
+            cached=0,
+            attempted=10,
+            error_categories={
                 'bot_detection': 2,  # 2/6 = 33% < 50%
                 'network': 3,
                 'video_specific': 1,
             },
-        }
+        )
         with caplog.at_level(logging.WARNING, logger='src.stages.download_segments'):
             stage._log_error_summary(stats)
 
@@ -198,8 +198,8 @@ class TestErrorSummary:
             with patch.object(Path, 'exists', return_value=False):
                 _, stats = stage._download_segments(segments, output_dir, 2.0, None)
 
-        assert stats['error_categories'].get('bot_detection', 0) == 3
-        assert stats['failed'] == 3
+        assert stats.error_categories.get('bot_detection', 0) == 3
+        assert stats.failed == 3
 
 
 # ---------------------------------------------------------------------------

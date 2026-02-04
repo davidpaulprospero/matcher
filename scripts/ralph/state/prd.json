@@ -154,7 +154,7 @@
                             "id":  "US-52-010",
                             "title":  "Consolidate segment download stats tracking into a SegmentDownloadStats dataclass",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Create SegmentDownloadStats dataclass with fields: succeeded, failed, cached, attempted, total, retry_count, segment_durations, total_bytes, error_categories, error_aggregator",
                                                        "Replace the inline stats dict in _download_segments() with the dataclass instance",
