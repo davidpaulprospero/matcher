@@ -1194,7 +1194,7 @@ function Save-HardStoriesArchive {
         Archive object to save
     #>
     param(
-        [Parameter(Mandatory)][hashtable]$Archive
+        [Parameter(Mandatory)]$Archive
     )
 
     $archiveFile = if ($script:Paths) { $script:Paths.HardStoriesArchive } else { Join-Path $script:RalphDir "state\hard_stories_archive.json" }
