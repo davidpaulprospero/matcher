@@ -19,8 +19,30 @@ from ..topic_extraction import compute_topic_penalty
 
 if TYPE_CHECKING:
     from ..config import Config
+    from ..config.sections.matching import MatchingScoringConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _get_scoring_config(config=None) -> Optional['MatchingScoringConfig']:
+    """Get the scoring config from a config object, or None if unavailable.
+
+    Returns None if the config doesn't have a proper scoring config.
+    Uses duck-typing check to avoid returning Mock auto-generated attributes.
+    """
+    if config is None:
+        return None
+    mc = getattr(config, 'matching', None)
+    if mc is None:
+        return None
+    sc = getattr(mc, 'scoring', None)
+    if sc is None:
+        return None
+    # Duck-type check: real MatchingScoringConfig has confidence_floor as a float
+    cf = getattr(sc, 'confidence_floor', None)
+    if not isinstance(cf, (int, float)):
+        return None
+    return sc
 
 
 def calculate_adaptive_threshold(
@@ -619,7 +641,8 @@ def _is_jarring_context_switch(
 def apply_entity_match_boost(
     confidence: float,
     vo_segment: SRTSegment,
-    video_segment: SRTSegment
+    video_segment: SRTSegment,
+    config=None
 ) -> Tuple[float, str, List[str]]:
     """
     Apply confidence boost when video contains same named entities as voiceover.
@@ -659,14 +682,24 @@ def apply_entity_match_boost(
     if not matching:
         return confidence, "", []
 
-    # Graduated boost based on match count
+    # Graduated boost based on match count (configurable via scoring config)
+    sc = _get_scoring_config(config)
+    boosts = getattr(sc, 'entity_match_boosts', None) if sc else None
     match_count = len(matching)
-    if match_count >= 3:
-        boost = 0.12
-    elif match_count == 2:
-        boost = 0.08
+    if boosts:
+        if match_count >= 3:
+            boost = boosts.get('3+', 0.12)
+        elif match_count == 2:
+            boost = boosts.get('2', 0.08)
+        else:
+            boost = boosts.get('1', 0.05)
     else:
-        boost = 0.05
+        if match_count >= 3:
+            boost = 0.12
+        elif match_count == 2:
+            boost = 0.08
+        else:
+            boost = 0.05
 
     # Apply boost (cap at 1.0)
     boosted = min(1.0, confidence + boost)
@@ -800,20 +833,25 @@ def calculate_transcript_quality(
     text = transcript_text.strip()
     reasons = []
 
+    # Read configurable thresholds (fall back to module constants)
+    sc = _get_scoring_config(config)
+    min_words_good = getattr(sc, 'transcript_min_words_good', TRANSCRIPT_MIN_WORD_COUNT_GOOD) if sc else TRANSCRIPT_MIN_WORD_COUNT_GOOD
+    min_words_medium = getattr(sc, 'transcript_min_words_medium', TRANSCRIPT_MIN_WORD_COUNT_MEDIUM) if sc else TRANSCRIPT_MIN_WORD_COUNT_MEDIUM
+
     # Factor 1: Word count scoring (0.0 - 0.4)
     # More words generally means better quality transcription
     words = text.split()
     word_count = len(words)
 
-    if word_count >= TRANSCRIPT_MIN_WORD_COUNT_GOOD:
+    if word_count >= min_words_good:
         word_score = 0.4
-    elif word_count >= TRANSCRIPT_MIN_WORD_COUNT_MEDIUM:
-        # Linear interpolation between 20 and 50 words
-        word_score = 0.2 + 0.2 * ((word_count - TRANSCRIPT_MIN_WORD_COUNT_MEDIUM) /
-                                   (TRANSCRIPT_MIN_WORD_COUNT_GOOD - TRANSCRIPT_MIN_WORD_COUNT_MEDIUM))
+    elif word_count >= min_words_medium:
+        # Linear interpolation between medium and good word counts
+        word_score = 0.2 + 0.2 * ((word_count - min_words_medium) /
+                                   (min_words_good - min_words_medium))
     else:
-        # Linear interpolation between 0 and 20 words
-        word_score = 0.2 * (word_count / TRANSCRIPT_MIN_WORD_COUNT_MEDIUM) if word_count > 0 else 0.0
+        # Linear interpolation between 0 and medium word count
+        word_score = 0.2 * (word_count / min_words_medium) if word_count > 0 else 0.0
 
     reasons.append(f"words:{word_count}")
 
@@ -839,10 +877,12 @@ def calculate_transcript_quality(
     # Clamp to valid range
     quality_score = max(0.0, min(1.0, quality_score))
 
-    # Determine quality tier
-    if quality_score >= TRANSCRIPT_QUALITY_HIGH_THRESHOLD:
+    # Determine quality tier (configurable thresholds)
+    high_threshold = getattr(sc, 'transcript_quality_high', TRANSCRIPT_QUALITY_HIGH_THRESHOLD) if sc else TRANSCRIPT_QUALITY_HIGH_THRESHOLD
+    medium_threshold = getattr(sc, 'transcript_quality_medium', TRANSCRIPT_QUALITY_MEDIUM_THRESHOLD) if sc else TRANSCRIPT_QUALITY_MEDIUM_THRESHOLD
+    if quality_score >= high_threshold:
         quality_tier = "high"
-    elif quality_score >= TRANSCRIPT_QUALITY_MEDIUM_THRESHOLD:
+    elif quality_score >= medium_threshold:
         quality_tier = "medium"
     else:
         quality_tier = "low"
@@ -1047,7 +1087,8 @@ def compute_multimodal_score(
     entity_match_score: float,
     visual_description_score: float,
     weights: dict = None,
-    multimodal_enabled: bool = True
+    multimodal_enabled: bool = True,
+    scoring_config=None
 ) -> Tuple[float, str, dict]:
     """
     Compute weighted multi-modal similarity score.
@@ -1084,12 +1125,19 @@ def compute_multimodal_score(
         }
 
     # Use default weights if not provided, validate and normalize
+    # scoring_config.multimodal_default_weights overrides the module-level constant
+    default_weights = DEFAULT_MULTIMODAL_WEIGHTS
+    if scoring_config is not None:
+        cfg_defaults = getattr(scoring_config, 'multimodal_default_weights', None)
+        if isinstance(cfg_defaults, dict):
+            default_weights = cfg_defaults
+
     if weights:
         w = validate_multimodal_weights(weights)
         if w is None:
-            w = dict(DEFAULT_MULTIMODAL_WEIGHTS)
+            w = dict(default_weights)
     else:
-        w = dict(DEFAULT_MULTIMODAL_WEIGHTS)
+        w = dict(default_weights)
 
     # Final safety check: all-zero weights after validation
     weight_sum = sum(w.values())
@@ -1166,7 +1214,8 @@ def compute_multimodal_score(
 
 def calculate_keyword_overlap_score(
     vo_keywords: List[str],
-    video_keywords: List[str]
+    video_keywords: List[str],
+    scoring_config=None
 ) -> Tuple[float, List[str]]:
     """
     Calculate normalized keyword overlap score between voiceover and video.
@@ -1174,6 +1223,7 @@ def calculate_keyword_overlap_score(
     Args:
         vo_keywords: Keywords from voiceover segment
         video_keywords: Keywords from video segment
+        scoring_config: Optional MatchingScoringConfig for configurable thresholds
 
     Returns:
         Tuple of (overlap_score, matched_keywords)
@@ -1194,18 +1244,31 @@ def calculate_keyword_overlap_score(
         return 0.0, []
 
     # Normalize score: more matches = higher score, with diminishing returns
-    # 1 match = 0.3, 2 matches = 0.5, 3 matches = 0.7, 4+ matches = 0.85-1.0
+    # Configurable thresholds via scoring_config.keyword_overlap_thresholds
     match_count = len(matched)
-    if match_count >= 5:
-        score = 1.0
-    elif match_count >= 4:
-        score = 0.9
-    elif match_count >= 3:
-        score = 0.75
-    elif match_count >= 2:
-        score = 0.55
+    thresholds = getattr(scoring_config, 'keyword_overlap_thresholds', None) if scoring_config else None
+    if thresholds:
+        if match_count >= 5:
+            score = thresholds.get('5+', 1.0)
+        elif match_count >= 4:
+            score = thresholds.get('4', 0.9)
+        elif match_count >= 3:
+            score = thresholds.get('3', 0.75)
+        elif match_count >= 2:
+            score = thresholds.get('2', 0.55)
+        else:
+            score = thresholds.get('1', 0.35)
     else:
-        score = 0.35
+        if match_count >= 5:
+            score = 1.0
+        elif match_count >= 4:
+            score = 0.9
+        elif match_count >= 3:
+            score = 0.75
+        elif match_count >= 2:
+            score = 0.55
+        else:
+            score = 0.35
 
     # Get original-case matched keywords
     matched_original = [k for k in vo_keywords if k.lower().strip() in matched]
@@ -1411,7 +1474,8 @@ SEMANTIC_COHERENCE_ABRUPT_PENALTY = 0.05  # Penalty for abrupt topic flow
 def compute_semantic_coherence(
     current_embedding: Any,
     previous_embedding: Any,
-    semantic_coherence_enabled: bool = True
+    semantic_coherence_enabled: bool = True,
+    scoring_config=None
 ) -> Tuple[float, str]:
     """
     Compute semantic coherence adjustment based on topic flow between adjacent matches.
@@ -1457,13 +1521,19 @@ def compute_semantic_coherence(
         logger.warning(f"Failed to compute cosine similarity: {e}")
         return 0.0, f"similarity_error:{str(e)}"
 
+    # Read configurable thresholds (fall back to module constants)
+    smooth_threshold = getattr(scoring_config, 'semantic_coherence_smooth_threshold', SEMANTIC_COHERENCE_SMOOTH_THRESHOLD) if scoring_config else SEMANTIC_COHERENCE_SMOOTH_THRESHOLD
+    abrupt_threshold = getattr(scoring_config, 'semantic_coherence_abrupt_threshold', SEMANTIC_COHERENCE_ABRUPT_THRESHOLD) if scoring_config else SEMANTIC_COHERENCE_ABRUPT_THRESHOLD
+    smooth_boost = getattr(scoring_config, 'semantic_coherence_smooth_boost', SEMANTIC_COHERENCE_SMOOTH_BOOST) if scoring_config else SEMANTIC_COHERENCE_SMOOTH_BOOST
+    abrupt_penalty = getattr(scoring_config, 'semantic_coherence_abrupt_penalty', SEMANTIC_COHERENCE_ABRUPT_PENALTY) if scoring_config else SEMANTIC_COHERENCE_ABRUPT_PENALTY
+
     # Apply adjustments based on similarity thresholds
-    if similarity > SEMANTIC_COHERENCE_SMOOTH_THRESHOLD:
-        adjustment = SEMANTIC_COHERENCE_SMOOTH_BOOST
-        reason = f"smooth_topic_flow(sim={similarity:.3f}):+{SEMANTIC_COHERENCE_SMOOTH_BOOST}"
-    elif similarity < SEMANTIC_COHERENCE_ABRUPT_THRESHOLD:
-        adjustment = -SEMANTIC_COHERENCE_ABRUPT_PENALTY
-        reason = f"abrupt_topic_flow(sim={similarity:.3f}):-{SEMANTIC_COHERENCE_ABRUPT_PENALTY}"
+    if similarity > smooth_threshold:
+        adjustment = smooth_boost
+        reason = f"smooth_topic_flow(sim={similarity:.3f}):+{smooth_boost}"
+    elif similarity < abrupt_threshold:
+        adjustment = -abrupt_penalty
+        reason = f"abrupt_topic_flow(sim={similarity:.3f}):-{abrupt_penalty}"
     else:
         adjustment = 0.0
         reason = f"neutral_topic_flow(sim={similarity:.3f})"
@@ -1509,6 +1579,12 @@ class MatchScoring:
         """
         self.config = config
         self._mc = config.matching if config else None
+        # Get scoring config with duck-type validation
+        _sc_candidate = getattr(self._mc, 'scoring', None) if self._mc else None
+        if _sc_candidate is not None and isinstance(getattr(_sc_candidate, 'confidence_floor', None), (int, float)):
+            self._sc = _sc_candidate
+        else:
+            self._sc = None
 
     def calculate_confidence(
         self,
@@ -1538,7 +1614,8 @@ class MatchScoring:
             entity_match_score=entity_score,
             visual_description_score=visual_score,
             weights=weights,
-            multimodal_enabled=multimodal_enabled
+            multimodal_enabled=multimodal_enabled,
+            scoring_config=self._sc
         )
 
     def normalize_score(
@@ -1564,7 +1641,8 @@ class MatchScoring:
             confidence=confidence,
             pool_size=pool_size,
             candidates=candidates,
-            pool_normalization_enabled=pool_norm_enabled
+            pool_normalization_enabled=pool_norm_enabled,
+            scoring_config=self._sc
         )
 
     def apply_boost(
@@ -1643,6 +1721,16 @@ class MatchScoring:
     # Threshold below which over-penalized matches are logged as warnings
     LOW_CONFIDENCE_WARNING_THRESHOLD = 0.15
 
+    @property
+    def confidence_floor(self) -> float:
+        """Confidence floor from config or class default."""
+        return getattr(self._sc, 'confidence_floor', self.CONFIDENCE_FLOOR) if self._sc else self.CONFIDENCE_FLOOR
+
+    @property
+    def low_confidence_warning_threshold(self) -> float:
+        """Low confidence warning threshold from config or class default."""
+        return getattr(self._sc, 'low_confidence_warning_threshold', self.LOW_CONFIDENCE_WARNING_THRESHOLD) if self._sc else self.LOW_CONFIDENCE_WARNING_THRESHOLD
+
     def apply_all_adjustments(
         self,
         confidence: float,
@@ -1713,12 +1801,14 @@ class MatchScoring:
 
         # 6. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
-        if confidence < self.CONFIDENCE_FLOOR and original_confidence > self.CONFIDENCE_FLOOR:
-            confidence = self.CONFIDENCE_FLOOR
-            reasons.append(f"confidence floor applied: {self.CONFIDENCE_FLOOR}")
+        floor = self.confidence_floor
+        if confidence < floor and original_confidence > floor:
+            confidence = floor
+            reasons.append(f"confidence floor applied: {floor}")
 
         # 7. Log warning for over-penalized matches (US-46-004)
-        if confidence < self.LOW_CONFIDENCE_WARNING_THRESHOLD and original_confidence >= self.LOW_CONFIDENCE_WARNING_THRESHOLD:
+        warning_threshold = self.low_confidence_warning_threshold
+        if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
                 f"Over-penalized match: {original_confidence:.2f} -> {confidence:.2f} "
                 f"(video={getattr(video_segment, 'source_file', 'unknown')}, "
@@ -1780,7 +1870,7 @@ class MatchScoring:
         Returns:
             Tuple of (overlap_score, matched_keywords)
         """
-        return calculate_keyword_overlap_score(vo_keywords, video_keywords)
+        return calculate_keyword_overlap_score(vo_keywords, video_keywords, scoring_config=self._sc)
 
     def calculate_entity_match(
         self,
@@ -1804,7 +1894,8 @@ def normalize_confidence_by_pool(
     confidence: float,
     pool_size: int,
     candidates: Optional[List[Tuple[SRTSegment, float]]] = None,
-    pool_normalization_enabled: bool = True
+    pool_normalization_enabled: bool = True,
+    scoring_config=None
 ) -> Tuple[float, str]:
     """
     Normalize confidence score based on candidate pool size.
@@ -1846,14 +1937,21 @@ def normalize_confidence_by_pool(
     reasons = []
     adjustment = 0.0
 
-    # Calculate base normalization factor: sqrt(pool_size / 50)
+    # Read configurable pool normalization constants (fall back to module constants)
+    ref_size = getattr(scoring_config, 'pool_normalization_reference_size', POOL_NORMALIZATION_REFERENCE_SIZE) if scoring_config else POOL_NORMALIZATION_REFERENCE_SIZE
+    min_factor = getattr(scoring_config, 'pool_normalization_min_factor', POOL_NORMALIZATION_MIN_FACTOR) if scoring_config else POOL_NORMALIZATION_MIN_FACTOR
+    max_factor = getattr(scoring_config, 'pool_normalization_max_factor', POOL_NORMALIZATION_MAX_FACTOR) if scoring_config else POOL_NORMALIZATION_MAX_FACTOR
+    small_threshold = getattr(scoring_config, 'pool_small_threshold', POOL_SMALL_THRESHOLD) if scoring_config else POOL_SMALL_THRESHOLD
+    large_threshold = getattr(scoring_config, 'pool_large_threshold', POOL_LARGE_THRESHOLD) if scoring_config else POOL_LARGE_THRESHOLD
+    tight_margin = getattr(scoring_config, 'pool_tight_margin_threshold', POOL_TIGHT_MARGIN_THRESHOLD) if scoring_config else POOL_TIGHT_MARGIN_THRESHOLD
+
+    # Calculate base normalization factor: sqrt(pool_size / reference_size)
     # Small pools: factor < 1.0 (confidence preserved/boosted)
     # Large pools: factor > 1.0 (confidence reduced)
-    raw_factor = (pool_size / POOL_NORMALIZATION_REFERENCE_SIZE) ** 0.5
+    raw_factor = (pool_size / ref_size) ** 0.5
 
-    # Clamp factor to [0.8, 1.2] range
-    clamped_factor = max(POOL_NORMALIZATION_MIN_FACTOR,
-                         min(POOL_NORMALIZATION_MAX_FACTOR, raw_factor))
+    # Clamp factor to [min_factor, max_factor] range
+    clamped_factor = max(min_factor, min(max_factor, raw_factor))
 
     # Determine margin characteristics if candidates provided
     top_margin = None
@@ -1863,7 +1961,7 @@ def normalize_confidence_by_pool(
         top_margin = top_score - second_score
 
     # Apply pool-specific adjustments
-    if pool_size < POOL_SMALL_THRESHOLD:
+    if pool_size < small_threshold:
         # Small pool: boost confidence if there's a clear winner
         if top_margin is not None and top_margin >= 0.1:
             # Clear winner in small pool - this is a strong signal
@@ -1872,9 +1970,9 @@ def normalize_confidence_by_pool(
         else:
             reasons.append(f"small_pool({pool_size}):factor={clamped_factor:.2f}")
 
-    elif pool_size > POOL_LARGE_THRESHOLD:
+    elif pool_size > large_threshold:
         # Large pool: reduce confidence if margins are tight
-        if top_margin is not None and top_margin < POOL_TIGHT_MARGIN_THRESHOLD:
+        if top_margin is not None and top_margin < tight_margin:
             # Tight margin in large pool - confidence may be inflated
             adjustment = -0.05
             reasons.append(f"large_pool({pool_size})+tight_margin({top_margin:.2f}):-0.05")
