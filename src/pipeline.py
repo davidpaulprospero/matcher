@@ -236,6 +236,49 @@ class PipelineOrchestrator:
 
         return ", ".join(parts) if parts else "empty state"
 
+    def _print_timing_summary(
+        self,
+        total_duration: float,
+        skipped_stages: set
+    ) -> None:
+        """
+        Log a formatted table of per-stage timing after pipeline completion.
+
+        Shows each stage's wall-clock duration, percentage of total pipeline
+        time, and marks checkpoint-resumed stages as 'skipped'.
+
+        Args:
+            total_duration: Total pipeline wall-clock time in seconds.
+            skipped_stages: Set of stage names that were restored from checkpoint.
+        """
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("Pipeline Timing Summary")
+        logger.info("=" * 60)
+        logger.info(f"  {'Stage':<25} {'Duration':>10} {'% of Total':>12}")
+        logger.info(f"  {'-'*25} {'-'*10} {'-'*12}")
+
+        for stage in self.stages:
+            name = stage.name
+            if name in skipped_stages:
+                logger.info(f"  {name:<25} {'skipped':>10} {'-':>12}")
+            elif name in self.stage_timings:
+                elapsed = self.stage_timings[name]
+                pct = (elapsed / total_duration * 100) if total_duration > 0 else 0.0
+                logger.info(f"  {name:<25} {elapsed:>9.1f}s {pct:>11.1f}%")
+            else:
+                # Stage was filtered out (skip_stages / only_stages)
+                logger.info(f"  {name:<25} {'--':>10} {'-':>12}")
+
+        logger.info(f"  {'-'*25} {'-'*10} {'-'*12}")
+        logger.info(f"  {'TOTAL':<25} {total_duration:>9.1f}s {'100.0%':>12}")
+        logger.info("=" * 60)
+
+        # Persist timing summary to checkpoint stage_metrics
+        self.checkpoint.save_stage_timing_summary(
+            self.stage_timings, total_duration, skipped_stages
+        )
+
     def _get_recovery_suggestion(self, stage_name: str, error: str) -> str:
         """
         Return an actionable recovery suggestion based on stage name and error.
@@ -331,6 +374,10 @@ class PipelineOrchestrator:
                 for stage_name in group:
                     parallel_groups[stage_name] = group
 
+        # Track skipped stages and pipeline start time for timing summary
+        skipped_stages: set = set()
+        pipeline_start_time = time.time()
+
         # Try to load checkpoint if resuming
         if resume:
             self.load_checkpoint()
@@ -357,6 +404,7 @@ class PipelineOrchestrator:
                 if stage.restore(self.state, self.checkpoint, self.config):
                     # Validate state attributes after stage restoration
                     self.state.validate_state_attributes()
+                    skipped_stages.add(stage_name)
                     continue
                 else:
                     # US-51-008: restore failed - re-run the stage instead of
@@ -469,6 +517,11 @@ class PipelineOrchestrator:
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
 
         self.current_stage = None
+
+        # Print timing summary after successful pipeline completion
+        total_duration = time.time() - pipeline_start_time
+        self._print_timing_summary(total_duration, skipped_stages)
+
         return True
 
     def _run_dry_run(
