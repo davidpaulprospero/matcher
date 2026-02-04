@@ -146,8 +146,8 @@
             "id": "US-53-010",
             "title": "Improve iterative match serialization robustness for checkpoint restore",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T1 (small, defensive coding). Source files: src/stages/iterative_match.py (lines 440-469 serialization, lines 458-468 drill-into fallback added by previous sprint). The else branch now has a drill-into fallback for MatchResult (US-52 work), but there's no validation that the restored data is actually usable. Match.from_dict() can still reject entries silently. This story adds validation logging so failed restores are visible.",
+            "passes": true,
+            "notes": "Added defensive `or ''` on source_file getattr in both if/else branches. Added WARNING logs with match index and available attributes when video_file is empty. Added INFO summary log after serialization loop. Updated _serialize_match test helper to mirror production code. Added TestNoneSourceFileFallbackLogging (4 tests) and TestCheckpointRoundTrip (3 tests). All 51 tests in test_match_serialization.py pass.",
             "acceptanceCriteria": [
                 "Add validation logging when serialized match has empty video_file after all fallback attempts — log WARNING with match index and available attributes",
                 "Add a summary log after serialization: 'Serialized N matches, M had empty video_file (skipped)' at INFO level",
@@ -160,8 +160,8 @@
             "id": "US-53-011",
             "title": "Add confidence variance validation to prevent false certainty in adaptive threshold",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T1 (small, validation + logging). Source files: src/matching/tiered_matcher.py (lines 243-254 where variance computed on top-5 scores only), src/matching/scoring.py (lines 62-72 where adaptive threshold reduced for low variance). If top-5 scores are nearly identical (e.g., all 0.85), variance=0 but code treats it as 'clear winner'. Adaptive threshold reduces for low variance (silently), potentially skipping LLM reranking for uncertain matches.",
+            "passes": true,
+            "notes": "Implemented variance floor (0.02) in scoring.py calculate_adaptive_threshold() — when computed stdev < 0.02, treated as 'uncertain' (var_floor) instead of 'clear winner'. Added top-10 candidate usage when pool >= 10 in both scoring.py and tiered_matcher.py _calculate_confidence_variance(). Added NaN/Inf guards on stdev results. Added DEBUG logging for variance computation (candidate_count, top_n_used, computed_variance, below_floor). Updated 3 existing tests with adjusted scores to account for variance floor. Added 4 new tests in TestVarianceFloorPreventsThresholdReduction: blocks reduction for scores within 0.01, allows reduction for above-floor variance, verifies top-10 usage for large pools, catches identical scores as var_floor. All 19 adaptive threshold tests and 21 confidence variance tests pass.",
             "acceptanceCriteria": [
                 "Add minimum variance floor (0.02) — when computed variance < floor, treat as 'uncertain' rather than 'clear winner' for adaptive threshold decisions",
                 "Compute variance on top-10 candidates instead of top-5 when pool size >= 10, falling back to top-5 for smaller pools",

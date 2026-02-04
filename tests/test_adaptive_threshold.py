@@ -77,17 +77,17 @@ class TestAdaptiveThreshold:
 
     @pytest.mark.fast
     def test_low_variance_decreases_threshold(self):
-        """Low candidate variance (<0.05) should decrease threshold by 0.05."""
+        """Low candidate variance (>=0.02 and <0.05) should decrease threshold by 0.05."""
         base_threshold = 0.85
         voiceover_text = "This is a normal length voiceover segment."
 
-        # Create candidates with very similar scores (low variance)
+        # Create candidates with low but above-floor variance (stdev ~0.028)
         candidates = [
-            (create_mock_segment(), 0.88),
+            (create_mock_segment(), 0.89),
             (create_mock_segment(), 0.87),
             (create_mock_segment(), 0.86),
-            (create_mock_segment(), 0.85),
             (create_mock_segment(), 0.84),
+            (create_mock_segment(), 0.82),
         ]
 
         threshold, reason = calculate_adaptive_threshold(
@@ -104,13 +104,13 @@ class TestAdaptiveThreshold:
         base_threshold = 0.85
         voiceover_text = "Short"  # 5 chars
 
-        # Create candidates with very similar scores (low variance)
+        # Create candidates with low but above-floor variance (stdev ~0.028)
         candidates = [
-            (create_mock_segment(), 0.88),
+            (create_mock_segment(), 0.89),
             (create_mock_segment(), 0.87),
             (create_mock_segment(), 0.86),
-            (create_mock_segment(), 0.85),
             (create_mock_segment(), 0.84),
+            (create_mock_segment(), 0.82),
         ]
 
         threshold, reason = calculate_adaptive_threshold(
@@ -128,11 +128,11 @@ class TestAdaptiveThreshold:
         base_threshold = 0.52
         voiceover_text = "This is a normal length voiceover segment."
 
-        # Low variance to trigger -0.05
+        # Low variance above floor to trigger -0.05 (stdev ~0.028)
         candidates = [
-            (create_mock_segment(), 0.88),
-            (create_mock_segment(), 0.87),
+            (create_mock_segment(), 0.89),
             (create_mock_segment(), 0.86),
+            (create_mock_segment(), 0.82),
         ]
 
         threshold, reason = calculate_adaptive_threshold(
@@ -301,6 +301,140 @@ class TestAdaptiveThreshold:
         )
 
         # Variance >= 0.05 should NOT trigger adjustment
+        assert "low_var" not in reason
+
+
+class TestVarianceFloorPreventsThresholdReduction:
+    """US-53-011: Tests that variance floor prevents false certainty."""
+
+    @pytest.mark.fast
+    def test_variance_floor_blocks_reduction_when_scores_within_001(self):
+        """When top-5 scores are within 0.01 of each other, variance floor
+        should prevent adaptive threshold reduction (false certainty)."""
+        base_threshold = 0.85
+        voiceover_text = "This is a normal length voiceover segment for testing."
+
+        # All scores within 0.01 of each other -> stdev ≈ 0.006, well below floor of 0.02
+        candidates = [
+            (create_mock_segment(), 0.850),
+            (create_mock_segment(), 0.849),
+            (create_mock_segment(), 0.848),
+            (create_mock_segment(), 0.847),
+            (create_mock_segment(), 0.846),
+        ]
+
+        threshold, reason = calculate_adaptive_threshold(
+            base_threshold, voiceover_text, candidates
+        )
+
+        # Should NOT get the -0.05 reduction since variance is below floor
+        assert threshold == base_threshold, (
+            f"Variance floor should prevent threshold reduction, got {threshold}"
+        )
+        assert "low_var" not in reason, (
+            f"Should not see low_var adjustment, got reason: {reason}"
+        )
+        assert "var_floor" in reason, (
+            f"Should see var_floor marker in reason, got: {reason}"
+        )
+
+    @pytest.mark.fast
+    def test_variance_above_floor_still_reduces_threshold(self):
+        """When variance is between floor (0.02) and 0.05, threshold should still reduce."""
+        base_threshold = 0.85
+        voiceover_text = "This is a normal length voiceover segment for testing."
+
+        # Scores with stdev ~0.03 (above floor of 0.02 but below 0.05)
+        candidates = [
+            (create_mock_segment(), 0.88),
+            (create_mock_segment(), 0.87),
+            (create_mock_segment(), 0.86),
+            (create_mock_segment(), 0.85),
+            (create_mock_segment(), 0.84),
+        ]
+
+        import statistics as st
+        actual_stdev = st.stdev([0.88, 0.87, 0.86, 0.85, 0.84])
+        # stdev of evenly spaced values 0.84-0.88 ≈ 0.0158... which is below floor
+        # Need values with slightly more spread
+        # Let's verify and adjust if needed
+        if actual_stdev < 0.02:
+            # Use wider spread to get above floor
+            candidates = [
+                (create_mock_segment(), 0.89),
+                (create_mock_segment(), 0.87),
+                (create_mock_segment(), 0.86),
+                (create_mock_segment(), 0.84),
+                (create_mock_segment(), 0.82),
+            ]
+            actual_stdev = st.stdev([0.89, 0.87, 0.86, 0.84, 0.82])
+
+        assert 0.02 <= actual_stdev < 0.05, f"Test setup: stdev should be in [0.02, 0.05), got {actual_stdev}"
+
+        threshold, reason = calculate_adaptive_threshold(
+            base_threshold, voiceover_text, candidates
+        )
+
+        assert abs(threshold - 0.80) < 0.001, (
+            f"Variance above floor but below 0.05 should reduce threshold, got {threshold}"
+        )
+        assert "low_var" in reason
+
+    @pytest.mark.fast
+    def test_top10_used_for_large_pools(self):
+        """When 10+ candidates available, variance should use top-10 instead of top-5."""
+        base_threshold = 0.85
+        voiceover_text = "This is a normal length voiceover segment for testing."
+
+        # 12 candidates - top-5 have low variance, but top-10 have high variance
+        # This ensures top-10 usage changes the outcome
+        candidates = [
+            (create_mock_segment(), 0.90),
+            (create_mock_segment(), 0.89),
+            (create_mock_segment(), 0.88),
+            (create_mock_segment(), 0.87),
+            (create_mock_segment(), 0.86),
+            (create_mock_segment(), 0.50),  # Big drop - makes top-10 variance high
+            (create_mock_segment(), 0.45),
+            (create_mock_segment(), 0.40),
+            (create_mock_segment(), 0.35),
+            (create_mock_segment(), 0.30),
+            (create_mock_segment(), 0.25),
+            (create_mock_segment(), 0.20),
+        ]
+
+        threshold, reason = calculate_adaptive_threshold(
+            base_threshold, voiceover_text, candidates
+        )
+
+        # With top-10, variance includes the 0.50-0.30 scores, making it high (>0.05)
+        # So no low_var adjustment should be applied
+        assert "low_var" not in reason, (
+            f"Top-10 variance should be high, no reduction. Reason: {reason}"
+        )
+        assert threshold == base_threshold
+
+    @pytest.mark.fast
+    def test_identical_scores_trigger_variance_floor(self):
+        """All identical scores (variance=0) should hit the variance floor."""
+        base_threshold = 0.85
+        voiceover_text = "This is a normal length voiceover segment."
+
+        candidates = [
+            (create_mock_segment(), 0.85),
+            (create_mock_segment(), 0.85),
+            (create_mock_segment(), 0.85),
+            (create_mock_segment(), 0.85),
+            (create_mock_segment(), 0.85),
+        ]
+
+        threshold, reason = calculate_adaptive_threshold(
+            base_threshold, voiceover_text, candidates
+        )
+
+        # Variance is 0.0 (below floor), should NOT reduce threshold
+        assert threshold == base_threshold
+        assert "var_floor" in reason
         assert "low_var" not in reason
 
 

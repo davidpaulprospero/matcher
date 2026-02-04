@@ -82,17 +82,41 @@ def calculate_adaptive_threshold(
     # Adjustment 2: Candidate variance
     # Low variance means one candidate is clearly better than others
     # Can accept lower threshold when there's a clear winner
+    # US-53-011: Use top-10 when pool >= 10, apply variance floor (0.02)
     if candidates and len(candidates) >= 2:
+        # Use top-10 candidates for variance when pool is large enough
+        top_n = 10 if len(candidates) >= 10 else 5
         # Convert to Python float to avoid numpy.float32 coercion error in statistics.stdev
-        top_scores = [float(sim) for _, sim in candidates[:5]]
+        top_scores = [float(sim) for _, sim in candidates[:top_n]]
         try:
             variance = statistics.stdev(top_scores) if len(top_scores) >= 2 else 0.0
         except statistics.StatisticsError:
             variance = 0.0
 
-        if variance < 0.05:
+        # Guard against NaN/Inf from degenerate inputs
+        if math.isnan(variance) or math.isinf(variance):
+            logger.debug(f"Variance computation returned {variance}, treating as 0.0")
+            variance = 0.0
+
+        # Variance floor: treat very low variance as 'uncertain' (false certainty)
+        # When top candidates all score nearly the same, it's NOT a clear winner
+        VARIANCE_FLOOR = 0.02
+        variance_below_floor = variance < VARIANCE_FLOOR
+
+        logger.debug(
+            f"Variance computation: candidate_count={len(candidates)}, "
+            f"top_n_used={min(top_n, len(candidates))}, "
+            f"computed_variance={variance:.4f}, "
+            f"below_floor={variance_below_floor}"
+        )
+
+        if variance < 0.05 and not variance_below_floor:
+            # Low variance but above floor: genuine clear winner
             adjustment -= 0.05
             reasons.append(f"low_var({variance:.3f}):-0.05")
+        elif variance_below_floor:
+            # Below floor: false certainty, do NOT reduce threshold
+            reasons.append(f"var_floor({variance:.3f}):no_adjust")
 
     # Calculate final threshold, clamped to valid range [0.5, 0.99]
     adjusted_threshold = max(0.5, min(0.99, base_threshold + adjustment))
