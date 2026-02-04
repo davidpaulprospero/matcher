@@ -1209,6 +1209,11 @@ class DownloadConfig:
     # 0 = disabled (never abort on bot-detection errors).
     bot_detection_abort_threshold: int = 10
 
+    # Network failure threshold: after N consecutive network failures (DNS, connection
+    # refused, etc.), abort the download loop. These indicate systemic network issues
+    # that won't resolve by retrying more videos. Resets on any successful download.
+    network_failure_threshold: int = 3
+
     # FFmpeg location (for segment downloads, set if not in PATH)
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""

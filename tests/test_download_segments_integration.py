@@ -63,6 +63,7 @@ def _make_mock_downloader(
     mock_dl.download_config = MagicMock()
     mock_dl.download_config.bot_detection_tier_floor_threshold = bot_floor_threshold
     mock_dl.download_config.bot_detection_abort_threshold = bot_abort_threshold
+    mock_dl.download_config.network_failure_threshold = 3
     mock_dl.download_config.segment_socket_timeout = socket_timeout
     mock_dl.download_config.socket_timeout = 30
     mock_dl.download_config.segment_max_resolution = 1080

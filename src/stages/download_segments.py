@@ -596,6 +596,13 @@ class DownloadVideoSegmentsStage(Stage):
                 _dl_cfg_top, 'bot_detection_abort_threshold', BOT_DETECTION_ABORT_THRESHOLD
             ))
 
+        # US-53-008: Read network failure threshold from config
+        _network_failure_threshold = NETWORK_FAILURE_THRESHOLD  # module-level default
+        if _dl_cfg_top:
+            _network_failure_threshold = int(getattr(
+                _dl_cfg_top, 'network_failure_threshold', NETWORK_FAILURE_THRESHOLD
+            ))
+
         for idx, seg in enumerate(segments, 1):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
@@ -827,9 +834,9 @@ class DownloadVideoSegmentsStage(Stage):
                     consecutive_network_failures += 1
                     logger.warning(
                         f"Network failure detected ({consecutive_network_failures}/"
-                        f"{NETWORK_FAILURE_THRESHOLD}): {error_msg}"
+                        f"{_network_failure_threshold}): {error_msg}"
                     )
-                    if consecutive_network_failures >= NETWORK_FAILURE_THRESHOLD:
+                    if consecutive_network_failures >= _network_failure_threshold:
                         remaining = total - idx
                         logger.error(
                             f"Aborting download loop: {consecutive_network_failures} consecutive "
