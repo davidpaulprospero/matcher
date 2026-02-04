@@ -329,14 +329,59 @@ def is_segment_file(file_path: str) -> bool:
 # Formatting Utilities
 # ============================================================
 
-def frames_to_tc(frames: int, fps: float = 30.0) -> str:
-    """Convert frame count to timecode string HH:MM:SS:FF"""
-    total_seconds = frames / fps
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-    seconds = int(total_seconds % 60)
-    frame = int(frames % fps)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frame:02d}"
+def parse_timecode_to_frames(timecode: str, frame_rate: float) -> int:
+    """
+    Parse a timecode string into a total frame count.
+
+    Handles both ':' and ';' separators so drop-frame timecodes
+    (HH:MM:SS;FF) are accepted alongside standard (HH:MM:SS:FF).
+
+    Args:
+        timecode: Timecode string like "01:00:00:00" or "01:00:00;00"
+        frame_rate: Timeline frame rate (e.g. 30.0, 29.97, 24.0)
+
+    Returns:
+        Total frame count for the given timecode
+    """
+    tc_parts = timecode.replace(';', ':').split(':')
+    return (
+        int(tc_parts[0]) * 3600 +
+        int(tc_parts[1]) * 60 +
+        int(tc_parts[2])
+    ) * int(frame_rate) + int(tc_parts[3])
+
+
+def frames_to_tc(
+    frames: int,
+    fps: float = 30.0,
+    start_frame_offset: int = 0,
+    separator: str = ':'
+) -> str:
+    """
+    Convert frame count to timecode string.
+
+    Args:
+        frames: Frame count to convert
+        fps: Frame rate (e.g. 30.0, 29.97, 24.0)
+        start_frame_offset: Frame offset added before conversion (e.g.
+            from a timeline start timecode like 01:00:00:00)
+        separator: Character between seconds and frames.
+            Use ':' for non-drop-frame, ';' for drop-frame.
+
+    Returns:
+        Timecode string like "01:00:03:15" or "01:00:03;15"
+    """
+    total_frames = frames + start_frame_offset
+    ifps = int(fps)
+
+    frame_in_sec = total_frames % ifps
+    total_secs = total_frames // ifps
+    secs = total_secs % 60
+    total_mins = total_secs // 60
+    mins = total_mins % 60
+    hours = total_mins // 60
+
+    return f"{hours:02d}:{mins:02d}:{secs:02d}{separator}{frame_in_sec:02d}"
 
 
 def get_confidence_color(confidence: float) -> str:
