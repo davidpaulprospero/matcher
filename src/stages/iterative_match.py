@@ -420,6 +420,7 @@ class IterativeMatchStage(Stage):
 
             # Serialize matches for checkpoint (preserves iterative improvements)
             serialized_matches = []
+            empty_video_file_count = 0
             for i, match in enumerate(state.matches):
                 try:
                     # Handle MatchResult structure (has primary_match with video_segment)
@@ -431,11 +432,20 @@ class IterativeMatchStage(Stage):
                         conf = 0.0
 
                         if hasattr(pm, 'video_segment') and pm.video_segment:
-                            source_file = getattr(pm.video_segment, 'source_file', '')
+                            source_file = getattr(pm.video_segment, 'source_file', '') or ''
                             video_start = getattr(pm.video_segment, 'start_time', 0.0)
                             video_end = getattr(pm.video_segment, 'end_time', 0.0)
 
                         conf = getattr(pm, 'confidence', 0.0)
+
+                        if not source_file:
+                            avail_attrs = [a for a in ('video_segment', 'confidence', 'reasoning')
+                                           if hasattr(pm, a)]
+                            logger.warning(
+                                f"Match {i}: empty video_file after all fallback attempts "
+                                f"(type={type(match).__name__}, pm_attrs={avail_attrs})"
+                            )
+                            empty_video_file_count += 1
 
                         serialized_matches.append({
                             'segment_index': i,
@@ -462,16 +472,18 @@ class IterativeMatchStage(Stage):
                             if pm is not None:
                                 vs = getattr(pm, 'video_segment', None)
                                 if vs is not None:
-                                    video_file = getattr(vs, 'source_file', '')
+                                    video_file = getattr(vs, 'source_file', '') or ''
                                     video_start = getattr(vs, 'start_time', video_start)
                                     video_end = getattr(vs, 'end_time', video_end)
                                 confidence = getattr(pm, 'confidence', confidence)
 
                         if not video_file:
+                            avail_attrs = [a for a in dir(match) if not a.startswith('_')][:10]
                             logger.warning(
-                                f"Match {i} serialized with empty video_file "
-                                f"(type={type(match).__name__})"
+                                f"Match {i}: empty video_file after all fallback attempts "
+                                f"(type={type(match).__name__}, attrs={avail_attrs})"
                             )
+                            empty_video_file_count += 1
 
                         serialized_matches.append({
                             'segment_index': getattr(match, 'segment_index', i),
@@ -485,6 +497,11 @@ class IterativeMatchStage(Stage):
                         })
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
+
+            logger.info(
+                f"Serialized {len(serialized_matches)} matches, "
+                f"{empty_video_file_count} had empty video_file (skipped)"
+            )
 
             # Build checkpoint data
             checkpoint_data = {

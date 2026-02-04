@@ -23,6 +23,7 @@ Core functionality:
 from __future__ import annotations
 
 import logging
+import math
 import statistics
 import time
 from pathlib import Path
@@ -243,9 +244,13 @@ class TieredMatcher:
         similar scores, making the selection less definitive.
         Low variance indicates clear winner with others scoring much lower.
 
+        US-53-011: Uses top-10 candidates when pool >= 10 (unless top_n explicitly
+        overridden), applies NaN/Inf guard, and logs variance computation details.
+
         Args:
             candidates: List of (video_segment, similarity) tuples
-            top_n: Number of top candidates to consider (default: 5)
+            top_n: Number of top candidates to consider (default: 5,
+                   auto-scales to 10 when pool >= 10)
 
         Returns:
             Standard deviation of top-N similarity scores (0.0 if < 2 candidates)
@@ -253,16 +258,31 @@ class TieredMatcher:
         if len(candidates) < 2:
             return 0.0
 
+        # Auto-scale to top-10 when pool is large enough and default top_n used
+        effective_top_n = 10 if (top_n == 5 and len(candidates) >= 10) else top_n
+
         # Get top-N similarity scores (convert to Python float to avoid numpy coercion error)
-        top_scores = [float(sim) for _, sim in candidates[:top_n]]
+        top_scores = [float(sim) for _, sim in candidates[:effective_top_n]]
 
         if len(top_scores) < 2:
             return 0.0
 
         try:
-            return statistics.stdev(top_scores)
+            result = statistics.stdev(top_scores)
         except statistics.StatisticsError:
             return 0.0
+
+        # Guard against NaN/Inf from degenerate inputs
+        if math.isnan(result) or math.isinf(result):
+            logger.debug(f"Variance computation returned {result}, treating as 0.0")
+            return 0.0
+
+        logger.debug(
+            f"Confidence variance: candidate_count={len(candidates)}, "
+            f"top_n_used={len(top_scores)}, computed_variance={result:.4f}"
+        )
+
+        return result
 
     def _extract_matched_keywords(
         self,
