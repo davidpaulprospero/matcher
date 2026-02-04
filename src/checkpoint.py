@@ -32,6 +32,9 @@ STAGE_ORDER = [
     "OUTPUT"
 ]
 
+# Current checkpoint version — single source of truth for write and validation
+CURRENT_CHECKPOINT_VERSION = "2.0"
+
 # Legacy stage names for checkpoint migration
 LEGACY_STAGES = [
     "DOWNLOAD", "STOCK", "BROLL_DOWNLOAD", "REMIX",
@@ -72,7 +75,7 @@ class SavedKeywords:
 @dataclass
 class CheckpointData:
     """Data saved at each checkpoint"""
-    version: str = "2.0"  # Bumped for simplified pipeline
+    version: str = CURRENT_CHECKPOINT_VERSION
     created_at: str = ""
     updated_at: str = ""
     last_completed_stage: str = ""
@@ -451,11 +454,11 @@ class CheckpointManager:
         }
 
         if version in ('0.9', '1.0'):
-            logger.info(f"Migrating checkpoint from v{version} to v2.0 (simplified pipeline)")
+            logger.info(f"Migrating checkpoint from v{version} to v{CURRENT_CHECKPOINT_VERSION} (simplified pipeline)")
 
             # Build new CheckpointData
             migrated_data = {
-                'version': '2.0',
+                'version': CURRENT_CHECKPOINT_VERSION,
                 'created_at': data.get('created_at', datetime.now().isoformat()),
                 'updated_at': data.get('updated_at', datetime.now().isoformat()),
                 'config_hash': data.get('config_hash', ''),
@@ -507,7 +510,7 @@ class CheckpointManager:
             try:
                 self.data = migrated
                 self._atomic_save()
-                logger.info("Migrated checkpoint to v2.0 saved successfully")
+                logger.info(f"Migrated checkpoint to v{CURRENT_CHECKPOINT_VERSION} saved successfully")
             except Exception as e:
                 logger.warning(f"Could not save migrated checkpoint: {e}")
 
@@ -525,8 +528,11 @@ class CheckpointManager:
         issues = []
 
         # Check version compatibility
-        if data.version and data.version != "1.0":
-            issues.append(f"Checkpoint version {data.version} may not be fully compatible")
+        if data.version and data.version != CURRENT_CHECKPOINT_VERSION:
+            issues.append(
+                f"Checkpoint version {data.version} differs from current "
+                f"{CURRENT_CHECKPOINT_VERSION} — consider re-running with --fresh"
+            )
 
         # Check for required fields
         if not data.created_at:
