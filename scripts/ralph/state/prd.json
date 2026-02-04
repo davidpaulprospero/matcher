@@ -104,8 +104,8 @@
             "id": "US-53-007",
             "title": "Add cookie propagation to download_segments Python API calls",
             "priority": "high",
-            "passes": false,
-            "notes": "Tier: T2 (medium, config + integration). Source files: src/stages/download_segments.py (the _build_ydl_opts method where ydl_opts assembled — US-52-005 builder), src/config/sections/download.py (download config dataclass), config.yaml (download section). The Python API in download_segments.py doesn't read ~/.config/yt-dlp/config, so it gets zero cookies. CLI works because it reads --cookies-from-browser firefox from that config. Need to inject cookiesfrombrowser into ydl_opts from download config. Check if _build_ydl_opts already handles this from the US-52-005 builder work.",
+            "passes": true,
+            "notes": "Pre-implemented by US-49-002 and US-52-005. _build_ydl_opts() at download_segments.py:1006-1020 already injects cookiesfrombrowser from config.cookies_from_browser, with fallback to cookies_path and cookie_rotation.cookie_files[0]. DownloadConfig has cookies_from_browser field (download.py:1101). config.yaml has cookies_from_browser: firefox at line 960. test_build_ydl_opts.py TestBuildYdlOptsCookies has 4 tests covering all scenarios (18/18 pass).",
             "acceptanceCriteria": [
                 "Verify _build_ydl_opts() in download_segments.py injects cookiesfrombrowser or cookiefile into ydl_opts from download config",
                 "If not present, add cookies_from_browser field to download config dataclass (default: ['firefox']) and inject ydl_opts['cookiesfrombrowser'] = config value",
