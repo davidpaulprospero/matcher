@@ -55,27 +55,47 @@ def _find_audio_for_voiceover(vo_path: str) -> Optional[str]:
     - combined_output.mp3/wav (common pattern)
     - voiceover.mp3/wav (common pattern)
 
+    When multiple candidates exist, returns the largest file by size
+    (most likely the main voiceover audio rather than a click track or scratch mix).
+
     Returns:
         Path to audio file if found, None otherwise.
     """
+    logger = logging.getLogger(__name__)
     vo_path_obj = Path(vo_path)
     vo_dir = vo_path_obj.parent
     vo_stem = vo_path_obj.stem
 
-    # Try same name with audio extensions
+    candidates: List[Path] = []
+
+    # Collect candidates: same name with audio extensions
     for ext in ['.mp3', '.wav', '.m4a', '.aac']:
         candidate = vo_dir / f"{vo_stem}{ext}"
         if candidate.exists():
-            return str(candidate)
+            candidates.append(candidate)
 
-    # Try common voiceover file patterns
+    # Collect candidates: common voiceover file patterns
     for pattern in ['combined_output', 'voiceover', 'audio', 'vo']:
         for ext in ['.mp3', '.wav', '.m4a', '.aac']:
             candidate = vo_dir / f"{pattern}{ext}"
-            if candidate.exists():
-                return str(candidate)
+            if candidate.exists() and candidate not in candidates:
+                candidates.append(candidate)
 
-    return None
+    if not candidates:
+        return None
+
+    if len(candidates) == 1:
+        return str(candidates[0])
+
+    # Multiple candidates: sort by file size descending, return largest
+    candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+    selected = candidates[0]
+    size_mb = selected.stat().st_size / (1024 * 1024)
+    logger.info(
+        "Found %d audio candidates, selected %s (%.0fMB)",
+        len(candidates), selected.name, size_mb
+    )
+    return str(selected)
 
 
 def _is_missing_file(file_path: str) -> bool:

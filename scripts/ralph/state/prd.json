@@ -139,8 +139,8 @@
                 "Add test with 3 mock audio files of different sizes in a temp directory, verify largest is selected",
                 "Add test with single audio file, verify current first-match behavior is preserved"
             ],
-            "passes": false,
-            "notes": "Tier: enhancement (low risk). Source files: src/otio/timeline.py:56-85 (_find_audio_for_voiceover). Current behavior returns first match from extension loop (line 73-76), then first match from pattern loop (line 79-83). When a directory has voiceover.mp3 (300MB main audio) and audio.mp3 (10MB click track), the pattern order determines which is returned, not file size. Change: collect all candidates, sort by size descending, return largest. Log: 'Found 3 audio candidates, selected voiceover.mp3 (312MB)'."
+            "passes": true,
+            "notes": "Refactored _find_audio_for_voiceover to collect all candidates and return largest by file size. Added logging when multiple candidates found. 7 tests added covering size-based selection, single file, no candidates, duplicate prevention, and log verification."
         },
         {
             "id": "US-56-010",
