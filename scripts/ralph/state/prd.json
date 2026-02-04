@@ -56,7 +56,7 @@
                                                        "Test verifies get_status() returns correct counts after init with mixed valid/invalid cookie files",
                                                        "Test verifies the summary log message is emitted during __init__"
                                                    ],
-                            "notes":  "Tier: S (small). DONE: Updated __init__ summary log to format 'Cookie rotator: X/N cookies valid (Y invalid)'. Added required keys (total, valid, invalid, cooldown, exhausted) to get_status() while preserving legacy keys. Invalid reasons logged when continue_on_partial=True. 5 new tests in TestInitDiagnostics class. All 43 tests pass."
+                            "notes":  "Tier: S (small). DONE: Updated __init__ summary log to format \u0027Cookie rotator: X/N cookies valid (Y invalid)\u0027. Added required keys (total, valid, invalid, cooldown, exhausted) to get_status() while preserving legacy keys. Invalid reasons logged when continue_on_partial=True. 5 new tests in TestInitDiagnostics class. All 43 tests pass."
                         },
                         {
                             "id":  "US-58-004",
@@ -99,7 +99,7 @@
                                                        "Test verifies that jitter still applies when pause is well below max_pause_seconds",
                                                        "Existing circuit breaker tests continue to pass"
                                                    ],
-                            "notes":  "Moved jitter into _get_effective_pause_seconds pipeline: base -> escalation -> budget -> jitter -> cap. Extracted _apply_jitter_raw (no cap) used by pipeline, _apply_jitter wraps it with cap for standalone use. Updated check_and_wait, get_remaining_pause_time, wait_for_recovery_if_needed to not double-jitter. Added TestJitterCappedAtMaxPause test class with 6 tests. Updated existing tests to use jitter_factor=0.0 where exact values are asserted."
+                            "notes":  "Moved jitter into _get_effective_pause_seconds pipeline: base -\u003e escalation -\u003e budget -\u003e jitter -\u003e cap. Extracted _apply_jitter_raw (no cap) used by pipeline, _apply_jitter wraps it with cap for standalone use. Updated check_and_wait, get_remaining_pause_time, wait_for_recovery_if_needed to not double-jitter. Added TestJitterCappedAtMaxPause test class with 6 tests. Updated existing tests to use jitter_factor=0.0 where exact values are asserted."
                         },
                         {
                             "id":  "US-58-007",
@@ -113,7 +113,7 @@
                                                        "Test verifies that repeated fail+remove cycles do not grow the _failed_cookies dict unboundedly",
                                                        "Existing cookie rotator tests continue to pass"
                                                    ],
-                            "notes":  "DONE: Added `self._failed_cookies.pop(cookie_path, None)` to _remove_invalid_cookie (line 199 in cookie_rotator.py). No _cooldown_until dict exists — cooldowns are tracked via _failed_cookies timestamps, so cleaning that dict addresses both criteria. 6 new tests in test_cookie_cooldown_cleanup.py covering: cleanup on removal, cleanup on cooldown tracking, safe removal without prior failure, unbounded growth prevention, preservation of other cookies' cooldowns, and mid-session invalidation integration. All 100 existing cookie tests pass."
+                            "notes":  "DONE: Implementation at cookie_rotator.py:199 uses _failed_cookies.pop(cookie_path, None) to clean up cooldown entries on removal. No separate _cooldown_until dict exists - cooldown is tracked via _failed_cookies timestamps. 6 tests in test_cookie_cooldown_cleanup.py cover: mark_failed+remove cleanup, cooldown tracking cleanup, safe no-op when not failed, unbounded growth prevention (100 cycles), preservation of other cookies' cooldowns, and mid-session integration. All 6 new tests + 43 existing cookie rotation tests pass."
                         },
                         {
                             "id":  "US-58-008",
