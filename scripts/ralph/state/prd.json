@@ -62,7 +62,7 @@
             "id": "US-55-004",
             "title": "Add tests for iterative_match checkpoint serialization of video_file field",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test class TestMatchSerializationVideoFile in tests/test_stage_iterative_match.py verifying that serialization of MatchResult objects extracts video_file from match.primary_match.video_segment.source_file (not getattr(match, 'video_file', ''))",
                 "Add test that a MatchResult with primary_match.video_segment.source_file='abc123' serializes to a dict with video_file='abc123' (not empty string)",
@@ -71,7 +71,7 @@
                 "Add test that the else branch (non-MatchResult simple Match objects) also correctly serializes video_file",
                 "All new tests must be marked @pytest.mark.fast and pass independently"
             ],
-            "notes": "Tier: T1 (P1 bug coverage). Source files: src/stages/iterative_match.py:421-527 (serialization block), src/stages/match.py:167 (correct pattern using primary_match.video_segment.source_file), src/utils.py:506-518 (MatchResult dataclass). The MATCH stage correctly drills into match.primary_match.video_segment.source_file but ITERATIVE_MATCH uses getattr(match, 'video_file', '') which always returns '' for MatchResult objects. Tests should use match_result_factory from conftest.py to create realistic MatchResult instances."
+            "notes": "Added TestMatchSerializationVideoFile with 6 tests: MatchResult extracts source_file from primary_match.video_segment, None primary_match returns empty string, round-trip via state.Match.from_dict, simple state.Match else branch, empty source_file handling, else branch round-trip. All @pytest.mark.fast, all pass."
         },
         {
             "id": "US-55-005",
