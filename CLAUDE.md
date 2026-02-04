@@ -394,6 +394,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-04 | Feat: Replace keyword evidence gate with LLM-based criteria verification — `Confirm-CriteriaEvidence` sends single haiku call instead of per-criterion keyword matching; falls back to `Search-CriterionEvidence` when CLI unavailable |
 | 2026-02-04 | Feat: Ralph evidence threshold gate — stories rejected when <90% of acceptance criteria have verifiable evidence; previously exit code 0 alone was sufficient to pass regardless of actual evidence |
 | 2026-02-04 | Fix: Ralph queue not advancing — TrueAutoLoop and AdaptiveOvernightLoop missing `Update-QueueProgress` after sprint completion, causing infinite re-sprints on same focus area |
 | 2026-02-04 | Fix: Ralph early exit code override — `taskkill /T /F` produces exit code 1, causing false "story failed" → FAST-FAIL abort; now overrides to 0 when `storyCompletionDetected` is true |
