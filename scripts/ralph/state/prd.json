@@ -137,7 +137,7 @@
             "id": "US-51-009",
             "title": "Add pipeline dry-run mode for stage validation without execution",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Pipeline.run(dry_run=True) validates all stage inputs in sequence without executing any stage",
                 "Dry-run reports which stages would run, which would skip (checkpoint), and which have input validation errors",
@@ -146,7 +146,7 @@
                 "Unit test verifies dry-run does not modify state or checkpoint",
                 "Unit test verifies dry-run correctly identifies stages that would fail validation"
             ],
-            "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 281-466 (run method) \u00e2\u20ac\u201d the dry_run parameter already exists in the method signature (line 289) but the implementation at lines 409-414 only logs 'DRY RUN' and skips stage.run(). It doesn't call validate_inputs() for subsequent stages or produce a summary. Enhance to iterate all stages, call validate_inputs() on each, and produce a structured summary. CLI: src/cli/args.py for --dry-run flag."
+            "notes": "Enhanced _run_dry_run in src/pipeline.py to: load checkpoint for skip detection, categorize stages as run/checkpoint/skip/error, validate inputs for runnable stages, produce structured summary table. Wired --dry-run CLI flag through main.py. 16 new tests in tests/test_pipeline_dry_run.py covering no-execution, no-state-modification, stage categorization, return values, summary logging, and CLI flag parsing."
         },
         {
             "id": "US-51-010",
