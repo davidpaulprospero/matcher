@@ -134,7 +134,20 @@ transcription:
   # Reasoning: GPU transcription must be sequential (shared model)
   max_workers: 4
   batch_size: 10
-  
+
+  # Audio extraction parallelism (US-60-010)
+  # Number of parallel workers for FFmpeg audio extraction (Phase 1)
+  # Default: min(4, cpu_count()) for sensible default on various machines
+  # Set to 0 to use the default calculation
+  # Validated to ensure <= cpu_count() (capped automatically if exceeded)
+  audio_extraction_workers: 0
+
+  # Automatic GPU cleanup after batch transcription (US-60-011)
+  # When true, automatically unloads WhisperModel after transcribe_videos_parallel()
+  # to free GPU memory for subsequent stages (embedding, matching)
+  # The cleanup is called in a finally block, so it runs even if batch processing fails
+  auto_cleanup_after_batch: true
+
   # Voice Activity Detection
   # Chain-of-thought: VAD skips silence, improves accuracy FOR VOICEOVER
   # WARNING: VAD can be too aggressive for YouTube videos with varying audio quality

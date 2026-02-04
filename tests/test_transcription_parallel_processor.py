@@ -43,6 +43,7 @@ def mock_config():
     config.transcription.vad_filter = True
     config.transcription.min_silence_duration_ms = 200
     config.transcription.speech_pad_ms = 10
+    config.transcription.audio_extraction_workers = 4  # Fix for ThreadPoolExecutor
     return config
 
 
@@ -1114,3 +1115,67 @@ class TestTranscriptionRetry:
 
         # Should have slept twice
         assert mock_sleep.call_count == 2
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.time.sleep')
+    @patch('src.transcription.parallel_processor._clear_cuda_cache')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_cuda_cache_cleared_between_retries(
+        self, mock_unlink, mock_clear_cache, mock_sleep, mock_extract, MockWhisperClient,
+        sample_raw_segments
+    ):
+        """Test CUDA cache is cleared between retry attempts (US-60-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: fail first time with CUDA OOM, succeed second
+        mock_whisper = MockWhisperClient.return_value
+        call_count = [0]
+
+        def transcribe_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("CUDA out of memory")
+            return sample_raw_segments
+
+        mock_whisper.transcribe.side_effect = transcribe_side_effect
+
+        result = transcribe_video("/video1.mp4", mock_cache, max_retries=2)
+
+        # Should have succeeded on retry
+        assert len(result) == 3
+
+        # Should have called CUDA cache clear before sleeping
+        assert mock_clear_cache.call_count == 1
+        # Verify clear_cache was called (before sleep in the retry loop)
+        mock_clear_cache.assert_called_once()
+
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor._clear_cuda_cache')
+    @patch('pathlib.Path.unlink')
+    @pytest.mark.fast
+    def test_no_cuda_cache_clear_on_permanent_error(
+        self, mock_unlink, mock_clear_cache, mock_extract, MockWhisperClient
+    ):
+        """Test CUDA cache is NOT cleared on permanent errors (US-60-012)"""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        mock_extract.return_value = "/fake/audio.wav"
+
+        # Mock transcription: fail with FileNotFoundError (permanent)
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.side_effect = FileNotFoundError("File not found")
+
+        result = transcribe_video("/video1.mp4", mock_cache, max_retries=2)
+
+        # Should return empty - no retry
+        assert result == []
+
+        # Should NOT have called CUDA cache clear (no retry for permanent errors)
+        mock_clear_cache.assert_not_called()

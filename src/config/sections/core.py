@@ -5,6 +5,7 @@ Extracted from monolithic config.py during refactoring (Jan 7, 2026).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 __all__ = [
@@ -69,6 +70,18 @@ class TranscriptionConfig:
     max_workers: int = 4
     batch_size: int = 10
 
+    # Audio extraction parallelism (US-60-010)
+    # Number of parallel workers for FFmpeg audio extraction (Phase 1)
+    # Default: min(4, cpu_count()) for sensible default on various machines
+    # Set to 0 or None to use the default calculation
+    # Validated in __post_init__ to ensure <= cpu_count()
+    audio_extraction_workers: int = 0
+
+    # Automatic cleanup after batch (US-60-011)
+    # When True, automatically calls whisper_client.cleanup() after batch transcription
+    # to free GPU memory for subsequent stages (embedding, matching)
+    auto_cleanup_after_batch: bool = True
+
     # VAD settings
     vad_filter: bool = False  # Default False - YouTube audio quality varies, VAD too aggressive
     min_silence_duration_ms: int = 200
@@ -94,6 +107,17 @@ class TranscriptionConfig:
     def __post_init__(self):
         if self.pause_split is None:
             self.pause_split = PauseSplitConfig()
+
+        # Validate and set audio_extraction_workers (US-60-010)
+        cpu_count = os.cpu_count() or 4  # Fallback to 4 if cpu_count() returns None
+        default_workers = min(4, cpu_count)
+
+        if self.audio_extraction_workers <= 0:
+            # Use default: min(4, cpu_count())
+            self.audio_extraction_workers = default_workers
+        elif self.audio_extraction_workers > cpu_count:
+            # Cap at cpu_count() to prevent over-subscription
+            self.audio_extraction_workers = cpu_count
 
 
 @dataclass

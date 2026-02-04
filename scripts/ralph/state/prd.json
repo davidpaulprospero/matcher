@@ -139,8 +139,8 @@
                                                        "Log metrics summary at end of batch transcription",
                                                        "Add test verifying metrics calculation accuracy"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (observability). Target file: src/transcription/parallel_processor.py (transcribe_videos_parallel around lines 28-240). Similar pattern to CaptionMetrics in src/caption/metrics.py."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) TranscriptionMetrics dataclass at src/transcription/metrics.py lines 19-316 with total_videos, cached_hits, transcribed_count, total_audio_duration_s (maps to total_duration_s in summary), and avg_speed_ratio property. (2) transcribe_videos_parallel() collects metrics at lines 96, 130, 238, 244, 261 and returns via return_metrics=True parameter (lines 281-283). (3) avg_speed_ratio calculated at metrics.py lines 135-145 (audio duration / transcription time). (4) Metrics summary logged at parallel_processor.py lines 264-272 via logger.info and console output. (5) test_speed_ratio_calculation in tests/test_transcription_metrics.py lines 50-66 verifies exact calculation accuracy. All 13 transcription metrics tests pass."
                         },
                         {
                             "id":  "US-60-010",
@@ -153,8 +153,8 @@
                                                        "Default to min(4, cpu_count()) for sensible default on various machines",
                                                        "Add test verifying worker count is respected and validated"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (configuration). Target files: src/transcription/parallel_processor.py (line 33 max_workers parameter), src/config/sections/transcription.py. Currently hardcoded to 4 workers."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) Added audio_extraction_workers field to TranscriptionConfig at src/config/sections/core.py line 76 with default 0 (uses calculated default). (2) Updated transcribe_videos_parallel() to accept max_workers=None and read from config.transcription.audio_extraction_workers when None (parallel_processor.py lines 37, 91-93). (3) Added validation in TranscriptionConfig.__post_init__ at lines 113-121 that caps workers at cpu_count(). (4) Default calculation min(4, cpu_count()) implemented in __post_init__ for 0/negative values. (5) Added 12 tests in tests/test_audio_extraction_workers.py covering config defaults, validation, capping, and integration with transcribe_videos_parallel(). All 12 tests pass."
                         },
                         {
                             "id":  "US-60-011",
@@ -167,8 +167,8 @@
                                                        "Ensure cleanup is called even if batch processing raises an exception (use finally block)",
                                                        "Add test verifying cleanup is called and GPU memory is released"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (resource management). Target files: src/transcription/parallel_processor.py (add finally block around lines 230-240), src/transcription/whisper_client.py (cleanup method at lines 238-279). Frees GPU memory for subsequent stages."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) Added auto_cleanup_after_batch field to TranscriptionConfig at src/config/sections/core.py lines 82-85 (default True) and config.yaml lines 145-149. (2) Updated transcribe_videos_parallel() to call whisper_client.cleanup() in finally block at lines 302-307. (3) Cleanup already logs GPU memory before/after and calculates delta in whisper_client.py cleanup() method at lines 371-397. (4) Wrapped entire batch processing in try/finally block (lines 111-307) to ensure cleanup runs even on exception. (5) Added 7 tests in tests/test_whisper_cleanup_hook.py verifying cleanup is called when enabled, NOT called when disabled, called on exception (finally), and default enabled without config. All 7 tests pass."
                         },
                         {
                             "id":  "US-60-012",
@@ -181,8 +181,8 @@
                                                        "Clear CUDA cache between retries to help recover from OOM",
                                                        "Add test verifying retry behavior for transient vs permanent errors"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (robustness). Target files: src/transcription/parallel_processor.py (transcribe_video around lines 243-372), src/transcription/exceptions.py (is_transient_error already exists). Existing retry logic at lines 305-341 provides foundation but may need CUDA cache clearing between retries."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) is_transient_error() already exists in src/transcription/exceptions.py lines 68-95 with TRANSIENT_ERROR_PATTERNS including 'cuda', 'out of memory', 'ctranslate2' at lines 40-50. (2) Retry logic in transcribe_video() at parallel_processor.py lines 372-424 with max_retries=2 parameter (line 320). (3) Exponential backoff at line 420: delay = base_delay * (2 ** attempt) gives 1s, 2s with base_delay=1.0. (4) Added _clear_cuda_cache() function at lines 29-46 that calls torch.cuda.empty_cache() and torch.cuda.synchronize(), called before sleep in retry loop at line 425. (5) TestTranscriptionRetry class in tests/test_transcription_parallel_processor.py lines 944-1166 with 7 tests covering transient retries, permanent error rejection, CUDA cache clearing. Also fixed unrelated mock_config fixture to include audio_extraction_workers. All 34 tests pass."
                         }
                     ]
 }

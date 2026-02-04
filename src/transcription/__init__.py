@@ -37,7 +37,8 @@ Example:
 from .whisper_client import WhisperClient, cleanup_model
 from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
-from .utils import extract_audio, write_srt, extract_video_id, format_timestamp_srt
+from .utils import extract_audio, write_srt, extract_video_id, format_timestamp_srt, get_audio_duration
+from .metrics import TranscriptionMetrics
 from .exceptions import (
     TranscriptionError,
     TransientTranscriptionError,
@@ -69,6 +70,9 @@ __all__ = [
     # Dataclasses (from src.state)
     'TranscriptSegment',
 
+    # Metrics (US-60-009)
+    'TranscriptionMetrics',
+
     # Modular components
     'WhisperClient',
     'TranscriptCache',
@@ -88,4 +92,5 @@ __all__ = [
     'write_srt',
     'extract_video_id',
     'format_timestamp_srt',
+    'get_audio_duration',
 ]
