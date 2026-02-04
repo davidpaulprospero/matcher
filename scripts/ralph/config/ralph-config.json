@@ -234,7 +234,8 @@
         },
         "storyCompletionEarlyExit": {
             "enabled": true,
-            "gracePeriodSeconds": 15
+            "gracePeriodSeconds": 15,
+            "evidenceThresholdPercent": 90
         },
         "focusAreaOverrides": {
             "testing": { "stallThreshold": 300, "killThreshold": 600 },

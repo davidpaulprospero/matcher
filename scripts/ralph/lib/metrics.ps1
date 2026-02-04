@@ -553,6 +553,12 @@ function Log-StoryVerification {
         $color = if ($pct -ge 80) { "Green" } elseif ($pct -ge 50) { "Yellow" } else { "Red" }
         Write-Host "  Evidence: $criteriaMetCount/$criteriaTotalCount criteria verified ($pct%)" -ForegroundColor $color
     }
+
+    return @{
+        criteriaMet   = $criteriaMetCount
+        criteriaTotal = $criteriaTotalCount
+        percentage    = if ($criteriaTotalCount -gt 0) { [math]::Round(($criteriaMetCount / $criteriaTotalCount) * 100, 0) } else { 100 }
+    }
 }
 
 function Append-SessionTimeline {
