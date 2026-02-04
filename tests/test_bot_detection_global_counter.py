@@ -238,7 +238,7 @@ class TestBotCounterResetOnSuccess:
                 )
 
             # All 7 segments should have been attempted (no abort at threshold 50)
-            assert stats['attempted'] == 7
+            assert stats.attempted == 7
 
             # clear_tier_floor should have been called once on the success (idx=4)
             esc_mgr.clear_tier_floor.assert_called_once()
@@ -327,6 +327,6 @@ class TestBotErrorsDoNotResetNetworkCounter:
         #
         # Expected: net_before network errors + 1 bot error + 1 network
         # error = net_before + 2 attempted, then abort.
-        assert stats['attempted'] == net_before + 2
-        assert stats['failed'] == net_before + 2
-        assert stats['succeeded'] == 0
+        assert stats.attempted == net_before + 2
+        assert stats.failed == net_before + 2
+        assert stats.succeeded == 0
