@@ -125,8 +125,8 @@
                 "The validation runs at timeline.py after actual_vo_duration is determined (around line 512-524)",
                 "Add test with actual_vo_duration=100s but last_srt_end=120s, verify warning is logged"
             ],
-            "passes": false,
-            "notes": "Tier: enhancement (low risk). Source files: src/otio/timeline.py:512-524 (actual_vo_duration detection via ffprobe), src/otio/timeline.py:543-557 (time_scale_factor calculation). The time_scale_factor auto-calculation at line 548 already compares actual vs SRT durations, but doesn't warn when actual < scaled SRT end. Add validation after line 560: if actual_vo_duration < last_srt_end * time_scale_factor, warn about cutoff. If actual_vo_duration > last_srt_end * time_scale_factor + 30, warn about excessive trailing silence."
+            "passes": true,
+            "notes": "Added VO duration validation in timeline.py after time_scale_factor calculation. Warns when audio shorter than scaled SRT end (cutoff), logs info when trailing silence >30s. 4 tests added."
         },
         {
             "id": "US-56-009",
