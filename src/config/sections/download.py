@@ -159,6 +159,11 @@ class CaptionCircuitBreakerConfig:
     # Maximum pause duration cap (seconds) to prevent runaway pause scaling
     max_pause_seconds: float = 300.0
 
+    # Circuit breaker cascade (US-61-003): when enabled, failures propagate to
+    # the download circuit breaker (and vice versa) to speed up coordinated pausing
+    # when YouTube is rate-limiting. Default: True.
+    circuit_breaker_cascade: bool = True
+
 
 @dataclass
 class CaptionRetryBudgetConfig:
@@ -840,6 +845,11 @@ class CircuitBreakerConfig:
 
     # Maximum pause duration cap (seconds) to prevent runaway pause scaling
     max_pause_seconds: float = 300.0
+
+    # Circuit breaker cascade (US-61-003): when enabled, failures propagate to
+    # the caption circuit breaker (and vice versa) to speed up coordinated pausing
+    # when YouTube is rate-limiting. Default: True.
+    circuit_breaker_cascade: bool = True
 
 
 @dataclass

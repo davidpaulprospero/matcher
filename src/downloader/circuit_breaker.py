@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from .escalation_manager import EscalationManager
     from .rate_limit_budget import RateLimitBudget
+    from src.caption.circuit_breaker import CaptionCircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,11 @@ class CircuitBreakerConfig:
     # Delay is computed as: base_delay * (1 + random.uniform(-jitter, +jitter))
     # Default 0.2 means ±20% randomization to prevent thundering herd
     jitter_factor: float = 0.2
+
+    # Circuit breaker cascade (US-61-003): when enabled, failures propagate to
+    # the caption circuit breaker (and vice versa) to speed up coordinated pausing
+    # when YouTube is rate-limiting. Default: True.
+    circuit_breaker_cascade: bool = True
 
 
 @dataclass
@@ -118,6 +124,7 @@ class CircuitBreaker:
         self._budget: Optional[RateLimitBudget] = None
         self._consecutive_successes: int = 0
         self._last_jitter_applied: float = 0.0  # Track for debugging/metrics
+        self._caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None
 
     @property
     def is_enabled(self) -> bool:
@@ -156,6 +163,68 @@ class CircuitBreaker:
             budget: The RateLimitBudget to consult for resource state.
         """
         self._budget = budget
+
+    def set_caption_circuit_breaker(self, caption_cb: 'CaptionCircuitBreaker') -> None:
+        """Link the caption circuit breaker for cascade coordination (US-61-003).
+
+        When linked and circuit_breaker_cascade is enabled:
+        - Download CB failures increment the caption CB's shared failure counter
+        - When download CB trips on 403/429, it propagates the open state to caption CB
+
+        Args:
+            caption_cb: The CaptionCircuitBreaker instance to coordinate with.
+        """
+        self._caption_circuit_breaker = caption_cb
+        logger.debug("Download circuit breaker linked to caption circuit breaker for cascade")
+
+    def _cascade_failure_to_caption(self) -> None:
+        """Propagate failure to caption circuit breaker (US-61-003).
+
+        Called when download CB records a failure. Increments the caption CB's
+        failure counter to speed up coordinated tripping when YouTube is
+        broadly rate-limiting.
+        """
+        if not self._caption_circuit_breaker:
+            return
+
+        cascade_enabled = getattr(self.config, 'circuit_breaker_cascade', True)
+        if not cascade_enabled:
+            return
+
+        if not self._caption_circuit_breaker.is_enabled:
+            return
+
+        # Increment caption CB failure counter
+        self._caption_circuit_breaker.state.consecutive_failures += 1
+        logger.debug(
+            f"Download CB cascading failure to caption CB "
+            f"(caption failures now: {self._caption_circuit_breaker.state.consecutive_failures})"
+        )
+
+    def _cascade_trip_to_caption(self) -> None:
+        """Propagate trip (open) state to caption circuit breaker (US-61-003).
+
+        Called when download CB trips. Propagates the pause state to caption CB
+        so both circuit breakers pause together.
+        """
+        if not self._caption_circuit_breaker:
+            return
+
+        cascade_enabled = getattr(self.config, 'circuit_breaker_cascade', True)
+        if not cascade_enabled:
+            return
+
+        if not self._caption_circuit_breaker.is_enabled:
+            return
+
+        # If caption CB is not already open, trip it
+        if not self._caption_circuit_breaker.state.is_open:
+            logger.info(
+                "Download circuit breaker cascading trip to caption circuit breaker"
+            )
+            self._caption_circuit_breaker.state.is_open = True
+            self._caption_circuit_breaker.state.opened_at = self.state.opened_at
+            self._caption_circuit_breaker.state.total_trips += 1
 
     def _base_pause(self) -> float:
         """Get the base pause duration from config.
@@ -446,6 +515,8 @@ class CircuitBreaker:
         Increments the consecutive failure counter. If threshold is reached,
         trips the circuit (opens it) and pauses future searches.
 
+        US-61-003: Also cascades failure to caption circuit breaker if linked.
+
         Returns:
             True if circuit tripped (opened) as a result of this failure,
             False otherwise.
@@ -461,6 +532,9 @@ class CircuitBreaker:
             f"({self.state.consecutive_failures}/{self.config.consecutive_failures_threshold})"
         )
 
+        # US-61-003: Cascade failure to caption CB
+        self._cascade_failure_to_caption()
+
         # Check if we've hit the threshold
         if self.state.consecutive_failures >= self.config.consecutive_failures_threshold:
             self._trip()
@@ -474,6 +548,7 @@ class CircuitBreaker:
         Called internally when consecutive failures reach threshold.
         Logs clearly at INFO level so users can see the pause happening.
         Uses effective pause duration (which may be extended by escalation state).
+        US-61-003: Also cascades trip to caption circuit breaker if linked.
         """
         self.state.is_open = True
         self.state.opened_at = time.time()
@@ -485,6 +560,9 @@ class CircuitBreaker:
             f"search failures. Pausing for {effective_pause:.0f}s before "
             f"allowing new searches. (trip #{self.state.total_trips})"
         )
+
+        # US-61-003: Cascade trip to caption CB
+        self._cascade_trip_to_caption()
 
     def reset(self) -> None:
         """Manually reset the circuit breaker.
