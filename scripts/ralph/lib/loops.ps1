@@ -351,6 +351,11 @@ function Start-TrueAutoLoop {
                     Write-Host "  Created $($decomposedStories.Count) decomposed stories" -ForegroundColor Green
                 }
 
+                # Mark current area as complete in queue BEFORE picking next area
+                if ($status.focusArea) {
+                    Update-QueueProgress -AreaId $status.focusArea -Silent
+                }
+
                 # Check for graceful stop BEFORE generating new sprint
                 if (Test-GracefulStopRequested) {
                     Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
@@ -1179,6 +1184,9 @@ function Start-AdaptiveOvernightLoop {
                     Invoke-StoryDecomposition -HardStory $hs | Out-Null
                 }
             }
+
+            # Mark current area as complete in queue
+            Update-QueueProgress -AreaId $currentArea -Silent
 
             # Check for graceful stop
             if (Test-GracefulStopRequested) {
