@@ -295,6 +295,34 @@ class VideoDownloader:
         rate_limit_config = getattr(self.download_config, 'rate_limit', None)
         self._per_tier_isolation = getattr(rate_limit_config, 'per_tier_isolation', True) if rate_limit_config else True
 
+        # Validate retry configuration bounds (US-58-004)
+        max_retries = getattr(self.download_config, 'max_retries', 3)
+        retry_backoff = getattr(self.download_config, 'retry_backoff', 2.0)
+        retry_delay = getattr(self.download_config, 'retry_delay', 2.0)
+
+        if not isinstance(max_retries, int) or max_retries < 0 or max_retries > 20:
+            raise ValueError(
+                f"max_retries must be an integer in range [0, 20], got {max_retries}"
+            )
+        if not isinstance(retry_backoff, (int, float)) or retry_backoff < 1.0 or retry_backoff > 10.0:
+            raise ValueError(
+                f"retry_backoff must be a number in range [1.0, 10.0], got {retry_backoff}"
+            )
+
+        # Warn if computed max backoff time exceeds 600 seconds
+        if max_retries > 0:
+            max_backoff_time = sum(
+                retry_delay * (retry_backoff ** attempt)
+                for attempt in range(max_retries)
+            )
+            if max_backoff_time > 600.0:
+                logger.warning(
+                    f"Retry configuration produces high max backoff time: "
+                    f"{max_backoff_time:.1f}s (threshold: 600s). "
+                    f"max_retries={max_retries}, retry_delay={retry_delay}, "
+                    f"retry_backoff={retry_backoff}"
+                )
+
         # Speed tracker (for adaptive timeouts)
         speed_tracking_config = getattr(self.download_config, 'speed_tracking', None)
         speed_tracking_enabled = False

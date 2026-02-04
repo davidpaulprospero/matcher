@@ -66,6 +66,101 @@ class TestRetryConfiguration:
             assert config.download.retry_backoff == 3.0
 
 
+class TestRetryConfigValidation:
+    """Test that retry configuration bounds are validated in __init__ (US-58-004)."""
+
+    @pytest.mark.fast
+    def test_negative_max_retries_raises_value_error(self, tmp_path):
+        """Test that negative max_retries raises ValueError."""
+        config = create_mock_downloader_config(tmp_path, max_retries=-1)
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            with pytest.raises(ValueError, match="max_retries must be an integer in range"):
+                VideoDownloader(config)
+
+    @pytest.mark.fast
+    def test_max_retries_above_upper_bound_raises_value_error(self, tmp_path):
+        """Test that max_retries > 20 raises ValueError."""
+        config = create_mock_downloader_config(tmp_path, max_retries=21)
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            with pytest.raises(ValueError, match="max_retries must be an integer in range"):
+                VideoDownloader(config)
+
+    @pytest.mark.fast
+    def test_retry_backoff_below_minimum_raises_value_error(self, tmp_path):
+        """Test that retry_backoff < 1.0 raises ValueError."""
+        config = create_mock_downloader_config(tmp_path, retry_backoff=0.5)
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            with pytest.raises(ValueError, match="retry_backoff must be a number in range"):
+                VideoDownloader(config)
+
+    @pytest.mark.fast
+    def test_retry_backoff_above_upper_bound_raises_value_error(self, tmp_path):
+        """Test that retry_backoff > 10.0 raises ValueError."""
+        config = create_mock_downloader_config(tmp_path, retry_backoff=11.0)
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            with pytest.raises(ValueError, match="retry_backoff must be a number in range"):
+                VideoDownloader(config)
+
+    @pytest.mark.fast
+    def test_valid_bounds_accepted(self, tmp_path):
+        """Test that valid boundary values are accepted without error."""
+        # Test lower bounds
+        config = create_mock_downloader_config(tmp_path, max_retries=0, retry_backoff=1.0)
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            downloader = VideoDownloader(config)
+            assert config.download.max_retries == 0
+            assert config.download.retry_backoff == 1.0
+
+        # Test upper bounds
+        config = create_mock_downloader_config(tmp_path, max_retries=20, retry_backoff=10.0)
+        with patch_video_downloader_dependencies():
+            downloader = VideoDownloader(config)
+            assert config.download.max_retries == 20
+            assert config.download.retry_backoff == 10.0
+
+    @pytest.mark.fast
+    def test_warning_logged_when_max_backoff_exceeds_threshold(self, tmp_path, caplog):
+        """Test that a warning is logged when computed max backoff exceeds 600s."""
+        import logging
+        # max_retries=10, retry_delay=2.0, retry_backoff=3.0
+        # total = sum(2.0 * 3.0^i for i in 0..9) = 2*(3^10-1)/(3-1) = 59048 >> 600
+        config = create_mock_downloader_config(
+            tmp_path, max_retries=10, retry_delay=2.0, retry_backoff=3.0
+        )
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            with caplog.at_level(logging.WARNING):
+                VideoDownloader(config)
+            assert any(
+                "max backoff time" in record.message and "threshold: 600s" in record.message
+                for record in caplog.records
+            ), f"Expected backoff warning not found in logs: {[r.message for r in caplog.records]}"
+
+    @pytest.mark.fast
+    def test_no_warning_for_reasonable_backoff(self, tmp_path, caplog):
+        """Test that no warning is logged when backoff is within threshold."""
+        import logging
+        # max_retries=3, retry_delay=2.0, retry_backoff=2.0
+        # total = 2 + 4 + 8 = 14s, well under 600s
+        config = create_mock_downloader_config(
+            tmp_path, max_retries=3, retry_delay=2.0, retry_backoff=2.0
+        )
+        with patch_video_downloader_dependencies():
+            from src.downloader.core import VideoDownloader
+            with caplog.at_level(logging.WARNING):
+                VideoDownloader(config)
+            backoff_warnings = [
+                r for r in caplog.records
+                if "max backoff time" in r.message
+            ]
+            assert len(backoff_warnings) == 0, f"Unexpected backoff warning: {backoff_warnings}"
+
+
 class TestTransientErrorDetection:
     """Test that transient errors are correctly identified."""
 
