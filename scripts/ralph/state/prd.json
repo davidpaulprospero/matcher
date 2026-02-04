@@ -104,7 +104,7 @@
                             "id":  "US-57-007",
                             "title":  "Split download_segments main loop into focused sub-methods",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "The main download loop in src/stages/download_segments.py (lines 540-897) is refactored into sub-methods: _prepare_download_context(), _check_preconditions(), _execute_download(), _handle_result()",
                                                        "Each sub-method is no longer than 80 lines",
@@ -112,7 +112,7 @@
                                                        "All existing tests in tests/test_download_segment*.py continue to pass without modification",
                                                        "Add at least one test for _check_preconditions() that verifies circuit breaker open state returns a skip reason"
                                                    ],
-                            "notes":  ""
+                            "notes":  "All sub-methods implemented: _prepare_download_context (47 lines), _check_preconditions (45 lines), _execute_download (78 lines), _handle_result (54 lines). Main _download_segments loop (76 lines) calls them sequentially. All 72 existing tests pass. TestCheckPreconditionsUnit added with 3 tests including circuit breaker open state skip reason verification."
                         },
                         {
                             "id":  "US-57-008",
@@ -161,7 +161,7 @@
                             "id":  "US-57-011",
                             "title":  "Extract magic number constants from state restoration and matching",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Extract DEFAULT_MATCH_DURATION_SECONDS = 10.0 constant from the hardcoded fallback in src/state.py line 146 (video_end = video_start + 10.0)",
                                                        "Extract DEFAULT_GAP_CONFIDENCE = 0.0 constant used in gap match creation in src/matching/tiered_matcher.py",
@@ -175,7 +175,7 @@
                             "id":  "US-57-012",
                             "title":  "Split pipeline config validation into schema validation and runtime environment checks",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Split _validate_config() in src/pipeline.py (lines 136-183) into two methods: _validate_config_schema() (pure config checks, no I/O) and _validate_runtime_environment() (filesystem/PATH checks)",
                                                        "_validate_config_schema() can be called without any filesystem access and validates required fields, type constraints, and value ranges",
@@ -183,7 +183,7 @@
                                                        "Both methods return List[str] of validation errors, and the caller combines them",
                                                        "Add a test that calls _validate_config_schema() with an invalid config and verifies errors are returned without touching the filesystem"
                                                    ],
-                            "notes":  "Tier: Low priority refactor. Source files: src/pipeline.py (lines 136-183, _validate_config method). Sprint 45 story US-45-010 moved config validation before checkpoint loading; this story refines the validation itself by separating pure schema checks from I/O-dependent environment checks. Schema validation can run in CI without a real filesystem, enabling faster feedback."
+                            "notes":  "Split _validate_config() into _validate_config_schema() (pure config checks, no I/O) and _validate_runtime_environment() (filesystem/PATH checks). Both return List[str]. Added 12 tests in test_pipeline_config_schema_validation.py including a test that verifies no filesystem access occurs during schema validation."
                         }
                     ]
 }

@@ -138,9 +138,58 @@ class PipelineOrchestrator:
         """
         Validate pipeline configuration before running stages.
 
-        Checks:
-        - cache_dir is writable (or can be created)
-        - Embedding provider is configured when matching stages are enabled
+        Combines schema validation (pure config checks) with runtime environment
+        checks (filesystem/PATH). See _validate_config_schema() and
+        _validate_runtime_environment() for details.
+
+        Returns:
+            List of validation error strings. Empty list means config is valid.
+        """
+        errors = self._validate_config_schema()
+        errors.extend(self._validate_runtime_environment())
+        return errors
+
+    def _validate_config_schema(self) -> List[str]:
+        """
+        Pure config schema validation — no I/O, no filesystem access.
+
+        Checks required fields, type constraints, and value ranges that can be
+        validated from config values alone. Safe to call in CI without a real
+        filesystem.
+
+        Returns:
+            List of validation error strings. Empty list means config is valid.
+        """
+        errors: List[str] = []
+
+        # Check cache_dir is configured
+        cache_dir = getattr(getattr(self.config, 'cache', None), 'cache_dir', None)
+        if not cache_dir:
+            errors.append("No cache directory configured (config.cache.cache_dir)")
+
+        # Check embedding provider when matching stages are enabled
+        matching_stage_names = {'MATCH', 'ITERATIVE_MATCH'}
+        has_matching_stages = any(
+            getattr(stage, 'name', '') in matching_stage_names
+            for stage in self.stages
+        )
+        if has_matching_stages:
+            embedding_config = getattr(self.config, 'embedding', None)
+            provider = getattr(embedding_config, 'provider', None) if embedding_config else None
+            if not provider:
+                errors.append(
+                    "Embedding provider not configured (config.embedding.provider) "
+                    "but matching stages require embeddings"
+                )
+
+        return errors
+
+    def _validate_runtime_environment(self) -> List[str]:
+        """
+        Runtime environment checks — requires filesystem/PATH access.
+
+        Checks cache_dir writability, browser availability, and other
+        I/O-dependent preconditions.
 
         Returns:
             List of validation error strings. Empty list means config is valid.
@@ -163,23 +212,6 @@ class PipelineOrchestrator:
                     errors.append(
                         f"Cannot create cache directory (parent not writable): {cache_dir}"
                     )
-        elif not cache_dir:
-            errors.append("No cache directory configured (config.cache.cache_dir)")
-
-        # Check embedding provider when matching stages are enabled
-        matching_stage_names = {'MATCH', 'ITERATIVE_MATCH'}
-        has_matching_stages = any(
-            getattr(stage, 'name', '') in matching_stage_names
-            for stage in self.stages
-        )
-        if has_matching_stages:
-            embedding_config = getattr(self.config, 'embedding', None)
-            provider = getattr(embedding_config, 'provider', None) if embedding_config else None
-            if not provider:
-                errors.append(
-                    "Embedding provider not configured (config.embedding.provider) "
-                    "but matching stages require embeddings"
-                )
 
         # US-57-004: Warn if cookies_from_browser is set but browser not on PATH
         self._warn_cookies_from_browser()

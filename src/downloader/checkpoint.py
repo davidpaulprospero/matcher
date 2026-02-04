@@ -49,6 +49,8 @@ class DownloadCheckpoint:
     escalation_state: Optional[Dict] = None
     # Per-tier backoff state for resume support (Sprint 12 US-003)
     tier_backoff_state: Optional[Dict] = None
+    # Schema version for detecting checkpoint format drift (US-58-002)
+    schema_version: int = 1
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -78,6 +80,17 @@ class DownloadCheckpoint:
         # Handle checkpoints created before tier backoff state was added (Sprint 12 US-003)
         if 'tier_backoff_state' not in data:
             data['tier_backoff_state'] = None
+        # Handle checkpoints created before schema_version was added (US-58-002)
+        if 'schema_version' not in data:
+            data['schema_version'] = 1
+        # Warn if loaded checkpoint has a different schema version than current
+        current_version = 1
+        if data['schema_version'] != current_version:
+            logger.warning(
+                "Checkpoint schema_version mismatch: loaded v%d, current v%d. "
+                "Checkpoint may contain unexpected fields or missing defaults.",
+                data['schema_version'], current_version
+            )
         return cls(**data)
 
 
