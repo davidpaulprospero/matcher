@@ -93,7 +93,7 @@
             "id": "US-52-006",
             "title": "Unify error classification between download_segments and core downloader",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Extract _classify_error(), _is_network_failure(), _is_escalation_error() from download_segments.py into a shared module",
                 "Both download_segments.py and core.py import error classification from the shared location",
@@ -102,7 +102,7 @@
                 "download_segments.py imports and delegates to the shared module (no duplicate logic)",
                 "core.py's ERROR_SEVERITY_PATTERNS are reconciled with _is_network_failure patterns"
             ],
-            "notes": "Tier: Refactor (DRY architecture). Files: src/stages/download_segments.py:60-128 (error classification functions), src/downloader/core.py (ERROR_SEVERITY_PATTERNS dict), new file src/downloader/error_classification.py. The root cause of Issue 3 (DNS abort) is that download_segments.py and core.py have independent error classification with different patterns. Unifying them ensures both paths classify the same errors consistently."
+            "notes": "Created src/downloader/error_classification.py with unified is_network_failure(), is_escalation_error(), classify_error_category(), classify_error_severity(), ERROR_SEVERITY_PATTERNS, SEVERITY_MULTIPLIERS, and threshold constants. download_segments.py imports _is_network_failure, _is_escalation_error, classify_error_category, NETWORK_FAILURE_THRESHOLD, BOT_DETECTION_ABORT_THRESHOLD from shared module. core.py imports ERROR_SEVERITY_PATTERNS, SEVERITY_MULTIPLIERS, classify_error_severity from shared module. All 365 relevant tests pass (7 pre-existing failures unrelated to this change)."
         },
         {
             "id": "US-52-007",

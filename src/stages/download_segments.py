@@ -29,104 +29,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Error patterns indicating systemic network failures (not video-specific)
-# These match both subprocess stderr AND Python API DownloadError messages,
-# which wrap exceptions as "ERROR: [youtube] ID: <original exception text>".
-_NETWORK_FAILURE_PATTERNS = (
-    'getaddrinfo failed',
-    'Name or service not known',
-    'Errno 11001',           # Windows DNS resolution failure
-    'nodename nor servname',  # macOS DNS failure
-    'Network is unreachable',
-    'No address associated with hostname',
-    'Temporary failure in name resolution',
-    'Failed to resolve',     # curl/curl_cffi DNS failure message
-    'URLError',              # Python urllib wrapper (e.g. URLError: <urlopen error ...>)
-    'ConnectionResetError',  # Python API: connection dropped mid-transfer
-    'Connection refused',    # Server rejecting connections (systemic when widespread)
-    'Connection timed out',  # TCP connection timeout (systemic when widespread)
+# US-52-006: Error classification delegated to shared module
+from ..downloader.error_classification import (
+    is_network_failure as _is_network_failure,
+    is_escalation_error as _is_escalation_error,
+    classify_error_category,
+    NETWORK_FAILURE_THRESHOLD,
+    BOT_DETECTION_ABORT_THRESHOLD,
 )
-
-# ffmpeg exit code 0xFFFFFEC6 = 4294967158 unsigned = -314 signed (network error)
-_FFMPEG_NETWORK_EXIT_CODE = '4294967158'
-
-
-def _is_network_failure(error_msg: str) -> bool:
-    """Check if an error message indicates a systemic network failure.
-
-    These are failures that affect ALL downloads (DNS down, no internet),
-    as opposed to video-specific errors (403, removed, age-gated).
-
-    Args:
-        error_msg: The exception message string.
-
-    Returns:
-        True if the error indicates a systemic network issue.
-    """
-    error_lower = error_msg.lower()
-    for pattern in _NETWORK_FAILURE_PATTERNS:
-        if pattern.lower() in error_lower:
-            return True
-    # Check for ffmpeg network exit code
-    if _FFMPEG_NETWORK_EXIT_CODE in error_msg:
-        return True
-    return False
-
-
-# Default threshold for consecutive network failures before aborting
-NETWORK_FAILURE_THRESHOLD = 3
-
-# Default threshold for total bot-detection errors before aborting the stage.
-# When YouTube is broadly blocking (broken cookies, defeated impersonation),
-# every remaining segment hits the block wall with doomed Tier 1 requests.
-# This threshold triggers an early abort with actionable guidance.
-BOT_DETECTION_ABORT_THRESHOLD = 10
-
-
-def classify_error_category(error_msg: str) -> str:
-    """Classify a download error into a diagnostic category.
-
-    Categories (most specific first):
-        'network'       — DNS failure, no connectivity (systemic)
-        'bot_detection' — 403/bot/captcha/sign-in errors
-        'timeout'       — stall timeouts, socket timeouts
-        'video_specific'— removed, age-gated, unavailable, etc.
-
-    Args:
-        error_msg: The exception message string.
-
-    Returns:
-        One of 'network', 'bot_detection', 'timeout', 'video_specific'.
-    """
-    if _is_network_failure(error_msg):
-        return 'network'
-    if _is_escalation_error(error_msg):
-        return 'bot_detection'
-    lower = error_msg.lower()
-    if any(p in lower for p in ('timeout', 'timed out', 'stalled')):
-        return 'timeout'
-    return 'video_specific'
-
-
-def _is_escalation_error(error_msg: str) -> bool:
-    """Check if an error message indicates a 403/bot-detection/auth error.
-
-    These errors warrant escalation to a higher bypass tier via the
-    EscalationManager (Tier 2 extractor_args, Tier 3 cookies).
-
-    Args:
-        error_msg: The exception message string.
-
-    Returns:
-        True if the error matches 403/bot/auth patterns.
-    """
-    try:
-        from ..downloader.escalation_manager import is_escalation_trigger
-        return is_escalation_trigger(error_msg)
-    except ImportError:
-        # Fallback: simple pattern match if escalation_manager unavailable
-        lower = error_msg.lower()
-        return any(p in lower for p in ('403', 'forbidden', 'sign in', 'bot', 'captcha'))
 
 
 def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -> None:

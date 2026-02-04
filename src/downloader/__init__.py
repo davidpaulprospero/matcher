@@ -49,6 +49,16 @@ from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager, ImpersonationStats
 from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
 from .escalation_strategy import EscalationStrategy, EscalationDecision
+from .error_classification import (
+    classify_error_category,
+    classify_error_severity,
+    is_network_failure,
+    is_escalation_error,
+    NETWORK_FAILURE_THRESHOLD,
+    BOT_DETECTION_ABORT_THRESHOLD,
+    ERROR_SEVERITY_PATTERNS,
+    SEVERITY_MULTIPLIERS,
+)
 from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
@@ -118,6 +128,16 @@ __all__ = [
     'RetryQueueStats',
     'RateLimitMetrics',
     'RateLimitMetricsAggregator',
+
+    # Error classification (shared module)
+    'classify_error_category',
+    'classify_error_severity',
+    'is_network_failure',
+    'is_escalation_error',
+    'NETWORK_FAILURE_THRESHOLD',
+    'BOT_DETECTION_ABORT_THRESHOLD',
+    'ERROR_SEVERITY_PATTERNS',
+    'SEVERITY_MULTIPLIERS',
 
     # Segment utilities
     'collect_matched_segments',
