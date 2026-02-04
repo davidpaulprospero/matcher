@@ -22,14 +22,12 @@ from .utils import (
     create_clip_with_timewarp,
     optimize_timeline_gaps,
     MediaPathNormalizer,
+    AUDIO_ONLY_EXTS,
+    NON_MEDIA_EXTS,
+    _is_audio_only,
+    _has_problematic_path,
 )
 from .entities import _add_entity_images_to_track, _add_entity_videos_to_track
-
-# Audio-only extensions that cause DaVinci to hang
-AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
-
-# Non-media extensions that can't be imported (subtitles, text, etc.)
-NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
 
 # DaVinci Resolve clip count thresholds (see Rule 15 in CLAUDE.md)
 # DaVinci OTIO import hangs when total clips exceed ~3130
@@ -39,12 +37,6 @@ CLIP_COUNT_ERROR_THRESHOLD = 3000    # Log error when likely to fail
 # Maximum clip extension factor for gap_mode='extend'
 # Prevents extreme slowdowns when extending clips to fill large gaps
 MAX_CLIP_EXTENSION_FACTOR = 2.0  # Max 2x original duration
-
-
-def _is_audio_only(file_path: str) -> bool:
-    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
-    ext = Path(file_path).suffix.lower()
-    return ext in AUDIO_ONLY_EXTS
 
 
 def _is_non_media(file_path: str) -> bool:
@@ -83,34 +75,6 @@ def _find_audio_for_voiceover(vo_path: str) -> Optional[str]:
                 return str(candidate)
 
     return None
-
-
-def _has_problematic_path(file_path: str) -> bool:
-    """
-    Check if file path has characters that cause DaVinci OTIO import to hang.
-
-    Problematic patterns:
-    - Corrupted unicode (replacement char U+FFFD shown as �)
-    - Non-ASCII characters in paths (accents, special chars)
-    - Extended unicode that Windows/DaVinci can't handle
-    """
-    try:
-        # Check for replacement character (corrupted unicode)
-        if '\ufffd' in file_path or '�' in file_path:
-            return True
-
-        # Check if path is pure ASCII - non-ASCII can cause issues
-        for char in file_path:
-            code = ord(char)
-            # Allow ASCII printable (32-126), forward/back slash, colon
-            if code > 127:
-                # Non-ASCII character found
-                return True
-
-        return False
-    except Exception:
-        # If we can't even check the path, it's problematic
-        return True
 
 
 def _is_missing_file(file_path: str) -> bool:

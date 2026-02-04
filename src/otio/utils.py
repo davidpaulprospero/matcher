@@ -17,6 +17,46 @@ import opentimelineio as otio
 
 logger = logging.getLogger(__name__)
 
+# Audio-only extensions that cause DaVinci to hang
+AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+
+# Non-media extensions that can't be imported (subtitles, text, etc.)
+NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
+
+
+def _is_audio_only(file_path: str) -> bool:
+    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
+    ext = Path(file_path).suffix.lower()
+    return ext in AUDIO_ONLY_EXTS
+
+
+def _has_problematic_path(file_path: str) -> bool:
+    """
+    Check if file path has characters that cause DaVinci OTIO import to hang.
+
+    Problematic patterns:
+    - Corrupted unicode (replacement char U+FFFD shown as \ufffd)
+    - Non-ASCII characters in paths (accents, special chars)
+    - Extended unicode that Windows/DaVinci can't handle
+    """
+    try:
+        # Check for replacement character (corrupted unicode)
+        if '\ufffd' in file_path or '\ufffd' in file_path:
+            return True
+
+        # Check if path is pure ASCII - non-ASCII can cause issues
+        for char in file_path:
+            code = ord(char)
+            # Allow ASCII printable (32-126), forward/back slash, colon
+            if code > 127:
+                # Non-ASCII character found
+                return True
+
+        return False
+    except Exception:
+        # If we can't even check the path, it's problematic
+        return True
+
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder that converts numpy types to Python native types."""

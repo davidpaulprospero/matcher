@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 55,
-    "focusArea": "testing",
-    "branchName": "ralph/sprint-55",
+    "sprintNumber": 56,
+    "focusArea": "otio",
+    "branchName": "ralph/sprint-56",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,179 +11,178 @@
     },
     "userStories": [
         {
-            "id": "US-55-001",
-            "title": "Generate sprint stories for testing focus area",
+            "id": "US-56-001",
+            "title": "Generate sprint stories for otio focus area",
             "priority": "high",
-            "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'testing' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'otio' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'testing'",
-                "Add stories US-55-002 through US-55-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'otio'",
+                "Add stories US-56-002 through US-56-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-55-NNN to be unique across sprints",
-                "Mark this story (US-55-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-56-NNN to be unique across sprints",
+                "Mark this story (US-56-001) as passes: true when done"
             ],
-            "notes": "COMPLETED. Generated 11 testing stories (US-55-002 through US-55-012) covering the 6 download_segments issues from user interview plus broader test infrastructure gaps. Stories organized by priority: P0 cookie/impersonation tests, P1 serialization/stall tests, P2 escalation/network tests, plus test infrastructure improvements (conftest factories, error classification coverage, MatchResult round-trip, iterative match serialization)."
+            "passes": true,
+            "notes": "Seed story completed. Analyzed src/otio/ (9 modules: timeline.py, tracks.py, entities.py, export.py, xml_export.py, reporting.py, utils.py, types.py, __init__.py) and tests/ (15 test files). Found: 3x duplicated _has_problematic_path, 2x duplicated _is_audio_only, hardcoded 01:00:00:00 in xml_export not using config, duplicated frames_to_tc, limited EDL colors, no NTSC detection, logging-only clip warnings, no audio validation, no segment map versioning, V9/V10 always show gaps in stats."
         },
         {
-            "id": "US-55-002",
-            "title": "Add tests for cookie propagation in download_segments ydl_opts",
+            "id": "US-56-002",
+            "title": "Deduplicate _has_problematic_path and _is_audio_only across otio modules",
             "priority": "high",
-            "passes": true,
             "acceptanceCriteria": [
-                "Add test class TestCookiePropagation in tests/test_stage_download_segments.py verifying _build_ydl_opts includes cookiesfrombrowser key when download config has cookies_from_browser set",
-                "Add test that ydl_opts contains cookiefile fallback when cookies_from_browser is not configured but a cookiefile path exists in config",
-                "Add test that ydl_opts contains NEITHER cookie key when both cookies_from_browser and cookiefile are absent from config",
-                "Add test verifying cookiesfrombrowser value is a list (e.g. ['firefox']) not a bare string, matching yt-dlp Python API requirements",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
+                "_has_problematic_path is defined ONLY in src/otio/utils.py and imported by timeline.py, tracks.py, and entities.py",
+                "_is_audio_only is defined ONLY in src/otio/utils.py (or timeline.py) and imported by tracks.py — no duplicate definitions remain",
+                "AUDIO_ONLY_EXTS constant is defined once and shared across all modules that need it",
+                "All existing tests in tests/test_otio_*.py continue to pass after the refactor",
+                "Add test in tests/test_otio_utils.py verifying _has_problematic_path handles unicode, replacement chars, and ASCII-only paths"
             ],
-            "notes": "COMPLETED (pre-implemented). TestCookiePropagation class already exists at tests/test_stage_download_segments.py:2345 with 6 tests covering all criteria: cookiesfrombrowser injection (list format verified), cookiefile fallback from cookies_path, cookiefile fallback from cookie_rotation, no-cookie baseline, Tier 3 override, and retry queue propagation. All 6 tests pass with @pytest.mark.fast."
+            "passes": true,
+            "notes": "Completed. Moved _has_problematic_path, _is_audio_only, AUDIO_ONLY_EXTS, NON_MEDIA_EXTS to src/otio/utils.py. Updated imports in timeline.py, tracks.py, entities.py to use shared definitions. Removed 3 duplicate _has_problematic_path definitions and 2 duplicate _is_audio_only definitions. Added 17 new tests (TestHasProblematicPath, TestIsAudioOnly, TestSharedConstants) in test_otio_utils.py covering unicode, replacement chars, CJK, emoji, ASCII paths, and audio extension detection. All 172 core otio tests pass (2 pre-existing failures unrelated to this change)."
         },
         {
-            "id": "US-55-003",
-            "title": "Add tests for ImpersonateTarget type conversion in _apply_escalation_to_ydl_opts",
+            "id": "US-56-003",
+            "title": "Extract shared frames_to_tc into otio utils and eliminate duplication",
             "priority": "high",
-            "passes": true,
             "acceptanceCriteria": [
-                "Add test class TestImpersonateTargetConversion in tests/test_stage_download_segments.py verifying that _apply_escalation_to_ydl_opts converts the '--impersonate' CLI arg string to a proper object type (not a raw string) in ydl_opts",
-                "Add test that the impersonation target client field is lowercased (e.g. 'Chrome-136' becomes 'chrome-136') since yt-dlp available targets are lowercase",
-                "Add test that when escalation result contains no '--impersonate' arg, ydl_opts does not have an 'impersonate' key",
-                "Add test that a malformed impersonate string (e.g. empty string or missing colon) is handled gracefully without raising an unhandled exception",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
+                "A single frames_to_tc(frames, frame_rate, start_frame_offset, separator) function exists in src/otio/utils.py",
+                "src/otio/export.py:337-350 uses the shared function instead of defining its own",
+                "src/otio/reporting.py:187-199 uses the shared function instead of defining its own",
+                "Timecode parsing logic (tc_parts splitting at export.py:330-335 and reporting.py:180-185) is extracted into a parse_timecode_to_frames() utility",
+                "Add tests verifying frames_to_tc for edge cases: 0 frames, frame_rate=29.97 rounded, drop-frame separator"
             ],
-            "notes": "Added TestImpersonateTargetConversion class at tests/test_stage_download_segments.py:1438 with 5 tests: (1) test_impersonate_arg_produces_object_not_string - verifies ImpersonateTarget not str, (2) test_client_field_is_lowercased - asserts client/os lowercase, (3) test_no_impersonate_arg_means_no_key - only extractor-args, no impersonate key, (4) test_malformed_impersonate_empty_string_no_crash - empty string graceful, (5) test_malformed_impersonate_no_colon_no_crash - no colon graceful. All 5 pass with @pytest.mark.fast."
-        },
-        {
-            "id": "US-55-004",
-            "title": "Add tests for iterative_match checkpoint serialization of video_file field",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add test class TestMatchSerializationVideoFile in tests/test_stage_iterative_match.py verifying that serialization of MatchResult objects extracts video_file from match.primary_match.video_segment.source_file (not getattr(match, 'video_file', ''))",
-                "Add test that a MatchResult with primary_match.video_segment.source_file='abc123' serializes to a dict with video_file='abc123' (not empty string)",
-                "Add test that a MatchResult with no primary_match (None) serializes video_file as empty string without raising AttributeError",
-                "Add test that serialized matches can be deserialized via Match.from_dict() and the video_file value survives the round-trip",
-                "Add test that the else branch (non-MatchResult simple Match objects) also correctly serializes video_file",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "Added TestMatchSerializationVideoFile with 6 tests: MatchResult extracts source_file from primary_match.video_segment, None primary_match returns empty string, round-trip via state.Match.from_dict, simple state.Match else branch, empty source_file handling, else branch round-trip. All @pytest.mark.fast, all pass."
-        },
-        {
-            "id": "US-55-005",
-            "title": "Add tests for network failure pattern matching against Python API exception formats",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add test class TestNetworkFailurePythonApiPatterns in tests/test_error_classification.py verifying is_network_failure() matches DNS resolution errors in Python exception format: 'Failed to resolve' and 'Errno 11001' (Windows DNS failure)",
-                "Add test that is_network_failure() matches ffmpeg exit code patterns: '4294967158' (unsigned) and '-314' (signed) from Python API error output",
-                "Add test that classify_error_category() returns 'network' for DNS failures and 'bot_detection' for 403/Sign-in errors, confirming the priority chain is correct",
-                "Add test that bot-detection messages ('Sign in to confirm', '403: Forbidden') are NOT classified as network failures by is_network_failure()",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "Added TestNetworkFailurePythonApiPatterns class with 17 tests in tests/test_error_classification.py. Tests cover: DNS resolution errors (Failed to resolve, Errno 11001), ffmpeg exit codes (4294967158 unsigned, -314 signed), classify_error_category priority chain (network for DNS, bot_detection for 403/Sign-in), and negative cases (bot-detection NOT classified as network). All @pytest.mark.fast."
-        },
-        {
-            "id": "US-55-006",
-            "title": "Add tests for download_segments bot-detection abort counter behavior",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add test class TestBotDetectionAbortCounter in tests/test_stage_download_segments.py verifying that consecutive bot-detection errors (403, 'Sign in') increment a shared counter across video IDs",
-                "Add test that when bot-detection counter exceeds BOT_DETECTION_ABORT_THRESHOLD (default 10), the download loop aborts early with appropriate logging",
-                "Add test that a successful download resets the bot-detection counter to zero",
-                "Add test that bot-detection errors do NOT reset the network failure counter (verifying the counter interaction described in Issue 6)",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "Added TestBotDetectionAbortCounter class with 6 tests in tests/test_stage_download_segments.py. Tests cover: shared counter across video IDs (403 + Sign-in errors), abort with logging when threshold exceeded, error_categories recording, counter reset on success, and bot-detection errors NOT resetting network failure counter. All @pytest.mark.fast."
-        },
-        {
-            "id": "US-55-007",
-            "title": "Add tests for EscalationManager circuit breaker wiring and tier floor propagation",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add test class TestCircuitBreakerWiring in tests/test_escalation_manager.py verifying that after set_circuit_breaker() is called, get_escalation_args() returns max-tier args when circuit breaker is open",
-                "Add test that set_tier_floor() causes all subsequent get_escalation_args() calls for NEW keywords to start at the floor tier instead of Tier 1",
-                "Add test that existing keywords below the tier floor are escalated to floor tier on next get_escalation_args() call",
-                "Add test that when circuit_breaker is None (default, never wired), get_escalation_args() returns normal tier-based args without shortcutting",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "Added TestCircuitBreakerWiring class with 5 tests: (1) CB open shortcuts to FULL_BYPASS, (2) tier floor new keywords start at floor, (3) existing keywords below floor elevated, (4) no CB means no shortcut, (5) closed CB means no shortcut. All @pytest.mark.fast."
-        },
-        {
-            "id": "US-55-008",
-            "title": "Add tests for MatchResult serialization round-trip in utils.py",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add test class TestMatchResultRoundTrip in tests/test_utils.py (or create if needed) verifying MatchResult.to_dict() and from_dict() preserve all fields: primary_match, alternatives, secondary_matches, strategy_matches, has_gap, confidence_variance, matched_keywords",
-                "Add test that a MatchResult with empty alternatives/secondary_matches/strategy_matches serializes and deserializes correctly with empty lists",
-                "Add test that nested Match objects within primary_match preserve video_segment.source_file through serialization",
-                "Add test that AlternativeMatch and StrategyMatch objects within alternatives/strategy_matches survive round-trip with correct diversity_score/strategy values",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "COMPLETED. Added to_dict()/from_dict() methods to MatchResult, AlternativeMatch, Match, and StrategyMatch in src/utils.py. Added TestMatchResultRoundTrip class with 7 tests in tests/test_utils_simple.py: full round-trip preserving all fields, empty collections round-trip, nested video_segment.source_file preservation, AlternativeMatch diversity_score round-trip, StrategyMatch strategy field round-trip (all 4 strategies), JSON serializability, and voiceover segment preservation. All @pytest.mark.fast, all 87 tests in file pass."
-        },
-        {
-            "id": "US-55-009",
-            "title": "Add download_segments stall detection timeout test coverage",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add test class TestDownloadStallDetection in tests/test_stage_download_segments.py verifying that the ydl.download() call is wrapped in a timeout mechanism that raises after a configurable duration",
-                "Add test that when ydl.download() exceeds the stall timeout, the error is classified as 'timeout' by classify_error_category() and feeds into the retry/escalation logic",
-                "Add test that socket_timeout in ydl_opts is set to the configured value (default 30) and is distinct from the stall detection timeout",
-                "Add test that a download that completes within the timeout is not interrupted",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "COMPLETED. Added TestDownloadStallDetection class with 8 tests in tests/test_stage_download_segments.py: stall timeout wraps ydl.download(), timeout classified as 'timeout' by classify_error_category(), timeout feeds into retry queue, timeout recorded in error_categories stats, socket_timeout set to configured value (default 30), socket_timeout distinct from stall timeout (not in ydl_opts), fast download not interrupted, moderate duration download not interrupted. All @pytest.mark.fast, all 8 pass."
-        },
-        {
-            "id": "US-55-010",
-            "title": "Add conftest factory fixtures for download_segments testing",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add download_config_factory fixture to tests/conftest.py that creates a mock download config object with configurable cookies_from_browser, cookiefile, socket_timeout, and escalation fields",
-                "Add escalation_result_factory fixture that creates mock EscalationResult objects with configurable CLI args (including --impersonate, --extractor-args, --cookies-from-browser)",
-                "Add segment_download_stats_factory fixture that creates SegmentDownloadStats instances with configurable initial values for succeeded/failed/cached/error_categories",
-                "Verify all new fixtures are usable from test files by adding a minimal smoke test for each factory in tests/test_conftest_factories.py",
-                "All new fixtures follow existing conftest.py patterns (use @pytest.fixture decorator, accept overrides via kwargs)"
-            ],
-            "notes": "Added 3 factory fixtures to conftest.py: download_config_factory (mock download config with configurable cookies/socket/escalation), escalation_result_factory (EscalationResult with configurable tier/args), segment_download_stats_factory (SegmentDownloadStats with configurable counts/categories). Created tests/test_conftest_factories.py with 10 smoke tests - all passing."
-        },
-        {
-            "id": "US-55-011",
-            "title": "Add error classification coverage for severity multipliers and edge cases",
-            "priority": "low",
             "passes": false,
-            "acceptanceCriteria": [
-                "Add test class TestErrorSeverityClassification in tests/test_error_classification.py verifying classify_error_severity() returns 'high' for quota-exceeded and bot-detection patterns, 'medium' for 429/rate-limit patterns, 'low' for age-gate/login patterns",
-                "Add test that SEVERITY_MULTIPLIERS dict maps correctly: low=1.5, medium=2.0, high=3.0",
-                "Add test that classify_error_category() returns 'video_specific' for errors that don't match network, bot_detection, or timeout patterns (the fallthrough case)",
-                "Add test for empty string and None-like inputs to all classification functions (is_network_failure, classify_error_category, classify_error_severity) ensuring no unhandled exceptions",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
-            ],
-            "notes": "Tier: T3 (coverage gap). Source files: src/downloader/error_classification.py:1-193 (ERROR_SEVERITY_PATTERNS, SEVERITY_MULTIPLIERS, classify_error_severity). Existing test file tests/test_error_classification.py has 15 markers covering basic classification but severity multipliers and edge cases (empty input, None) appear undertested. These severity values drive adaptive backoff in the circuit breaker."
+            "notes": "Tier: refactor (low risk). Source files: src/otio/export.py:330-350 (timecode parsing + frames_to_tc), src/otio/reporting.py:180-199 (timecode parsing + frames_to_tc), src/otio/utils.py (destination). Both functions are nearly identical — extract to utils.py, add drop_frame separator support. The parse_timecode_to_frames helper should handle both ':' and ';' separators."
         },
         {
-            "id": "US-55-012",
-            "title": "Add tests for download_segments retry queue checkpoint persistence and restore",
-            "priority": "low",
-            "passes": false,
+            "id": "US-56-004",
+            "title": "Use configurable timeline_start_tc in XML export instead of hardcoded 01:00:00:00",
+            "priority": "high",
             "acceptanceCriteria": [
-                "Add test class TestRetryQueueCheckpointPersistence in tests/test_stage_download_segments.py verifying that failed segments are saved to checkpoint with their current escalation tier and error category",
-                "Add test that on resume from checkpoint, the retry queue is restored with correct escalation tier state (segments don't restart at Tier 1)",
-                "Add test that segments with video_file='' in checkpoint are handled gracefully during restore (don't crash, log warning)",
-                "Add test that checkpoint progress callback is invoked with correct counts (downloaded, total, retry_queue_size) during the download loop",
-                "All new tests must be marked @pytest.mark.fast and pass independently"
+                "generate_davinci_media_xml() accepts timeline_start_tc parameter and uses it in the 3 hardcoded locations",
+                "generate_davinci_sequence_xml() accepts timeline_start_tc parameter and uses it in the 3 hardcoded locations",
+                "The <string> element at xml_export.py:361 uses the parameter instead of literal '01:00:00:00'",
+                "The <frame> calculation at xml_export.py:362 uses parsed timecode instead of fps_int*3600",
+                "Add test verifying XML output with non-default timecode (e.g., '00:00:00:00') contains correct <string> and <frame> values"
             ],
-            "notes": "Tier: T3 (integration coverage). Source files: src/stages/download_segments.py (retry queue processing, checkpoint progress callbacks), tests/test_stage_download_segments.py:TestRetryQueueIntegration (4 existing tests), tests/test_stage_download_segments.py:TestCheckpointProgress (2 existing tests). US-51-010 added retry queue checkpoint restore but the test coverage for the round-trip (save tier state -> checkpoint -> restore -> resume at correct tier) may be incomplete. Tests should verify the full persistence cycle."
+            "passes": false,
+            "notes": "Tier: bug fix (medium risk). Source files: src/otio/xml_export.py:361-362 (media XML timecode), src/otio/xml_export.py:700-701 (media XML helper sequence), src/otio/xml_export.py:775-776 (sequence XML timecode). All three locations hardcode '01:00:00:00' and fps_int*3600. The config already has OutputConfig.timeline_start_tc='01:00:00:00' (src/config/sections/output.py:67) and types.py:38 has DEFAULT_TIMELINE_START. Use parse_timecode_to_frames from US-56-003 to calculate the frame offset."
+        },
+        {
+            "id": "US-56-005",
+            "title": "Add NTSC flag detection for drop-frame timecodes in XML export",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "_validate_frame_rate returns a tuple (timebase_int, is_ntsc) instead of just int, or a separate _is_ntsc_rate function exists",
+                "XML <ntsc> elements use 'TRUE' for 29.97 and 59.94 fps timebases instead of always 'FALSE'",
+                "EDL FCM line uses 'DROP FRAME' when frame rate is 29.97 or 59.94 and drop_frame=True",
+                "Add test verifying XML output with 29.97fps has <ntsc>TRUE</ntsc> and 30fps has <ntsc>FALSE</ntsc>",
+                "Add test verifying _validate_frame_rate correctly identifies NTSC rates (23.976, 29.97, 59.94)"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (medium risk). Source files: src/otio/xml_export.py:29-54 (_validate_frame_rate), src/otio/xml_export.py:354,358,692,698,770,779 (all <ntsc>FALSE</ntsc> elements). NTSC rates are 23.976, 29.97, 59.94 — these should set ntsc=TRUE in the XML. The current code always writes FALSE which may cause import issues in DaVinci when project is set to NTSC. STANDARD_NLE_RATES at xml_export.py:26 already lists them."
+        },
+        {
+            "id": "US-56-006",
+            "title": "Add pre-flight media validation before timeline assembly",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "A validate_media_paths(matches, downloaded_segments) function exists that runs BEFORE create_timeline()",
+                "It reports missing files, audio-only files, problematic paths, and non-media files in a summary dict",
+                "The summary includes counts by category and lists affected segment indices",
+                "create_timeline() calls validate_media_paths() at the top and logs a summary before proceeding",
+                "Add test with mock match results containing mixed valid/invalid paths, verify summary accuracy"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (medium risk). Source files: src/otio/timeline.py:44-134 (individual validation functions _is_audio_only, _is_non_media, _has_problematic_path, _is_missing_file called per-clip at lines 830-832, 931, 1029, 1139). Currently each clip is validated inline during track building — failures create gaps mid-timeline with no upfront summary. The pre-flight scan should use the same validation functions but collect all issues first, then log a table: 'Media Validation: 95 valid, 3 audio-only (S012,S045,S099), 1 missing (S023)'."
+        },
+        {
+            "id": "US-56-007",
+            "title": "Add proactive clip budget tracking with auto-lite mode",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "A ClipBudgetTracker class exists that estimates total clips before timeline assembly based on match count and enabled tracks",
+                "When estimated clips exceed CLIP_COUNT_WARNING_THRESHOLD (2500), it logs a recommendation to disable V4-V8 tracks",
+                "When estimated clips exceed CLIP_COUNT_ERROR_THRESHOLD (3000), it auto-disables strategy tracks (V7-V8) and logs the action",
+                "The tracker integrates into create_timeline() before track building begins",
+                "Add test simulating 400 segments with all tracks enabled, verify auto-disable triggers at threshold"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (medium risk). Source files: src/otio/timeline.py:36-37 (thresholds), src/otio/timeline.py:163-188 (_log_clip_count_warnings — currently post-hoc logging only), src/otio/timeline.py:410-424 (track count determination). Formula: clips = segments * (1 + num_alternatives + num_secondary + len(strategy_tracks) + entity_tracks). For 100 segments with all 10 tracks: ~1000 clips. For 400 segments: ~4000 clips (over limit). The auto-lite should modify the config values (num_alternatives, include_strategy_tracks) before track building."
+        },
+        {
+            "id": "US-56-008",
+            "title": "Add voiceover audio duration validation against SRT timeline",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "When actual_vo_duration is detected, compare it against the last segment's end time (scaled by time_scale_factor)",
+                "Log a warning if actual audio is shorter than timeline end (content will be cut off)",
+                "Log info if trailing silence exceeds 30 seconds (potential alignment issue)",
+                "The validation runs at timeline.py after actual_vo_duration is determined (around line 512-524)",
+                "Add test with actual_vo_duration=100s but last_srt_end=120s, verify warning is logged"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (low risk). Source files: src/otio/timeline.py:512-524 (actual_vo_duration detection via ffprobe), src/otio/timeline.py:543-557 (time_scale_factor calculation). The time_scale_factor auto-calculation at line 548 already compares actual vs SRT durations, but doesn't warn when actual < scaled SRT end. Add validation after line 560: if actual_vo_duration < last_srt_end * time_scale_factor, warn about cutoff. If actual_vo_duration > last_srt_end * time_scale_factor + 30, warn about excessive trailing silence."
+        },
+        {
+            "id": "US-56-009",
+            "title": "Enhance _find_audio_for_voiceover with size-based selection and validation",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "_find_audio_for_voiceover returns the largest audio file when multiple candidates exist in the same directory",
+                "The function logs which file was selected and its size when multiple candidates are found",
+                "If only one candidate exists, it is returned without size comparison (current behavior preserved)",
+                "Add test with 3 mock audio files of different sizes in a temp directory, verify largest is selected",
+                "Add test with single audio file, verify current first-match behavior is preserved"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (low risk). Source files: src/otio/timeline.py:56-85 (_find_audio_for_voiceover). Current behavior returns first match from extension loop (line 73-76), then first match from pattern loop (line 79-83). When a directory has voiceover.mp3 (300MB main audio) and audio.mp3 (10MB click track), the pattern order determines which is returned, not file size. Change: collect all candidates, sort by size descending, return largest. Log: 'Found 3 audio candidates, selected voiceover.mp3 (312MB)'."
+        },
+        {
+            "id": "US-56-010",
+            "title": "Fix V9/V10 track coverage stats to reflect actual entity clip data",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "_calculate_track_coverage accepts optional entity_images and entity_videos parameters",
+                "When entity data is provided, V9/V10 stats reflect actual clip counts instead of always showing gaps",
+                "When entity data is not provided, V9/V10 stats show 'N/A' or are omitted instead of misleading 100% gap",
+                "Add test with mock entity_images dict containing 5 entities, verify V9 clip_count > 0",
+                "Add test without entity data, verify V9/V10 coverage is reported as unavailable"
+            ],
+            "passes": false,
+            "notes": "Tier: bug fix (low risk). Source files: src/otio/reporting.py:136-141 (V9/V10 always increment gap_count). Lines 136-141 unconditionally add gaps for every segment to V9 and V10, making track_coverage always report 0% coverage for entity tracks. This is misleading in the segment map JSON and statistics output. The entity data is available in the pipeline state but not passed to _calculate_track_coverage. Need to thread entity_images/entity_videos through from the caller."
+        },
+        {
+            "id": "US-56-011",
+            "title": "Add segment map schema versioning and metadata enrichment",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "generate_segment_map output JSON includes a 'schema_version' field set to '2.0'",
+                "Each segment entry includes 'matching_strategy' field extracted from match metadata (e.g., 'semantic', 'keyword', 'hybrid')",
+                "The output JSON includes a 'pipeline_info' section with stage versions and config hash",
+                "Backward-compatible: existing downstream tools ignore new fields gracefully",
+                "Add test verifying schema_version is present and segment entries contain matching_strategy field"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (low risk). Source files: src/otio/reporting.py:155-286 (generate_segment_map). Current output structure at line 265-275 has no version field. Add schema_version at top level. For matching_strategy, MatchResult objects (src/utils.py) may have strategy metadata — check match.primary_match for strategy info. If not available, default to 'unknown'. The pipeline_info section should include: pipeline_version (from __version__), config_hash (hash of output config), generation_timestamp."
+        },
+        {
+            "id": "US-56-012",
+            "title": "Add comprehensive EDL confidence color mapping for all tiers",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "EDL color mapping covers all confidence levels returned by get_confidence_color(): GREEN, CYAN, YELLOW, ORANGE, RED, PINK, BLUE, PURPLE",
+                "Unknown/unmapped colors fall back to 'White' instead of being silently dropped",
+                "The color mapping is defined as a constant (EDL_COLOR_MAP) in export.py, not inline in the function",
+                "Add test generating EDL with all confidence levels (0.0 to 1.0 range), verify each maps to a valid EDL color",
+                "Add test for entity markers verifying PINK maps correctly"
+            ],
+            "passes": false,
+            "notes": "Tier: enhancement (low risk). Source files: src/otio/export.py:352-360 (color_to_edl dict with 6 entries: GREEN->Mint, CYAN->Cyan, YELLOW->Yellow, ORANGE->Orange, RED->Red, PINK->Pink). get_confidence_color in src/otio/utils.py returns color strings based on confidence score thresholds. The current inline dict may not cover all colors returned by get_confidence_color (e.g., if BLUE or PURPLE are added). Extract to module-level constant, add fallback for unknown colors, and ensure DaVinci Resolve recognizes all mapped EDL color names."
         }
     ]
 }

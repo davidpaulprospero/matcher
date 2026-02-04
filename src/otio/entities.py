@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Literal
 
 import opentimelineio as otio
 
-from .utils import _to_windows_path, _get_media_duration
+from .utils import _to_windows_path, _get_media_duration, _has_problematic_path
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -31,25 +31,6 @@ logger = logging.getLogger(__name__)
 
 # Type alias for entity type
 EntityType = Literal["images", "videos"]
-
-
-def _has_problematic_path(file_path: str) -> bool:
-    """
-    Check if file path has characters that cause DaVinci OTIO import to hang.
-
-    Problematic patterns:
-    - Corrupted unicode (replacement char U+FFFD shown as �)
-    - Non-ASCII characters in paths (accents, special chars)
-    """
-    try:
-        if '\ufffd' in file_path or '�' in file_path:
-            return True
-        for char in file_path:
-            if ord(char) > 127:
-                return True
-        return False
-    except Exception:
-        return True
 
 
 def _get_attr(obj, name: str, default=None):
