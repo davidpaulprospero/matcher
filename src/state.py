@@ -26,6 +26,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Fallback duration (seconds) when video_end is missing from old checkpoint data.
+# Used in Match.from_dict to estimate a clip end time from video_start.
+DEFAULT_MATCH_DURATION_SECONDS = 10.0
+
 
 @dataclass
 class VoiceoverSegment:
@@ -143,7 +147,7 @@ class Match:
 
         # Estimate video_end if not provided (old checkpoints)
         video_start = float(data.get('video_start', data.get('start_time', 0.0)))
-        video_end = float(data.get('video_end', video_start + 10.0))
+        video_end = float(data.get('video_end', video_start + DEFAULT_MATCH_DURATION_SECONDS))
 
         return cls(
             segment_index=segment_index,
@@ -184,7 +188,8 @@ def restore_matches_from_dicts(
 
     restored_matches: List[Match] = []
     validation_errors: List[str] = []
-    empty_source_count = 0
+    empty_source_errors: List[str] = []
+    other_errors: List[str] = []
 
     for i, m in enumerate(matches_data):
         try:
@@ -193,22 +198,28 @@ def restore_matches_from_dicts(
         except ValueError as e:
             error_msg = f"match[{i}]: {e}"
             validation_errors.append(error_msg)
-            log.debug(error_msg)
             if "invalid video_file" in str(e):
-                empty_source_count += 1
+                empty_source_errors.append(error_msg)
+            else:
+                other_errors.append(error_msg)
+                log.debug(error_msg)
+
+    # Log individual empty source_file errors only when batch count is small
+    if len(empty_source_errors) <= 10:
+        for error_msg in empty_source_errors:
+            log.debug(error_msg)
 
     total = len(matches_data)
+    empty_source_count = len(empty_source_errors)
     if validation_errors:
         if empty_source_count > 0:
             log.warning(
-                f"{empty_source_count} of {total} match entries have empty "
-                f"source_file (likely all gap matches)"
+                f"{empty_source_count} match entries have empty "
+                f"source_file (likely all gap matches). "
+                f"Re-run MATCH stage with --match-only"
             )
-        other_errors = len(validation_errors) - empty_source_count
-        if other_errors > 0:
-            log.warning(f"{other_errors} of {total} match entries failed non-source_file validation")
-        if len(validation_errors) > total * 0.5:
-            log.warning("Re-run MATCH stage with --match-only")
+        if other_errors:
+            log.warning(f"{len(other_errors)} of {total} match entries failed non-source_file validation")
 
     # Return None if no valid matches were restored from non-empty data
     if not restored_matches and matches_data:
