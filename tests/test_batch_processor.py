@@ -814,3 +814,240 @@ class TestBatchProcessorBudgetStatus:
         assert len(failed_events) == 1
         assert 'budget_consumed_pct' in failed_events[0], \
             "budget_consumed_pct missing from failed event"
+
+
+class TestBatchProcessorUnavailableDetection:
+    """Tests for US-59-006: Early termination when all errors are 'no captions'."""
+
+    def test_unavailable_pattern_triggers_warning_and_preflight_mode(self):
+        """Batch of 20 videos where first 10 lack captions triggers warning
+        and remaining 10 use pre-flight-only mode.
+
+        Verifies:
+        - Counter of consecutive CaptionUnavailableError is tracked
+        - When 80%+ of last 10 videos return CaptionUnavailableError, warning is logged
+        - Remaining videos use pre-flight-only mode (has_captions check first)
+        - CaptionMetrics records unavailable_count and unavailable_rate
+        """
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.exceptions import CaptionUnavailableError
+        from src.caption.metrics import CaptionMetrics
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        # Track which videos got preflight check vs full fetch
+        preflight_checked = []
+        full_fetch_called = []
+
+        def mock_fetch(video_id, preferred_language=None):
+            full_fetch_called.append(video_id)
+            raise CaptionUnavailableError(video_id, "No captions available")
+
+        def mock_has_captions(video_id):
+            preflight_checked.append(video_id)
+            return False
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+        mock_fetcher.has_captions.side_effect = mock_has_captions
+
+        # Use single worker for deterministic ordering
+        # Use 30 videos total so that even with thread scheduling lag,
+        # some later videos will see the preflight_only flag
+        config = BatchProcessorConfig(
+            max_workers=1,
+            unavailable_window_size=10,
+            unavailable_threshold=0.8,
+        )
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        metrics = CaptionMetrics()
+        progress_events: List[tuple] = []
+
+        def on_progress(video_id: str, status: str, details: Dict):
+            progress_events.append((video_id, status, details))
+
+        video_ids = [f"vid{i:03d}" for i in range(30)]
+        result = processor.process(
+            video_ids,
+            metrics=metrics,
+            progress_callback=on_progress,
+        )
+
+        # All 30 videos should be unavailable
+        assert result.unavailable_count == 30
+        assert result.success_count == 0
+        assert result.error_count == 30
+
+        # Should have switched to preflight mode
+        assert result.unavailable_switched_to_preflight is True
+
+        # has_captions should have been called for at least some videos
+        # after the mode switch (thread scheduling may cause 1-2 extra
+        # full fetches before the flag takes effect)
+        assert len(preflight_checked) > 0, (
+            f"Expected preflight checks but got none. "
+            f"Full fetches: {len(full_fetch_called)}"
+        )
+
+        # The full fetch count should be less than total because preflight
+        # skips the full fetch for videos where has_captions returns False
+        assert len(full_fetch_called) < 30, (
+            f"Expected some videos to use preflight-only mode. "
+            f"Full fetches: {len(full_fetch_called)}, preflight: {len(preflight_checked)}"
+        )
+
+        # Check that unavailable_pattern progress event was fired
+        pattern_events = [
+            e for e in progress_events if e[1] == 'unavailable_pattern'
+        ]
+        assert len(pattern_events) == 1
+        assert pattern_events[0][2]['unavailable_rate'] >= 0.8
+
+        # CaptionMetrics should record unavailable summary
+        assert metrics.unavailable_count == 30
+        assert metrics.unavailable_rate > 0.0
+
+    def test_no_preflight_switch_when_below_threshold(self):
+        """When unavailable rate is below 80%, no mode switch occurs."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.exceptions import CaptionUnavailableError
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        call_count = [0]
+
+        def mock_fetch(video_id, preferred_language=None):
+            call_count[0] += 1
+            # 50% unavailable (5 out of 10) - below 80% threshold
+            if call_count[0] % 2 == 0:
+                raise CaptionUnavailableError(video_id, "No captions")
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(
+            max_workers=1,
+            unavailable_window_size=10,
+            unavailable_threshold=0.8,
+        )
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        video_ids = [f"vid{i:03d}" for i in range(15)]
+        result = processor.process(video_ids)
+
+        # Should NOT switch to preflight mode
+        assert result.unavailable_switched_to_preflight is False
+        # has_captions should never be called
+        mock_fetcher.has_captions.assert_not_called()
+
+    def test_preflight_mode_allows_success_when_has_captions(self):
+        """In preflight-only mode, videos that DO have captions still get fetched."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.exceptions import CaptionUnavailableError
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        call_order = [0]
+
+        def mock_fetch(video_id, preferred_language=None):
+            call_order[0] += 1
+            if call_order[0] <= 10:
+                raise CaptionUnavailableError(video_id, "No captions")
+            # After mode switch, if has_captions passes, this gets called
+            return MockCaptionResult(video_id=video_id, segments=[{"text": "ok"}])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+        # After preflight switch, has_captions returns True for some videos
+        mock_fetcher.has_captions.return_value = True
+
+        config = BatchProcessorConfig(
+            max_workers=1,
+            unavailable_window_size=10,
+            unavailable_threshold=0.8,
+        )
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        video_ids = [f"vid{i:03d}" for i in range(15)]
+        result = processor.process(video_ids)
+
+        # First 10 unavailable, remaining 5 should succeed (preflight passes)
+        assert result.unavailable_switched_to_preflight is True
+        assert result.success_count > 0
+        assert result.unavailable_count == 10
+
+    def test_unavailable_count_in_batch_result(self):
+        """BatchResult.unavailable_count tracks total unavailable videos."""
+        from src.caption.batch_processor import BatchProcessor, BatchProcessorConfig
+        from src.caption.exceptions import CaptionUnavailableError
+
+        mock_fetcher = MagicMock()
+        mock_fetcher._timeout = 30.0
+        mock_fetcher._preferred_formats = ["vtt"]
+        mock_fetcher._sort_videos_by_channel_success = lambda x, y: x
+
+        call_count = [0]
+
+        def mock_fetch(video_id, preferred_language=None):
+            call_count[0] += 1
+            if call_count[0] <= 3:
+                raise CaptionUnavailableError(video_id, "No captions")
+            return MockCaptionResult(video_id=video_id, segments=[])
+
+        mock_fetcher.fetch_captions_auto_language_with_retry.side_effect = mock_fetch
+
+        config = BatchProcessorConfig(max_workers=1)
+        processor = BatchProcessor(mock_fetcher, config=config)
+
+        video_ids = [f"vid{i:03d}" for i in range(5)]
+        result = processor.process(video_ids)
+
+        # 3 unavailable, 2 success
+        assert result.unavailable_count == 3
+        assert result.success_count == 2
+        assert result.error_count == 3  # unavailable counted as errors
+
+    def test_metrics_unavailable_rate_in_summary(self):
+        """CaptionMetrics.get_summary_dict() includes unavailable_count and rate."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_unavailable_summary(count=15, rate=0.75)
+
+        summary = metrics.get_summary_dict()
+        assert summary['unavailable_count'] == 15
+        assert summary['unavailable_rate'] == 0.75
+
+    def test_metrics_unavailable_in_to_dict_from_dict(self):
+        """CaptionMetrics serializes and deserializes unavailable fields."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_unavailable_summary(count=10, rate=0.5)
+
+        data = metrics.to_dict()
+        assert data['unavailable_count'] == 10
+        assert data['unavailable_rate'] == 0.5
+
+        restored = CaptionMetrics.from_dict(data)
+        assert restored.unavailable_count == 10
+        assert restored.unavailable_rate == 0.5
+
+    def test_metrics_summary_includes_unavailable_line(self):
+        """CaptionMetrics.summary() includes unavailable line when count > 0."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_unavailable_summary(count=8, rate=0.4)
+
+        summary_text = metrics.summary()
+        assert "Unavailable: 8 videos" in summary_text
+        assert "40.0%" in summary_text
