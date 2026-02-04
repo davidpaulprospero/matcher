@@ -706,6 +706,160 @@ def match_factory(srt_segment_factory):
 
 
 # =============================================================================
+# DOWNLOAD-SEGMENTS FACTORIES (US-010, Sprint 55)
+# =============================================================================
+#
+# Factory fixtures for download_segments stage testing. Reduces boilerplate
+# across download/escalation/circuit-breaker test files.
+# =============================================================================
+
+
+@pytest.fixture
+def download_config_factory():
+    """
+    Factory fixture for creating mock download config objects.
+
+    Usage:
+        cfg = download_config_factory()  # Defaults
+        cfg = download_config_factory(socket_timeout=60, cookies_from_browser="firefox")
+        cfg = download_config_factory(escalation={'enabled': True, 'max_tier': 3})
+
+    Parameters:
+        - cookies_from_browser: str (default "chrome")
+        - cookiefile: str or None (default None)
+        - socket_timeout: int (default 30)
+        - max_retries: int (default 3)
+        - escalation: dict (default {'enabled': True}) - merged onto mock
+
+    Returns:
+        Callable that creates mock download config objects
+    """
+    from unittest.mock import Mock
+
+    def _make(
+        cookies_from_browser: str = "chrome",
+        cookiefile: str = None,
+        socket_timeout: int = 30,
+        max_retries: int = 3,
+        escalation: dict = None,
+        **extra_fields,
+    ):
+        esc_defaults = {'enabled': True}
+        esc_cfg = {**esc_defaults, **(escalation or {})}
+
+        mock_cfg = Mock()
+        mock_cfg.cookies_from_browser = cookies_from_browser
+        mock_cfg.cookiefile = cookiefile
+        mock_cfg.socket_timeout = socket_timeout
+        mock_cfg.max_retries = max_retries
+        mock_cfg.escalation = Mock(**esc_cfg)
+
+        # Apply any extra fields
+        for key, value in extra_fields.items():
+            setattr(mock_cfg, key, value)
+
+        return mock_cfg
+
+    return _make
+
+
+@pytest.fixture
+def escalation_result_factory():
+    """
+    Factory fixture for creating EscalationResult objects.
+
+    Usage:
+        result = escalation_result_factory()  # Tier 1 defaults
+        result = escalation_result_factory(tier=2, rotate_cookies=True)
+        result = escalation_result_factory(
+            args=['--impersonate', 'Chrome-131:Windows-11', '--cookies-from-browser', 'chrome']
+        )
+
+    Parameters:
+        - args: List[str] (default ['--impersonate', 'Chrome-131:Windows-11'])
+        - tier: int (default 1) - maps to EscalationTier enum value
+        - rotate_cookies: bool (default False)
+        - rotate_vpn: bool (default False)
+
+    Returns:
+        Callable that creates EscalationResult instances
+    """
+    from src.downloader.escalation_manager import EscalationResult
+    from src.downloader.types import EscalationTier
+
+    def _make(
+        args: list = None,
+        tier: int = 1,
+        rotate_cookies: bool = False,
+        rotate_vpn: bool = False,
+    ):
+        return EscalationResult(
+            args=args if args is not None else ['--impersonate', 'Chrome-131:Windows-11'],
+            tier=EscalationTier(tier),
+            rotate_cookies=rotate_cookies,
+            rotate_vpn=rotate_vpn,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def segment_download_stats_factory():
+    """
+    Factory fixture for creating SegmentDownloadStats instances.
+
+    Usage:
+        stats = segment_download_stats_factory()  # All zeros
+        stats = segment_download_stats_factory(succeeded=5, failed=2, total=10)
+        stats = segment_download_stats_factory(
+            error_categories={'network': 3, 'bot_detection': 1}
+        )
+
+    Parameters:
+        - succeeded: int (default 0)
+        - failed: int (default 0)
+        - cached: int (default 0)
+        - attempted: int (default 0)
+        - total: int (default 0)
+        - retry_count: int (default 0)
+        - error_categories: dict (default {})
+        - segment_durations: list (default [])
+        - total_bytes: int (default 0)
+
+    Returns:
+        Callable that creates SegmentDownloadStats instances
+    """
+    from src.stages.download_segments import SegmentDownloadStats
+
+    def _make(
+        succeeded: int = 0,
+        failed: int = 0,
+        cached: int = 0,
+        attempted: int = 0,
+        total: int = 0,
+        retry_count: int = 0,
+        error_categories: dict = None,
+        segment_durations: list = None,
+        total_bytes: int = 0,
+    ):
+        stats = SegmentDownloadStats()
+        stats.succeeded = succeeded
+        stats.failed = failed
+        stats.cached = cached
+        stats.attempted = attempted
+        stats.total = total
+        stats.retry_count = retry_count
+        if error_categories:
+            stats.error_categories = dict(error_categories)
+        if segment_durations:
+            stats.segment_durations = list(segment_durations)
+        stats.total_bytes = total_bytes
+        return stats
+
+    return _make
+
+
+# =============================================================================
 # TEST ISOLATION MONITORING (US-005, Sprint 26)
 # =============================================================================
 #

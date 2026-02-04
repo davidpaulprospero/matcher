@@ -147,7 +147,7 @@
             "id": "US-55-010",
             "title": "Add conftest factory fixtures for download_segments testing",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add download_config_factory fixture to tests/conftest.py that creates a mock download config object with configurable cookies_from_browser, cookiefile, socket_timeout, and escalation fields",
                 "Add escalation_result_factory fixture that creates mock EscalationResult objects with configurable CLI args (including --impersonate, --extractor-args, --cookies-from-browser)",
@@ -155,7 +155,7 @@
                 "Verify all new fixtures are usable from test files by adding a minimal smoke test for each factory in tests/test_conftest_factories.py",
                 "All new fixtures follow existing conftest.py patterns (use @pytest.fixture decorator, accept overrides via kwargs)"
             ],
-            "notes": "Tier: T3 (infrastructure). Source files: tests/conftest.py (813 lines, 13 fixtures + 5 factories), src/stages/download_segments.py:44-66 (SegmentDownloadStats dataclass), src/downloader/escalation_manager.py (EscalationResult). The existing conftest has match_result_factory and config_factory but no download-segments-specific factories. Adding these reduces boilerplate across US-55-002, US-55-003, US-55-006, US-55-009 and future download stage tests."
+            "notes": "Added 3 factory fixtures to conftest.py: download_config_factory (mock download config with configurable cookies/socket/escalation), escalation_result_factory (EscalationResult with configurable tier/args), segment_download_stats_factory (SegmentDownloadStats with configurable counts/categories). Created tests/test_conftest_factories.py with 10 smoke tests - all passing."
         },
         {
             "id": "US-55-011",
