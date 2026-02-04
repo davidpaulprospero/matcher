@@ -71,6 +71,52 @@ Describe 'Evidence gate exists in claude.ps1 success path' -Tag 'Unit', 'Evidenc
 }
 
 # =============================================================================
+# Confirm-CriteriaEvidence: LLM-based criteria verification
+# =============================================================================
+
+Describe 'Confirm-CriteriaEvidence uses LLM verification' -Tag 'Unit', 'EvidenceGate' {
+    BeforeAll {
+        $script:metricsSource = Get-Content (Join-Path $script:RalphDir 'lib\metrics.ps1') -Raw
+        $funcPattern = 'function Confirm-CriteriaEvidence\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
+        $script:confirmBody = [regex]::Match($script:metricsSource, $funcPattern).Value
+    }
+
+    It 'exists as a function in metrics.ps1' {
+        $script:confirmBody | Should -Not -BeNullOrEmpty
+    }
+
+    It 'uses --model haiku for LLM call' {
+        $script:confirmBody | Should -Match '--model haiku'
+    }
+
+    It 'calls Get-ClaudePath to check CLI availability' {
+        $script:confirmBody | Should -Match 'Get-ClaudePath'
+    }
+
+    It 'returns $null when Claude is unavailable (fallback signal)' {
+        $script:confirmBody | Should -Match 'return \$null'
+    }
+
+    It 'truncates git diff to 8000 chars' {
+        $script:confirmBody | Should -Match '8000'
+    }
+
+    It 'parses MET and NOT_MET responses from LLM' {
+        $script:confirmBody | Should -Match "'\^MET\\s\+\(\\d\+\)'"
+        $script:confirmBody | Should -Match "'\^NOT_MET\\s\+\(\\d\+\)'"
+    }
+
+    It 'uses async output capture like Confirm-CommitMatchesStory' {
+        $script:confirmBody | Should -Match 'Register-ObjectEvent'
+        $script:confirmBody | Should -Match 'BeginOutputReadLine'
+    }
+
+    It 'has 60 second timeout' {
+        $script:confirmBody | Should -Match 'AddSeconds\(60\)'
+    }
+}
+
+# =============================================================================
 # Log-StoryVerification returns evidence data
 # =============================================================================
 
@@ -79,6 +125,14 @@ Describe 'Log-StoryVerification returns evidence counts' -Tag 'Unit', 'EvidenceG
         $script:metricsSource = Get-Content (Join-Path $script:RalphDir 'lib\metrics.ps1') -Raw
         $funcPattern = 'function Log-StoryVerification\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
         $script:funcBody = [regex]::Match($script:metricsSource, $funcPattern).Value
+    }
+
+    It 'calls Confirm-CriteriaEvidence for LLM verification' {
+        $script:funcBody | Should -Match 'Confirm-CriteriaEvidence'
+    }
+
+    It 'falls back to Search-CriterionEvidence when LLM returns null' {
+        $script:funcBody | Should -Match 'Search-CriterionEvidence\s+-Criterion'
     }
 
     It 'returns an object with criteriaMet' {

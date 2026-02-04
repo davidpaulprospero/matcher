@@ -461,6 +461,161 @@ function Log-GitOperations {
     Write-JsonNoBom -Path $gitOpsFile -Content ($gitOps | ConvertTo-Json -Depth 5)
 }
 
+function Confirm-CriteriaEvidence {
+    <#
+    .SYNOPSIS
+        LLM-verify acceptance criteria against git diff and Claude output (replaces keyword matching)
+    .DESCRIPTION
+        Sends a single LLM call (haiku) with all acceptance criteria + truncated evidence.
+        Returns per-criterion MET/NOT_MET results. Falls back to Search-CriterionEvidence
+        keyword matching if Claude CLI is unavailable or LLM call fails.
+    .PARAMETER Criteria
+        Array of acceptance criterion strings
+    .PARAMETER ClaudeOutput
+        Full Claude stdout+stderr for evidence searching
+    .PARAMETER DiffOutput
+        Git diff output for evidence searching
+    .RETURNS
+        Array of hashtables: @{ index; met (bool); evidence (string); confidence (float) }
+    #>
+    param(
+        [array]$Criteria = @(),
+        [string]$ClaudeOutput = "",
+        [string]$DiffOutput = ""
+    )
+
+    if (-not $Criteria -or $Criteria.Count -eq 0) { return @() }
+
+    $claudePath = Get-ClaudePath
+    if (-not $claudePath) {
+        Write-Host "  Evidence: Claude not available, falling back to keyword matching" -ForegroundColor DarkYellow
+        return $null  # Signal caller to use fallback
+    }
+
+    # Build numbered criteria list
+    $criteriaList = ""
+    for ($i = 0; $i -lt $Criteria.Count; $i++) {
+        $criteriaList += "$($i + 1). $($Criteria[$i])`n"
+    }
+
+    # Truncate evidence: diff = first 8000 chars, output = last 8000 chars
+    $truncatedDiff = if ($DiffOutput.Length -gt 8000) { $DiffOutput.Substring(0, 8000) + "`n[...truncated]" } else { $DiffOutput }
+    $truncatedOutput = if ($ClaudeOutput.Length -gt 8000) { $ClaudeOutput.Substring($ClaudeOutput.Length - 8000) } else { $ClaudeOutput }
+
+    $prompt = @"
+You are verifying whether acceptance criteria for a user story were actually implemented.
+Review the git diff (code changes) and implementation output below, then determine which criteria are MET.
+
+A criterion is MET if the code changes or output show clear evidence it was implemented.
+A criterion is NOT_MET only if there is no evidence at all in the diff or output.
+
+ACCEPTANCE CRITERIA:
+$criteriaList
+GIT DIFF (code changes):
+$truncatedDiff
+
+IMPLEMENTATION OUTPUT:
+$truncatedOutput
+
+For each criterion, respond with ONLY MET or NOT_MET followed by the number. Nothing else.
+Example:
+MET 1
+NOT_MET 2
+MET 3
+"@
+
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $claudePath
+        $psi.Arguments = "--print --dangerously-skip-permissions --model haiku"
+        $psi.WorkingDirectory = $script:ProjectRoot
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $psi
+
+        # Async output capture (prevents pipe buffer deadlock)
+        $outBuilder = [System.Text.StringBuilder]::new()
+        $errBuilder = [System.Text.StringBuilder]::new()
+
+        $outHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+        $errHandler = { if (-not [string]::IsNullOrEmpty($EventArgs.Data)) { $Event.MessageData.AppendLine($EventArgs.Data) } }
+
+        $outEvent = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -Action $outHandler -MessageData $outBuilder
+        $errEvent = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action $errHandler -MessageData $errBuilder
+
+        try {
+            $process.Start() | Out-Null
+            $process.BeginOutputReadLine()
+            $process.BeginErrorReadLine()
+
+            $process.StandardInput.Write($prompt)
+            $process.StandardInput.Close()
+
+            # 60 second timeout for simple classification
+            $deadline = (Get-Date).AddSeconds(60)
+            while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 500
+            }
+            $completed = $process.HasExited
+
+            if (-not $completed) {
+                $treePid = $process.Id
+                try { taskkill /T /F /PID $treePid 2>$null | Out-Null } catch {}
+                if (-not $process.HasExited) { try { $process.Kill() } catch {} }
+                Write-Host "  Evidence: LLM verification timed out, falling back to keyword matching" -ForegroundColor DarkYellow
+                return $null  # Signal caller to use fallback
+            }
+
+            try { $process.CancelOutputRead() } catch {}
+            try { $process.CancelErrorRead() } catch {}
+            Start-Sleep -Milliseconds 200
+
+            $output = $outBuilder.ToString()
+
+            # Parse response: MET <n> or NOT_MET <n>
+            $results = @()
+            for ($i = 0; $i -lt $Criteria.Count; $i++) {
+                # Default to NOT_MET if LLM didn't mention this criterion
+                $results += @{ index = $i; met = $false; evidence = "No LLM response for criterion"; confidence = 0.0 }
+            }
+
+            foreach ($line in ($output -split "`n")) {
+                $trimmed = $line.Trim()
+                if ($trimmed -match '^NOT_MET\s+(\d+)') {
+                    $num = [int]$Matches[1] - 1  # Convert 1-based to 0-based
+                    if ($num -ge 0 -and $num -lt $Criteria.Count) {
+                        $results[$num] = @{ index = $num; met = $false; evidence = "LLM: NOT_MET"; confidence = 0.8 }
+                    }
+                }
+                elseif ($trimmed -match '^MET\s+(\d+)') {
+                    $num = [int]$Matches[1] - 1
+                    if ($num -ge 0 -and $num -lt $Criteria.Count) {
+                        $results[$num] = @{ index = $num; met = $true; evidence = "LLM: MET"; confidence = 0.9 }
+                    }
+                }
+            }
+
+            return $results
+        }
+        finally {
+            Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
+            Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+            Remove-Job -Job $outEvent -Force -ErrorAction SilentlyContinue
+            Remove-Job -Job $errEvent -Force -ErrorAction SilentlyContinue
+            if ($process) { $process.Dispose() }
+        }
+    }
+    catch {
+        Write-Host "  Evidence: LLM verification failed: $_, falling back to keyword matching" -ForegroundColor DarkYellow
+        return $null  # Signal caller to use fallback
+    }
+}
+
 function Log-StoryVerification {
     <#
     .SYNOPSIS
@@ -499,37 +654,60 @@ function Log-StoryVerification {
     $criteriaTotalCount = 0
 
     if ($Story -and $Story.acceptanceCriteria) {
-        foreach ($criterion in $Story.acceptanceCriteria) {
-            $criteriaTotalCount++
+        $criteriaTotalCount = $Story.acceptanceCriteria.Count
 
-            if ($Passed -and ($ClaudeOutput -or $DiffOutput)) {
-                # Story 2.4: Evidence-based verification
-                $evidenceResult = Search-CriterionEvidence -Criterion $criterion -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
+        if ($Passed -and ($ClaudeOutput -or $DiffOutput)) {
+            # Try LLM-based verification first (single batch call)
+            $llmResults = Confirm-CriteriaEvidence -Criteria $Story.acceptanceCriteria -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
 
-                $verified = $evidenceResult.found
-                $evidence = $evidenceResult.evidence
-                $confidence = $evidenceResult.confidence
-
-                if ($verified) { $criteriaMetCount++ }
-            }
-            elseif ($Passed) {
-                # Fallback: passed but no output to search
-                $verified = $true
-                $evidence = "Story passed (exit code 0) but no output available for evidence search"
-                $confidence = 0.5
-                $criteriaMetCount++
+            if ($null -ne $llmResults) {
+                # LLM verification succeeded — map results
+                for ($i = 0; $i -lt $Story.acceptanceCriteria.Count; $i++) {
+                    $r = $llmResults[$i]
+                    if ($r.met) { $criteriaMetCount++ }
+                    $criteriaVerification += @{
+                        criterion  = $Story.acceptanceCriteria[$i]
+                        verified   = $r.met
+                        evidence   = $r.evidence
+                        confidence = $r.confidence
+                    }
+                }
             }
             else {
-                $verified = $false
-                $evidence = "Story not yet complete"
-                $confidence = 0.0
+                # Fallback: LLM unavailable, use keyword matching
+                foreach ($criterion in $Story.acceptanceCriteria) {
+                    $evidenceResult = Search-CriterionEvidence -Criterion $criterion -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
+                    if ($evidenceResult.found) { $criteriaMetCount++ }
+                    $criteriaVerification += @{
+                        criterion  = $criterion
+                        verified   = $evidenceResult.found
+                        evidence   = $evidenceResult.evidence
+                        confidence = $evidenceResult.confidence
+                    }
+                }
             }
-
-            $criteriaVerification += @{
-                criterion = $criterion
-                verified = $verified
-                evidence = $evidence
-                confidence = $confidence
+        }
+        elseif ($Passed) {
+            # Passed but no output to search
+            foreach ($criterion in $Story.acceptanceCriteria) {
+                $criteriaMetCount++
+                $criteriaVerification += @{
+                    criterion  = $criterion
+                    verified   = $true
+                    evidence   = "Story passed (exit code 0) but no output available for evidence search"
+                    confidence = 0.5
+                }
+            }
+        }
+        else {
+            # Story not yet complete
+            foreach ($criterion in $Story.acceptanceCriteria) {
+                $criteriaVerification += @{
+                    criterion  = $criterion
+                    verified   = $false
+                    evidence   = "Story not yet complete"
+                    confidence = 0.0
+                }
             }
         }
     }
