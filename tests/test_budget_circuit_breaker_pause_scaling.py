@@ -141,12 +141,17 @@ class TestBudgetAwarePauseScaling:
     """Test circuit breaker pause scaling based on budget state."""
 
     def _make_breaker(self, pause_seconds=60.0, max_pause_seconds=300.0):
-        """Create a circuit breaker with budget support."""
+        """Create a circuit breaker with budget support.
+
+        Uses jitter_factor=0.0 so tests can assert exact pause values
+        without jitter randomness (these tests focus on budget/escalation scaling).
+        """
         config = CircuitBreakerConfig(
             enabled=True,
             consecutive_failures_threshold=3,
             pause_seconds=pause_seconds,
             max_pause_seconds=max_pause_seconds,
+            jitter_factor=0.0,
         )
         return CircuitBreaker(config)
 
@@ -234,6 +239,7 @@ class TestMaxPauseSecondsCap:
         config = CircuitBreakerConfig(
             pause_seconds=200.0,
             max_pause_seconds=300.0,
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -256,6 +262,7 @@ class TestMaxPauseSecondsCap:
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             max_pause_seconds=300.0,
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -407,6 +414,7 @@ class TestCombinedScaling:
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             max_pause_seconds=500.0,  # High cap to allow full composition
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -432,6 +440,7 @@ class TestCombinedScaling:
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             max_pause_seconds=500.0,
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -459,6 +468,7 @@ class TestCombinedScaling:
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             max_pause_seconds=200.0,  # Low cap
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -635,6 +645,7 @@ class TestEscalationProportionalPauseIncrease:
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             max_pause_seconds=500.0,
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -661,6 +672,7 @@ class TestEscalationProportionalPauseIncrease:
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             max_pause_seconds=500.0,
+            jitter_factor=0.0,
         )
         breaker = CircuitBreaker(config)
 
@@ -685,6 +697,7 @@ class TestEscalationProportionalPauseIncrease:
             config = CircuitBreakerConfig(
                 pause_seconds=base_seconds,
                 max_pause_seconds=1000.0,  # High cap to avoid interference
+                jitter_factor=0.0,
             )
             breaker = CircuitBreaker(config)
             breaker.set_escalation_manager(mock_em)
