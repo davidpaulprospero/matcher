@@ -174,8 +174,8 @@
             "id": "US-53-012",
             "title": "Add pool normalization transparency logging",
             "priority": "low",
-            "passes": false,
-            "notes": "Tier: T1 (small, logging only). Source files: src/matching/scoring.py (lines 1803-1908 pool normalization, lines 1868-1880 small pool boost / large pool penalty logic). Pool normalization adjusts scores based on candidate pool size but the adjustment is opaque — reason strings show the factor but not why. Constants REFERENCE_SIZE=50, MIN_FACTOR=0.8, MAX_FACTOR=1.2, SMALL=10, LARGE=100 are hardcoded at lines 1479-1484.",
+            "passes": true,
+            "notes": "Enhanced DEBUG logging in normalize_confidence_by_pool to include pool_size, formatted top_margin, factor, and reason_category (small_pool_boost/large_pool_penalty/no_adjustment). Added normalize_pool_batch() wrapper that processes multiple segments and logs INFO summary with boost/penalty/no_adjustment counts. Pool normalization constants already exposed via MatchingScoringConfig (US-53-002). Added 4 caplog tests in TestPoolNormalizationLogging covering small pool, large pool, medium pool, and batch summary. All 38 tests pass.",
             "acceptanceCriteria": [
                 "Log at DEBUG level for each segment: pool_size, top margin (score difference between 1st and 2nd candidate), normalization factor applied, and reason category (small_pool_boost / large_pool_penalty / no_adjustment)",
                 "Log at INFO level a summary after all segments normalized: count of segments receiving boost vs penalty vs no adjustment",

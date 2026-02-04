@@ -2119,10 +2119,80 @@ def normalize_confidence_by_pool(
 
     reason = "; ".join(reasons)
 
+    # Determine reason category for transparency logging
+    if pool_size < small_threshold and top_margin is not None and top_margin >= 0.1:
+        reason_category = "small_pool_boost"
+    elif pool_size > large_threshold and top_margin is not None and top_margin < tight_margin:
+        reason_category = "large_pool_penalty"
+    else:
+        reason_category = "no_adjustment"
+
     logger.debug(
-        f"Pool normalization: pool={pool_size}, factor={clamped_factor:.2f}, "
-        f"inverse={inverse_factor:.2f}, adj={adjustment:+.2f}, "
+        f"Pool normalization: pool_size={pool_size}, top_margin={f'{top_margin:.4f}' if top_margin is not None else 'N/A'}, "
+        f"factor={clamped_factor:.3f}, reason_category={reason_category}, "
         f"{confidence:.3f} -> {normalized:.3f} ({reason})"
     )
 
     return normalized, reason
+
+
+def normalize_pool_batch(
+    segments: List[Tuple[float, int, Optional[List[Tuple[SRTSegment, float]]]]],
+    pool_normalization_enabled: bool = True,
+    scoring_config=None
+) -> List[Tuple[float, str]]:
+    """
+    Normalize confidence scores for a batch of segments and log a summary.
+
+    Each entry in segments is a tuple of (confidence, pool_size, candidates).
+    After normalizing all segments, logs an INFO-level summary of how many
+    received boost vs penalty vs no adjustment.
+
+    Args:
+        segments: List of (confidence, pool_size, candidates) tuples
+        pool_normalization_enabled: Whether pool normalization is enabled
+        scoring_config: Optional MatchingScoringConfig instance
+
+    Returns:
+        List of (normalized_confidence, reason) tuples
+    """
+    results = []
+    boost_count = 0
+    penalty_count = 0
+    no_adj_count = 0
+
+    # Read thresholds for category classification
+    small_threshold = getattr(scoring_config, 'pool_small_threshold', POOL_SMALL_THRESHOLD) if scoring_config else POOL_SMALL_THRESHOLD
+    large_threshold = getattr(scoring_config, 'pool_large_threshold', POOL_LARGE_THRESHOLD) if scoring_config else POOL_LARGE_THRESHOLD
+    tight_margin_val = getattr(scoring_config, 'pool_tight_margin_threshold', POOL_TIGHT_MARGIN_THRESHOLD) if scoring_config else POOL_TIGHT_MARGIN_THRESHOLD
+
+    for confidence, pool_size, candidates in segments:
+        normalized, reason = normalize_confidence_by_pool(
+            confidence=confidence,
+            pool_size=pool_size,
+            candidates=candidates,
+            pool_normalization_enabled=pool_normalization_enabled,
+            scoring_config=scoring_config
+        )
+        results.append((normalized, reason))
+
+        # Classify for summary
+        top_margin = None
+        if candidates and len(candidates) >= 2:
+            top_margin = candidates[0][1] - candidates[1][1]
+
+        if pool_size < small_threshold and top_margin is not None and top_margin >= 0.1:
+            boost_count += 1
+        elif pool_size > large_threshold and top_margin is not None and top_margin < tight_margin_val:
+            penalty_count += 1
+        else:
+            no_adj_count += 1
+
+    total = len(segments)
+    if total > 0:
+        logger.info(
+            f"Pool normalization summary: {total} segments processed — "
+            f"boost={boost_count}, penalty={penalty_count}, no_adjustment={no_adj_count}"
+        )
+
+    return results
