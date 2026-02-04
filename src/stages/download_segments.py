@@ -329,6 +329,14 @@ class DownloadVideoSegmentsStage(Stage):
                     except Exception as esc_err:
                         logger.debug(f"Could not collect escalation summary: {esc_err}")
 
+            # US-50-009: Add bot_detection_count and network_failure_count from error categories
+            error_cats = download_stats.get('error_categories', {})
+            escalation_summary['bot_detection_count'] = error_cats.get('bot_detection', 0)
+            escalation_summary['network_failure_count'] = error_cats.get('network', 0)
+
+            # US-50-009: Log structured escalation summary at stage completion
+            self._log_escalation_summary(escalation_summary)
+
             # Stage metrics for pipeline observability (US-49-009 + US-49-012)
             metrics = StageMetrics(
                 items_processed=download_stats['succeeded'] + download_stats['cached'],
@@ -939,6 +947,43 @@ class DownloadVideoSegmentsStage(Stage):
                 "Most failures are bot-detection. "
                 "Check cookie configuration (cookies_from_browser or cookies_path in config.yaml)."
             )
+
+    @staticmethod
+    def _log_escalation_summary(escalation_summary: Dict[str, Any]) -> None:
+        """US-50-009: Log structured escalation tier effectiveness summary.
+
+        Logs at INFO level with tier distribution, success/failure counts,
+        and per-tier effectiveness rates.
+        """
+        if not escalation_summary or not escalation_summary.get('total_escalations', 0):
+            # No escalation data to report (all downloads succeeded at tier 1)
+            if escalation_summary:
+                logger.info(
+                    "Escalation summary: no escalations needed "
+                    f"(bot_detection={escalation_summary.get('bot_detection_count', 0)} "
+                    f"network_failures={escalation_summary.get('network_failure_count', 0)})"
+                )
+            return
+
+        vpt = escalation_summary.get('videos_per_tier', {})
+        tier_parts = [f"{tier}={count}" for tier, count in sorted(vpt.items())]
+
+        logger.info(
+            f"Escalation summary: total_escalations={escalation_summary.get('total_escalations', 0)} "
+            f"average_tier={escalation_summary.get('average_tier', 1.0)} "
+            f"videos_per_tier=[{', '.join(tier_parts)}] "
+            f"bot_detection={escalation_summary.get('bot_detection_count', 0)} "
+            f"network_failures={escalation_summary.get('network_failure_count', 0)}"
+        )
+
+        # Log tier effectiveness if available
+        tier_eff = escalation_summary.get('tier_effectiveness', {})
+        if tier_eff:
+            for category, rates in tier_eff.items():
+                rate_parts = [f"{t}={r:.1%}" for t, r in sorted(rates.items())]
+                logger.info(
+                    f"Tier effectiveness [{category}]: {', '.join(rate_parts)}"
+                )
 
     def _process_retry_queue(
         self,

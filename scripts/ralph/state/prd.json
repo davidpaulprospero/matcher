@@ -134,7 +134,7 @@
             "id": "US-50-009",
             "title": "Add escalation tier effectiveness metrics to stage completion summary",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "At stage completion, download_segments logs a structured summary including: videos_per_tier (dict), total_escalations, average_tier, tier_effectiveness (success rate per tier)",
                 "The summary is written to checkpoint via stage_metrics so it persists across restarts",
@@ -142,7 +142,7 @@
                 "A unit test verifies that EscalationManager.get_metrics() output is correctly formatted into the stage summary",
                 "A unit test verifies the summary survives checkpoint save/restore round-trip"
             ],
-            "notes": "Tier: P2 observability. Source files: src/stages/download_segments.py (metrics collection at lines 287-310, escalation summary), src/downloader/escalation_manager.py (get_metrics at lines 933-969), src/checkpoint.py (stage_metrics field added in US-49-012). The previous sprint (US-49-012) added stage_metrics to checkpoint — this story ensures download_segments actually populates it with escalation data. Check if the metrics collection at lines 287-310 is already doing this."
+            "notes": "Implemented: Added _log_escalation_summary() method for structured logging of tier effectiveness at stage completion. Added bot_detection_count and network_failure_count from error_categories into escalation_summary dict. 13 new tests in test_escalation_stage_summary.py covering AC1-AC5. Pre-existing code from US-49-012 already handled videos_per_tier, tier_effectiveness, and checkpoint persistence via StageMetrics."
         },
         {
             "id": "US-50-010",
