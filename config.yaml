@@ -1649,7 +1649,11 @@ pipeline:
   # Resume/retry
   resume_enabled: true
   max_retries: 3
-  
+
+  # Checkpoint backup rotation (US-51-007)
+  # Number of rotated backup files: checkpoint.backup.json, .backup.1.json, .backup.2.json
+  checkpoint_backup_count: 3
+
   # Parallel processing
   parallel_transcription: true
   parallel_embedding: true

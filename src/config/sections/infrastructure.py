@@ -123,6 +123,9 @@ class PipelineConfig:
     resume_enabled: bool = True
     max_retries: int = 3
 
+    # Checkpoint backup rotation (US-51-007)
+    checkpoint_backup_count: int = 3  # Number of rotated backup files to keep
+
     # Parallel processing
     parallel_transcription: bool = True
     parallel_embedding: bool = True

@@ -102,13 +102,13 @@
                 "Unit test verifies progress hook callback is invoked with expected status values",
                 "Progress hook does not log for fast downloads (<30s) to avoid log spam"
             ],
-            "notes": "Tier: P2 improvement. Source: src/stages/download_segments.py — ydl_opts construction around lines 646-677. yt-dlp Python API supports 'progress_hooks': [callable] in ydl_opts. The hook receives a dict with 'status' ('downloading'|'finished'|'error'), 'downloaded_bytes', 'total_bytes', 'speed', 'elapsed', 'filename'. Currently there are no progress hooks, making it impossible to tell if a download is progressing slowly vs stalled. This complements US-51-002 (stall detection) by providing visibility before the stall timeout fires."
+            "notes": "Implemented: Added _make_progress_hook() static method to DownloadVideoSegmentsStage (download_segments.py:925-978). Hook is injected into ydl_opts at line 669. Logs INFO for slow downloads (>30s) with bytes/total/speed, throttled every 15s. Logs finished status with file size and elapsed time. Accumulates progress_hooks_data into stats dict, which flows into StageMetrics via escalation_summary (lines 392-395). 20 tests in test_segment_progress_hook.py cover creation, status values, slow/fast logging, finished logging, metrics accumulation, and edge cases."
         },
         {
             "id": "US-51-007",
             "title": "Add checkpoint backup rotation to prevent corruption data loss",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Checkpoint save (in checkpoint.py _atomic_save) rotates up to N backup files (default 3): checkpoint.backup.json, checkpoint.backup.1.json, checkpoint.backup.2.json",
                 "Each save rotates existing backups (2->3 deleted, 1->2, current->1, new backup created)",
@@ -117,7 +117,7 @@
                 "Unit test verifies backup rotation creates correct number of files",
                 "Unit test verifies restore from backup when primary checkpoint is corrupted"
             ],
-            "notes": "Tier: P2 improvement. Source: src/checkpoint.py — _atomic_save() method around lines 565-601. Currently saves a single checkpoint.backup.json. If the primary and backup are both corrupted (e.g., crash during save), all progress is lost. The _atomic_save already does write-to-temp + rename, but a single backup is fragile. Add rotation in _atomic_save() before the rename step. Config: infrastructure.checkpoint_backup_count (default 3) in src/config/sections/infrastructure.py."
+            "notes": "Implemented in checkpoint.py: _rotate_backups() rotates N backup files before each save, _get_backup_path()/get_all_backup_paths() manage paths. load() tries rotated backups (backup.1, backup.2...) when main+primary backup are both corrupt. clear() removes all rotated backups. Config: pipeline.checkpoint_backup_count (default 3) in PipelineConfig. 17 tests in test_checkpoint_backup_rotation.py, all 209 existing checkpoint tests pass."
         },
         {
             "id": "US-51-008",
