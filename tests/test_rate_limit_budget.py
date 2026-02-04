@@ -739,3 +739,118 @@ class TestConfigLoading:
         assert restored.max_vpn_switches == 4
         assert restored.rotations_used == 1
         assert restored.backoff_time_spent == 15.0
+
+
+# ============================================================================
+# Test Budget Summary String (US-61-010)
+# ============================================================================
+
+class TestBudgetSummaryString:
+    """Test budget_summary() method for formatted logging output."""
+
+    @pytest.mark.fast
+    def test_budget_summary_empty_budget(self, empty_budget):
+        """Summary shows 'none' when no budget consumed."""
+        summary = empty_budget.budget_summary()
+        assert summary == "Budget used: none"
+
+    @pytest.mark.fast
+    def test_budget_summary_with_rotations(self, budget):
+        """Summary shows rotation percentage correctly."""
+        budget.record_rotation(keyword="test")
+        budget.record_rotation(keyword="test")
+        summary = budget.budget_summary()
+        # 2 of 5 rotations = 40%
+        assert "rotations 2/5 (40%)" in summary
+        assert "Budget used:" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_with_vpn_switches(self, budget):
+        """Summary shows VPN switch percentage correctly."""
+        budget.record_vpn_switch(keyword="test")
+        summary = budget.budget_summary()
+        # 1 of 3 VPN switches = 33%
+        assert "VPN switches 1/3 (33%)" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_with_backoff(self, budget):
+        """Summary shows backoff percentage correctly."""
+        budget.record_backoff(45.0, keyword="test")
+        summary = budget.budget_summary()
+        # 45 of 60 seconds = 75%
+        assert "backoff 45s/60s (75%)" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_all_resources(self, budget):
+        """Summary includes all resource types when all are used."""
+        budget.record_rotation(keyword="kw1")
+        budget.record_rotation(keyword="kw2")
+        budget.record_vpn_switch(keyword="kw3")
+        budget.record_backoff(30.0, keyword="kw4")
+
+        summary = budget.budget_summary()
+        # Should include all three resource types
+        assert "rotations 2/5 (40%)" in summary
+        assert "VPN switches 1/3 (33%)" in summary
+        assert "backoff 30s/60s (50%)" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_includes_keywords(self, budget):
+        """Summary includes rate-limited keywords."""
+        budget.record_rotation(keyword="sunset")
+        budget.record_rotation(keyword="ocean")
+        budget.record_rotation(keyword="mountains")
+
+        summary = budget.budget_summary()
+        assert "Rate-limited keywords:" in summary
+        assert "sunset" in summary
+        assert "ocean" in summary
+        assert "mountains" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_truncates_many_keywords(self, budget):
+        """Summary truncates keyword list when more than 5."""
+        for i in range(8):
+            budget.record_rotation(keyword=f"keyword{i}")
+
+        summary = budget.budget_summary()
+        assert "Rate-limited keywords:" in summary
+        # Should show first 5 plus "... +3 more"
+        assert "keyword0" in summary
+        assert "keyword4" in summary
+        assert "... +3 more" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_unlimited_rotations(self, empty_budget):
+        """Summary shows unlimited rotations without percentage."""
+        empty_budget.max_rotations = 0  # Unlimited
+        empty_budget.record_rotation()
+        empty_budget.record_rotation()
+        empty_budget.record_rotation()
+
+        summary = empty_budget.budget_summary()
+        assert "rotations 3/unlimited" in summary
+
+    @pytest.mark.fast
+    def test_budget_summary_reflects_actual_usage(self, budget):
+        """Summary accurately reflects actual budget usage."""
+        # Simulate a realistic session
+        budget.record_backoff(15.0, keyword="forest")
+        budget.record_rotation(keyword="forest")
+        budget.record_backoff(10.0, keyword="sunset")
+        budget.record_rotation(keyword="sunset")
+        budget.record_rotation(keyword="sunset")
+        budget.record_vpn_switch(keyword="mountains")
+
+        summary = budget.budget_summary()
+        # Verify percentages match actual usage
+        # 3 rotations of 5 = 60%
+        assert "rotations 3/5 (60%)" in summary
+        # 1 VPN switch of 3 = 33%
+        assert "VPN switches 1/3 (33%)" in summary
+        # 25s backoff of 60s = 42%
+        assert "backoff 25s/60s (42%)" in summary
+        # 3 unique keywords
+        assert "forest" in summary
+        assert "sunset" in summary
+        assert "mountains" in summary

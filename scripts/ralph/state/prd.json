@@ -111,8 +111,8 @@
                                                        "Expose error_counts in get_performance_summary() for dashboard integration",
                                                        "Add test verifying error categorization increments correct counter"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (observability). Files: src/caption_fetcher.py (CaptionMetrics class), src/caption/error_handling.py (categorize_caption_error), src/caption/enums.py (CaptionErrorCategory). Currently caption errors are logged individually but not aggregated by category for diagnosis."
+                            "passes":  true,
+                            "notes":  "Complete. Added error_counts to get_performance_summary() in metrics.py. Added record_error_category() calls in batch_processor.py for both CaptionUnavailableError and other errors. Added batch end summary log showing \u0027Caption errors by category: RATE_LIMIT=5, UNAVAILABLE=12...\u0027. Added TestErrorCategoryCounterIncrement class with 4 tests verifying counter increments, integration with categorize_caption_error(), exposure in get_performance_summary(), and get_error_category_summary() statistics. All 72 tests in test_caption_error_patterns.py pass."
                         },
                         {
                             "id":  "US-61-008",
@@ -126,7 +126,7 @@
                                                        "Add test verifying 403 error triggers cookie rotation and retry"
                                                    ],
                             "passes":  false,
-                            "notes":  "Tier 1 (core functionality). Files: src/caption_fetcher.py (CaptionFetcher.__init__ and _fetch_subtitle), src/downloader/cookie_rotator.py. Currently caption fetcher does not use cookie rotation even though download core.py does - caption 403s exhaust retries without trying alternate cookies."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-61-009",
@@ -139,8 +139,8 @@
                                                        "Add default no-op callback to maintain backward compatibility",
                                                        "Add test verifying progress callback receives expected values during download"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (UX enhancement). Files: src/downloader/audio_first.py (download_segment at line ~427). Currently segment downloads show no progress - users see no feedback during long downloads."
+                            "passes":  true,
+                            "notes":  "Complete. Added SegmentDownloadProgress dataclass and parse_ytdlp_progress() function to types.py. Added segment_progress_callback parameter to download_video_segments() in audio_first.py. Modified _wait_for_process_with_progress() to parse yt-dlp progress lines and call callback. Added 18 tests in test_segment_progress_hook.py covering parsing, dataclass, and integration. All 38 tests pass."
                         },
                         {
                             "id":  "US-61-010",

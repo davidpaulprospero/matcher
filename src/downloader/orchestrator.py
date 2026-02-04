@@ -242,6 +242,7 @@ class DownloadOrchestrator:
         # Final reporting
         d.log_source_diversity_report()
         self._log_cache_stats()
+        self._log_budget_summary()
 
         # Clear checkpoint on success
         d._clear_checkpoint()
@@ -391,6 +392,23 @@ class DownloadOrchestrator:
             except (TypeError, ValueError):
                 # Handle MagicMock or invalid cache_stats gracefully
                 pass
+
+    def _log_budget_summary(self) -> None:
+        """Log rate limit budget summary at download completion.
+
+        US-61-010: Log budget usage summary showing rotations, VPN switches,
+        backoff time, and keywords that triggered rate limit events.
+        """
+        d = self.downloader
+        if hasattr(d, 'rate_limit_budget') and d.rate_limit_budget:
+            budget = d.rate_limit_budget
+            # Only log if any budget was consumed
+            if (
+                budget.rotations_used > 0 or
+                budget.vpn_switches_used > 0 or
+                budget.backoff_time_spent > 0
+            ):
+                logger.info(budget.budget_summary())
 
     def _process_retry_queue(
         self,
