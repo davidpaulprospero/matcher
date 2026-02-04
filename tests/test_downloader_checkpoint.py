@@ -166,6 +166,93 @@ class TestDownloadCheckpoint:
         assert checkpoint.timestamp == "2026-01-10T12:00:00"
 
     @pytest.mark.fast
+    def test_checkpoint_schema_version_default(self):
+        """Test that schema_version defaults to 1 (US-58-002)"""
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=["travel"],
+            completed_videos=["vid1"],
+            failed_keywords=[],
+            current_keyword="beach",
+            current_tier="short",
+            timestamp="2026-02-05T10:00:00"
+        )
+        assert checkpoint.schema_version == 1
+
+    @pytest.mark.fast
+    def test_checkpoint_to_dict_includes_schema_version(self):
+        """Test that to_dict includes schema_version in output (US-58-002)"""
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=[],
+            completed_videos=[],
+            failed_keywords=[],
+            current_keyword=None,
+            current_tier=None,
+            timestamp="2026-02-05T10:00:00"
+        )
+        data = checkpoint.to_dict()
+        assert 'schema_version' in data
+        assert data['schema_version'] == 1
+
+    @pytest.mark.fast
+    def test_checkpoint_from_dict_missing_schema_version_defaults_to_1(self):
+        """Test that loading checkpoint without schema_version defaults to 1 (US-58-002)"""
+        data = {
+            'completed_keywords': ["travel"],
+            'completed_videos': ["vid1"],
+            'failed_keywords': [],
+            'current_keyword': "beach",
+            'current_tier': "short",
+            'timestamp': "2026-02-05T10:00:00"
+        }
+        # No schema_version key in data
+        assert 'schema_version' not in data
+
+        checkpoint = DownloadCheckpoint.from_dict(data)
+        assert checkpoint.schema_version == 1
+
+    @pytest.mark.fast
+    def test_checkpoint_from_dict_mismatched_schema_version_warns(self, caplog):
+        """Test that loading checkpoint with mismatched schema_version logs warning (US-58-002)"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        data = {
+            'completed_keywords': [],
+            'completed_videos': [],
+            'failed_keywords': [],
+            'current_keyword': None,
+            'current_tier': None,
+            'timestamp': "2026-02-05T10:00:00",
+            'schema_version': 99  # Future/mismatched version
+        }
+
+        checkpoint = DownloadCheckpoint.from_dict(data)
+        assert checkpoint.schema_version == 99
+        assert "schema_version mismatch" in caplog.text
+        assert "loaded v99" in caplog.text
+        assert "current v1" in caplog.text
+
+    @pytest.mark.fast
+    def test_checkpoint_from_dict_matching_schema_version_no_warning(self, caplog):
+        """Test that loading checkpoint with matching schema_version does not warn (US-58-002)"""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        data = {
+            'completed_keywords': [],
+            'completed_videos': [],
+            'failed_keywords': [],
+            'current_keyword': None,
+            'current_tier': None,
+            'timestamp': "2026-02-05T10:00:00",
+            'schema_version': 1  # Matches current
+        }
+
+        checkpoint = DownloadCheckpoint.from_dict(data)
+        assert checkpoint.schema_version == 1
+        assert "schema_version mismatch" not in caplog.text
+
+    @pytest.mark.fast
     def test_checkpoint_with_none_values(self):
         """Test checkpoint with None for optional fields"""
         checkpoint = DownloadCheckpoint(

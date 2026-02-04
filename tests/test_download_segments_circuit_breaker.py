@@ -517,6 +517,108 @@ class TestCheckAndWaitCalledWhenOpen:
 
 
 # ---------------------------------------------------------------------------
+# Test: _check_preconditions() unit test (US-57-007 AC5)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPreconditionsUnit:
+    """Unit tests for _check_preconditions() — verifies circuit breaker
+    open state returns a skip reason without running the full download loop."""
+
+    @pytest.mark.fast
+    def test_open_circuit_max_tier_returns_skip_reason(
+        self, escalation_manager, circuit_breaker
+    ):
+        """When circuit breaker is open and video is at max tier,
+        _check_preconditions() should return a skip reason string."""
+        from src.stages.download_segments import (
+            DownloadVideoSegmentsStage,
+            SegmentDownloadStats,
+            _DownloadLoopContext,
+        )
+
+        stage = DownloadVideoSegmentsStage()
+
+        # Wire and trip circuit breaker
+        escalation_manager.set_circuit_breaker(circuit_breaker)
+        for _ in range(circuit_breaker.config.consecutive_failures_threshold):
+            circuit_breaker.record_failure()
+        assert circuit_breaker.is_open
+
+        # Set video to max tier
+        state = escalation_manager._get_state("skip_vid")
+        state.current_tier = EscalationTier.VPN_ROTATION
+
+        # Set up minimal downloader with retry queue
+        mock_downloader = MagicMock()
+        mock_downloader.retry_queue = MagicMock()
+        stage.downloader = mock_downloader
+
+        ctx = _DownloadLoopContext(
+            stats=SegmentDownloadStats(total=1),
+            escalation_mgr=escalation_manager,
+            circuit_breaker=circuit_breaker,
+        )
+
+        reason = stage._check_preconditions(
+            ctx, "skip_vid", 10.0, 20.0, Path("/tmp/out.mp4")
+        )
+
+        assert reason is not None
+        assert reason == "circuit_breaker_open_max_tier"
+        # Verify it was added to retry queue
+        mock_downloader.retry_queue.add.assert_called_once()
+
+    @pytest.mark.fast
+    def test_closed_circuit_returns_none(
+        self, escalation_manager, circuit_breaker
+    ):
+        """When circuit breaker is closed, _check_preconditions() returns None
+        (no skip reason — download may proceed)."""
+        from src.stages.download_segments import (
+            DownloadVideoSegmentsStage,
+            SegmentDownloadStats,
+            _DownloadLoopContext,
+        )
+
+        stage = DownloadVideoSegmentsStage()
+        assert not circuit_breaker.is_open
+
+        ctx = _DownloadLoopContext(
+            stats=SegmentDownloadStats(total=1),
+            escalation_mgr=escalation_manager,
+            circuit_breaker=circuit_breaker,
+        )
+
+        reason = stage._check_preconditions(
+            ctx, "ok_vid", 0.0, 10.0, Path("/tmp/ok.mp4")
+        )
+        assert reason is None
+
+    @pytest.mark.fast
+    def test_no_circuit_breaker_returns_none(self):
+        """When no circuit breaker is configured, _check_preconditions()
+        returns None immediately."""
+        from src.stages.download_segments import (
+            DownloadVideoSegmentsStage,
+            SegmentDownloadStats,
+            _DownloadLoopContext,
+        )
+
+        stage = DownloadVideoSegmentsStage()
+
+        ctx = _DownloadLoopContext(
+            stats=SegmentDownloadStats(total=1),
+            circuit_breaker=None,
+        )
+
+        reason = stage._check_preconditions(
+            ctx, "any_vid", 0.0, 10.0, Path("/tmp/any.mp4")
+        )
+        assert reason is None
+
+
+# ---------------------------------------------------------------------------
 # Test: Circuit breaker metrics in checkpoint (US-50-008 AC3)
 # ---------------------------------------------------------------------------
 
