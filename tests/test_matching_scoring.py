@@ -376,7 +376,7 @@ class TestApplyAllAdjustments:
         """Test applying all adjustments together"""
         scoring = MatchScoring(mock_config)
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.8,
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment,
@@ -395,7 +395,7 @@ class TestApplyAllAdjustments:
         scoring = MatchScoring(mock_config)
         sample_video_segment.is_broll = True
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.7,
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment
@@ -413,7 +413,7 @@ class TestApplyAllAdjustments:
         sample_video_segment.timing_penalty = 0.95
         sample_video_segment.caption_quality = 'high'
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.7,
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment
@@ -588,7 +588,7 @@ class TestCascadingConfidencePenalties:
         sample_video_segment.caption_quality = 'low'  # x0.5 multiplier
         sample_video_segment.timing_penalty = 0.3      # x0.3 multiplier (severe)
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.8,
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment
@@ -611,7 +611,7 @@ class TestCascadingConfidencePenalties:
         sample_video_segment.timing_penalty = 0.1       # x0.1
         sample_video_segment.source = 'global_cache'     # -0.1 additive
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.5,
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment
@@ -633,7 +633,7 @@ class TestCascadingConfidencePenalties:
         sample_video_segment.caption_quality = 'medium'  # x0.9
         sample_video_segment.timing_penalty = 0.6        # x0.6
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.8,
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment
@@ -658,7 +658,7 @@ class TestCascadingConfidencePenalties:
         sample_video_segment.timing_penalty = 0.5     # x0.5
 
         with patch('src.matching.scoring.logger') as mock_logger:
-            adjusted, reason = scoring.apply_all_adjustments(
+            adjusted, reason, *_ = scoring.apply_all_adjustments(
                 confidence=0.8,
                 vo_segment=sample_vo_segment,
                 video_segment=sample_video_segment
@@ -678,7 +678,7 @@ class TestCascadingConfidencePenalties:
         """
         scoring = MatchScoring(mock_config)
 
-        adjusted, reason = scoring.apply_all_adjustments(
+        adjusted, reason, *_ = scoring.apply_all_adjustments(
             confidence=0.03,  # Already below floor
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment
@@ -1017,6 +1017,161 @@ class TestAdaptiveThresholdEdgeCases:
         assert "medium_pool(10)" in reason_10 or "small_pool(10)" in reason_10
         assert "medium_pool(50)" in reason_50
         assert "large_pool(200)" in reason_200
+
+
+# ============================================================================
+# Test Confidence Breakdown Audit Trail (US-53-003)
+# ============================================================================
+
+class TestConfidenceBreakdown:
+    """Test that apply_all_adjustments returns a confidence breakdown list."""
+
+    @pytest.mark.fast
+    def test_breakdown_returned_as_third_element(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments returns a 3-tuple with breakdown as third element."""
+        scoring = MatchScoring(mock_config)
+        result = scoring.apply_all_adjustments(
+            confidence=0.8,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        assert len(result) == 3
+        _, _, breakdown = result
+        assert isinstance(breakdown, list)
+
+    @pytest.mark.fast
+    def test_breakdown_populated_with_broll(self, mock_config, sample_vo_segment, sample_video_segment):
+        """Breakdown list has entries when B-roll boost fires."""
+        scoring = MatchScoring(mock_config)
+        sample_video_segment.is_broll = True
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+
+        assert len(breakdown) >= 1
+        components = [b['component'] for b in breakdown]
+        assert 'broll_boost' in components
+
+        broll_entry = next(b for b in breakdown if b['component'] == 'broll_boost')
+        assert 'adjustment' in broll_entry
+        assert 'reason' in broll_entry
+        assert broll_entry['adjustment'] > 0  # boost is positive
+
+    @pytest.mark.fast
+    def test_breakdown_populated_with_multiple_adjustments(self, mock_config, sample_vo_segment, sample_video_segment):
+        """Breakdown has multiple entries when multiple adjustments fire."""
+        scoring = MatchScoring(mock_config)
+        sample_video_segment.is_broll = True
+        sample_video_segment.timing_penalty = 0.9
+        sample_video_segment.caption_quality = 'high'
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+
+        assert len(breakdown) >= 2
+        components = [b['component'] for b in breakdown]
+        assert 'broll_boost' in components
+        assert 'timing_penalty' in components
+
+    @pytest.mark.fast
+    def test_breakdown_empty_when_no_adjustments(self, mock_config, sample_vo_segment, sample_video_segment):
+        """Breakdown is empty list when no adjustments fire."""
+        scoring = MatchScoring(mock_config)
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.8,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+
+        # No special attributes set, so no adjustments should fire
+        assert isinstance(breakdown, list)
+
+    @pytest.mark.fast
+    def test_breakdown_is_json_serializable(self, mock_config, sample_vo_segment, sample_video_segment):
+        """Breakdown list is JSON-serializable (dicts with simple types)."""
+        import json
+        scoring = MatchScoring(mock_config)
+        sample_video_segment.is_broll = True
+        sample_video_segment.timing_penalty = 0.95
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+
+        # Must not raise
+        serialized = json.dumps(breakdown)
+        deserialized = json.loads(serialized)
+        assert isinstance(deserialized, list)
+        for entry in deserialized:
+            assert 'component' in entry
+            assert 'adjustment' in entry
+            assert 'reason' in entry
+
+    @pytest.mark.fast
+    def test_breakdown_entry_structure(self, mock_config, sample_vo_segment, sample_video_segment):
+        """Each breakdown entry has required keys: component, adjustment, reason."""
+        scoring = MatchScoring(mock_config)
+        sample_video_segment.is_broll = True
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+
+        for entry in breakdown:
+            assert isinstance(entry, dict)
+            assert set(entry.keys()) == {'component', 'adjustment', 'reason'}
+            assert isinstance(entry['component'], str)
+            assert isinstance(entry['adjustment'], (int, float))
+            assert isinstance(entry['reason'], str)
+
+
+class TestMatchResultConfidenceBreakdownField:
+    """Test MatchResult dataclass has confidence_breakdown field with correct default."""
+
+    @pytest.mark.fast
+    def test_confidence_breakdown_has_default(self):
+        """confidence_breakdown field has a default_factory in the dataclass."""
+        from dataclasses import fields as dataclass_fields
+        from src.utils import MatchResult
+        field_map = {f.name: f for f in dataclass_fields(MatchResult)}
+        assert 'confidence_breakdown' in field_map
+        f = field_map['confidence_breakdown']
+        assert f.default_factory is not None
+
+    @pytest.mark.fast
+    def test_matchresult_default_empty_breakdown(self):
+        """MatchResult defaults to empty confidence_breakdown."""
+        from src.utils import MatchResult, Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.8, reasoning="test")
+        result = MatchResult(primary_match=m)
+        assert result.confidence_breakdown == []
+
+    @pytest.mark.fast
+    def test_matchresult_accepts_breakdown(self):
+        """MatchResult can be constructed with a confidence_breakdown."""
+        from src.utils import MatchResult, Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.75, reasoning="test")
+        bd = [{'component': 'broll_boost', 'adjustment': 0.1, 'reason': 'B-roll boost: +0.10'}]
+        result = MatchResult(primary_match=m, confidence_breakdown=bd)
+        assert len(result.confidence_breakdown) == 1
+        assert result.confidence_breakdown[0]['component'] == 'broll_boost'
 
 
 if __name__ == "__main__":
