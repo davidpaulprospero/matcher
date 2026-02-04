@@ -1431,6 +1431,106 @@ class TestEscalationTierIntegration:
 
 
 # ============================================================================
+# ImpersonateTarget Type Conversion (US-55-003)
+# ============================================================================
+
+class TestImpersonateTargetConversion:
+    """Verify _apply_escalation_to_ydl_opts converts '--impersonate' CLI arg
+    strings to proper ImpersonateTarget objects with lowercase fields.
+
+    US-55-003: The yt-dlp Python API requires ImpersonateTarget objects, not
+    raw strings. Passing a string causes AssertionError at
+    networking/impersonate.py:119.
+    """
+
+    @pytest.mark.fast
+    def test_impersonate_arg_produces_object_not_string(self):
+        """ydl_opts['impersonate'] must be an ImpersonateTarget, not a raw str."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        assert 'impersonate' in ydl_opts
+        assert not isinstance(ydl_opts['impersonate'], str), \
+            "impersonate value must not be a raw string"
+        assert isinstance(ydl_opts['impersonate'], ImpersonateTarget), \
+            f"Expected ImpersonateTarget, got {type(ydl_opts['impersonate'])}"
+
+    @pytest.mark.fast
+    def test_client_field_is_lowercased(self):
+        """'Chrome-136' becomes client='chrome-136' (yt-dlp targets are lowercase)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'Chrome-136:Macos-15']
+
+        ydl_opts = {}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        target = ydl_opts['impersonate']
+        assert isinstance(target, ImpersonateTarget)
+        # client and os must be lowercase
+        assert target.client == target.client.lower(), \
+            f"client '{target.client}' is not lowercase"
+        assert target.os == target.os.lower(), \
+            f"os '{target.os}' is not lowercase"
+
+    @pytest.mark.fast
+    def test_no_impersonate_arg_means_no_key(self):
+        """When escalation result has no '--impersonate', ydl_opts has no 'impersonate' key."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        # Only extractor-args, no impersonation
+        mock_result = MagicMock()
+        mock_result.args = [
+            '--extractor-args', 'youtube:player_client=web_safari,tv_downgraded,web',
+        ]
+
+        ydl_opts = {'format': 'best'}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+
+        assert 'impersonate' not in ydl_opts, \
+            "impersonate key should not exist when --impersonate arg is absent"
+        # extractor_args should still be applied
+        assert 'extractor_args' in ydl_opts
+
+    @pytest.mark.fast
+    def test_malformed_impersonate_empty_string_no_crash(self):
+        """Empty impersonate string is handled gracefully (no unhandled exception)."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', '']
+
+        ydl_opts = {'format': 'best'}
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+        # Should not crash; impersonate key either absent or a valid object
+        assert ydl_opts.get('format') == 'best'
+
+    @pytest.mark.fast
+    def test_malformed_impersonate_no_colon_no_crash(self):
+        """Impersonate string without colon separator is handled gracefully."""
+        from src.stages.download_segments import _apply_escalation_to_ydl_opts
+
+        mock_result = MagicMock()
+        mock_result.args = ['--impersonate', 'JustABrowser']
+
+        ydl_opts = {'format': 'best'}
+        # Should not raise an unhandled exception
+        _apply_escalation_to_ydl_opts(ydl_opts, mock_result)
+        # If it parsed successfully, it should be an object not a string
+        if 'impersonate' in ydl_opts:
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            assert isinstance(ydl_opts['impersonate'], ImpersonateTarget)
+
+
+# ============================================================================
 # Download Progress Reporting (US-48-007)
 # ============================================================================
 
