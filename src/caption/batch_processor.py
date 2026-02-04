@@ -405,6 +405,13 @@ class BatchProcessor:
                     }
                     reason = 'unavailable'
 
+                    # US-61-007: Record error category for unavailable errors
+                    if metrics:
+                        from .error_handling import categorize_caption_error
+                        from .enums import CaptionErrorCategory
+                        error_category = categorize_caption_error(e, str(e.reason))
+                        metrics.record_error_category(error_category, video_id)
+
                     # US-59-006: Track unavailable in rolling window (inside worker thread)
                     with unavailable_lock:
                         unavailable_total_count[0] += 1
@@ -436,11 +443,14 @@ class BatchProcessor:
                             circuit_breaker.record_failure()
 
                     # Record failure in retry budget with error category (US-37-006)
+                    # US-61-007: Also record in metrics for dashboard integration
+                    from .error_handling import categorize_caption_error
+                    error_reason = str(getattr(e, 'reason', str(e)))
+                    error_category = categorize_caption_error(e, error_reason)
                     if retry_budget:
-                        from .error_handling import categorize_caption_error
-                        error_reason = str(getattr(e, 'reason', str(e)))
-                        error_category = categorize_caption_error(e, error_reason)
                         retry_budget.record_failure(video_id, error_category=error_category)
+                    if metrics:
+                        metrics.record_error_category(error_category, video_id)
 
                     error_result = {
                         'video_id': video_id,
@@ -733,10 +743,17 @@ class BatchProcessor:
                 unavailable_total_count[0], unavail_rate
             )
 
-        logger.info(
+        # US-61-007: Log error category summary at batch end
+        batch_summary_msg = (
             f"Batch caption fetch complete: {len(self._results)} processed, "
             f"{batch_result.success_count} succeeded"
         )
+        if metrics and metrics.error_category_counts:
+            error_parts = [
+                f"{cat}={count}" for cat, count in sorted(metrics.error_category_counts.items())
+            ]
+            batch_summary_msg += f" | Caption errors by category: {', '.join(error_parts)}"
+        logger.info(batch_summary_msg)
 
         batch_result.results = dict(self._results)
         return batch_result
