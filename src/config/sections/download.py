@@ -497,6 +497,13 @@ class CaptionFirstConfig:
     # captions are unavailable. When False, only manual captions are accepted.
     allow_auto_generated: bool = True
 
+    # Negative cache TTL in hours (US-60-004)
+    # Cached "captions unavailable" entries expire after this TTL.
+    # Shorter than max_cache_age_days since caption availability may change
+    # (e.g., creator enables captions later). Default 1 hour.
+    # Set to 0 to use max_cache_age_days for negative entries too.
+    negative_cache_ttl_hours: float = 1.0
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.circuit_breaker, dict):

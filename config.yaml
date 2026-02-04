@@ -107,18 +107,28 @@ video_search:
 
 transcription:
   provider: faster-whisper
-  
+
   # Model selection - larger = more accurate but slower
   # Options: tiny, base, small, medium, large, large-v2, large-v3
   model: base
   language: en
-  
+
   # GPU settings
   # Chain-of-thought: GPU much faster but requires CUDA
   # Reasoning: compute_type=auto lets faster-whisper choose optimal
   use_gpu: true
   compute_type: auto  # auto, float16, int8, float32
-  
+
+  # GPU memory pre-check (US-60-007)
+  # Minimum free GPU memory required before loading model (MB)
+  # Model sizes (approximate VRAM at float16):
+  #   tiny: ~400MB, base: ~500MB, small: ~1GB, medium: ~2GB, large: ~3GB
+  # If available memory is below this threshold, a warning is logged
+  minimum_gpu_memory_mb: 2000
+  # Automatically downgrade model if insufficient GPU memory
+  # e.g., if 'large' requested but only 1GB available, use 'small' instead
+  auto_downgrade_model: true
+
   # Parallel processing
   # Chain-of-thought: CPU can extract audio in parallel
   # Reasoning: GPU transcription must be sequential (shared model)

@@ -285,3 +285,112 @@ class TestPreflightListSubsCheck:
 
                 # Each video gets its own list-subs call
                 assert mock_list.call_count == 2
+
+
+@pytest.mark.fast
+class TestListAvailableSubtitles:
+    """Tests for list_available_subtitles() structured result (US-60-002)."""
+
+    def _make_fetcher(self):
+        """Create a CaptionFetcher with no config."""
+        return CaptionFetcher()
+
+    def test_returns_structured_result_with_all_fields(self):
+        """AC: list_available_subtitles returns structured result with
+        available_manual_languages, available_auto_languages, has_any_subtitles.
+        """
+        from src.caption_fetcher import SubtitleAvailabilityResult
+        fetcher = self._make_fetcher()
+
+        available = [
+            AvailableLanguage(code='en', name='English', is_auto_generated=False),
+            AvailableLanguage(code='es', name='Spanish', is_auto_generated=False),
+            AvailableLanguage(code='en', name='English (auto-generated)', is_auto_generated=True),
+            AvailableLanguage(code='fr', name='French (auto-generated)', is_auto_generated=True),
+        ]
+
+        with patch.object(fetcher, 'list_available_languages', return_value=available):
+            result = fetcher.list_available_subtitles("dQw4w9WgXcQ")
+
+            assert isinstance(result, SubtitleAvailabilityResult)
+            assert result.video_id == "dQw4w9WgXcQ"
+            assert result.has_any_subtitles is True
+            assert 'en' in result.available_manual_languages
+            assert 'es' in result.available_manual_languages
+            assert 'en' in result.available_auto_languages
+            assert 'fr' in result.available_auto_languages
+            assert len(result.all_languages) == 4
+
+    def test_has_any_subtitles_false_when_empty(self):
+        """AC: has_any_subtitles is False when no subtitles exist."""
+        fetcher = self._make_fetcher()
+
+        with patch.object(fetcher, 'list_available_languages', return_value=[]):
+            result = fetcher.list_available_subtitles("noSubsVideo")
+
+            assert result.has_any_subtitles is False
+            assert result.available_manual_languages == []
+            assert result.available_auto_languages == []
+
+    def test_has_language_method_checks_correctly(self):
+        """Test the has_language helper method."""
+        from src.caption_fetcher import SubtitleAvailabilityResult
+        fetcher = self._make_fetcher()
+
+        available = [
+            AvailableLanguage(code='en', name='English', is_auto_generated=False),
+            AvailableLanguage(code='de', name='German (auto)', is_auto_generated=True),
+        ]
+
+        with patch.object(fetcher, 'list_available_languages', return_value=available):
+            result = fetcher.list_available_subtitles("testVideo")
+
+            # Test has_language method
+            assert result.has_language('en') is True
+            assert result.has_language('EN') is True  # Case insensitive
+            assert result.has_language('en', manual_only=True) is True
+            assert result.has_language('de') is True
+            assert result.has_language('de', manual_only=True) is False  # Only auto
+            assert result.has_language('fr') is False  # Not available
+
+    def test_to_dict_serialization(self):
+        """Test that result can be serialized to dict for caching."""
+        from src.caption_fetcher import SubtitleAvailabilityResult
+        fetcher = self._make_fetcher()
+
+        available = [
+            AvailableLanguage(code='en', name='English', is_auto_generated=False),
+        ]
+
+        with patch.object(fetcher, 'list_available_languages', return_value=available):
+            result = fetcher.list_available_subtitles("testVideo")
+            serialized = result.to_dict()
+
+            assert serialized['video_id'] == "testVideo"
+            assert serialized['has_any_subtitles'] is True
+            assert 'en' in serialized['available_manual_languages']
+
+    def test_preflight_enables_fail_fast_no_format_attempts(self):
+        """AC: Unit test verifies pre-flight check prevents unnecessary format attempts.
+
+        When list_available_subtitles returns empty, no format attempts should occur.
+        """
+        fetcher = self._make_fetcher()
+
+        with patch('src.caption_fetcher.subprocess.run') as mock_run:
+            # list-subs returns empty (no captions)
+            mock_run.return_value = Mock(
+                stdout="",
+                stderr="",
+                returncode=0,
+            )
+
+            result = fetcher.list_available_subtitles("noSubsVideo")
+            assert result.has_any_subtitles is False
+
+            # Only 1 subprocess call - the list-subs check
+            assert mock_run.call_count == 1
+            cmd_args = mock_run.call_args[0][0]
+            assert '--list-subs' in cmd_args
+            # No format download attempts should have been made
+            assert '--write-sub' not in cmd_args

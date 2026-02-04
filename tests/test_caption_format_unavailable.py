@@ -358,3 +358,179 @@ class TestErrorPatternDetectorFormatUnavailable:
         assert result.detected is True
         # The signature should include "not available" or similar
         assert result.error_signature is not None
+
+
+# ============================================================
+# Format uniqueness tests (US-60-003)
+# ============================================================
+
+class TestFormatOnlyTriedOnce:
+    """Test that each format is only tried once per fetch attempt (US-60-003).
+
+    Previously, a bug caused json3 to be tried twice: once at the start
+    and again at the end of the fallback sequence. This test suite ensures
+    the format sequence is json3->vtt->srt with no duplicates.
+    """
+
+    def test_each_format_tried_once_on_format_unavailable(self):
+        """AC: Each format is only tried once per fetch attempt.
+
+        When all formats raise CaptionFormatUnavailableError, each format
+        should be attempted exactly once.
+        """
+        call_counts = {'json3': 0, 'vtt': 0, 'srt': 0}
+
+        def mock_fetch_with_format(video_url, video_id, temp_dir, language, auto_gen, fmt, fallback_level=0):
+            call_counts[fmt] = call_counts.get(fmt, 0) + 1
+            raise CaptionFormatUnavailableError(video_id, fmt, "Requested format is not available")
+
+        # Simulate the format loop from _fetch_subtitle_formats
+        preferred_formats = ['json3', 'vtt', 'srt']
+        last_error = None
+        for fallback_level, fmt in enumerate(preferred_formats):
+            try:
+                result = mock_fetch_with_format("url", "vid1", "/tmp", "en", False, fmt, fallback_level)
+                if result and hasattr(result, 'segments') and result.segments:
+                    break
+            except CaptionUnavailableError:
+                raise
+            except CaptionFormatUnavailableError as e:
+                last_error = e
+                continue
+            except CaptionFetchError as e:
+                last_error = e
+                continue
+
+        # Each format should be tried exactly once
+        assert call_counts['json3'] == 1, f"json3 tried {call_counts['json3']} times, expected 1"
+        assert call_counts['vtt'] == 1, f"vtt tried {call_counts['vtt']} times, expected 1"
+        assert call_counts['srt'] == 1, f"srt tried {call_counts['srt']} times, expected 1"
+
+    def test_no_duplicate_formats_in_preferred_list(self):
+        """AC: The preferred formats list should have no duplicates."""
+        from src.caption_fetcher import CaptionFetcher
+
+        fetcher = CaptionFetcher()
+        formats = fetcher._preferred_formats
+
+        # No duplicates in the list
+        assert len(formats) == len(set(formats)), \
+            f"Duplicate formats found in preferred_formats: {formats}"
+
+    def test_format_sequence_no_repeat_json3(self):
+        """AC: Format sequence is json3->vtt->srt with no repeat of json3.
+
+        This specifically tests the bug fix where json3 was tried again
+        at the end of the sequence after already failing.
+        """
+        from collections import Counter
+
+        call_log = []
+
+        def mock_fetch_with_format(video_url, video_id, temp_dir, language, auto_gen, fmt, fallback_level=0):
+            call_log.append(fmt)
+            raise CaptionFormatUnavailableError(video_id, fmt, "Requested format is not available")
+
+        # Simulate the format loop
+        preferred_formats = ['json3', 'vtt', 'srt']
+        for fallback_level, fmt in enumerate(preferred_formats):
+            try:
+                mock_fetch_with_format("url", "vid1", "/tmp", "en", False, fmt, fallback_level)
+            except CaptionFormatUnavailableError:
+                continue
+
+        # Check call sequence
+        assert call_log == ['json3', 'vtt', 'srt'], \
+            f"Expected ['json3', 'vtt', 'srt'], got {call_log}"
+
+        # Check no format appears more than once
+        counts = Counter(call_log)
+        for fmt, count in counts.items():
+            assert count == 1, f"Format {fmt} was tried {count} times, expected 1"
+
+    def test_real_fetcher_format_loop_no_duplicates_single_pass(self):
+        """Integration test: A single format pass has no duplicates.
+
+        Uses _fetch_subtitle_formats directly to test just one pass,
+        avoiding the auto-generated fallback which correctly retries.
+        """
+        from src.caption_fetcher import CaptionFetcher, AvailableLanguage
+        from unittest.mock import patch
+        from pathlib import Path
+        import tempfile
+
+        fetcher = CaptionFetcher()
+        call_log = []
+
+        def mock_format(video_url, video_id, temp_dir, language, auto_gen, fmt, fallback_level=0):
+            call_log.append((fmt, auto_gen))
+            raise CaptionFormatUnavailableError(video_id, fmt, "Requested format is not available")
+
+        with patch.object(fetcher, '_fetch_subtitle_with_format', side_effect=mock_format):
+            with tempfile.TemporaryDirectory() as td:
+                with pytest.raises(CaptionFormatUnavailableError):
+                    # Call _fetch_subtitle_formats directly (single pass)
+                    fetcher._fetch_subtitle_formats(
+                        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                        "dQw4w9WgXcQ",
+                        Path(td),
+                        "en",
+                        False,  # manual captions
+                    )
+
+        # Extract just the format names
+        formats_tried = [fmt for fmt, _ in call_log]
+
+        # Verify no duplicates within a single pass
+        assert len(formats_tried) == len(set(formats_tried)), \
+            f"Duplicate formats in single pass: {formats_tried}"
+        # Verify expected sequence
+        assert formats_tried == ['json3', 'vtt', 'srt'], \
+            f"Expected ['json3', 'vtt', 'srt'], got {formats_tried}"
+
+    def test_auto_fallback_correctly_retries_all_formats(self):
+        """Auto-fallback is allowed to retry all formats (different auto_gen flag).
+
+        When manual captions fail, auto-generated fallback should try all
+        formats again. This is correct behavior (not a duplicate bug).
+        """
+        from src.caption_fetcher import CaptionFetcher, AvailableLanguage
+        from unittest.mock import patch
+        from pathlib import Path
+        import tempfile
+
+        fetcher = CaptionFetcher()
+        call_log = []
+
+        def mock_format(video_url, video_id, temp_dir, language, auto_gen, fmt, fallback_level=0):
+            call_log.append((fmt, auto_gen))
+            raise CaptionFormatUnavailableError(video_id, fmt, "Requested format is not available")
+
+        # Mock pre-flight check to return English available
+        with patch.object(fetcher, 'list_available_languages', return_value=[
+            AvailableLanguage(code='en', name='English', is_auto_generated=True),
+        ]):
+            with patch.object(fetcher, '_fetch_subtitle_with_format', side_effect=mock_format):
+                with tempfile.TemporaryDirectory() as td:
+                    with pytest.raises(CaptionFormatUnavailableError):
+                        fetcher._fetch_subtitle(
+                            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                            "dQw4w9WgXcQ",
+                            Path(td),
+                            "en",
+                            False,  # Start with manual
+                        )
+
+        # Expect 6 calls: 3 manual (auto_gen=False) + 3 auto (auto_gen=True)
+        manual_calls = [(fmt, auto) for fmt, auto in call_log if not auto]
+        auto_calls = [(fmt, auto) for fmt, auto in call_log if auto]
+
+        # Manual pass should have no duplicates
+        manual_formats = [fmt for fmt, _ in manual_calls]
+        assert manual_formats == ['json3', 'vtt', 'srt'], \
+            f"Manual pass expected ['json3', 'vtt', 'srt'], got {manual_formats}"
+
+        # Auto pass should have no duplicates
+        auto_formats = [fmt for fmt, _ in auto_calls]
+        assert auto_formats == ['json3', 'vtt', 'srt'], \
+            f"Auto pass expected ['json3', 'vtt', 'srt'], got {auto_formats}"

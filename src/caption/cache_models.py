@@ -226,6 +226,50 @@ class ChannelCaptionPattern:
 
 
 @dataclass
+class CachedLanguageList:
+    """Cached list-subs output for available languages (US-59-012).
+
+    Caches the result of list_available_languages() to avoid redundant
+    yt-dlp --list-subs subprocess calls on resume runs.
+
+    Attributes:
+        video_id: YouTube video ID (11 characters).
+        languages: List of available language dicts with 'code', 'name', 'is_auto_generated'.
+        cached_at: Unix timestamp when cached.
+        ttl_hours: TTL in hours (default 1, since availability can change).
+    """
+    video_id: str
+    languages: List[Dict[str, Any]]  # AvailableLanguage fields as dicts
+    cached_at: float
+    ttl_hours: float = 1.0  # 1 hour default TTL
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'video_id': self.video_id,
+            'languages': self.languages,
+            'cached_at': self.cached_at,
+            'ttl_hours': self.ttl_hours,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CachedLanguageList':
+        """Create from dictionary."""
+        return cls(
+            video_id=data.get('video_id', ''),
+            languages=data.get('languages', []),
+            cached_at=data.get('cached_at', 0.0),
+            ttl_hours=data.get('ttl_hours', 1.0),
+        )
+
+    def is_expired(self) -> bool:
+        """Check if cache entry is expired based on TTL."""
+        age_seconds = time.time() - self.cached_at
+        ttl_seconds = self.ttl_hours * 3600
+        return age_seconds > ttl_seconds
+
+
+@dataclass
 class BatchPreCheckResult:
     """Result of batch pre-check by channel (US-006 Sprint 7).
 

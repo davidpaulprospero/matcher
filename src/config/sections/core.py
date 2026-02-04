@@ -56,6 +56,15 @@ class TranscriptionConfig:
     use_gpu: bool = True
     compute_type: str = "auto"  # auto, float16, int8, float32
 
+    # GPU memory settings (US-60-007)
+    # Minimum free GPU memory required before loading model (MB)
+    # Model sizes (approximate VRAM at float16):
+    #   tiny: ~400MB, base: ~500MB, small: ~1GB, medium: ~2GB, large: ~3GB
+    # Default 2000MB accommodates base model with comfortable margin
+    minimum_gpu_memory_mb: int = 2000
+    # Automatically downgrade model if insufficient GPU memory
+    auto_downgrade_model: bool = True
+
     # Parallel processing
     max_workers: int = 4
     batch_size: int = 10

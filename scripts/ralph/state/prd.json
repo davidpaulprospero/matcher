@@ -98,7 +98,7 @@
                                                        "Add test verifying caption failures populate transcription fallback list correctly"
                                                    ],
                             "passes":  true,
-                            "notes":  "IMPLEMENTED: (1) Added needs_transcription list attribute to CaptionStage.__init__ at line 69. (2) Populated from live_stream_ids, upcoming_stream_ids (when skip), no_caption_ids, and batch fetch failures (unavailable/error/budget_exhausted). (3) Persisted in checkpoint_data['needs_transcription'] at line 1185. (4) Set state.videos_needing_transcription at line 1163, restored in restore() at lines 1293-1299. (5) Added TestCaptionStageTranscriptionFallback test class with 2 tests in tests/test_caption_stage.py. All 8 tests pass."
+                            "notes":  "IMPLEMENTED: (1) Added needs_transcription list attribute at CaptionStage.__init__ line 70. (2) Populated from live streams (lines 519-526), pre-check no-caption (line 607), batch failures (lines 980-987). (3) Persisted in checkpoint at line 1186. (4) Set state.videos_needing_transcription at lines 1159-1164, restored in restore() at lines 1294-1300. (5) Added TestCaptionStageTranscriptionFallback with 2 tests verifying all criteria. All 8 caption stage tests pass."
                         },
                         {
                             "id":  "US-60-007",
@@ -111,8 +111,8 @@
                                                        "Automatically downgrade model size if memory is insufficient (e.g., base-\u003etiny)",
                                                        "Add test verifying memory check and automatic model downgrade behavior"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 (robustness). Target files: src/transcription/whisper_client.py (around lines 32-48, 58-158), src/config/sections/transcription.py. Existing _get_gpu_memory_mb() at lines 32-47 provides foundation."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) Added get_available_gpu_memory() function at whisper_client.py lines 50-70 that queries CUDA total memory minus allocated/reserved. (2) Added minimum_gpu_memory_mb (default 2000) and auto_downgrade_model (default True) to TranscriptionConfig in src/config/sections/core.py lines 58-65 and config.yaml lines 120-127. (3) Memory check and warning added to get_model() at lines 209-214 - warns if available GPU memory below threshold. (4) Automatic model downgrade via _select_model_for_memory() function at lines 93-135 with MODEL_MEMORY_REQUIREMENTS and MODEL_DOWNGRADE_ORDER constants. (5) Added TestGPUMemoryPreCheck class with 14 tests in tests/test_transcription_whisper_client.py verifying memory check, downgrade behavior, and threshold warnings. All 44 whisper client tests pass."
                         },
                         {
                             "id":  "US-60-008",
@@ -125,8 +125,8 @@
                                                        "Log count of entries imported during warmup",
                                                        "Add test verifying warmup imports entries correctly without duplicates"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (optimization). Target file: src/transcription/cache.py (TranscriptCache class). This enables cross-project transcript reuse similar to CaptionCache\u0027s global cache pattern."
+                            "passes":  true,
+                            "notes":  "IMPLEMENTED: (1) Added warmup_from_project(project_dir) method to TranscriptCache at src/transcription/cache.py lines 344-431. (2) Method scans both .cache/transcriptions and .cache/transcripts directories and copies JSON entries to global cache. (3) Duplicate detection via checking source_file against existing_sources set and normalized path/filename. (4) Logs imported and skipped counts via logger.info at lines 428-430. (5) Added TestWarmupFromProject class with 10 tests in tests/test_transcription_cache.py covering imports, duplicates, nonexistent dirs, corrupt files, and alt cache dirs. All 51 transcription cache tests pass."
                         },
                         {
                             "id":  "US-60-009",

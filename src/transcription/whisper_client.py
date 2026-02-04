@@ -47,6 +47,94 @@ def _get_gpu_memory_mb() -> tuple[float, float]:
     return 0.0, 0.0
 
 
+def get_available_gpu_memory() -> float:
+    """
+    Get available GPU memory in MB (US-60-007).
+
+    Queries CUDA device for total memory and subtracts currently allocated memory
+    to determine how much is available for new allocations.
+
+    Returns:
+        Available GPU memory in MB, or 0.0 if CUDA unavailable
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
+            allocated = torch.cuda.memory_allocated() / (1024 * 1024)
+            # Account for some reserved memory overhead
+            reserved = torch.cuda.memory_reserved() / (1024 * 1024)
+            # Available = total - max(allocated, reserved) to be conservative
+            used = max(allocated, reserved)
+            available = total - used
+            return available
+    except ImportError:
+        pass
+    return 0.0
+
+
+# Model size estimates in MB (approximate VRAM at float16)
+# Used for automatic model downgrade when GPU memory is insufficient
+MODEL_MEMORY_REQUIREMENTS = {
+    "large-v3": 3000,
+    "large-v2": 3000,
+    "large": 3000,
+    "medium": 2000,
+    "small": 1000,
+    "base": 500,
+    "tiny": 400,
+}
+
+# Model downgrade chain (larger -> smaller)
+MODEL_DOWNGRADE_ORDER = ["large-v3", "large-v2", "large", "medium", "small", "base", "tiny"]
+
+
+def _select_model_for_memory(requested_model: str, available_memory_mb: float, min_memory_mb: float) -> str:
+    """
+    Select appropriate model based on available GPU memory (US-60-007).
+
+    If requested model requires more memory than available, automatically
+    downgrades to a smaller model that fits within memory constraints.
+
+    Args:
+        requested_model: Model name requested by user
+        available_memory_mb: Available GPU memory in MB
+        min_memory_mb: Minimum memory threshold from config
+
+    Returns:
+        Model name to use (may be downgraded from requested)
+    """
+    # If we have plenty of memory, use requested model
+    if available_memory_mb >= min_memory_mb:
+        model_req = MODEL_MEMORY_REQUIREMENTS.get(requested_model, 500)
+        if available_memory_mb >= model_req:
+            return requested_model
+
+    # Find position of requested model in downgrade chain
+    try:
+        start_idx = MODEL_DOWNGRADE_ORDER.index(requested_model)
+    except ValueError:
+        # Unknown model, assume it's small enough
+        start_idx = len(MODEL_DOWNGRADE_ORDER) - 1
+
+    # Try each model from requested downward
+    for model in MODEL_DOWNGRADE_ORDER[start_idx:]:
+        model_req = MODEL_MEMORY_REQUIREMENTS.get(model, 500)
+        if available_memory_mb >= model_req:
+            if model != requested_model:
+                logger.warning(
+                    f"Insufficient GPU memory ({available_memory_mb:.0f}MB available). "
+                    f"Downgrading model from '{requested_model}' to '{model}'"
+                )
+            return model
+
+    # If nothing fits, return tiny as last resort
+    logger.warning(
+        f"Very low GPU memory ({available_memory_mb:.0f}MB). Using 'tiny' model."
+    )
+    return "tiny"
+
+
 class WhisperClient:
     """
     Thread-safe Whisper model client with GPU locking.
@@ -55,30 +143,55 @@ class WhisperClient:
     in parallel transcription scenarios.
     """
 
-    def __init__(self, model_name: str = "base", compute_type: str = "auto"):
+    def __init__(
+        self,
+        model_name: str = "base",
+        compute_type: str = "auto",
+        minimum_gpu_memory_mb: int = 2000,
+        auto_downgrade_model: bool = True
+    ):
         """
         Initialize Whisper client with model configuration.
 
         Args:
             model_name: Whisper model name (base, small, medium, large, etc.)
             compute_type: Compute type (auto, float16, int8)
+            minimum_gpu_memory_mb: Minimum GPU memory required (US-60-007)
+            auto_downgrade_model: Automatically downgrade model if insufficient memory
         """
         self.model_name = model_name
         self.compute_type = compute_type
+        self.minimum_gpu_memory_mb = minimum_gpu_memory_mb
+        self.auto_downgrade_model = auto_downgrade_model
 
     def get_model(self):
         """
         Get or create the shared WhisperModel instance.
 
         Thread-safe initialization with double-checked locking.
+        Performs GPU memory pre-check and automatic model downgrade if needed (US-60-007).
 
         Returns:
             WhisperModel instance
         """
         global _shared_model, _model_config
 
+        # Determine actual model to use (may be downgraded based on GPU memory)
+        actual_model = self.model_name
+        if self.auto_downgrade_model:
+            available_memory = get_available_gpu_memory()
+            if available_memory > 0:  # Only check if CUDA available
+                actual_model = _select_model_for_memory(
+                    self.model_name,
+                    available_memory,
+                    self.minimum_gpu_memory_mb
+                )
+            elif available_memory == 0:
+                # CUDA not available - warn if below threshold
+                logger.info("CUDA not available - GPU memory check skipped")
+
         # Check if we need to (re)initialize
-        current_config = {"model": self.model_name, "compute_type": self.compute_type}
+        current_config = {"model": actual_model, "compute_type": self.compute_type}
 
         if _shared_model is not None and _model_config == current_config:
             return _shared_model
@@ -90,10 +203,18 @@ class WhisperClient:
 
             # Log GPU memory before initialization
             mem_before_alloc, mem_before_reserved = _get_gpu_memory_mb()
-            logger.info(f"GPU memory before model init: allocated={mem_before_alloc:.1f}MB, reserved={mem_before_reserved:.1f}MB")
+            available_mem = get_available_gpu_memory()
+            logger.info(f"GPU memory before model init: allocated={mem_before_alloc:.1f}MB, reserved={mem_before_reserved:.1f}MB, available={available_mem:.1f}MB")
+
+            # Warn if below threshold (US-60-007)
+            if available_mem > 0 and available_mem < self.minimum_gpu_memory_mb:
+                logger.warning(
+                    f"GPU memory ({available_mem:.0f}MB) below threshold ({self.minimum_gpu_memory_mb}MB). "
+                    f"Performance may be degraded."
+                )
 
             logger.info(f"Initializing WhisperModel...")
-            logger.info(f"  Model: {self.model_name}")
+            logger.info(f"  Model: {actual_model}" + (f" (downgraded from {self.model_name})" if actual_model != self.model_name else ""))
             logger.info(f"  Compute type: {self.compute_type}")
 
             try:
@@ -131,7 +252,7 @@ class WhisperClient:
                 sys.stderr.flush()
 
                 _shared_model = WhisperModel(
-                    self.model_name,
+                    actual_model,
                     device=device,
                     compute_type=actual_compute,
                     num_workers=1,
