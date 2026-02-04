@@ -597,3 +597,141 @@ class TestIsNetworkFailurePythonApiExceptionFormat:
         """Python API DownloadError for age-gated video is NOT a network failure."""
         error = "ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users."
         assert _is_network_failure(error) is False
+
+
+# =============================================================================
+# US-55-005: Network failure pattern matching against Python API exception formats
+# =============================================================================
+
+# Import directly from the canonical error_classification module
+from src.downloader.error_classification import (
+    is_network_failure,
+    classify_error_category as classify_error_category_direct,
+)
+
+
+@pytest.mark.fast
+class TestNetworkFailurePythonApiPatterns:
+    """US-55-005: Verify is_network_failure() and classify_error_category()
+    handle Python API exception formats correctly, including DNS resolution
+    errors, ffmpeg exit codes, and bot-detection negative cases.
+
+    The Python API wraps exceptions differently than subprocess stderr.
+    These tests ensure pattern matching works for both formats.
+    """
+
+    # --- Criterion 1: DNS resolution errors in Python exception format ---
+
+    @pytest.mark.fast
+    def test_failed_to_resolve_python_api_format(self):
+        """'Failed to resolve' matches in Python API exception output."""
+        error = "curl_cffi.requests.errors.ConnectionError: Failed to resolve 'www.youtube.com'"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_failed_to_resolve_in_download_error_wrapper(self):
+        """'Failed to resolve' in yt-dlp DownloadError wrapper."""
+        error = "ERROR: [youtube] vid1: Unable to download webpage: Failed to resolve host name"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_errno_11001_windows_dns_python_exception(self):
+        """Errno 11001 (Windows DNS failure) in Python socket.gaierror format."""
+        error = "socket.gaierror: [Errno 11001] getaddrinfo failed"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_errno_11001_nested_in_download_error(self):
+        """Errno 11001 nested in yt-dlp DownloadError from Python API."""
+        error = (
+            "ERROR: [youtube] dQw4w9WgXcQ: Unable to download webpage: "
+            "<urlopen error [Errno 11001] getaddrinfo failed>"
+        )
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_errno_11001_in_urllib3_connection_error(self):
+        """Errno 11001 wrapped in urllib3 NewConnectionError (Python API path)."""
+        error = (
+            "urllib3.exceptions.NewConnectionError: "
+            "Failed to establish a new connection: [Errno 11001] getaddrinfo failed"
+        )
+        assert is_network_failure(error) is True
+
+    # --- Criterion 2: ffmpeg exit code patterns from Python API output ---
+
+    @pytest.mark.fast
+    def test_ffmpeg_exit_code_unsigned_4294967158(self):
+        """ffmpeg exit code 4294967158 (unsigned 0xFFFFFEC6) detected."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_ffmpeg_exit_code_signed_minus_314(self):
+        """ffmpeg exit code -314 (signed equivalent of 4294967158) detected."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code -314"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_ffmpeg_unsigned_in_download_error_wrapper(self):
+        """ffmpeg exit code 4294967158 wrapped in DownloadError."""
+        error = "ERROR: [youtube] vid1: ffmpeg exited with code 4294967158"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_ffmpeg_signed_in_download_error_wrapper(self):
+        """ffmpeg exit code -314 wrapped in DownloadError."""
+        error = "ERROR: [youtube] vid1: ffmpeg exited with code -314"
+        assert is_network_failure(error) is True
+
+    # --- Criterion 3: classify_error_category priority chain ---
+
+    @pytest.mark.fast
+    def test_classify_dns_failure_as_network(self):
+        """classify_error_category returns 'network' for DNS resolution failure."""
+        error = "socket.gaierror: [Errno 11001] getaddrinfo failed"
+        assert classify_error_category_direct(error) == 'network'
+
+    @pytest.mark.fast
+    def test_classify_failed_to_resolve_as_network(self):
+        """classify_error_category returns 'network' for 'Failed to resolve'."""
+        error = "curl_cffi.requests.errors.ConnectionError: Failed to resolve 'www.youtube.com'"
+        assert classify_error_category_direct(error) == 'network'
+
+    @pytest.mark.fast
+    def test_classify_403_forbidden_as_bot_detection(self):
+        """classify_error_category returns 'bot_detection' for 403 Forbidden."""
+        error = "ERROR: [youtube] abc123: HTTP Error 403: Forbidden"
+        assert classify_error_category_direct(error) == 'bot_detection'
+
+    @pytest.mark.fast
+    def test_classify_sign_in_as_bot_detection(self):
+        """classify_error_category returns 'bot_detection' for Sign-in errors."""
+        error = "ERROR: [youtube] abc123: Sign in to confirm you're not a bot"
+        assert classify_error_category_direct(error) == 'bot_detection'
+
+    # --- Criterion 4: Bot-detection NOT classified as network failures ---
+
+    @pytest.mark.fast
+    def test_sign_in_confirm_not_network_failure(self):
+        """'Sign in to confirm' bot-detection is NOT a network failure."""
+        error = "ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies"
+        assert is_network_failure(error) is False
+
+    @pytest.mark.fast
+    def test_403_forbidden_not_network_failure(self):
+        """'403: Forbidden' is NOT a network failure."""
+        error = "ERROR: [youtube] def456: HTTP Error 403: Forbidden"
+        assert is_network_failure(error) is False
+
+    @pytest.mark.fast
+    def test_sign_in_age_confirm_not_network_failure(self):
+        """'Sign in to confirm your age' is NOT a network failure."""
+        error = "ERROR: [youtube] ghi789: Sign in to confirm your age"
+        assert is_network_failure(error) is False
+
+    @pytest.mark.fast
+    def test_rate_limit_429_not_network_failure(self):
+        """HTTP 429 rate limit is NOT a network failure."""
+        error = "HTTP Error 429: Too Many Requests"
+        assert is_network_failure(error) is False
