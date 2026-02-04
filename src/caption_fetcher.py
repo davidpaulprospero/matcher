@@ -2263,6 +2263,7 @@ class CaptionFetcher:
         cookie_args: Optional[List[str]] = None,
         rate_limiter: Optional['UnifiedCaptionRateLimiter'] = None,
         cookie_rotator: Optional['CookieRotator'] = None,
+        caption_cache: Optional['CaptionCache'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2275,6 +2276,9 @@ class CaptionFetcher:
             rate_limiter: Optional UnifiedCaptionRateLimiter for coordinated rate limiting
                           with exponential backoff and jitter (US-33-003).
             cookie_rotator: Optional CookieRotator for rotating cookies on 403/rate limit errors.
+            caption_cache: Optional CaptionCache for negative caching (US-59-003).
+                           When provided, unavailable captions are cached to avoid
+                           redundant yt-dlp calls on subsequent fetch attempts.
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
@@ -2282,6 +2286,7 @@ class CaptionFetcher:
         self._cookie_args_override = cookie_args
         self._rate_limiter = rate_limiter
         self.cookie_rotator = cookie_rotator
+        self._caption_cache = caption_cache
 
         # Log cookie rotator status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -2318,6 +2323,11 @@ class CaptionFetcher:
                     )
             except AttributeError:
                 pass
+
+        # Pre-flight language cache: video_id -> List[AvailableLanguage] (US-59-002)
+        # Avoids redundant --list-subs calls when _fetch_subtitle is called
+        # multiple times for the same video (e.g., different language/auto combos)
+        self._preflight_lang_cache: Dict[str, List[AvailableLanguage]] = {}
 
     def _add_bypass_args_to_cmd(self, cmd: list, video_id: str) -> None:
         """Add escalation or impersonation args to a yt-dlp command.
@@ -3941,6 +3951,16 @@ class CaptionFetcher:
             CaptionUnavailableError: If no captions exist for the video.
             CaptionFetchError: If fetch fails due to network/temporary error.
         """
+        # US-59-003: Check negative cache before any network calls
+        if self._caption_cache and self._caption_cache.is_caption_unavailable(video_id, language):
+            logger.info(
+                f"Caption {video_id}: Negative cache hit - known unavailable for '{language}'"
+            )
+            raise CaptionUnavailableError(
+                video_id,
+                f"Negative cache: captions known unavailable for language '{language}'"
+            )
+
         # Pre-fetch rate limit delay (US-33-003)
         if self._rate_limiter:
             self._rate_limiter.wait_if_needed()
@@ -3997,6 +4017,14 @@ class CaptionFetcher:
             # No captions found in any format
             if last_error:
                 raise last_error
+
+            # US-59-003: Store negative result in cache before raising
+            if self._caption_cache:
+                self._caption_cache.store_unavailable(video_id, language)
+                logger.debug(
+                    f"Caption {video_id}: Stored negative cache for '{language}'"
+                )
+
             raise CaptionUnavailableError(
                 video_id,
                 f"No captions available in {language} or en"
@@ -4015,6 +4043,10 @@ class CaptionFetcher:
         Tries formats in preference order (US-006). Falls back to next format
         on parse error, not just unavailability.
 
+        US-59-002: Pre-flight list-subs check. Before iterating formats, calls
+        list_available_languages() to verify captions exist. This eliminates
+        ~30s of wasted subprocess calls for videos with no captions.
+
         Args:
             video_url: Full YouTube URL.
             video_id: Video ID for result metadata.
@@ -4024,7 +4056,47 @@ class CaptionFetcher:
 
         Returns:
             CaptionResult if successful, None if no captions for this format.
+
+        Raises:
+            CaptionUnavailableError: If pre-flight check finds no captions or
+                no captions matching the requested language.
         """
+        # US-59-002: Pre-flight list-subs check before iterating formats
+        # Uses instance-level cache to avoid redundant --list-subs calls
+        # when called multiple times for the same video (different lang/auto combos)
+        if video_id not in self._preflight_lang_cache:
+            try:
+                available = self.list_available_languages(video_id)
+                self._preflight_lang_cache[video_id] = available
+            except CaptionFetchError:
+                # If list-subs fails (network error etc.), fall through to
+                # format loop which has its own error handling
+                logger.debug(
+                    f"Caption {video_id}: Pre-flight list-subs failed, "
+                    f"falling back to format iteration"
+                )
+                self._preflight_lang_cache[video_id] = None  # type: ignore[assignment]
+
+        available_langs = self._preflight_lang_cache.get(video_id)
+
+        if available_langs is not None:  # None means list-subs failed, skip check
+            if not available_langs:
+                # No captions at all for this video
+                raise CaptionUnavailableError(
+                    video_id,
+                    "Pre-flight check: no captions available (list-subs returned empty)"
+                )
+
+            # Check if the requested language is available
+            available_codes = {lang.code for lang in available_langs}
+            if language not in available_codes:
+                available_list = ", ".join(sorted(available_codes))
+                raise CaptionUnavailableError(
+                    video_id,
+                    f"Pre-flight check: language '{language}' not available. "
+                    f"Available languages: {available_list}"
+                )
+
         # Try each format in preference order (US-006)
         last_error = None
         for fmt in self._preferred_formats:
@@ -5075,10 +5147,11 @@ class CachedCaption:
     format_source: str
     fetch_timestamp: float  # Unix timestamp when fetched
     duration: float = 0.0  # Total caption duration
+    unavailable: bool = False  # US-59-003: True if captions known unavailable
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        d = {
             'video_id': self.video_id,
             'language': self.language,
             'segments': self.segments,
@@ -5087,6 +5160,9 @@ class CachedCaption:
             'fetch_timestamp': self.fetch_timestamp,
             'duration': self.duration,
         }
+        if self.unavailable:
+            d['unavailable'] = True
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> 'CachedCaption':
@@ -5743,6 +5819,97 @@ class CaptionCache(BaseCache):
                    f"duration={result.duration:.1f}s, "
                    f"auto={result.is_auto_generated})")
         return True
+
+    def store_unavailable(self, video_id: str, language: str = "en") -> bool:
+        """Store a negative cache entry marking captions as unavailable (US-59-003).
+
+        Caches the knowledge that a video has no captions, avoiding repeated
+        yt-dlp subprocess calls for videos known to lack captions.
+
+        Args:
+            video_id: YouTube video ID.
+            language: Language code that was checked.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        if not self.enabled:
+            return False
+
+        key = self._make_cache_key(video_id, language)
+
+        cached = CachedCaption(
+            video_id=video_id,
+            language=language,
+            segments=[],
+            is_auto_generated=False,
+            format_source="unavailable",
+            fetch_timestamp=time.time(),
+            duration=0.0,
+            unavailable=True,
+        )
+
+        self.set(key, cached.to_dict())
+
+        logger.info(f"Cached unavailable captions: {key}")
+        return True
+
+    def is_caption_unavailable(
+        self,
+        video_id: str,
+        language: str = "en",
+        check_staleness: bool = True
+    ) -> bool:
+        """Check if captions are known to be unavailable for a video (US-59-003).
+
+        Uses the existing staleness policy (strict/warn/skip):
+        - 'strict': Returns False for stale entries (triggers re-check)
+        - 'warn': Logs warning but returns True (cached unavailable is used)
+        - 'skip': No staleness check, returns cached status as-is
+
+        Args:
+            video_id: YouTube video ID.
+            language: Language code to check.
+            check_staleness: If True, check if cache entry is stale.
+
+        Returns:
+            True if captions are cached as unavailable and not stale.
+        """
+        if not self.enabled:
+            return False
+
+        key = self._make_cache_key(video_id, language)
+        entry = self.get(key)
+
+        if entry is None:
+            return False
+
+        try:
+            cached = CachedCaption.from_dict(entry.data)
+            if not cached.unavailable:
+                return False
+
+            # Check staleness for unavailable entries
+            if check_staleness and self.validation_mode != 'skip' and self.is_stale(entry):
+                age_days = self.get_entry_age_days(entry)
+                if self.validation_mode == 'strict':
+                    logger.info(
+                        f"Caption unavailable cache stale (strict mode): {key} "
+                        f"(age: {age_days:.1f} days, max: {self.max_age_days} days)"
+                    )
+                    return False
+                else:  # 'warn' mode
+                    logger.warning(
+                        f"Caption unavailable cache stale: {key} "
+                        f"(age: {age_days:.1f} days, max: {self.max_age_days} days) - "
+                        f"using cached unavailable status"
+                    )
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to check unavailable status for {key}: {e}")
+            return False
 
     def get_or_fetch(
         self,

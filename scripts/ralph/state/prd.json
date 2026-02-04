@@ -1,7 +1,7 @@
 ﻿{
-    "sprintNumber":  58,
-    "focusArea":  "download",
-    "branchName":  "ralph/sprint-58",
+    "sprintNumber":  59,
+    "focusArea":  "caption",
+    "branchName":  "ralph/sprint-59",
     "projectContext":  {
                            "sourceDir":  "src/",
                            "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,179 +11,178 @@
                        },
     "userStories":  [
                         {
-                            "id":  "US-58-001",
-                            "title":  "Generate sprint stories for download focus area",
-                            "priority":  "high",
-                            "passes":  true,
+                            "id":  "US-59-001",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027download\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027caption\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027download\u0027",
-                                                       "Add stories US-58-002 through US-58-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027caption\u0027",
+                                                       "Add stories US-59-002 through US-59-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-58-NNN to be unique across sprints",
-                                                       "Mark this story (US-58-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-59-NNN to be unique across sprints",
+                                                       "Mark this story (US-59-001) as passes: true when done"
                                                    ],
-                            "notes":  "Evidence gate: 5/11 criteria verified (45%). Minimum: 90%."
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Generate sprint stories for caption focus area",
+                            "notes":  "Seed story completed. Generated 11 stories (US-59-002 through US-59-012) covering: pre-flight format discovery, negative cache integration, format-specific error differentiation, FormatTimeoutPolicy integration, early termination on no-captions, auto-generated caption fallback, batch pre-flight deduplication, caption metrics dashboard, retry budget per-format tracking, caption stage transcription fallback coordination, and list-subs output caching."
                         },
                         {
-                            "id":  "US-58-002",
-                            "title":  "Add version field to download checkpoint schema",
+                            "id":  "US-59-002",
+                            "title":  "Wire pre-flight list-subs check into format fallback loop",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "DownloadCheckpoint dataclass in src/stages/download_segments.py has a `schema_version: int = 1` field",
-                                                       "The `from_dict` classmethod logs a warning when loaded checkpoint has a different schema_version than current",
-                                                       "The `to_dict` method includes schema_version in serialized output",
-                                                       "Test verifies that loading a checkpoint without schema_version defaults to 1 (backward compat)",
-                                                       "Test verifies that loading a checkpoint with mismatched schema_version logs a warning"
+                                                       "_fetch_subtitle() calls list_available_languages() before iterating formats when no cached language data exists for the video",
+                                                       "If list_available_languages() returns empty list, _fetch_subtitle() raises CaptionUnavailableError immediately without trying any format",
+                                                       "If list_available_languages() returns languages but none match the requested language, _fetch_subtitle() raises CaptionUnavailableError with descriptive message listing available languages",
+                                                       "Pre-flight check is skipped when caption cache already has a valid entry for the video (avoids redundant yt-dlp call)",
+                                                       "Unit test verifies that a video with no captions triggers exactly 1 yt-dlp invocation (list-subs) instead of 3+ format attempts"
                                                    ],
-                            "notes":  "Tier: S (small). DONE: Added schema_version: int = 1 to DownloadCheckpoint in src/downloader/checkpoint.py (not download_segments.py as story stated). from_dict defaults missing field to 1, warns on mismatch. to_dict uses asdict() which auto-includes. 5 new tests in test_downloader_checkpoint.py. All 41 tests pass."
+                            "notes":  "All 5 criteria verified. Implementation at src/caption_fetcher.py:4041-4075 (pre-flight check with cache), tests at tests/test_caption_preflight.py (7 tests, all passing)."
                         },
                         {
-                            "id":  "US-58-003",
-                            "title":  "Add initialization diagnostics to cookie rotator",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "CookieRotator.__init__ logs a summary line: \u0027Cookie rotator: X/N cookies valid (Y invalid)\u0027 after validation",
-                                                       "CookieRotator has a `get_status()` method returning a dict with keys: total, valid, invalid, cooldown, exhausted",
-                                                       "When `continue_on_partial=True` and some cookies fail validation, the invalid count and reasons are included in the summary log",
-                                                       "Test verifies get_status() returns correct counts after init with mixed valid/invalid cookie files",
-                                                       "Test verifies the summary log message is emitted during __init__"
-                                                   ],
-                            "notes":  "Tier: S (small). DONE: Updated __init__ summary log to format \u0027Cookie rotator: X/N cookies valid (Y invalid)\u0027. Added required keys (total, valid, invalid, cooldown, exhausted) to get_status() while preserving legacy keys. Invalid reasons logged when continue_on_partial=True. 5 new tests in TestInitDiagnostics class. All 43 tests pass."
-                        },
-                        {
-                            "id":  "US-58-004",
-                            "title":  "Validate retry configuration bounds in VideoDownloader init",
+                            "id":  "US-59-003",
+                            "title":  "Integrate negative cache (store_unavailable) into caption fetcher",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "VideoDownloader.__init__ validates max_retries_per_video is in range [0, 20] and raises ValueError if not",
-                                                       "VideoDownloader.__init__ validates retry_backoff is in range [1.0, 10.0] and raises ValueError if not",
-                                                       "A warning is logged if total max backoff time (initial_delay * backoff^max_retries) exceeds 600 seconds",
-                                                       "Test verifies ValueError raised for negative max_retries_per_video",
-                                                       "Test verifies ValueError raised for retry_backoff below 1.0",
-                                                       "Test verifies warning logged when computed max backoff exceeds threshold"
+                                                       "When _fetch_subtitle() determines no captions exist (via pre-flight or exhausted formats), it calls cache.store_unavailable(video_id, language) before raising CaptionUnavailableError",
+                                                       "At the start of fetch_captions() or fetch_captions_with_retry(), cache.is_caption_unavailable(video_id, language) is checked and returns early if True",
+                                                       "Negative cache entries use the existing staleness policy (strict/warn/skip modes) from CaptionCache",
+                                                       "Unit test verifies that a second fetch attempt for a known-unavailable video hits the negative cache and makes zero yt-dlp subprocess calls",
+                                                       "Negative cache integration works with both single-video and batch fetch paths"
                                                    ],
-                            "notes":  "Implemented: Added validation block in VideoDownloader.__init__ (core.py ~line 299) that checks max_retries in [0,20] and retry_backoff in [1.0,10.0], raising ValueError for out-of-bounds. Logs warning when sum of retry_delay*backoff^i exceeds 600s. 7 tests added to TestRetryConfigValidation in test_downloader_retry.py. All 28 tests pass."
+                            "notes":  "All 5 criteria verified. Added caption_cache param to CaptionFetcher.__init__, negative cache check at start of fetch_captions(), store_unavailable() call before raising CaptionUnavailableError. Added store_unavailable() and is_caption_unavailable() methods to CaptionCache in caption_fetcher.py with staleness policy support (strict/warn/skip). Wired caption_cache in caption_stage.py and iterative_match.py. Tests: 10 tests in tests/test_negative_cache.py, all 419 existing caption tests pass."
                         },
                         {
-                            "id":  "US-58-005",
-                            "title":  "Deduplicate escalation trigger regex from category definitions",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "The combined trigger regex in EscalationManager is built dynamically from _TRIGGER_CATEGORIES patterns rather than a separate hardcoded regex",
-                                                       "A startup assertion in __init__ verifies all patterns in _TRIGGER_CATEGORIES compile as valid regex",
-                                                       "The `_categorize_error` method uses _TRIGGER_CATEGORIES as the single source of truth",
-                                                       "Test verifies that all patterns from _TRIGGER_CATEGORIES match the combined regex",
-                                                       "Test verifies that invalid regex patterns in _TRIGGER_CATEGORIES raise an error at init time"
-                                                   ],
-                            "notes":  "Tier: M (medium). Source files: src/downloader/escalation_manager.py (lines 24-52 main regex, lines 54-68 _TRIGGER_CATEGORIES). Currently the main regex and category patterns are defined separately, meaning a 429 error can match both \u0027429\u0027 and \u0027rate.?limit\u0027 patterns. Building from a single source prevents drift and ensures mutual exclusion."
-                        },
-                        {
-                            "id":  "US-58-006",
-                            "title":  "Cap circuit breaker jitter to respect max_pause_seconds",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "The final pause duration after jitter application never exceeds max_pause_seconds",
-                                                       "Jitter is applied before the max_pause_seconds cap in the calculation pipeline",
-                                                       "Test verifies that with jitter_factor=0.5 and pause near max_pause_seconds, the result is capped at max_pause_seconds",
-                                                       "Test verifies that jitter still applies when pause is well below max_pause_seconds",
-                                                       "Existing circuit breaker tests continue to pass"
-                                                   ],
-                            "notes":  "Moved jitter into _get_effective_pause_seconds pipeline: base -\u003e escalation -\u003e budget -\u003e jitter -\u003e cap. Extracted _apply_jitter_raw (no cap) used by pipeline, _apply_jitter wraps it with cap for standalone use. Updated check_and_wait, get_remaining_pause_time, wait_for_recovery_if_needed to not double-jitter. Added TestJitterCappedAtMaxPause test class with 6 tests. Updated existing tests to use jitter_factor=0.0 where exact values are asserted."
-                        },
-                        {
-                            "id":  "US-58-007",
-                            "title":  "Clean up cooldown dict entries for removed cookies",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "CookieRotator._remove_invalid_cookie also removes the entry from _failed_cookies dict if present",
-                                                       "CookieRotator._remove_invalid_cookie also removes the entry from _cooldown_until dict if present",
-                                                       "Test verifies that after a cookie is marked failed then removed, _failed_cookies no longer contains that path",
-                                                       "Test verifies that repeated fail+remove cycles do not grow the _failed_cookies dict unboundedly",
-                                                       "Existing cookie rotator tests continue to pass"
-                                                   ],
-                            "notes":  "DONE: Implementation at cookie_rotator.py:199 uses _failed_cookies.pop(cookie_path, None) to clean up cooldown entries on removal. No separate _cooldown_until dict exists - cooldown is tracked via _failed_cookies timestamps. 6 tests in test_cookie_cooldown_cleanup.py cover: mark_failed+remove cleanup, cooldown tracking cleanup, safe no-op when not failed, unbounded growth prevention (100 cycles), preservation of other cookies' cooldowns, and mid-session integration. All 6 new tests + 43 existing cookie rotation tests pass."
-                        },
-                        {
-                            "id":  "US-58-008",
-                            "title":  "Add batch-level diagnostics to match data restore",
+                            "id":  "US-59-004",
+                            "title":  "Differentiate \u0027format unavailable\u0027 from \u0027no captions at all\u0027 in error handling",
                             "priority":  "high",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "When match restore encounters multiple entries with empty source_file, a single summary warning is logged: \u0027{N} match entries have empty source_file (likely all gap matches)\u0027",
-                                                       "Individual ValueError exceptions for empty source_file are suppressed when batch count exceeds 10",
-                                                       "The summary includes a recommendation: \u0027Re-run MATCH stage with --match-only\u0027",
-                                                       "Test verifies that restoring 100 entries with empty source_file produces one summary log, not 100 individual errors",
-                                                       "Test verifies that restoring entries with other invalid fields (e.g., non-string video_file) still raise individual errors"
+                                                       "_fetch_subtitle_with_format() at line 4114 distinguishes between \u0027Requested format is not available\u0027 (format-specific) and \u0027no subtitles\u0027/\u0027subtitles are disabled\u0027 (video-level) in stderr parsing",
+                                                       "When stderr contains \u0027Requested format is not available\u0027, a new CaptionFormatUnavailableError is raised (subclass of CaptionFetchError) instead of generic CaptionFetchError",
+                                                       "When _fetch_subtitle() catches CaptionUnavailableError from any format attempt, it breaks the loop immediately instead of trying remaining formats (no captions means no captions in any format)",
+                                                       "Unit test verifies that \u0027Requested format is not available\u0027 error on json3 still tries vtt/srt, while \u0027no subtitles\u0027 error on json3 stops immediately",
+                                                       "Existing error categorization in src/caption/error_handling.py categorize_caption_error() handles the new error type correctly"
                                                    ],
-                            "notes":  "Tier: M (medium). Source files: src/state.py (lines 125-127 restore validation), src/stages/match.py (lines 182-183 serialization). The interview notes describe 566 entries with empty source_file generating 566 individual ValueErrors. This overwhelms logs and obscures the root cause. Fix: collect empty-source_file errors, emit batch summary, keep individual errors for other validation failures."
+                            "notes":  "Tier: core-fix. The error at line 4116-4125 treats \u0027Requested format is not available\u0027 as a generic CaptionFetchError, causing the loop to try all remaining formats. But \u0027no subtitles\u0027 and \u0027subtitles are disabled\u0027 are caught as CaptionUnavailableError at line 4123 — the problem is the format-specific \u0027Requested format is not available\u0027 error doesn\u0027t match these patterns so it falls through to the generic path. Need a third error class or smarter pattern matching. Key files: src/caption_fetcher.py (lines 4113-4125), src/caption/error_handling.py, src/caption/enums.py."
                         },
                         {
-                            "id":  "US-58-009",
-                            "title":  "Validate cookies_from_browser PATH availability at startup",
-                            "priority":  "high",
+                            "id":  "US-59-005",
+                            "title":  "Integrate FormatTimeoutPolicy into _fetch_subtitle_with_format",
+                            "priority":  "medium",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "During download subsystem initialization, if cookies_from_browser is set, shutil.which() checks the browser is on PATH",
-                                                       "If the browser is not found, a clear warning is logged: \u0027cookies_from_browser is set to {browser} but it is not found on PATH. Cookie extraction will fail at Tier 3. Set cookies_path instead.\u0027",
-                                                       "The warning is emitted once at startup, not on every download attempt",
-                                                       "Test verifies warning is logged when cookies_from_browser is set to a non-existent browser",
-                                                       "Test verifies no warning when cookies_from_browser is set to an available browser"
+                                                       "_fetch_subtitle_with_format() uses FormatTimeoutPolicy.get_timeout(subtitle_format, fallback_level) instead of the flat self._timeout for the subprocess.run timeout parameter",
+                                                       "fallback_level is derived from the format\u0027s position in the current preference order (0 for first format, 1 for second, etc.)",
+                                                       "CaptionFetcher.__init__() instantiates FormatTimeoutPolicy with configurable base timeouts from caption_first config section",
+                                                       "Unit test verifies that json3 gets a longer timeout (45s) than vtt/srt (25s) as defined in FormatTimeoutPolicy defaults",
+                                                       "Unit test verifies that the third format attempt gets a reduced timeout (0.8x multiplier per fallback_level)"
                                                    ],
-                            "notes":  "Tier: S (small). Source files: src/downloader/core.py (VideoDownloader.__init__ or check_dependencies), src/config/sections/download.py (cookies_from_browser field). The interview notes specifically call out Firefox not being on PATH causing Tier 3 failures. A startup check prevents silent failures hours into a pipeline run. Use shutil.which() which is already imported in the codebase."
+                            "notes":  "Tier: enhancement. FormatTimeoutPolicy exists at src/caption_timeout_manager.py:416-457 with per-format timeouts (json3: 45s, srv3: 30s, vtt: 25s, srt: 25s) and progressive fallback reduction (0.8x per level), but is never imported or used in src/caption_fetcher.py. Currently _fetch_subtitle_with_format() at line 4108 uses flat self._timeout (default 30s) for all formats. Key files: src/caption_fetcher.py (line 4108, line 2292 for __init__), src/caption_timeout_manager.py (lines 416-457 FormatTimeoutPolicy class)."
                         },
                         {
-                            "id":  "US-58-010",
-                            "title":  "Document and extract timeout precedence constants in download core",
+                            "id":  "US-59-006",
+                            "title":  "Add early termination in batch fetch when all errors are \u0027no captions\u0027",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "fetch_captions_batch() tracks a counter of consecutive CaptionUnavailableError results across the batch",
+                                                       "When 80% or more of the last 10 videos return CaptionUnavailableError, a warning is logged suggesting the source may not have captions",
+                                                       "Early termination does NOT abort the batch — it logs the warning and continues, but switches remaining videos to \u0027pre-flight only\u0027 mode (list-subs check, skip format attempts if no subs found)",
+                                                       "CaptionMetrics records the unavailable_count and unavailable_rate in the batch summary",
+                                                       "Unit test verifies that a batch of 20 videos where first 10 all lack captions triggers the warning and the remaining 10 use pre-flight-only mode"
+                                                   ],
+                            "notes":  "Tier: enhancement. fetch_captions_batch() at src/caption_fetcher.py:3230 already has error pattern detection (US-007 Sprint 7) at lines 3337-3354 with modes \u0027abort\u0027/\u0027warn\u0027/\u0027skip\u0027, but this only covers rate limits and geoblocking patterns — not systematic \u0027no captions available\u0027 patterns. The existing 30% threshold logic at line 3337 can be extended. CaptionMetrics at line 6710 tracks error_categories but doesn\u0027t have an unavailable-specific counter. Key files: src/caption_fetcher.py (lines 3230-3922 fetch_captions_batch, lines 3337-3354 error pattern detection, lines 6710+ CaptionMetrics)."
+                        },
+                        {
+                            "id":  "US-59-007",
+                            "title":  "Add auto-generated caption fallback in _fetch_subtitle",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "When _fetch_subtitle() fails to find manual captions (auto_generated=False), it retries with auto_generated=True before raising CaptionUnavailableError",
+                                                       "The auto-generated fallback only triggers when the error is caption unavailability (not rate limits, timeouts, or network errors)",
+                                                       "Auto-generated fallback respects the existing allow_auto_generated config flag (default True) and skips if False",
+                                                       "CaptionResult.is_auto_generated is set to True when auto-generated fallback is used, preserving quality metadata",
+                                                       "Unit test verifies that a video with only auto-generated captions returns a CaptionResult with is_auto_generated=True after manual caption attempt fails"
+                                                   ],
+                            "notes":  "Tier: enhancement. _fetch_subtitle() at src/caption_fetcher.py:4005 receives auto_generated as a parameter but the caller chain doesn\u0027t implement a manual-then-auto fallback. The method tries all formats with the given auto_generated value, then gives up. The --write-auto-subs flag is already used at line 4081 when auto_generated=True. fetch_captions_auto_language() at line 2780 handles language fallback but not manual-to-auto fallback. determine_caption_quality() at line 71 already scores auto-generated lower. Key files: src/caption_fetcher.py (lines 4005-4056 _fetch_subtitle, line 4081 sub_flag, line 2780 fetch_captions_auto_language)."
+                        },
+                        {
+                            "id":  "US-59-008",
+                            "title":  "Deduplicate list-subs calls for same-channel videos in batch fetch",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "fetch_captions_batch() extracts channel ID from video_search_results metadata when available",
+                                                       "A channel_caption_availability dict caches the list-subs result (available languages) per channel_id",
+                                                       "When a video\u0027s channel already has a cached list-subs result showing no captions in the requested language, the video is marked unavailable without making a yt-dlp call",
+                                                       "The channel cache is per-batch (not persisted) and only used as a heuristic — individual videos can still override if the channel cache shows \u0027unavailable\u0027 but video-specific data hasn\u0027t been checked",
+                                                       "Unit test verifies that 5 videos from the same channel result in at most 2 list-subs calls (first video + one retry after unavailable)"
+                                                   ],
+                            "notes":  "Tier: optimization. fetch_captions_batch() at src/caption_fetcher.py:3230 processes videos in parallel via ThreadPoolExecutor. Channel-based prioritization already exists (US-009 Sprint 7) at lines 3360-3372 tracking channel_success_rates. Video metadata from video_search_results includes channel_id in most cases. The channel pattern tracking in CaptionMetrics (channel_patterns dict at ~line 6710) could be extended. Key files: src/caption_fetcher.py (lines 3230-3922 fetch_captions_batch, lines 3360-3372 channel prioritization, lines 6710+ CaptionMetrics.channel_patterns)."
+                        },
+                        {
+                            "id":  "US-59-009",
+                            "title":  "Add caption fetch performance summary to CaptionMetrics",
                             "priority":  "low",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "The _run_download_cmd method has a docstring explaining the timeout selection precedence: (1) timeout_override param, (2) tier-specific download_timeouts, (3) config default, (4) adaptive multiplier",
-                                                       "The 1.5x stall-to-max timeout multiplier at line ~2067-2068 is extracted to a named constant STALL_TO_MAX_TIMEOUT_RATIO with explanatory comment",
-                                                       "The named constant is defined at module level or in DownloadConfig",
-                                                       "Test verifies STALL_TO_MAX_TIMEOUT_RATIO is used (not a magic number) by checking the constant exists and is referenced"
+                                                       "CaptionMetrics gains a record_format_attempt(video_id, format_name, success, elapsed_seconds) method that tracks per-format attempt counts and durations",
+                                                       "CaptionMetrics gains a get_performance_summary() method returning a dict with: total_subprocess_calls, total_subprocess_seconds, avg_seconds_per_call, calls_saved_by_preflight, calls_saved_by_negative_cache",
+                                                       "The performance summary is included in the existing generate_summary_report() output at line ~8047",
+                                                       "_fetch_subtitle_with_format() calls record_format_attempt() after each subprocess invocation",
+                                                       "Unit test verifies that performance summary accurately reflects the number of subprocess calls and time spent"
                                                    ],
-                            "notes":  "Tier: S (small). Source files: src/downloader/core.py (lines 1996-2006 _run_download_cmd timeout logic, lines 2067-2068 magic 1.5x multiplier). Currently timeout logic has three sources of truth plus an adaptive multiplier with no documentation of precedence. The 1.5x multiplier relationship between stall timeout and max timeout is unexplained."
+                            "notes":  "Tier: observability. CaptionMetrics at src/caption_fetcher.py:6710 already tracks format_success_counts and extensive batch statistics, but doesn\u0027t track per-format attempt counts (only successes) or subprocess call timing. The generate_summary_report() method at line ~8047 outputs format stats but not performance/efficiency data. Adding this enables measuring the impact of pre-flight checks and negative caching from US-59-002 and US-59-003. Key files: src/caption_fetcher.py (lines 6710-7000 CaptionMetrics class, lines 8047-8130 generate_summary_report, line 4104 subprocess.run call in _fetch_subtitle_with_format)."
                         },
                         {
-                            "id":  "US-58-011",
-                            "title":  "Add per-keyword strategy exhaustion tracking to rate limit budget",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "RateLimitBudget has a `keywords_exhausted_strategies` dict tracking which keywords have exhausted which strategies (cookies, vpn, impersonation)",
-                                                       "When a keyword exhausts cookie rotations, subsequent calls to should_attempt_strategy(\u0027cookies\u0027, keyword) return False for that keyword",
-                                                       "Other keywords are not affected by one keyword\u0027s exhaustion",
-                                                       "Test verifies that keyword A exhausting cookies does not block keyword B from trying cookies",
-                                                       "Test verifies that per-keyword exhaustion persists across retry attempts for the same keyword",
-                                                       "Existing rate limit budget tests continue to pass"
-                                                   ],
-                            "notes":  "Tier: M (medium). Source files: src/downloader/rate_limit_budget.py (RateLimitBudget class), src/downloader/core.py (lines 449-485 _share_budget_across_keywords). Currently when one keyword exhausts cookie rotations, subsequent keywords also skip cookies even though the rotator might work for different search terms. Keywords processed earlier unfairly consume more budget."
-                        },
-                        {
-                            "id":  "US-58-012",
-                            "title":  "Enrich download subprocess error context with command metadata",
+                            "id":  "US-59-010",
+                            "title":  "Track retry budget consumption per subtitle format",
                             "priority":  "low",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "When a yt-dlp subprocess fails, the error log includes: (1) which call site triggered it (keyword search, ID download, audio, segment, caption), (2) the current escalation tier, (3) whether impersonation was active",
-                                                       "The call site identifier is passed as a `context` parameter to _run_download_cmd",
-                                                       "Error classification in error_classification.py receives the context metadata for enriched error categorization",
-                                                       "Test verifies that error logs from different call sites include the correct context identifier",
-                                                       "Test verifies that the context parameter is optional for backward compatibility"
+                                                       "CaptionRetryBudget gains a format_attempts dict tracking attempts per subtitle format (json3, vtt, srt)",
+                                                       "record_attempt() accepts an optional format parameter and increments the format-specific counter",
+                                                       "budget_exhausted() can optionally check per-format exhaustion (e.g., stop trying json3 after N consecutive failures across different videos)",
+                                                       "to_dict() and from_dict() serialize/deserialize the format_attempts field for checkpoint persistence",
+                                                       "Unit test verifies that per-format tracking correctly accumulates across multiple videos and survives checkpoint round-trip"
                                                    ],
-                            "notes":  "Tier: M (medium). Source files: src/downloader/core.py (_run_download_cmd at ~line 1996, 8 call sites listed in prompt.md), src/downloader/error_classification.py. Currently when a subprocess fails, the error log doesn\u0027t indicate which of the 8 call sites triggered it. Adding context helps diagnose whether failures are keyword-search-specific, download-specific, or caption-specific. The context parameter should be optional with default None."
+                            "notes":  "Tier: enhancement. CaptionRetryBudget at src/caption/retry_budget.py:73 tracks global attempts, per-video attempts (attempts_per_video_id at line 147), and error categories (error_counts), but not per-format attempts. This means the budget can\u0027t detect that e.g. json3 is consistently failing across all videos (suggesting a yt-dlp or YouTube API issue with that format). Adding per-format tracking enables smarter format skipping when a format is systematically broken. Key files: src/caption/retry_budget.py (lines 73-350, especially record_attempt at 208, budget_exhausted at 341, to_dict/from_dict)."
+                        },
+                        {
+                            "id":  "US-59-011",
+                            "title":  "Coordinate caption stage with transcription fallback on batch-wide unavailability",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "CaptionStage.run() checks the batch result summary after fetch_captions_batch() completes and logs how many videos had captions vs how many fell back to unavailable",
+                                                       "When more than 50% of videos in the batch have no captions, CaptionStage sets a state flag (state.caption_batch_low_yield = True) that downstream stages can read",
+                                                       "The state flag is persisted in checkpoint.json so --resume preserves it",
+                                                       "DOWNLOAD_SEGMENTS stage reads caption_batch_low_yield and logs a warning that many videos will need transcription after download",
+                                                       "Unit test verifies that state.caption_batch_low_yield is set when 6 out of 10 videos return no captions"
+                                                   ],
+                            "notes":  "Tier: enhancement. CaptionStage at src/stages/caption_stage.py:138 runs the batch and stores results in state.text_metadata and state.caption_results, but doesn\u0027t summarize batch-wide caption availability for downstream stages. Currently, the pipeline discovers missing captions only during DOWNLOAD_SEGMENTS when it tries to use them. The state object (src/state.py) already supports arbitrary attributes. Checkpoint persistence is handled by src/checkpoint.py. Key files: src/stages/caption_stage.py (line 138 run method), src/state.py, src/stages/download_segments.py, src/checkpoint.py."
+                        },
+                        {
+                            "id":  "US-59-012",
+                            "title":  "Cache list-subs output to avoid redundant pre-flight calls on resume",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "list_available_languages() checks a cache before making the yt-dlp --list-subs subprocess call",
+                                                       "The cache key is video_id and the cached value includes the list of AvailableLanguage objects and a timestamp",
+                                                       "Cache entries expire after a configurable TTL (default 1 hour) since subtitle availability can change",
+                                                       "The cache is stored in the existing .cache/ directory structure (not in-memory only) so it persists across --resume runs",
+                                                       "Unit test verifies that calling list_available_languages() twice for the same video within the TTL results in exactly 1 subprocess call"
+                                                   ],
+                            "notes":  "Tier: optimization. list_available_languages() at src/caption_fetcher.py:2440 always makes a yt-dlp --list-subs call with no caching. If US-59-002 wires this into the fetch path, every video will incur an extra subprocess call (~10s) unless results are cached. The existing CaptionCache at src/caption/cache.py handles TTL-based caching for caption content but not for availability metadata. A lightweight addition to CaptionCache or a separate dict in CaptionFetcher would work. Key files: src/caption_fetcher.py (lines 2440-2483 list_available_languages), src/caption/cache.py (base cache class with TTL support)."
                         }
                     ]
 }

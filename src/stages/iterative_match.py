@@ -519,6 +519,7 @@ class IterativeMatchStage(Stage):
 
                 if restored_matches:
                     state.matches = restored_matches
+                    state._raw_match_dicts = matches_data
                     logger.info(
                         f"Restored {self.name}: {len(restored_matches)} matches, "
                         f"{data.get('passes_completed', 0)} passes, "
@@ -1233,8 +1234,8 @@ class IterativeMatchStage(Stage):
         cookie_args = self._get_cookie_args(config, log_usage=True)
 
         # Initialize fetcher and cache with rotated cookies
-        fetcher = CaptionFetcher(config=config, cookie_args=cookie_args)
         cache = CaptionCache(caption_config)
+        fetcher = CaptionFetcher(config=config, cookie_args=cookie_args, caption_cache=cache)
 
         candidates = []
         success_count = 0
