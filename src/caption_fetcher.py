@@ -2227,6 +2227,61 @@ class AvailableLanguage:
     is_auto_generated: bool  # True if auto-generated captions
 
 
+@dataclass
+class SubtitleAvailabilityResult:
+    """Structured result of pre-flight subtitle availability check (US-60-002).
+
+    Provides a comprehensive view of subtitle availability for a video,
+    separating manual and auto-generated languages for informed decisions.
+
+    Attributes:
+        video_id: YouTube video ID that was checked.
+        available_manual_languages: List of language codes with manually uploaded subtitles.
+        available_auto_languages: List of language codes with auto-generated subtitles.
+        has_any_subtitles: True if any subtitles (manual or auto) are available.
+        all_languages: Full list of AvailableLanguage objects with details.
+
+    Example:
+        >>> result = fetcher.list_available_subtitles("dQw4w9WgXcQ")
+        >>> if not result.has_any_subtitles:
+        ...     print("No captions - skip format attempts")
+        >>> elif 'en' in result.available_manual_languages:
+        ...     print("English manual captions available")
+        >>> elif 'en' in result.available_auto_languages:
+        ...     print("English auto-generated captions available")
+    """
+    video_id: str
+    available_manual_languages: List[str]
+    available_auto_languages: List[str]
+    has_any_subtitles: bool
+    all_languages: List[AvailableLanguage] = field(default_factory=list)
+
+    def has_language(self, code: str, manual_only: bool = False) -> bool:
+        """Check if a specific language is available.
+
+        Args:
+            code: Language code to check (e.g., 'en', 'es').
+            manual_only: If True, only check manual languages.
+
+        Returns:
+            True if the language is available.
+        """
+        code_lower = code.lower()
+        if manual_only:
+            return code_lower in [c.lower() for c in self.available_manual_languages]
+        return (code_lower in [c.lower() for c in self.available_manual_languages] or
+                code_lower in [c.lower() for c in self.available_auto_languages])
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dictionary for caching/logging."""
+        return {
+            'video_id': self.video_id,
+            'available_manual_languages': self.available_manual_languages,
+            'available_auto_languages': self.available_auto_languages,
+            'has_any_subtitles': self.has_any_subtitles,
+        }
+
+
 class CaptionFetcher:
     """Fetches YouTube captions using yt-dlp.
 
@@ -2266,6 +2321,7 @@ class CaptionFetcher:
         rate_limiter: Optional['UnifiedCaptionRateLimiter'] = None,
         cookie_rotator: Optional['CookieRotator'] = None,
         caption_cache: Optional['CaptionCache'] = None,
+        list_subs_cache: Optional['ListSubsCache'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2281,6 +2337,8 @@ class CaptionFetcher:
             caption_cache: Optional CaptionCache for negative caching (US-59-003).
                            When provided, unavailable captions are cached to avoid
                            redundant yt-dlp calls on subsequent fetch attempts.
+            list_subs_cache: Optional ListSubsCache for caching --list-subs output (US-59-012).
+                             Avoids redundant subprocess calls on resume runs.
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
@@ -2289,6 +2347,7 @@ class CaptionFetcher:
         self._rate_limiter = rate_limiter
         self.cookie_rotator = cookie_rotator
         self._caption_cache = caption_cache
+        self._list_subs_cache = list_subs_cache
 
         # Log cookie rotator status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -2455,6 +2514,11 @@ class CaptionFetcher:
         Uses yt-dlp to query subtitle metadata without downloading.
         Returns both manual and auto-generated caption languages.
 
+        Caching (US-59-012):
+        - Results are cached in ListSubsCache with 1 hour TTL (configurable).
+        - Cache is checked before making yt-dlp subprocess call.
+        - Reduces subprocess calls on --resume runs.
+
         Args:
             video_id: YouTube video ID (11 characters).
 
@@ -2472,6 +2536,22 @@ class CaptionFetcher:
         """
         if not self._is_valid_video_id(video_id):
             raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
+
+        # US-59-012: Check persistent cache first
+        if self._list_subs_cache:
+            cached_languages = self._list_subs_cache.get_languages(video_id)
+            if cached_languages is not None:
+                # Convert cached dicts back to AvailableLanguage objects
+                languages = [
+                    AvailableLanguage(
+                        code=lang['code'],
+                        name=lang['name'],
+                        is_auto_generated=lang['is_auto_generated']
+                    )
+                    for lang in cached_languages
+                ]
+                logger.debug(f"list_available_languages: cache hit for {video_id} ({len(languages)} languages)")
+                return languages
 
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -2502,7 +2582,14 @@ class CaptionFetcher:
             )
 
             # Parse the output to extract available languages
-            return self._parse_list_subs_output(result.stdout, result.stderr)
+            languages = self._parse_list_subs_output(result.stdout, result.stderr)
+
+            # US-59-012: Store in persistent cache
+            if self._list_subs_cache:
+                self._list_subs_cache.store(video_id, languages)
+                logger.debug(f"list_available_languages: cached {video_id} ({len(languages)} languages)")
+
+            return languages
 
         except subprocess.TimeoutExpired:
             raise CaptionFetchError(video_id, f"Timeout after {self._timeout}s")
@@ -2594,6 +2681,64 @@ class CaptionFetcher:
 
         logger.debug(f"Found {len(languages)} available caption languages")
         return languages
+
+    def list_available_subtitles(self, video_id: str) -> SubtitleAvailabilityResult:
+        """Pre-flight subtitle availability check (US-60-002).
+
+        Runs yt-dlp --list-subs --skip-download to detect available subtitle
+        tracks without attempting to download any caption format. Returns a
+        structured result that enables fail-fast behavior when no subtitles exist.
+
+        This method wraps list_available_languages() and provides a more
+        structured result with separate manual and auto-generated language lists.
+
+        Performance benefit:
+            Videos without any captions previously wasted ~40s attempting
+            json3->vtt->srt format downloads. This pre-flight check
+            reduces that to a single ~3s list-subs call.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+
+        Returns:
+            SubtitleAvailabilityResult with:
+            - available_manual_languages: List of manual subtitle language codes
+            - available_auto_languages: List of auto-generated subtitle language codes
+            - has_any_subtitles: Boolean for fail-fast decisions
+            - all_languages: Full AvailableLanguage objects with details
+
+        Raises:
+            CaptionFetchError: If unable to query video metadata (network error, timeout).
+
+        Example:
+            >>> result = fetcher.list_available_subtitles("dQw4w9WgXcQ")
+            >>> if not result.has_any_subtitles:
+            ...     raise CaptionUnavailableError(video_id, "No subtitles available")
+            >>> if result.has_language('en', manual_only=True):
+            ...     # Prefer manual English captions
+            ...     pass
+        """
+        # Delegate to list_available_languages for the actual yt-dlp call
+        languages = self.list_available_languages(video_id)
+
+        # Separate manual and auto-generated languages
+        manual_codes = [lang.code for lang in languages if not lang.is_auto_generated]
+        auto_codes = [lang.code for lang in languages if lang.is_auto_generated]
+
+        result = SubtitleAvailabilityResult(
+            video_id=video_id,
+            available_manual_languages=manual_codes,
+            available_auto_languages=auto_codes,
+            has_any_subtitles=len(languages) > 0,
+            all_languages=languages
+        )
+
+        logger.debug(
+            f"Pre-flight check {video_id}: has_subtitles={result.has_any_subtitles}, "
+            f"manual={manual_codes}, auto={auto_codes}"
+        )
+
+        return result
 
     def has_captions(self, video_id: str) -> bool:
         """Check if a video has any captions available (US-008).
@@ -4080,6 +4225,11 @@ class CaptionFetcher:
     ) -> CaptionResult:
         """Fetch captions for a YouTube video.
 
+        US-60-005: Consolidated yt-dlp invocations.
+        Uses single --list-subs call first to determine available tracks,
+        then ONE targeted --write-sub download for the best available track.
+        Reduces subprocess calls from up to 4 sequential attempts to max 2.
+
         Args:
             video_id: YouTube video ID (11 characters).
             language: Preferred language code (ISO 639-1).
@@ -4114,66 +4264,163 @@ class CaptionFetcher:
         if not self._is_valid_video_id(video_id):
             raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
 
+        # US-60-005: Timing for subprocess call reduction metrics
+        _fetch_start = time.monotonic()
+
+        # US-60-005: Single --list-subs call to determine available tracks
+        # This call is cached (US-59-012), so subsequent calls for same video are free
+        try:
+            available_languages = self.list_available_languages(video_id)
+        except CaptionFetchError as e:
+            # Network/timeout error on list-subs, re-raise
+            raise
+
+        if not available_languages:
+            # US-59-003: Store negative result in cache before raising
+            if self._caption_cache:
+                self._caption_cache.store_unavailable(video_id, language)
+            # US-60-005: Log timing - only 1 subprocess call (list-subs)
+            _elapsed = time.monotonic() - _fetch_start
+            logger.info(
+                f"Caption {video_id}: No captions available (1 subprocess call, {_elapsed:.2f}s)"
+            )
+            raise CaptionUnavailableError(
+                video_id,
+                f"No captions available (list-subs returned empty)"
+            )
+
+        # US-60-005: Select best available track from list-subs result
+        # Priority order: (1) manual in preferred language, (2) auto in preferred language,
+        # (3) manual in English, (4) auto in English
+        selected_track = self._select_best_track(
+            available_languages, language, prefer_manual
+        )
+
+        if not selected_track:
+            # No matching track found in list-subs result
+            if self._caption_cache:
+                self._caption_cache.store_unavailable(video_id, language)
+            _elapsed = time.monotonic() - _fetch_start
+            available_codes = sorted({lang.code for lang in available_languages})
+            logger.info(
+                f"Caption {video_id}: Language '{language}' not in available: {available_codes} "
+                f"(1 subprocess call, {_elapsed:.2f}s)"
+            )
+            raise CaptionUnavailableError(
+                video_id,
+                f"Language '{language}' not available. Available: {available_codes}"
+            )
+
+        selected_lang, selected_auto = selected_track
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
+        # US-60-005: Single targeted --write-sub download
         # Create temp directory for subtitle files
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
-            # Determine which subtitle to fetch
-            # Try manual captions first if preferred, then auto-generated
-            formats_to_try = []
-            if prefer_manual:
-                formats_to_try.append((language, False))  # Manual
-                formats_to_try.append((language, True))   # Auto
-            else:
-                formats_to_try.append((language, True))   # Auto
-                formats_to_try.append((language, False))  # Manual
-
-            # Also try English as fallback if not already preferred
-            if language != "en":
-                formats_to_try.append(("en", False))
-                formats_to_try.append(("en", True))
-
-            result = None
-            last_error = None
-
-            for lang, auto in formats_to_try:
-                try:
-                    result = self._fetch_subtitle(
-                        video_url, video_id, temp_path, lang, auto
-                    )
-                    if result and result.segments:
-                        # Record success for rate limiter (US-33-003)
-                        if self._rate_limiter:
-                            self._rate_limiter.record_success()
-                        return result
-                except CaptionUnavailableError:
-                    continue  # Try next format
-                except CaptionFetchError as e:
-                    # Check if this is a rate limit error (US-33-003)
-                    if self._rate_limiter:
-                        category = categorize_caption_error(e, getattr(e, 'reason', ''))
-                        if category == CaptionErrorCategory.RATE_LIMIT:
-                            self._rate_limiter.record_rate_limit(video_id)
-                    last_error = e
-                    continue
-
-            # No captions found in any format
-            if last_error:
-                raise last_error
-
-            # US-59-003: Store negative result in cache before raising
-            if self._caption_cache:
-                self._caption_cache.store_unavailable(video_id, language)
-                logger.debug(
-                    f"Caption {video_id}: Stored negative cache for '{language}'"
+            try:
+                # Use _fetch_subtitle_formats directly to get the caption with format fallback
+                result = self._fetch_subtitle_formats(
+                    video_url, video_id, temp_path, selected_lang, selected_auto
                 )
 
-            raise CaptionUnavailableError(
-                video_id,
-                f"No captions available in {language} or en"
-            )
+                if result and result.segments:
+                    # Record success for rate limiter (US-33-003)
+                    if self._rate_limiter:
+                        self._rate_limiter.record_success()
+
+                    # US-60-005: Log timing - 2 subprocess calls total (list-subs + write-sub)
+                    _elapsed = time.monotonic() - _fetch_start
+                    logger.info(
+                        f"Caption {video_id}: Fetched {len(result.segments)} segments "
+                        f"(lang={selected_lang}, auto={selected_auto}, 2 subprocess calls, {_elapsed:.2f}s)"
+                    )
+                    return result
+
+            except CaptionUnavailableError:
+                # Video-level unavailability detected during download
+                if self._caption_cache:
+                    self._caption_cache.store_unavailable(video_id, language)
+                raise
+            except CaptionFetchError as e:
+                # Check if this is a rate limit error (US-33-003)
+                if self._rate_limiter:
+                    category = categorize_caption_error(e, getattr(e, 'reason', ''))
+                    if category == CaptionErrorCategory.RATE_LIMIT:
+                        self._rate_limiter.record_rate_limit(video_id)
+                raise
+
+        # Shouldn't reach here, but handle gracefully
+        if self._caption_cache:
+            self._caption_cache.store_unavailable(video_id, language)
+        raise CaptionUnavailableError(
+            video_id,
+            f"No captions available in {language} or en"
+        )
+
+    def _select_best_track(
+        self,
+        available_languages: List[AvailableLanguage],
+        preferred_language: str,
+        prefer_manual: bool
+    ) -> Optional[tuple]:
+        """Select the best caption track from available languages (US-60-005).
+
+        Priority order:
+        1. Manual captions in preferred language (if prefer_manual)
+        2. Auto captions in preferred language (or swap with #1 if not prefer_manual)
+        3. Manual captions in English fallback
+        4. Auto captions in English fallback
+
+        Args:
+            available_languages: List of AvailableLanguage from list_available_languages().
+            preferred_language: ISO 639-1 language code to prefer.
+            prefer_manual: If True, prefer manual over auto-generated.
+
+        Returns:
+            Tuple of (language_code, is_auto_generated) for the best track,
+            or None if no suitable track found.
+        """
+        # Build lookup structures
+        manual_langs = {
+            lang.code.lower() for lang in available_languages
+            if not lang.is_auto_generated
+        }
+        auto_langs = {
+            lang.code.lower() for lang in available_languages
+            if lang.is_auto_generated
+        }
+
+        pref_lower = preferred_language.lower()
+
+        # Try preferred language first
+        if prefer_manual:
+            if pref_lower in manual_langs:
+                return (preferred_language, False)
+            if pref_lower in auto_langs:
+                return (preferred_language, True)
+        else:
+            if pref_lower in auto_langs:
+                return (preferred_language, True)
+            if pref_lower in manual_langs:
+                return (preferred_language, False)
+
+        # Fallback to English if not the preferred language
+        if preferred_language.lower() != "en":
+            if prefer_manual:
+                if "en" in manual_langs:
+                    return ("en", False)
+                if "en" in auto_langs:
+                    return ("en", True)
+            else:
+                if "en" in auto_langs:
+                    return ("en", True)
+                if "en" in manual_langs:
+                    return ("en", False)
+
+        # No suitable track found
+        return None
 
     def _fetch_subtitle(
         self,
@@ -5654,12 +5901,16 @@ class CaptionCache(BaseCache):
             # Cache validation settings (US-008 Sprint 6)
             self.validation_mode = getattr(config, 'cache_validation', 'warn')
             self.validation_tolerance = getattr(config, 'cache_validation_tolerance', 0.2)
+            # Negative cache TTL (US-60-004)
+            # Separate TTL for "unavailable" entries (default 1 hour)
+            self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
             self.enabled = True
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
+            self.negative_cache_ttl_hours = 1.0
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -6115,15 +6366,41 @@ class CaptionCache(BaseCache):
         logger.info(f"Cached unavailable captions: {key}")
         return True
 
+    def is_negative_entry_stale(self, entry: CacheEntry) -> bool:
+        """Check if a negative cache entry is stale based on negative_cache_ttl_hours (US-60-004).
+
+        Uses a separate, shorter TTL for negative entries since caption availability
+        can change (e.g., creator enables captions after upload).
+
+        Args:
+            entry: Cache entry to check.
+
+        Returns:
+            True if the entry is older than negative_cache_ttl_hours, False otherwise.
+            Returns False if negative_cache_ttl_hours is 0 (uses max_age_days instead).
+        """
+        if self.negative_cache_ttl_hours <= 0:
+            # Fall back to regular staleness check (max_age_days)
+            return self.is_stale(entry)
+
+        age_seconds = time.time() - entry.cached_at
+        max_age_seconds = self.negative_cache_ttl_hours * 3600
+        return age_seconds > max_age_seconds
+
     def is_caption_unavailable(
         self,
         video_id: str,
         language: str = "en",
         check_staleness: bool = True
     ) -> bool:
-        """Check if captions are known to be unavailable for a video (US-59-003).
+        """Check if captions are known to be unavailable for a video (US-59-003, US-60-004).
 
-        Uses the existing staleness policy (strict/warn/skip):
+        TTL handling (US-60-004):
+        Uses negative_cache_ttl_hours (default 1 hour) instead of max_age_days
+        for negative entries. This allows captions to be re-checked more frequently
+        since availability may change.
+
+        Staleness handling (when check_staleness=True):
         - 'strict': Returns False for stale entries (triggers re-check)
         - 'warn': Logs warning but returns True (cached unavailable is used)
         - 'skip': No staleness check, returns cached status as-is
@@ -6150,20 +6427,21 @@ class CaptionCache(BaseCache):
             if not cached.unavailable:
                 return False
 
-            # Check staleness for unavailable entries
-            if check_staleness and self.validation_mode != 'skip' and self.is_stale(entry):
-                age_days = self.get_entry_age_days(entry)
+            # US-60-004: Check staleness for negative entries using negative_cache_ttl_hours
+            if check_staleness and self.validation_mode != 'skip' and self.is_negative_entry_stale(entry):
+                age_hours = (time.time() - entry.cached_at) / 3600
+                ttl_hours = self.negative_cache_ttl_hours if self.negative_cache_ttl_hours > 0 else (self.max_age_days * 24)
                 if self.validation_mode == 'strict':
                     logger.info(
-                        f"Caption unavailable cache stale (strict mode): {key} "
-                        f"(age: {age_days:.1f} days, max: {self.max_age_days} days)"
+                        f"Caption unavailable cache expired (strict mode): {key} "
+                        f"(age: {age_hours:.1f}h, max: {ttl_hours:.1f}h)"
                     )
                     return False
                 else:  # 'warn' mode
                     logger.warning(
-                        f"Caption unavailable cache stale: {key} "
-                        f"(age: {age_days:.1f} days, max: {self.max_age_days} days) - "
-                        f"using cached unavailable status"
+                        f"Caption unavailable cache expired: {key} "
+                        f"(age: {age_hours:.1f}h, max: {ttl_hours:.1f}h) - "
+                        f"consider running --cleanup-caption-cache"
                     )
 
             return True
@@ -7285,6 +7563,15 @@ class CaptionMetrics:
     # Count of subprocess calls avoided by negative cache hit (US-59-009)
     calls_saved_by_negative_cache: int = 0
 
+    # US-60-005: Consolidated subprocess call tracking
+    # Tracks videos fetched using consolidated approach (list-subs + targeted download)
+    consolidated_fetch_count: int = 0
+    # Sum of subprocess calls for consolidated fetches (should be 1 or 2 per video)
+    consolidated_subprocess_calls: int = 0
+    # Estimated calls saved by consolidation vs old approach (4 calls per captionless video)
+    # Formula: (videos_with_no_captions * 3) + (videos_with_captions * 2)
+    calls_saved_by_consolidation: int = 0
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -7359,8 +7646,49 @@ class CaptionMetrics:
 
         logger.debug(f"Negative cache saved subprocess call for {video_id or 'unknown'}")
 
+    def record_consolidated_fetch(
+        self,
+        video_id: str,
+        subprocess_calls: int,
+        had_captions: bool
+    ) -> None:
+        """Record a fetch using consolidated subprocess approach (US-60-005).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Called after each fetch_captions() call to track:
+        - Number of subprocess calls used (1 for list-subs only, 2 for list+download)
+        - Estimated savings vs old approach (4 calls for no-caption videos, 2-4 for success)
+
+        Args:
+            video_id: YouTube video ID.
+            subprocess_calls: Number of subprocess calls made (1 or 2).
+            had_captions: Whether captions were successfully fetched.
+        """
+        with self._lock:
+            self.consolidated_fetch_count += 1
+            self.consolidated_subprocess_calls += subprocess_calls
+
+            # Old approach would make up to 4 calls per captionless video
+            # (manual preferred lang, auto preferred lang, manual en, auto en)
+            # For successful fetches, old approach averaged ~2-3 calls
+            if had_captions:
+                # Old approach: average ~2.5 calls, new: 2 calls (list + download)
+                old_calls_estimate = 2.5
+            else:
+                # Old approach: 4 calls trying all combinations, new: 1 call (list only)
+                old_calls_estimate = 4.0
+
+            saved = old_calls_estimate - subprocess_calls
+            self.calls_saved_by_consolidation += max(0, int(saved))
+
+        logger.debug(
+            f"Consolidated fetch for {video_id}: {subprocess_calls} calls "
+            f"(had_captions={had_captions})"
+        )
+
     def get_performance_summary(self) -> Dict[str, Any]:
-        """Get caption fetch performance summary (US-59-009).
+        """Get caption fetch performance summary (US-59-009, US-60-005).
 
         Thread-safe: Protected by lock for parallel fetching.
 
@@ -7371,6 +7699,10 @@ class CaptionMetrics:
             - avg_seconds_per_call: Average duration per subprocess call
             - calls_saved_by_preflight: Calls avoided by pre-flight list-subs check
             - calls_saved_by_negative_cache: Calls avoided by negative cache hits
+            - consolidated_fetch_count: Videos fetched using consolidated approach (US-60-005)
+            - consolidated_subprocess_calls: Total subprocess calls via consolidated approach
+            - calls_saved_by_consolidation: Estimated calls saved vs old 4-call approach
+            - avg_calls_per_video: Average subprocess calls per video (should be ~1.5)
         """
         with self._lock:
             total_calls = len(self.format_attempt_records)
@@ -7379,12 +7711,23 @@ class CaptionMetrics:
             )
             avg_seconds = total_seconds / total_calls if total_calls > 0 else 0.0
 
+            # US-60-005: Consolidated fetch metrics
+            avg_calls_per_video = (
+                self.consolidated_subprocess_calls / self.consolidated_fetch_count
+                if self.consolidated_fetch_count > 0 else 0.0
+            )
+
             return {
                 'total_subprocess_calls': total_calls,
                 'total_subprocess_seconds': round(total_seconds, 2),
                 'avg_seconds_per_call': round(avg_seconds, 2),
                 'calls_saved_by_preflight': self.calls_saved_by_preflight,
                 'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,
+                # US-60-005: Consolidated approach metrics
+                'consolidated_fetch_count': self.consolidated_fetch_count,
+                'consolidated_subprocess_calls': self.consolidated_subprocess_calls,
+                'calls_saved_by_consolidation': self.calls_saved_by_consolidation,
+                'avg_calls_per_video': round(avg_calls_per_video, 2),
             }
 
     def record_fetch_success(

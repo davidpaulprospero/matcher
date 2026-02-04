@@ -66,6 +66,9 @@ class CaptionStage(Stage):
         self._fetcher = None
         self._config_validated = False
 
+        # US-60-006: Track videos that need transcription fallback
+        self.needs_transcription: List[str] = []
+
         # US-005: Validate language config at init if config provided
         if config is not None:
             self._validate_language_config(config)
@@ -157,6 +160,9 @@ class CaptionStage(Stage):
         """
         warnings = []
         retry_budget = None  # US-40-004: Initialize early for access in except block
+
+        # US-60-006: Reset transcription fallback list for this run
+        self.needs_transcription = []
 
         # US-44-002: Validate required attributes exist
         validate_required_state_attrs(state, ['video_ids'], self.name)
@@ -510,9 +516,14 @@ class CaptionStage(Stage):
                     # Report separately
                     if live_stream_ids:
                         print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
+                        # US-60-006: Add live streams to transcription fallback list
+                        self.needs_transcription.extend(live_stream_ids)
                     if upcoming_stream_ids:
                         action = "queued" if handle_upcoming == "queue" else "skipped"
                         print(f"  ! {action.capitalize()} {len(upcoming_stream_ids)} upcoming/premiere streams")
+                        # US-60-006: Add skipped upcoming streams to transcription fallback list
+                        if handle_upcoming == 'skip':
+                            self.needs_transcription.extend(upcoming_stream_ids)
 
                 # Store pending streams in state if queued
                 if pending_streams:
@@ -592,6 +603,8 @@ class CaptionStage(Stage):
                 if no_caption_ids:
                     ids_to_fetch = [vid for vid in ids_to_fetch if vid not in no_caption_ids]
                     print(f"  ! Pre-check: {len(no_caption_ids)} videos have no captions (will use transcription fallback)")
+                    # US-60-006: Add no-caption videos to transcription fallback list
+                    self.needs_transcription.extend(no_caption_ids)
 
             if ids_to_fetch:
                 print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
@@ -964,6 +977,15 @@ class CaptionStage(Stage):
                 if r.get('unavailable') or r.get('error')
             )
 
+            # US-60-006: Add videos that failed caption fetch to transcription fallback list
+            # This catches failures from the batch fetch (not pre-check or live stream filtering)
+            for video_id, result in caption_results.items():
+                if video_id not in self.needs_transcription:
+                    if result.get('unavailable') or result.get('error'):
+                        self.needs_transcription.append(video_id)
+                    elif result.get('skipped') and result.get('reason') == 'budget_exhausted':
+                        self.needs_transcription.append(video_id)
+
             # US-59-011: Calculate batch-wide caption availability summary
             # Count videos with captions vs without (including skipped/error/unavailable)
             total_videos_in_batch = len(caption_results)
@@ -1134,6 +1156,13 @@ class CaptionStage(Stage):
                 else:
                     logger.warning("Failed to save format statistics to cache")
 
+            # US-60-006: Set state.videos_needing_transcription for downstream TRANSCRIBE stage
+            state.videos_needing_transcription = list(self.needs_transcription)
+            if self.needs_transcription:
+                logger.info(
+                    f"US-60-006: {len(self.needs_transcription)} videos need transcription fallback"
+                )
+
             # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
                 'caption_results': caption_results,
@@ -1153,6 +1182,8 @@ class CaptionStage(Stage):
                 'caption_metrics': metrics.to_dict(),
                 # US-59-011: Caption batch low yield flag for downstream stages
                 'caption_batch_low_yield': getattr(state, 'caption_batch_low_yield', False),
+                # US-60-006: Videos needing transcription fallback for resume support
+                'needs_transcription': self.needs_transcription,
             }
 
             # US-37-007: Save retry budget state for resume support
@@ -1259,9 +1290,19 @@ class CaptionStage(Stage):
                     logger.info(
                         "Restored caption_batch_low_yield=True: many videos will need transcription"
                     )
+
+                # US-60-006: Restore videos_needing_transcription from checkpoint
+                needs_transcription = data.get('needs_transcription', [])
+                state.videos_needing_transcription = needs_transcription
+                if needs_transcription:
+                    logger.info(
+                        f"Restored videos_needing_transcription: {len(needs_transcription)} videos"
+                    )
             else:
                 # Stage data exists but no caption results - valid empty case
                 logger.info("Restored CAPTION: 0 videos (no captions fetched)")
+                # US-60-006: Ensure videos_needing_transcription is empty for consistency
+                state.videos_needing_transcription = []
 
             return True
 
