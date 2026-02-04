@@ -112,7 +112,7 @@
                                                        "All existing tests in tests/test_download_segment*.py continue to pass without modification",
                                                        "Add at least one test for _check_preconditions() that verifies circuit breaker open state returns a skip reason"
                                                    ],
-                            "notes":  "HARD STORY: Phantom success - exits 0 but never sets passes: true"
+                            "notes":  ""
                         },
                         {
                             "id":  "US-57-008",
@@ -155,7 +155,7 @@
                                                        "Add a test that verifies STAGE_FIELD_MAP contains entries for all stages in STAGE_ORDER",
                                                        "Add a test that verifies adding a stage to STAGE_ORDER without a corresponding CheckpointData field raises an error"
                                                    ],
-                            "notes":  "Auto-generated STAGE_FIELD_MAP from CheckpointData dataclass fields using lowercased naming convention. Added _build_stage_field_map() and _validate_stage_field_map() functions. Validation raises ImportError at module load if STAGE_ORDER has entries without corresponding CheckpointData fields. 11 new tests in test_stage_field_map_autogen.py, all passing."
+                            "notes":  "Evidence gate: 4/5 criteria verified (80%). Minimum: 90%."
                         },
                         {
                             "id":  "US-57-011",
