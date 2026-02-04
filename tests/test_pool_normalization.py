@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from src.matching.scoring import (
     normalize_confidence_by_pool,
+    normalize_pool_batch,
     POOL_NORMALIZATION_REFERENCE_SIZE,
     POOL_NORMALIZATION_MIN_FACTOR,
     POOL_NORMALIZATION_MAX_FACTOR,
@@ -497,3 +498,124 @@ class TestNormalizationFormula:
         # Pool of 72: sqrt(72/50) = 1.2 (exactly at max factor)
         raw_factor = (72 / POOL_NORMALIZATION_REFERENCE_SIZE) ** 0.5
         assert abs(raw_factor - 1.2) < 0.01
+
+
+class TestPoolNormalizationLogging:
+    """Tests verifying pool normalization transparency logging (US-53-012)."""
+
+    @pytest.mark.fast
+    def test_small_pool_debug_log_contains_required_fields(self, caplog):
+        """DEBUG log for a small pool (size=5) includes pool_size, top_margin, factor, reason_category."""
+        import logging
+
+        mock_seg = MagicMock()
+        candidates = [
+            (mock_seg, 0.90),  # Top
+            (mock_seg, 0.75),  # 2nd - margin = 0.15 (clear winner)
+            (mock_seg, 0.60),
+        ]
+
+        with caplog.at_level(logging.DEBUG, logger="src.matching.scoring"):
+            normalize_confidence_by_pool(
+                confidence=0.7,
+                pool_size=5,
+                candidates=candidates,
+                pool_normalization_enabled=True
+            )
+
+        # Find the pool normalization debug log
+        pool_logs = [r for r in caplog.records if "Pool normalization:" in r.message]
+        assert len(pool_logs) == 1, f"Expected 1 pool normalization log, got {len(pool_logs)}"
+
+        msg = pool_logs[0].message
+        assert "pool_size=5" in msg
+        assert "top_margin=0.1500" in msg
+        assert "factor=" in msg
+        assert "reason_category=small_pool_boost" in msg
+
+    @pytest.mark.fast
+    def test_large_pool_debug_log_contains_required_fields(self, caplog):
+        """DEBUG log for a large pool (size=200) includes pool_size, top_margin, factor, reason_category."""
+        import logging
+
+        mock_seg = MagicMock()
+        candidates = [
+            (mock_seg, 0.82),  # Top
+            (mock_seg, 0.80),  # 2nd - margin = 0.02 (tight)
+            (mock_seg, 0.75),
+        ]
+
+        with caplog.at_level(logging.DEBUG, logger="src.matching.scoring"):
+            normalize_confidence_by_pool(
+                confidence=0.85,
+                pool_size=200,
+                candidates=candidates,
+                pool_normalization_enabled=True
+            )
+
+        pool_logs = [r for r in caplog.records if "Pool normalization:" in r.message]
+        assert len(pool_logs) == 1
+
+        msg = pool_logs[0].message
+        assert "pool_size=200" in msg
+        assert "top_margin=0.0200" in msg
+        assert "factor=" in msg
+        assert "reason_category=large_pool_penalty" in msg
+
+    @pytest.mark.fast
+    def test_medium_pool_debug_log_shows_no_adjustment(self, caplog):
+        """DEBUG log for a medium pool shows reason_category=no_adjustment."""
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="src.matching.scoring"):
+            normalize_confidence_by_pool(
+                confidence=0.8,
+                pool_size=50,
+                pool_normalization_enabled=True
+            )
+
+        pool_logs = [r for r in caplog.records if "Pool normalization:" in r.message]
+        assert len(pool_logs) == 1
+
+        msg = pool_logs[0].message
+        assert "pool_size=50" in msg
+        assert "reason_category=no_adjustment" in msg
+
+    @pytest.mark.fast
+    def test_batch_summary_info_log(self, caplog):
+        """normalize_pool_batch logs INFO summary with boost/penalty/no_adjustment counts."""
+        import logging
+
+        mock_seg = MagicMock()
+
+        # Small pool with clear winner -> boost
+        small_candidates = [
+            (mock_seg, 0.90),
+            (mock_seg, 0.75),
+        ]
+        # Large pool with tight margin -> penalty
+        large_candidates = [
+            (mock_seg, 0.82),
+            (mock_seg, 0.80),
+        ]
+        # Medium pool -> no_adjustment
+        segments = [
+            (0.7, 5, small_candidates),     # boost
+            (0.85, 200, large_candidates),   # penalty
+            (0.8, 50, None),                 # no_adjustment
+        ]
+
+        with caplog.at_level(logging.INFO, logger="src.matching.scoring"):
+            results = normalize_pool_batch(segments)
+
+        assert len(results) == 3
+
+        # Find the summary log
+        summary_logs = [r for r in caplog.records if "Pool normalization summary" in r.message]
+        assert len(summary_logs) == 1, f"Expected 1 summary log, got {len(summary_logs)}"
+
+        msg = summary_logs[0].message
+        assert "3 segments processed" in msg
+        assert "boost=1" in msg
+        assert "penalty=1" in msg
+        assert "no_adjustment=1" in msg
