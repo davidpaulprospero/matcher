@@ -165,6 +165,14 @@ class CaptionMetrics:
     unavailable_count: int = 0
     unavailable_rate: float = 0.0
 
+    # Per-format attempt tracking (US-59-009)
+    # Each entry: {video_id, format_name, success, elapsed_seconds}
+    format_attempt_records: List[Dict[str, Any]] = field(default_factory=list)
+    # Count of subprocess calls avoided by pre-flight list-subs check (US-59-009)
+    calls_saved_by_preflight: int = 0
+    # Count of subprocess calls avoided by negative cache hit (US-59-009)
+    calls_saved_by_negative_cache: int = 0
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -274,6 +282,90 @@ class CaptionMetrics:
         with self._lock:
             self.fetch_attempts += 1
         logger.debug(f"Caption fetch attempt recorded for {video_id or 'unknown'}")
+
+    def record_format_attempt(
+        self,
+        video_id: str,
+        format_name: str,
+        success: bool,
+        elapsed_seconds: float
+    ) -> None:
+        """Record a per-format subprocess attempt with timing (US-59-009).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Args:
+            video_id: YouTube video ID.
+            format_name: Caption format attempted (e.g., 'json3', 'vtt', 'srt').
+            success: Whether the subprocess call succeeded.
+            elapsed_seconds: Wall-clock time for the subprocess call.
+        """
+        with self._lock:
+            self.format_attempt_records.append({
+                'video_id': video_id,
+                'format_name': format_name,
+                'success': success,
+                'elapsed_seconds': elapsed_seconds,
+            })
+
+        logger.debug(
+            f"Format attempt recorded for {video_id}: {format_name} "
+            f"{'OK' if success else 'FAIL'} in {elapsed_seconds:.2f}s"
+        )
+
+    def record_preflight_saving(self, video_id: str = "") -> None:
+        """Record a subprocess call saved by pre-flight list-subs check (US-59-009).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Args:
+            video_id: Video ID for logging context.
+        """
+        with self._lock:
+            self.calls_saved_by_preflight += 1
+
+        logger.debug(f"Pre-flight saved subprocess call for {video_id or 'unknown'}")
+
+    def record_negative_cache_saving(self, video_id: str = "") -> None:
+        """Record a subprocess call saved by negative cache hit (US-59-009).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Args:
+            video_id: Video ID for logging context.
+        """
+        with self._lock:
+            self.calls_saved_by_negative_cache += 1
+
+        logger.debug(f"Negative cache saved subprocess call for {video_id or 'unknown'}")
+
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """Get caption fetch performance summary (US-59-009).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns:
+            Dict with performance metrics:
+            - total_subprocess_calls: Total subprocess invocations recorded
+            - total_subprocess_seconds: Cumulative wall-clock time in subprocess calls
+            - avg_seconds_per_call: Average duration per subprocess call
+            - calls_saved_by_preflight: Calls avoided by pre-flight list-subs check
+            - calls_saved_by_negative_cache: Calls avoided by negative cache hits
+        """
+        with self._lock:
+            total_calls = len(self.format_attempt_records)
+            total_seconds = sum(
+                r['elapsed_seconds'] for r in self.format_attempt_records
+            )
+            avg_seconds = total_seconds / total_calls if total_calls > 0 else 0.0
+
+            return {
+                'total_subprocess_calls': total_calls,
+                'total_subprocess_seconds': round(total_seconds, 2),
+                'avg_seconds_per_call': round(avg_seconds, 2),
+                'calls_saved_by_preflight': self.calls_saved_by_preflight,
+                'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,
+            }
 
     def record_fetch_success(
         self,
@@ -1168,6 +1260,22 @@ class CaptionMetrics:
         if channel_summary:
             lines.append(f"  {channel_summary}")
 
+        # Performance summary (US-59-009)
+        if self.format_attempt_records or self.calls_saved_by_preflight or self.calls_saved_by_negative_cache:
+            perf = self.get_performance_summary()
+            perf_parts = [f"{perf['total_subprocess_calls']} subprocess calls"]
+            if perf['total_subprocess_seconds'] > 0:
+                perf_parts.append(f"{perf['total_subprocess_seconds']:.1f}s total")
+                perf_parts.append(f"{perf['avg_seconds_per_call']:.2f}s avg")
+            saved_parts = []
+            if perf['calls_saved_by_preflight'] > 0:
+                saved_parts.append(f"{perf['calls_saved_by_preflight']} by preflight")
+            if perf['calls_saved_by_negative_cache'] > 0:
+                saved_parts.append(f"{perf['calls_saved_by_negative_cache']} by neg-cache")
+            if saved_parts:
+                perf_parts.append(f"saved: {', '.join(saved_parts)}")
+            lines.append(f"  Performance: {', '.join(perf_parts)}")
+
         return "\n".join(lines)
 
     def get_slowest_videos(self, n: int = 5) -> List[tuple]:
@@ -1232,6 +1340,9 @@ class CaptionMetrics:
             },
             'unavailable_count': self.unavailable_count,
             'unavailable_rate': self.unavailable_rate,
+            'format_attempt_records': list(self.format_attempt_records),  # US-59-009
+            'calls_saved_by_preflight': self.calls_saved_by_preflight,  # US-59-009
+            'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,  # US-59-009
         }
 
     @classmethod
@@ -1284,6 +1395,9 @@ class CaptionMetrics:
             },
             unavailable_count=data.get('unavailable_count', 0),
             unavailable_rate=data.get('unavailable_rate', 0.0),
+            format_attempt_records=data.get('format_attempt_records', []),  # US-59-009
+            calls_saved_by_preflight=data.get('calls_saved_by_preflight', 0),  # US-59-009
+            calls_saved_by_negative_cache=data.get('calls_saved_by_negative_cache', 0),  # US-59-009
         )
 
     def export_json(
