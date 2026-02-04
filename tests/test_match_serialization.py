@@ -183,6 +183,142 @@ class TestRestoreMatchesFromDicts:
 
 
 # ============================================================================
+# US-57-002: Batch-level diagnostics for corrupted match data
+# ============================================================================
+
+class TestBatchDiagnostics:
+    """US-57-002: Verify restore_matches_from_dicts aggregates validation
+    failures into a single summary log instead of individual errors."""
+
+    def test_80_of_100_empty_source_file_summary(self, caplog):
+        """100 match dicts with 80 empty source_file emits single summary line."""
+        import logging
+
+        valid_base = {
+            'video_start': 0.0, 'video_end': 10.0,
+            'confidence': 0.8, 'strategy': 'semantic',
+        }
+        # 80 invalid (empty source_file)
+        invalid_dicts = [
+            {**valid_base, 'segment_index': i, 'video_file': ''}
+            for i in range(80)
+        ]
+        # 20 valid
+        valid_dicts = [
+            {**valid_base, 'segment_index': 80 + i, 'video_file': f'vid_{i}'}
+            for i in range(20)
+        ]
+        all_dicts = invalid_dicts + valid_dicts
+
+        with caplog.at_level(logging.DEBUG):
+            result = restore_matches_from_dicts(all_dicts)
+
+        assert result is not None
+        assert len(result) == 20
+
+        # Check that summary line appears exactly once
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
+        assert len(summary_msgs) == 1, \
+            f"Expected exactly 1 summary message, got {len(summary_msgs)}: {summary_msgs}"
+        assert '80 of 100' in summary_msgs[0]
+        assert 'likely all gap matches' in summary_msgs[0]
+
+        # Check actionable advice (80/100 > 50%)
+        advice_msgs = [m for m in warning_messages if '--match-only' in m]
+        assert len(advice_msgs) == 1, \
+            f"Expected actionable advice, got: {warning_messages}"
+
+        # Individual errors should be DEBUG, not ERROR or WARNING
+        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert len(error_records) == 0, \
+            f"Expected no ERROR-level records, got {len(error_records)}"
+
+    def test_all_valid_no_summary_warning(self, caplog):
+        """All valid match dicts should emit no summary warning."""
+        import logging
+
+        valid_dicts = [
+            {
+                'segment_index': i,
+                'video_file': f'vid_{i}',
+                'video_start': 0.0,
+                'video_end': 10.0,
+                'confidence': 0.8,
+                'strategy': 'semantic',
+            }
+            for i in range(50)
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            result = restore_matches_from_dicts(valid_dicts)
+
+        assert result is not None
+        assert len(result) == 50
+
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
+        assert len(summary_msgs) == 0, \
+            f"Expected no summary warning, got: {summary_msgs}"
+        advice_msgs = [m for m in warning_messages if '--match-only' in m]
+        assert len(advice_msgs) == 0, \
+            f"Expected no advice warning, got: {advice_msgs}"
+
+    def test_below_50_percent_no_advice(self, caplog):
+        """When <50% fail, summary appears but no actionable advice."""
+        import logging
+
+        valid_base = {
+            'video_start': 0.0, 'video_end': 10.0,
+            'confidence': 0.8, 'strategy': 'semantic',
+        }
+        # 2 invalid, 8 valid = 20% failure
+        invalid_dicts = [
+            {**valid_base, 'segment_index': i, 'video_file': ''}
+            for i in range(2)
+        ]
+        valid_dicts = [
+            {**valid_base, 'segment_index': 2 + i, 'video_file': f'vid_{i}'}
+            for i in range(8)
+        ]
+        all_dicts = invalid_dicts + valid_dicts
+
+        with caplog.at_level(logging.WARNING):
+            result = restore_matches_from_dicts(all_dicts)
+
+        assert result is not None
+        assert len(result) == 8
+
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        # Summary should appear (there are errors)
+        summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
+        assert len(summary_msgs) == 1
+
+        # But no advice (only 20% failed, below 50%)
+        advice_msgs = [m for m in warning_messages if '--match-only' in m]
+        assert len(advice_msgs) == 0, \
+            f"Expected no advice for <50% failures, got: {advice_msgs}"
+
+    def test_individual_errors_logged_as_debug(self, caplog):
+        """Individual validation errors are logged at DEBUG, not WARNING/ERROR."""
+        import logging
+
+        invalid_dicts = [
+            {'segment_index': i, 'video_file': '', 'video_start': 0.0,
+             'video_end': 10.0, 'confidence': 0.8}
+            for i in range(5)
+        ]
+
+        with caplog.at_level(logging.DEBUG):
+            restore_matches_from_dicts(invalid_dicts)
+
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG
+                         and 'match[' in r.message]
+        assert len(debug_records) == 5, \
+            f"Expected 5 DEBUG-level individual errors, got {len(debug_records)}"
+
+
+# ============================================================================
 # Stage restore harmonization tests
 # ============================================================================
 
@@ -491,10 +627,10 @@ class TestIterativeMatchSerializesMatchResult:
         assert len(result) == 1
         assert result[0].video_file == 'valid_vid'
 
-        # A validation warning should have been logged for the empty video_file
+        # A batch summary warning should have been logged about empty source_file
         warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any('video_file' in msg or 'validation' in msg.lower() for msg in warning_messages), \
-            f"Expected warning about empty video_file, got: {warning_messages}"
+        assert any('empty source_file' in msg or 'source_file' in msg for msg in warning_messages), \
+            f"Expected warning about empty source_file, got: {warning_messages}"
 
 
 # ============================================================================

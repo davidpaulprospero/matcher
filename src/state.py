@@ -184,18 +184,31 @@ def restore_matches_from_dicts(
 
     restored_matches: List[Match] = []
     validation_errors: List[str] = []
+    empty_source_count = 0
 
     for i, m in enumerate(matches_data):
         try:
             match = Match.from_dict(m, index=i, default_strategy=default_strategy)
             restored_matches.append(match)
         except ValueError as e:
-            validation_errors.append(f"match[{i}]: {e}")
+            error_msg = f"match[{i}]: {e}"
+            validation_errors.append(error_msg)
+            log.debug(error_msg)
+            if "invalid video_file" in str(e):
+                empty_source_count += 1
 
+    total = len(matches_data)
     if validation_errors:
-        log.warning(f"Match validation errors during restore: {validation_errors[:5]}")
-        if len(validation_errors) > 5:
-            log.warning(f"... and {len(validation_errors) - 5} more validation errors")
+        if empty_source_count > 0:
+            log.warning(
+                f"{empty_source_count} of {total} match entries have empty "
+                f"source_file (likely all gap matches)"
+            )
+        other_errors = len(validation_errors) - empty_source_count
+        if other_errors > 0:
+            log.warning(f"{other_errors} of {total} match entries failed non-source_file validation")
+        if len(validation_errors) > total * 0.5:
+            log.warning("Re-run MATCH stage with --match-only")
 
     # Return None if no valid matches were restored from non-empty data
     if not restored_matches and matches_data:
