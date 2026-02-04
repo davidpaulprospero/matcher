@@ -67,10 +67,12 @@ class EscalationState:
     """Per-keyword escalation progression state.
 
     Tracks consecutive 403 errors and manages tier advancement
-    for the 3-tier bypass system.
+    for the 4-tier bypass system. Also tracks consecutive successes
+    for de-escalation.
     """
     current_tier: EscalationTier = EscalationTier.IMPERSONATE_ONLY
     consecutive_403s: int = 0
+    consecutive_successes: int = 0
     last_escalation_time: Optional[float] = None
     extractor_args_index: int = 0
     escalation_history: List[Tuple[float, EscalationTier]] = field(default_factory=list)
@@ -87,10 +89,39 @@ class EscalationState:
         self.last_escalation_time = now
         self.escalation_history.append((now, self.current_tier))
         self.consecutive_403s = 0
+        self.consecutive_successes = 0
 
-    def record_success(self) -> None:
-        """Reset 403 counter but keep the current tier (sticky escalation)."""
+    def record_success(
+        self,
+        de_escalation_threshold: int = 5,
+        de_escalation_enabled: bool = True,
+    ) -> bool:
+        """Record a success, potentially de-escalating on sustained success.
+
+        Resets the 403 counter and increments consecutive_successes.
+        If consecutive_successes reaches de_escalation_threshold and
+        de_escalation is enabled, decreases tier by 1.
+
+        Args:
+            de_escalation_threshold: Number of consecutive successes needed
+                to trigger de-escalation. Default: 5.
+            de_escalation_enabled: Whether de-escalation is enabled. Default: True.
+
+        Returns:
+            True if de-escalation occurred, False otherwise.
+        """
         self.consecutive_403s = 0
+        self.consecutive_successes += 1
+
+        if (
+            de_escalation_enabled
+            and self.consecutive_successes >= de_escalation_threshold
+            and self.current_tier > EscalationTier.IMPERSONATE_ONLY
+        ):
+            self.current_tier = EscalationTier(self.current_tier - 1)
+            self.consecutive_successes = 0
+            return True
+        return False
 
 
 @dataclass

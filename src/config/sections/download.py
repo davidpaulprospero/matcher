@@ -1085,6 +1085,10 @@ class ExtractorArgsConfig:
     # Maximum escalation tier (1=impersonate, 2=extractor-args, 3=full bypass)
     max_tier: int = 3
 
+    # De-escalation: drop tier on sustained success (US-61-006)
+    de_escalation_enabled: bool = True
+    de_escalation_threshold: int = 5  # Consecutive successes needed to de-escalate
+
 
 @dataclass
 class DownloadConfig:
