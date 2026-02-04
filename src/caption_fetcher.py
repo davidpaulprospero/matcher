@@ -4064,6 +4064,11 @@ class CaptionFetcher:
         list_available_languages() to verify captions exist. This eliminates
         ~30s of wasted subprocess calls for videos with no captions.
 
+        US-59-007: Auto-generated fallback. When called with auto_generated=False
+        and manual captions are unavailable, retries with auto_generated=True
+        if allow_auto_generated config is True. Only triggers on caption
+        unavailability errors, not rate limits/timeouts/network errors.
+
         Args:
             video_url: Full YouTube URL.
             video_id: Video ID for result metadata.
@@ -4114,6 +4119,60 @@ class CaptionFetcher:
                     f"Available languages: {available_list}"
                 )
 
+        try:
+            return self._fetch_subtitle_formats(
+                video_url, video_id, temp_dir, language, auto_generated
+            )
+        except (CaptionUnavailableError, CaptionFormatUnavailableError):
+            # US-59-007: Auto-generated fallback
+            # When manual captions fail, retry with auto-generated if allowed
+            if not auto_generated and self._is_auto_fallback_allowed():
+                logger.info(
+                    f"Caption {video_id}: Manual captions unavailable for '{language}', "
+                    f"falling back to auto-generated"
+                )
+                result = self._fetch_subtitle_formats(
+                    video_url, video_id, temp_dir, language, True
+                )
+                return result
+            raise
+
+    def _is_auto_fallback_allowed(self) -> bool:
+        """Check if auto-generated caption fallback is allowed by config (US-59-007)."""
+        if not self.config:
+            return True  # Default: allow
+        caption_config = getattr(self.config.download, 'caption_first', None)
+        if caption_config is None:
+            return True
+        return getattr(caption_config, 'allow_auto_generated', True)
+
+    def _fetch_subtitle_formats(
+        self,
+        video_url: str,
+        video_id: str,
+        temp_dir: Path,
+        language: str,
+        auto_generated: bool
+    ) -> Optional[CaptionResult]:
+        """Try each subtitle format in preference order.
+
+        Internal helper for _fetch_subtitle (US-59-007 refactor).
+
+        Args:
+            video_url: Full YouTube URL.
+            video_id: Video ID for result metadata.
+            temp_dir: Temporary directory for downloaded files.
+            language: Language code.
+            auto_generated: Whether to fetch auto-generated captions.
+
+        Returns:
+            CaptionResult if successful, None if no captions for this format.
+
+        Raises:
+            CaptionUnavailableError: If video has no captions at all.
+            CaptionFormatUnavailableError: If all formats exhausted.
+            CaptionFetchError: If fetch fails due to network/temporary error.
+        """
         # Try each format in preference order (US-006)
         last_error = None
         for fallback_level, fmt in enumerate(self._preferred_formats):

@@ -1034,6 +1034,7 @@ download:
     fallback_languages: []            # Language fallback chain (empty = default)
     timeout: 30                       # Timeout for caption fetch requests (seconds)
     prefer_human_captions: true       # Prefer human-uploaded over auto-generated
+    allow_auto_generated: true        # Allow auto-generated caption fallback (US-59-007)
     cache_captions: true              # Cache captions for cross-project reuse
     cache_dir: "~/.matcher_caption_cache"  # Global cache directory (supports ~)
     max_cache_age_days: 30            # Cache TTL in days (0 = no expiration)

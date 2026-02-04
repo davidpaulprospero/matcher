@@ -4456,12 +4456,12 @@ class TestCaptionFormatPreference:
                 fmt_idx = cmd.index('--sub-format')
                 formats_tried.append(cmd[fmt_idx + 1])
 
-                # json3 not available - use "no subtitles" to trigger CaptionUnavailableError
-                # which correctly falls through to next format
+                # json3 not available - use "requested format is not available" to trigger
+                # CaptionFormatUnavailableError which falls through to next format (US-59-004)
                 if 'json3' in cmd[fmt_idx + 1]:
                     result = Mock()
                     result.returncode = 1
-                    result.stderr = "no subtitles available in json3 format"
+                    result.stderr = "requested format is not available"
                     return result
                 else:
                     result = Mock()
@@ -4710,9 +4710,9 @@ class TestCaptionFormatPreference:
 
             result = Mock()
             if fmt == "json3":
-                # First format unavailable
+                # First format unavailable (US-59-004: format-level, not video-level)
                 result.returncode = 1
-                result.stderr = "no subtitles available for this video"
+                result.stderr = "requested format is not available"
             else:
                 # Second format succeeds
                 result.returncode = 0
