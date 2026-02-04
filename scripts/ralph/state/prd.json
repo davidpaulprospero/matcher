@@ -148,7 +148,7 @@
             "id": "US-50-010",
             "title": "Add integration test for download_segments cookie propagation with mocked yt-dlp",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "An integration test creates a DownloadConfig with cookies_from_browser='firefox' and verifies the ydl_opts dict passed to YoutubeDL contains cookiesfrombrowser=['firefox']",
                 "An integration test creates a DownloadConfig with cookies_path='/path/to/cookies.txt' and no cookies_from_browser, and verifies ydl_opts contains cookiefile='/path/to/cookies.txt'",
@@ -156,7 +156,7 @@
                 "An integration test verifies that when neither is set, ydl_opts contains neither cookiesfrombrowser nor cookiefile keys",
                 "All tests mock YoutubeDL to avoid actual network calls"
             ],
-            "notes": "Tier: P0 validation. Source file: src/stages/download_segments.py (cookie handling at lines 579-595). This validates the cookie propagation added in sprint 49. The ydl_opts construction at lines 565-596 should set cookiesfrombrowser as a list (yt-dlp Python API expects [browser_name]) not a string. Test file: tests/test_download_segments_cookies.py (new)."
+            "notes": "Integration tests for cookie propagation in download_segments. 5 tests: cookies_from_browser -> cookiesfrombrowser list, cookies_path -> cookiefile, browser priority over path, no cookies = no keys, cookie_rotation fallback. All pass."
         },
         {
             "id": "US-50-011",
