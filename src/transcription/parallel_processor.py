@@ -13,27 +13,54 @@ import logging
 import shutil
 import time
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .whisper_client import WhisperClient
 from .cache import TranscriptCache
-from .utils import extract_audio, write_srt
+from .utils import extract_audio, write_srt, get_audio_duration
 from .exceptions import is_transient_error
+from .metrics import TranscriptionMetrics
 from src.state import TranscriptSegment
 
 logger = logging.getLogger(__name__)
+
+
+def _clear_cuda_cache() -> None:
+    """
+    Clear CUDA memory cache to help recover from GPU OOM errors.
+
+    Called between retry attempts for transient GPU errors.
+    No-op if torch is not installed or CUDA is not available.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            logger.debug("Cleared CUDA cache between retry attempts")
+    except ImportError:
+        # torch not installed - using CPU-only mode
+        pass
+    except Exception as e:
+        # Don't let cache clearing failure block retry
+        logger.debug(f"Could not clear CUDA cache: {e}")
+
+
+# Type alias for return value with metrics
+TranscriptionResult = Tuple[Dict[str, List[TranscriptSegment]], TranscriptionMetrics]
 
 
 def transcribe_videos_parallel(
     video_paths: List[str],
     cache: Any,
     config: Any = None,
-    max_workers: int = 4,
+    max_workers: int = None,
     force_reprocess: bool = False,
     show_progress: bool = True,
-    skip_if_cached: bool = True
-) -> Dict[str, List[TranscriptSegment]]:
+    skip_if_cached: bool = True,
+    return_metrics: bool = False
+) -> Union[Dict[str, List[TranscriptSegment]], TranscriptionResult]:
     """
     Transcribe multiple videos with parallel audio extraction but sequential GPU.
 
@@ -45,14 +72,19 @@ def transcribe_videos_parallel(
         video_paths: List of video file paths
         cache: CacheManager or similar with cache_dir attribute
         config: Configuration object with transcription settings
-        max_workers: Number of parallel workers for audio extraction
+        max_workers: Number of parallel workers for audio extraction.
+                    If None, uses config.transcription.audio_extraction_workers
+                    (US-60-010), which defaults to min(4, cpu_count()).
         force_reprocess: If True, ignore cache and reprocess all (deprecated, use skip_if_cached=False)
         show_progress: Whether to show progress
         skip_if_cached: If True (default), skip videos already in cache.
                        If False, reprocess all videos ignoring cache.
+        return_metrics: If True, return (results, metrics) tuple instead of just results.
+                       Added in US-60-009 for batch transcription progress tracking.
 
     Returns:
-        Dict mapping video path to list of TranscriptSegments
+        If return_metrics=False: Dict mapping video path to list of TranscriptSegments
+        If return_metrics=True: Tuple of (results dict, TranscriptionMetrics)
     """
     # Get cache directory from cache object or use as string
     if hasattr(cache, 'cache_dir'):
@@ -70,6 +102,9 @@ def transcribe_videos_parallel(
         vad_filter = False
         min_silence_duration_ms = getattr(config.transcription, 'min_silence_duration_ms', 200)
         speech_pad_ms = getattr(config.transcription, 'speech_pad_ms', 10)
+        # Audio extraction workers (US-60-010)
+        if max_workers is None:
+            max_workers = getattr(config.transcription, 'audio_extraction_workers', 4)
     else:
         model_name = "base"
         compute_type = "auto"
@@ -78,166 +113,219 @@ def transcribe_videos_parallel(
         min_silence_duration_ms = 200
         speech_pad_ms = 10
 
+    # Fallback if max_workers still None (no config provided)
+    if max_workers is None:
+        import os
+        cpu_count = os.cpu_count() or 4
+        max_workers = min(4, cpu_count)
+
+    # Get auto_cleanup setting (US-60-011)
+    auto_cleanup_after_batch = True  # Default enabled
+    if config:
+        auto_cleanup_after_batch = getattr(config.transcription, 'auto_cleanup_after_batch', True)
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
 
-    # Determine whether to skip cached videos
-    # skip_if_cached takes precedence; force_reprocess is deprecated but still honored
-    should_skip_cached = skip_if_cached and not force_reprocess
+    try:
+        # Initialize metrics (US-60-009)
+        metrics = TranscriptionMetrics(total_videos=len(video_paths))
 
-    # Separate cached vs uncached
-    cached_videos = []
-    uncached_videos = []
+        # Determine whether to skip cached videos
+        # skip_if_cached takes precedence; force_reprocess is deprecated but still honored
+        should_skip_cached = skip_if_cached and not force_reprocess
 
-    for video_path in video_paths:
-        if not should_skip_cached:
-            # Reprocess all videos (skip_if_cached=False or force_reprocess=True)
-            uncached_videos.append(video_path)
-        else:
-            # Check cache when skip_if_cached=True
-            cached = transcript_cache.get(video_path)
-            if cached:
-                cached_videos.append((video_path, cached))
-            else:
+        # Separate cached vs uncached
+        cached_videos = []
+        uncached_videos = []
+
+        for video_path in video_paths:
+            if not should_skip_cached:
+                # Reprocess all videos (skip_if_cached=False or force_reprocess=True)
                 uncached_videos.append(video_path)
+            else:
+                # Check cache when skip_if_cached=True
+                cached = transcript_cache.get(video_path)
+                if cached:
+                    cached_videos.append((video_path, cached))
+                else:
+                    uncached_videos.append(video_path)
 
-    # Load cached results
-    for video_path, segments in cached_videos:
-        results[video_path] = [
-            TranscriptSegment(
-                index=i,
-                start_time=seg['start'],
-                end_time=seg['end'],
-                text=seg['text'],
-                source_file=video_path
-            )
-            for i, seg in enumerate(segments)
-        ]
-
-    # Log skipped videos count when skip_if_cached=True
-    if should_skip_cached and cached_videos:
-        logger.info(f"Skipped {len(cached_videos)} cached videos (skip_if_cached=True)")
-
-    if show_progress:
-        print(f"  Video index: {len(cached_videos)} cached, {len(uncached_videos)} new", flush=True)
-
-    if not uncached_videos:
-        return results
-
-    # Create temp directory for audio files
-    temp_dir = Path(cache_dir) / "temp_audio"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    # =========================================================================
-    # PHASE 1: Parallel audio extraction (CPU-bound)
-    # =========================================================================
-    if show_progress:
-        print(f"  Phase 1: Extracting audio ({max_workers} workers)...", flush=True)
-
-    audio_files = {}  # video_path -> audio_path
-    phase1_start = time.time()
-
-    def extract_audio_task(video_path):
-        audio_path = extract_audio(video_path, str(temp_dir))
-        return video_path, audio_path
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(extract_audio_task, vp)
-            for vp in uncached_videos
-        ]
-
-        completed = 0
-        total_videos = len(futures)
-        for future in as_completed(futures):
-            try:
-                video_path, audio_path = future.result()
-                completed += 1
-                if audio_path:
-                    audio_files[video_path] = audio_path
-                if show_progress and completed % 10 == 0:
-                    print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
-            except Exception as e:
-                completed += 1
-                # Log full traceback for debugging parallel processing issues
-                logger.exception(f"  Audio extraction error: {e}")
-
-    phase1_time = time.time() - phase1_start
-    if show_progress:
-        print(f"  ✓ Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)", flush=True)
-
-    # =========================================================================
-    # PHASE 2: Sequential GPU transcription (mutex protected)
-    # =========================================================================
-    if show_progress:
-        print(f"  Phase 2: Transcribing with shared model (sequential GPU)...", flush=True)
-
-    phase2_start = time.time()
-    total = len(audio_files)
-
-    for i, (video_path, audio_path) in enumerate(audio_files.items()):
-        video_name = Path(video_path).stem[:40]
-
-        if show_progress:
-            pct = ((i + 1) / total) * 100
-            elapsed = time.time() - phase2_start
-            eta = (elapsed / (i + 1)) * (total - i - 1) if i > 0 else 0
-            print(f"\r  [{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s    ", end='', flush=True)
-
-        try:
-            # Transcribe with WhisperClient (GPU-locked)
-            raw_segments = whisper_client.transcribe(
-                audio_path,
-                language=language,
-                vad_filter=vad_filter,
-                min_silence_duration_ms=min_silence_duration_ms,
-                speech_pad_ms=speech_pad_ms
-            )
-
-            # Cache the result
-            transcript_cache.set(video_path, raw_segments)
-
-            # Convert to TranscriptSegment
+        # Load cached results and record cache hits
+        for video_path, segments in cached_videos:
             results[video_path] = [
                 TranscriptSegment(
-                    index=j,
+                    index=i,
                     start_time=seg['start'],
                     end_time=seg['end'],
                     text=seg['text'],
                     source_file=video_path
                 )
-                for j, seg in enumerate(raw_segments)
+                for i, seg in enumerate(segments)
+            ]
+            metrics.record_cache_hit(video_path)
+
+        # Log skipped videos count when skip_if_cached=True
+        if should_skip_cached and cached_videos:
+            logger.info(f"Skipped {len(cached_videos)} cached videos (skip_if_cached=True)")
+
+        if show_progress:
+            print(f"  Video index: {len(cached_videos)} cached, {len(uncached_videos)} new", flush=True)
+
+        if not uncached_videos:
+            # Log metrics summary even when all cached (US-60-009)
+            logger.info(f"Transcription metrics: {metrics.get_summary_dict()}")
+            if return_metrics:
+                return results, metrics
+            return results
+
+        # Create temp directory for audio files
+        temp_dir = Path(cache_dir) / "temp_audio"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # =========================================================================
+        # PHASE 1: Parallel audio extraction (CPU-bound)
+        # =========================================================================
+        if show_progress:
+            print(f"  Phase 1: Extracting audio ({max_workers} workers)...", flush=True)
+
+        audio_files = {}  # video_path -> audio_path
+        phase1_start = time.time()
+
+        def extract_audio_task(video_path):
+            audio_path = extract_audio(video_path, str(temp_dir))
+            return video_path, audio_path
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(extract_audio_task, vp)
+                for vp in uncached_videos
             ]
 
-        except Exception as e:
-            # Log full traceback for debugging transcription issues
-            logger.exception(f"  Transcription error for {video_name}: {e}")
-            results[video_path] = []
+            completed = 0
+            total_videos = len(futures)
+            for future in as_completed(futures):
+                try:
+                    video_path, audio_path = future.result()
+                    completed += 1
+                    if audio_path:
+                        audio_files[video_path] = audio_path
+                    if show_progress and completed % 10 == 0:
+                        print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
+                except Exception as e:
+                    completed += 1
+                    # Log full traceback for debugging parallel processing issues
+                    logger.exception(f"  Audio extraction error: {e}")
 
-        # Clean up audio file
+        phase1_time = time.time() - phase1_start
+        if show_progress:
+            print(f"  ✓ Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)", flush=True)
+
+        # =========================================================================
+        # PHASE 2: Sequential GPU transcription (mutex protected)
+        # =========================================================================
+        if show_progress:
+            print(f"  Phase 2: Transcribing with shared model (sequential GPU)...", flush=True)
+
+        phase2_start = time.time()
+        total = len(audio_files)
+
+        for i, (video_path, audio_path) in enumerate(audio_files.items()):
+            video_name = Path(video_path).stem[:40]
+
+            if show_progress:
+                pct = ((i + 1) / total) * 100
+                elapsed = time.time() - phase2_start
+                eta = (elapsed / (i + 1)) * (total - i - 1) if i > 0 else 0
+                print(f"\r  [{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s    ", end='', flush=True)
+
+            # Get audio duration for speed ratio calculation (US-60-009)
+            audio_duration = get_audio_duration(audio_path) or 0.0
+            transcription_start = time.time()
+
+            try:
+                # Transcribe with WhisperClient (GPU-locked)
+                raw_segments = whisper_client.transcribe(
+                    audio_path,
+                    language=language,
+                    vad_filter=vad_filter,
+                    min_silence_duration_ms=min_silence_duration_ms,
+                    speech_pad_ms=speech_pad_ms
+                )
+
+                transcription_time = time.time() - transcription_start
+
+                # Cache the result
+                transcript_cache.set(video_path, raw_segments)
+
+                # Convert to TranscriptSegment
+                results[video_path] = [
+                    TranscriptSegment(
+                        index=j,
+                        start_time=seg['start'],
+                        end_time=seg['end'],
+                        text=seg['text'],
+                        source_file=video_path
+                    )
+                    for j, seg in enumerate(raw_segments)
+                ]
+
+                # Record metrics (US-60-009)
+                metrics.record_transcription(video_path, audio_duration, transcription_time)
+
+            except Exception as e:
+                # Log full traceback for debugging transcription issues
+                logger.exception(f"  Transcription error for {video_name}: {e}")
+                results[video_path] = []
+                metrics.record_failure(video_path)
+
+            # Clean up audio file
+            try:
+                Path(audio_path).unlink()
+            except (OSError, IOError) as e:
+                # Non-critical: temp file cleanup failure won't affect results
+                logger.debug(f"Could not remove temp audio file {audio_path}: {e}")
+
+        if show_progress:
+            print()  # New line after progress
+
+        phase2_time = time.time() - phase2_start
+        if show_progress:
+            print(f"  ✓ Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)", flush=True)
+
+        # Record phase times in metrics (US-60-009)
+        metrics.set_phase_times(phase1_time, phase2_time)
+
+        # Log metrics summary at end of batch transcription (US-60-009)
+        summary = metrics.get_summary_dict()
+        logger.info(
+            f"Transcription batch complete: {summary['transcribed_count']} transcribed, "
+            f"{summary['cached_hits']} cached, {summary['failed_count']} failed. "
+            f"Speed: {summary['avg_speed_ratio']:.1f}x realtime"
+        )
+        if show_progress and summary['transcribed_count'] > 0:
+            print(f"  📊 Speed: {summary['avg_speed_ratio']:.1f}x realtime "
+                  f"({summary['total_duration_s']:.0f}s audio in {summary['total_time_s']:.0f}s)", flush=True)
+
+        # Clean up temp directory
         try:
-            Path(audio_path).unlink()
+            shutil.rmtree(temp_dir, ignore_errors=True)
         except (OSError, IOError) as e:
-            # Non-critical: temp file cleanup failure won't affect results
-            logger.debug(f"Could not remove temp audio file {audio_path}: {e}")
+            # Non-critical: temp directory cleanup failure won't affect results
+            logger.debug(f"Could not remove temp directory {temp_dir}: {e}")
 
-    if show_progress:
-        print()  # New line after progress
+        if return_metrics:
+            return results, metrics
+        return results
 
-    phase2_time = time.time() - phase2_start
-    if show_progress:
-        print(f"  ✓ Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)", flush=True)
-
-    # Clean up temp directory
-    try:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    except (OSError, IOError) as e:
-        # Non-critical: temp directory cleanup failure won't affect results
-        logger.debug(f"Could not remove temp directory {temp_dir}: {e}")
-
-    return results
+    finally:
+        # Cleanup WhisperModel to free GPU memory (US-60-011)
+        # Called even if batch processing raises an exception
+        if auto_cleanup_after_batch:
+            logger.info("Auto-cleanup after batch enabled, freeing GPU memory...")
+            whisper_client.cleanup()
 
 
 def transcribe_video(
@@ -333,6 +421,8 @@ def transcribe_video(
                 logger.warning(
                     f"Retrying transcription for {video_id} after {e}"
                 )
+                # Clear CUDA cache to help recover from GPU OOM (US-60-012)
+                _clear_cuda_cache()
                 time.sleep(delay)
             else:
                 # All retries exhausted

@@ -167,3 +167,46 @@ def format_timestamp_srt(seconds: float) -> str:
     secs = int(seconds % 60)
     millis = int((seconds % 1) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def get_audio_duration(audio_path: str, timeout: int = 10) -> Optional[float]:
+    """
+    Get audio file duration using ffprobe.
+
+    Args:
+        audio_path: Path to audio file
+        timeout: Maximum time in seconds for ffprobe (default: 10)
+
+    Returns:
+        Duration in seconds, or None if unable to determine
+    """
+    import json as json_module
+
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            str(audio_path)
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding='utf-8',
+            errors='replace'
+        )
+
+        if result.returncode == 0:
+            data = json_module.loads(result.stdout)
+            duration_str = data.get('format', {}).get('duration')
+            if duration_str:
+                return float(duration_str)
+
+    except (subprocess.TimeoutExpired, json_module.JSONDecodeError, ValueError, KeyError) as e:
+        logger.debug(f"Could not get audio duration for {audio_path}: {e}")
+
+    return None
