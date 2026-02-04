@@ -108,7 +108,7 @@
                             "id":  "US-52-007",
                             "title":  "Add bot-detection abort threshold to prevent futile download attempts",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "When consecutive_bot_detections exceeds bot_detection_abort_threshold (config, default 15), the stage aborts with a clear error message",
                                                        "Abort message includes the count of bot detections and recommends checking cookie config",
@@ -117,7 +117,7 @@
                                                        "Unit test verifies mixed bot-detection and success resets the counter",
                                                        "Bot-detection abort is logged as a stage-level failure with \u0027bot_detection_abort\u0027 category"
                                                    ],
-                            "notes":  "HARD STORY: Skipped after 30_minute_limit - pending decomposition"
+                            "notes":  "Fixed bot-detection abort threshold and added bot_detection_abort category. Commit 73e30bd. Originally marked as hard story due to DateTime null crash in ralph (not a story failure). Manually restored after fixing the ralph bug."
                         },
                         {
                             "id":  "US-52-008",

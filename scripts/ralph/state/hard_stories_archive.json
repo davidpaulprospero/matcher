@@ -1,0 +1,47 @@
+{
+    "statistics":  {
+                       "totalHardStories":  1,
+                       "abandoned":  0,
+                       "successfullyDecomposed":  0,
+                       "stillHardAfterDecomposition":  0
+                   },
+    "version":  "2026-02-04",
+    "stories":  [
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Sprint 43 verification",
+                        "firstFailedAt":  "2026-02-03T06:29:52.8936868+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-03T06:29:52.8936868+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-03T06:03:29.4009066+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-03T06:10:10.8408889+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-03T06:29:52.8681835+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-43-011",
+                        "focusArea":  "quality",
+                        "sprintNumbers":  [
+                                              43
+                                          ],
+                        "failureCount":  1
+                    }
+                ]
+}

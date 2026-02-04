@@ -91,9 +91,9 @@ class TestBotDetectionAbort:
             )
 
         # Should have attempted exactly `threshold` downloads then aborted
-        assert stats['attempted'] == threshold
-        assert stats['failed'] == threshold
-        assert stats['succeeded'] == 0
+        assert stats.attempted == threshold
+        assert stats.failed == threshold
+        assert stats.succeeded == 0
         assert len(downloaded) == 0
 
     @pytest.mark.fast
@@ -123,8 +123,8 @@ class TestBotDetectionAbort:
             )
 
         # All segments attempted because threshold was not hit
-        assert stats['attempted'] == total_segments
-        assert stats['failed'] == total_segments
+        assert stats.attempted == total_segments
+        assert stats.failed == total_segments
 
     @pytest.mark.fast
     def test_abort_disabled_when_threshold_zero(self):
@@ -151,7 +151,7 @@ class TestBotDetectionAbort:
             )
 
         # All segments attempted — abort was disabled
-        assert stats['attempted'] == total_segments
+        assert stats.attempted == total_segments
 
     @pytest.mark.fast
     def test_counter_resets_on_success_no_false_abort(self):
@@ -194,9 +194,9 @@ class TestBotDetectionAbort:
             )
 
         # All 5 segments attempted (counter reset at index 3 prevents abort)
-        assert stats['attempted'] == 5
+        assert stats.attempted == 5
         # 4 failures + 1 success (or file-not-found depends on path)
-        assert stats['failed'] >= 2  # At minimum the first 2 and last 2
+        assert stats.failed >= 2  # At minimum the first 2 and last 2
 
     @pytest.mark.fast
     def test_default_constant_value(self):
@@ -241,7 +241,7 @@ class TestBotDetectionAbortCheckpoint:
                 progress_callback=mock_progress,
             )
 
-        assert stats['attempted'] == threshold
+        assert stats.attempted == threshold
 
         # progress_callback should have been called for each attempt + the final
         # abort checkpoint call. The last call should be at idx == threshold.
@@ -276,7 +276,7 @@ class TestBotDetectionAbortCheckpoint:
                 progress_callback=None,
             )
 
-        assert stats['attempted'] == threshold
+        assert stats.attempted == threshold
 
 
 # ---------------------------------------------------------------------------
@@ -314,12 +314,12 @@ class TestBotDetectionAbortCategory:
                 progress_callback=None,
             )
 
-        assert stats['attempted'] == threshold
-        assert 'bot_detection_abort' in stats['error_categories'], (
+        assert stats.attempted == threshold
+        assert 'bot_detection_abort' in stats.error_categories, (
             f"Expected 'bot_detection_abort' in error_categories, "
-            f"got {stats['error_categories']}"
+            f"got {stats.error_categories}"
         )
-        assert stats['error_categories']['bot_detection_abort'] == 1
+        assert stats.error_categories['bot_detection_abort'] == 1
 
     @pytest.mark.fast
     def test_abort_message_includes_count_and_cookie_guidance(self):
@@ -418,13 +418,13 @@ class TestBotDetectionMixedSuccessReset:
 
             # All 5 segments should have been attempted (no abort at threshold=3
             # because the success at position 3 reset the counter)
-            assert stats['attempted'] == 5, (
-                f"Expected all 5 segments attempted, got {stats['attempted']} — "
+            assert stats.attempted == 5, (
+                f"Expected all 5 segments attempted, got {stats.attempted} — "
                 f"counter was not reset on success"
             )
-            assert stats['succeeded'] >= 1
+            assert stats.succeeded >= 1
             # bot_detection_abort should NOT be in error_categories
-            assert 'bot_detection_abort' not in stats.get('error_categories', {}), (
+            assert 'bot_detection_abort' not in stats.error_categories, (
                 "bot_detection_abort should not appear when abort didn't fire"
             )
         finally:
