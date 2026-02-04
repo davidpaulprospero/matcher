@@ -77,7 +77,7 @@
                             "id":  "US-58-005",
                             "title":  "Deduplicate escalation trigger regex from category definitions",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "The combined trigger regex in EscalationManager is built dynamically from _TRIGGER_CATEGORIES patterns rather than a separate hardcoded regex",
                                                        "A startup assertion in __init__ verifies all patterns in _TRIGGER_CATEGORIES compile as valid regex",

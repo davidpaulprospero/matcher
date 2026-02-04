@@ -27,38 +27,10 @@ from .types import EscalationState, EscalationTier
 
 logger = logging.getLogger(__name__)
 
-# Compiled regex for 403/bot-detection patterns in yt-dlp stderr output.
-# These are SEPARATE from ERROR_SEVERITY_PATTERNS in core.py, which handles
-# rate-limit severity classification. Escalation triggers specifically detect
-# when yt-dlp is being blocked and a higher bypass tier is needed.
-_ESCALATION_TRIGGER_RE = re.compile(
-    # 403 patterns (original)
-    r'HTTP Error 403'
-    # Bot/captcha patterns (original)
-    r'|Sign in to confirm'
-    r'|bot'
-    r'|captcha'
-    r'|blocked'
-    r'|verify you are human'
-    # 429 / rate-limit patterns
-    r'|HTTP Error 429'
-    r'|429'
-    r'|Too Many Requests'
-    r'|rate.?limit'
-    # IP-based restriction patterns
-    r'|IP address'
-    r'|ip.*block'
-    r'|access denied'
-    r'|geo.?block'
-    # Age-gate patterns
-    r'|age.?gate'
-    r'|age.?restrict'
-    r'|sign.*in.*to.*confirm.*age',
-    re.IGNORECASE,
-)
-
-# Category-specific compiled regexes for classify_trigger().
-# Order matters: more specific patterns checked first.
+# Category-specific patterns for escalation trigger classification.
+# This is the SINGLE SOURCE OF TRUTH for all escalation trigger detection.
+# The combined regex (_ESCALATION_TRIGGER_RE) is built dynamically from these.
+# Order matters: more specific patterns checked first in classify_trigger().
 _TRIGGER_CATEGORIES: List[Tuple[str, "re.Pattern[str]"]] = [
     ('429', re.compile(
         r'HTTP Error 429|Too Many Requests|rate.?limit',
@@ -81,6 +53,22 @@ _TRIGGER_CATEGORIES: List[Tuple[str, "re.Pattern[str]"]] = [
         re.IGNORECASE,
     )),
 ]
+
+# Validate all category patterns compile as valid regex at import time.
+# This catches typos or invalid patterns immediately rather than at runtime.
+for _cat_name, _cat_pattern in _TRIGGER_CATEGORIES:
+    assert isinstance(_cat_pattern, re.Pattern), (
+        f"Invalid regex pattern in _TRIGGER_CATEGORIES[{_cat_name!r}]: "
+        f"expected compiled re.Pattern, got {type(_cat_pattern).__name__}"
+    )
+
+# Build combined trigger regex dynamically from _TRIGGER_CATEGORIES.
+# Joins all category patterns with '|' so is_escalation_trigger() matches
+# any category without needing a separate hand-maintained regex.
+_ESCALATION_TRIGGER_RE = re.compile(
+    '|'.join(cat_pattern.pattern for _, cat_pattern in _TRIGGER_CATEGORIES),
+    re.IGNORECASE,
+)
 
 
 def is_escalation_trigger(stderr_output: str) -> bool:

@@ -47,13 +47,20 @@ from .keyword_remix import SearchOptimizer
 from .audio_first import AudioFirstPipeline
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager, ImpersonationStats
-from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
+from .escalation_manager import (
+    EscalationManager, EscalationResult, is_escalation_trigger,
+    classify_trigger, _TRIGGER_CATEGORIES,
+)
 from .escalation_strategy import EscalationStrategy, EscalationDecision
 from .error_classification import (
     classify_error_category,
     classify_error_severity,
+    classify_network_subcategory,
     is_network_failure,
     is_escalation_error,
+    ERROR_PATTERNS,
+    NETWORK_ERROR_PATTERNS,
+    NETWORK_FAILURE_PATTERNS,
     NETWORK_FAILURE_THRESHOLD,
     BOT_DETECTION_ABORT_THRESHOLD,
     ERROR_SEVERITY_PATTERNS,
@@ -112,6 +119,8 @@ __all__ = [
     'EscalationManager',
     'EscalationResult',
     'is_escalation_trigger',
+    'classify_trigger',
+    '_TRIGGER_CATEGORIES',
     'EscalationStrategy',
     'EscalationDecision',
     'CookieMethodFallback',
@@ -132,8 +141,12 @@ __all__ = [
     # Error classification (shared module)
     'classify_error_category',
     'classify_error_severity',
+    'classify_network_subcategory',
     'is_network_failure',
     'is_escalation_error',
+    'ERROR_PATTERNS',
+    'NETWORK_ERROR_PATTERNS',
+    'NETWORK_FAILURE_PATTERNS',
     'NETWORK_FAILURE_THRESHOLD',
     'BOT_DETECTION_ABORT_THRESHOLD',
     'ERROR_SEVERITY_PATTERNS',
