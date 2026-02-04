@@ -160,6 +160,10 @@ class CheckpointManager:
         self.config_hash = config_hash
         self.data: Optional[CheckpointData] = None
         self._config = config  # Store config for stage restore
+        # US-51-007: Backup rotation count from config (default 3)
+        self._backup_count = getattr(
+            getattr(config, 'pipeline', None), 'checkpoint_backup_count', 3
+        ) if config else 3
         
     def exists(self) -> bool:
         """Check if a checkpoint exists"""
@@ -234,6 +238,24 @@ class CheckpointManager:
 
         # Decide which checkpoint to use based on validity and timestamps
         data = self._select_checkpoint(main_data, backup_data)
+
+        # US-51-007: If both main and primary backup failed, try rotated backups
+        if data is None:
+            for i in range(1, self._backup_count):
+                rotated_path = self._get_backup_path(i)
+                if rotated_path.exists():
+                    rotated_data = self._try_load_file(rotated_path)
+                    if rotated_data is not None:
+                        logger.warning(
+                            f"Restored checkpoint from rotated backup: {rotated_path.name}"
+                        )
+                        # Restore to main
+                        try:
+                            shutil.copy2(rotated_path, self.checkpoint_path)
+                        except Exception as e:
+                            logger.warning(f"Could not restore rotated backup to main: {e}")
+                        data = rotated_data
+                        break
 
         if data is None:
             return None
@@ -667,17 +689,52 @@ class CheckpointManager:
         self._atomic_save()
         logger.info(f"Marked {stage} as incomplete - will be re-run")
 
+    def _get_backup_path(self, index: int) -> Path:
+        """Get the path for a numbered backup file.
+
+        index 0 -> checkpoint.backup.json (primary backup)
+        index 1 -> checkpoint.backup.1.json
+        index 2 -> checkpoint.backup.2.json
+        """
+        if index == 0:
+            return self.backup_path
+        return self.project_dir / f"checkpoint.backup.{index}.json"
+
+    def _get_all_backup_paths(self) -> List[Path]:
+        """Return list of all backup paths in order (newest first)."""
+        return [self._get_backup_path(i) for i in range(self._backup_count)]
+
+    def _rotate_backups(self):
+        """Rotate backup files: N-1 -> deleted, N-2 -> N-1, ..., 0 -> 1, current -> 0.
+
+        US-51-007: Maintains up to _backup_count backup files for resilience.
+        """
+        try:
+            # Delete the oldest backup if it exists
+            oldest = self._get_backup_path(self._backup_count - 1)
+            if oldest.exists():
+                oldest.unlink()
+
+            # Shift each backup up by one slot (work backwards)
+            for i in range(self._backup_count - 1, 0, -1):
+                src = self._get_backup_path(i - 1)
+                dst = self._get_backup_path(i)
+                if src.exists():
+                    shutil.copy2(src, dst)
+
+            # Copy current checkpoint to primary backup slot
+            if self.checkpoint_path.exists():
+                shutil.copy2(self.checkpoint_path, self.backup_path)
+        except Exception as e:
+            logger.warning(f"Failed to rotate backups: {e}")
+
     def _atomic_save(self):
         """Atomically save checkpoint (write temp, then rename)"""
         start_time = time.perf_counter()
         temp_path = self.checkpoint_path.with_suffix('.tmp')
         try:
-            # Backup existing checkpoint
-            if self.checkpoint_path.exists():
-                try:
-                    shutil.copy2(self.checkpoint_path, self.backup_path)
-                except Exception as e:
-                    logger.warning(f"Failed to backup checkpoint: {e}")
+            # US-51-007: Rotate backups before overwriting
+            self._rotate_backups()
 
             # Write to temp file
             with open(temp_path, 'w', encoding='utf-8') as f:
@@ -832,8 +889,10 @@ class CheckpointManager:
         """Clear checkpoint (for fresh start)"""
         if self.checkpoint_path.exists():
             self.checkpoint_path.unlink()
-        if self.backup_path.exists():
-            self.backup_path.unlink()
+        # US-51-007: Clear all rotated backups
+        for backup_path in self._get_all_backup_paths():
+            if backup_path.exists():
+                backup_path.unlink()
         self.data = None
     
     def get_summary(self) -> str:
