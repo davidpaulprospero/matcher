@@ -828,7 +828,7 @@ class TestFrameRateValidation:
         from src.otio.xml_export import _validate_frame_rate, STANDARD_NLE_RATES
 
         for rate in STANDARD_NLE_RATES:
-            result = _validate_frame_rate(rate)
+            result, is_ntsc = _validate_frame_rate(rate)
             assert isinstance(result, int), f"Expected int for rate {rate}"
             # 23.976, 29.97, 59.94 should round to 24, 30, 60
             expected = round(rate)
@@ -841,7 +841,7 @@ class TestFrameRateValidation:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            result = _validate_frame_rate(27.5)
+            result, is_ntsc = _validate_frame_rate(27.5)
 
         # Should log warning about non-standard rate
         assert "Non-standard frame rate" in caplog.text
@@ -849,17 +849,18 @@ class TestFrameRateValidation:
         # Should still return an integer
         assert isinstance(result, int)
         assert result == 28  # Rounded
+        assert is_ntsc is False  # 27.5 is not NTSC
 
     @pytest.mark.fast
     def test_validate_frame_rate_returns_integer(self):
-        """Test _validate_frame_rate always returns an integer."""
+        """Test _validate_frame_rate always returns an integer timebase."""
         from src.otio.xml_export import _validate_frame_rate
 
         test_rates = [23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0,
                       15.5, 27.3, 45.8, 120.0]
 
         for rate in test_rates:
-            result = _validate_frame_rate(rate)
+            result, is_ntsc = _validate_frame_rate(rate)
             assert isinstance(result, int), f"Expected int for rate {rate}, got {type(result)}"
 
     @pytest.mark.fast
@@ -867,7 +868,7 @@ class TestFrameRateValidation:
         """Test 23.976 fps rounds to 24."""
         from src.otio.xml_export import _validate_frame_rate
 
-        result = _validate_frame_rate(23.976)
+        result, is_ntsc = _validate_frame_rate(23.976)
         assert result == 24
 
     @pytest.mark.fast
@@ -875,7 +876,7 @@ class TestFrameRateValidation:
         """Test 29.97 fps rounds to 30."""
         from src.otio.xml_export import _validate_frame_rate
 
-        result = _validate_frame_rate(29.97)
+        result, is_ntsc = _validate_frame_rate(29.97)
         assert result == 30
 
     @pytest.mark.fast
@@ -883,7 +884,7 @@ class TestFrameRateValidation:
         """Test 59.94 fps rounds to 60."""
         from src.otio.xml_export import _validate_frame_rate
 
-        result = _validate_frame_rate(59.94)
+        result, is_ntsc = _validate_frame_rate(59.94)
         assert result == 60
 
     @pytest.mark.fast
@@ -892,7 +893,7 @@ class TestFrameRateValidation:
         from src.otio.xml_export import _validate_frame_rate
 
         for rate in [24, 25, 30, 50, 60]:
-            result = _validate_frame_rate(float(rate))
+            result, is_ntsc = _validate_frame_rate(float(rate))
             assert result == rate
 
     @pytest.mark.fast
@@ -1561,3 +1562,184 @@ class TestXMLSpecialCharacterHandling:
         assert "中文" in escaped, "Unicode should be preserved"
         assert "&amp;" in escaped, "Ampersand should be escaped"
         assert escaped == "中文 &amp; English"
+
+
+class TestNTSCDetection:
+    """Tests for NTSC rate detection and <ntsc> element in XML export."""
+
+    @pytest.mark.fast
+    def test_is_ntsc_rate_detects_ntsc_rates(self):
+        """Test _is_ntsc_rate correctly identifies NTSC rates (23.976, 29.97, 59.94)."""
+        from src.otio.xml_export import _is_ntsc_rate
+
+        assert _is_ntsc_rate(23.976) is True
+        assert _is_ntsc_rate(29.97) is True
+        assert _is_ntsc_rate(59.94) is True
+
+    @pytest.mark.fast
+    def test_is_ntsc_rate_rejects_non_ntsc_rates(self):
+        """Test _is_ntsc_rate rejects non-NTSC rates."""
+        from src.otio.xml_export import _is_ntsc_rate
+
+        assert _is_ntsc_rate(24.0) is False
+        assert _is_ntsc_rate(25.0) is False
+        assert _is_ntsc_rate(30.0) is False
+        assert _is_ntsc_rate(50.0) is False
+        assert _is_ntsc_rate(60.0) is False
+
+    @pytest.mark.fast
+    def test_validate_frame_rate_returns_ntsc_flag(self):
+        """Test _validate_frame_rate returns (int, bool) tuple with NTSC detection."""
+        from src.otio.xml_export import _validate_frame_rate
+
+        # NTSC rates
+        fps_int, is_ntsc = _validate_frame_rate(29.97)
+        assert fps_int == 30
+        assert is_ntsc is True
+
+        fps_int, is_ntsc = _validate_frame_rate(59.94)
+        assert fps_int == 60
+        assert is_ntsc is True
+
+        fps_int, is_ntsc = _validate_frame_rate(23.976)
+        assert fps_int == 24
+        assert is_ntsc is True
+
+        # Non-NTSC rates
+        fps_int, is_ntsc = _validate_frame_rate(30.0)
+        assert fps_int == 30
+        assert is_ntsc is False
+
+        fps_int, is_ntsc = _validate_frame_rate(24.0)
+        assert fps_int == 24
+        assert is_ntsc is False
+
+        fps_int, is_ntsc = _validate_frame_rate(25.0)
+        assert fps_int == 25
+        assert is_ntsc is False
+
+    @pytest.mark.fast
+    def test_xml_ntsc_true_for_29_97fps(self, mock_matches, temp_output_path):
+        """Test XML output with 29.97fps has <ntsc>TRUE</ntsc>."""
+        paths = generate_resolve_xml_with_bins(
+            mock_matches,
+            temp_output_path,
+            frame_rate=29.97
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        # All ntsc elements should be TRUE
+        ntsc_elements = root.findall('.//ntsc')
+        assert len(ntsc_elements) > 0, "Expected at least one <ntsc> element"
+        for ntsc_elem in ntsc_elements:
+            assert ntsc_elem.text == 'TRUE', \
+                f"Expected <ntsc>TRUE</ntsc> for 29.97fps, got <ntsc>{ntsc_elem.text}</ntsc>"
+
+    @pytest.mark.fast
+    def test_xml_ntsc_false_for_30fps(self, mock_matches, temp_output_path):
+        """Test XML output with 30fps has <ntsc>FALSE</ntsc>."""
+        paths = generate_resolve_xml_with_bins(
+            mock_matches,
+            temp_output_path,
+            frame_rate=30.0
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        # All ntsc elements should be FALSE
+        ntsc_elements = root.findall('.//ntsc')
+        assert len(ntsc_elements) > 0, "Expected at least one <ntsc> element"
+        for ntsc_elem in ntsc_elements:
+            assert ntsc_elem.text == 'FALSE', \
+                f"Expected <ntsc>FALSE</ntsc> for 30fps, got <ntsc>{ntsc_elem.text}</ntsc>"
+
+    @pytest.mark.fast
+    def test_sequence_xml_ntsc_true_for_29_97fps(self, mock_matches, temp_output_path):
+        """Test sequence XML with 29.97fps has <ntsc>TRUE</ntsc>."""
+        path = generate_davinci_sequence_xml(
+            mock_matches,
+            temp_output_path,
+            frame_rate=29.97
+        )
+
+        tree = ET.parse(path)
+        root = tree.getroot()
+
+        ntsc_elements = root.findall('.//ntsc')
+        assert len(ntsc_elements) > 0
+        for ntsc_elem in ntsc_elements:
+            assert ntsc_elem.text == 'TRUE', \
+                f"Expected TRUE for 29.97fps, got {ntsc_elem.text}"
+
+    @pytest.mark.fast
+    def test_sequence_xml_displayformat_df_for_ntsc(self, mock_matches, temp_output_path):
+        """Test sequence XML uses DF displayformat for NTSC rates."""
+        path = generate_davinci_sequence_xml(
+            mock_matches,
+            temp_output_path,
+            frame_rate=29.97
+        )
+
+        tree = ET.parse(path)
+        root = tree.getroot()
+
+        df_elements = root.findall('.//displayformat')
+        assert len(df_elements) > 0
+        for df_elem in df_elements:
+            assert df_elem.text == 'DF', \
+                f"Expected DF for 29.97fps, got {df_elem.text}"
+
+    @pytest.mark.fast
+    def test_sequence_xml_displayformat_ndf_for_non_ntsc(self, mock_matches, temp_output_path):
+        """Test sequence XML uses NDF displayformat for non-NTSC rates."""
+        path = generate_davinci_sequence_xml(
+            mock_matches,
+            temp_output_path,
+            frame_rate=30.0
+        )
+
+        tree = ET.parse(path)
+        root = tree.getroot()
+
+        df_elements = root.findall('.//displayformat')
+        assert len(df_elements) > 0
+        for df_elem in df_elements:
+            assert df_elem.text == 'NDF', \
+                f"Expected NDF for 30fps, got {df_elem.text}"
+
+    @pytest.mark.fast
+    def test_xml_ntsc_true_for_59_94fps(self, mock_matches, temp_output_path):
+        """Test XML output with 59.94fps has <ntsc>TRUE</ntsc>."""
+        paths = generate_resolve_xml_with_bins(
+            mock_matches,
+            temp_output_path,
+            frame_rate=59.94
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        ntsc_elements = root.findall('.//ntsc')
+        assert len(ntsc_elements) > 0
+        for ntsc_elem in ntsc_elements:
+            assert ntsc_elem.text == 'TRUE'
+
+    @pytest.mark.fast
+    def test_xml_ntsc_false_for_25fps(self, mock_matches, temp_output_path):
+        """Test XML output with 25fps (PAL) has <ntsc>FALSE</ntsc>."""
+        paths = generate_resolve_xml_with_bins(
+            mock_matches,
+            temp_output_path,
+            frame_rate=25.0
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        ntsc_elements = root.findall('.//ntsc')
+        assert len(ntsc_elements) > 0
+        for ntsc_elem in ntsc_elements:
+            assert ntsc_elem.text == 'FALSE'
