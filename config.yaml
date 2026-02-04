@@ -482,6 +482,43 @@ matching:
   # Decision: Downgrade confidence by 0.1 when <50% of explanation keywords are verifiable
   explanation_validation_enabled: true  # Enable LLM explanation keyword verification
 
+  # Scoring thresholds (US-53-002)
+  # Chain-of-thought: Hardcoded thresholds prevent tuning without code edits
+  # Reasoning: Extract all scoring constants into config for easy experimentation
+  # Decision: Nested dataclass with sensible defaults matching original hardcoded values
+  scoring:
+    confidence_floor: 0.05             # Minimum confidence after all penalties
+    low_confidence_warning_threshold: 0.15  # Warn when penalized below this
+    entity_match_boosts:               # Graduated boost by entity match count
+      '1': 0.05                        # 1 entity match
+      '2': 0.08                        # 2 entity matches
+      '3+': 0.12                       # 3+ entity matches
+    keyword_overlap_thresholds:        # Score by keyword match count
+      '1': 0.35
+      '2': 0.55
+      '3': 0.75
+      '4': 0.90
+      '5+': 1.0
+    transcript_quality_high: 0.8       # Score above this = high quality
+    transcript_quality_medium: 0.5     # Score above this = medium quality
+    transcript_min_words_good: 50      # Word count for "good" quality
+    transcript_min_words_medium: 20    # Word count for "medium" quality
+    multimodal_default_weights:        # Default weights when multimodal_weights not set (sum to 1.0)
+      text_embedding: 0.40
+      keyword_overlap: 0.25
+      entity_match: 0.20
+      visual_description: 0.15
+    semantic_coherence_smooth_threshold: 0.6   # Above = smooth topic flow
+    semantic_coherence_abrupt_threshold: 0.3   # Below = abrupt transition
+    semantic_coherence_smooth_boost: 0.03      # Boost for smooth flow
+    semantic_coherence_abrupt_penalty: 0.05    # Penalty for abrupt transition
+    pool_normalization_reference_size: 50      # Reference pool size for normalization
+    pool_normalization_min_factor: 0.8         # Min normalization factor
+    pool_normalization_max_factor: 1.2         # Max normalization factor
+    pool_small_threshold: 10                   # Pool "small" below this
+    pool_large_threshold: 100                  # Pool "large" above this
+    pool_tight_margin_threshold: 0.05          # Top-2 score diff for "tight margin"
+
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
   # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas

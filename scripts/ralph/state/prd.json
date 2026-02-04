@@ -1,197 +1,187 @@
 {
-  "sprintNumber": 52,
-  "focusArea": "architecture",
-  "branchName": "ralph/sprint-52",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-52-001",
-      "title": "Generate sprint stories for architecture focus area",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'architecture' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'architecture'",
-        "Add stories US-52-002 through US-52-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-52-NNN to be unique across sprints",
-        "Mark this story (US-52-001) as passes: true when done"
-      ],
-      "notes": "Seed story completed. Generated 11 architecture stories (US-52-002 through US-52-012) based on user interview detailing 6 download_segments.py issues plus broader codebase architecture analysis. Several interview issues (cookies P0, impersonation P0, bot-detection P2) were already partially fixed in prior sprints (US-49-002, US-49-005); stories focus on remaining gaps and new architectural improvements."
+    "sprintNumber": 53,
+    "focusArea": "quality",
+    "branchName": "ralph/sprint-53",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
     },
-    {
-      "id": "US-52-002",
-      "title": "Add stall detection wrapper for yt-dlp Python API download calls",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Wrap ydl.download() call in download_segments.py with a concurrent.futures timeout mechanism",
-        "Timeout value is configurable via download config field segment_download_timeout (default 300 seconds)",
-        "On timeout, the download thread is interrupted and a DownloadError is raised with 'stall_timeout' category",
-        "Timeout errors feed into existing escalation/retry logic (not treated as network failure)",
-        "Unit test verifies timeout triggers after configured duration using mock ydl.download that blocks",
-        "Unit test verifies successful downloads within timeout are not interrupted"
-      ],
-      "notes": "Tier: P1 (hang prevention). Implementation was already in place from US-49-004: concurrent.futures.ThreadPoolExecutor wraps ydl.download() at line 782, config field is segment_stall_timeout (default 120s) in DownloadConfig. TimeoutError classified as 'timeout' category (not network/bot_detection). 14 unit tests added in tests/test_download_segments_stall_timeout.py covering: timeout triggers, successful download not interrupted, error classification, retry queue integration, network failure counter isolation, disabled mode, config defaults."
-    },
-    {
-      "id": "US-52-003",
-      "title": "Fix iterative_match serialization to extract video_file from MatchResult structure",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "In iterative_match.py else branch (around line 452), drill into match.primary_match.video_segment.source_file when available",
-        "Fall back to getattr(match, 'video_file', '') only when primary_match is None or has no video_segment",
-        "Serialized matches with MatchResult objects produce non-empty video_file values",
-        "Unit test creates MatchResult with primary_match.video_segment.source_file set and verifies serialization extracts it",
-        "Unit test verifies fallback path still works for plain Match objects with video_file attribute"
-      ],
-      "notes": "Tier: P1 (data loss on restore). Files: src/stages/iterative_match.py:450-466. The else branch at line 452 does getattr(match, 'video_file', '') which always returns '' for MatchResult objects. The if branch (line 420-449) correctly drills into primary_match.video_segment.source_file — the else branch must mirror this pattern. Match.from_dict() rejects entries with empty video_file, so all iterative matches are silently lost on checkpoint restore."
-    },
-    {
-      "id": "US-52-004",
-      "title": "Add network failure pattern tests for Python API exception format",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add test cases for _is_network_failure() with Python API exception message format (yt_dlp.utils.DownloadError wrapping)",
-        "Test covers 'Errno 11001' (DNS resolution failure) pattern matching",
-        "Test covers ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as network failure",
-        "Test covers 'Failed to resolve' hostname pattern",
-        "Verify _is_network_failure() returns True for all Python API formatted network errors",
-        "Add any missing patterns to _is_network_failure() if tests reveal gaps"
-      ],
-      "notes": "Added TestIsNetworkFailurePythonApiExceptionFormat class (17 tests) to test_error_classification.py. Added 'Failed to resolve' pattern to _NETWORK_FAILURE_PATTERNS (was missing — curl_cffi DNS failure). Tests cover: Errno 11001 in 4 wrapping formats, ffmpeg exit code 4294967158 in 3 formats, 'Failed to resolve' in 4 formats, plus 3 classify_error_category integration tests and 3 negative cases. All 78 tests pass."
-    },
-    {
-      "id": "US-52-005",
-      "title": "Extract download_segments ydl_opts construction into a builder function",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create a _build_ydl_opts() method on DownloadSegmentsStage that constructs the ydl_opts dict",
-        "Method accepts video_id, start, end, output_file, and download config as parameters",
-        "Cookie propagation logic (cookiesfrombrowser, cookiefile fallback) is encapsulated in the builder",
-        "Escalation application (_apply_escalation_to_ydl_opts) is called within the builder",
-        "Unit test verifies ydl_opts includes cookiesfrombrowser when config provides cookies_from_browser",
-        "Unit test verifies ydl_opts includes socket_timeout, retries, format string from config"
-      ],
-      "notes": "Extracted _build_ydl_opts() method encapsulating base options, cookie propagation, and escalation. Refactored both _download_segments main loop and _process_retry_queue to use the builder. 18 unit tests in test_build_ydl_opts.py (base options, cookies, escalation). All 114 existing download_segments tests pass."
-    },
-    {
-      "id": "US-52-006",
-      "title": "Unify error classification between download_segments and core downloader",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Extract _classify_error(), _is_network_failure(), _is_escalation_error() from download_segments.py into a shared module",
-        "Both download_segments.py and core.py import error classification from the shared location",
-        "Shared module lives at src/downloader/error_classification.py",
-        "Existing tests for error classification continue to pass after relocation",
-        "download_segments.py imports and delegates to the shared module (no duplicate logic)",
-        "core.py's ERROR_SEVERITY_PATTERNS are reconciled with _is_network_failure patterns"
-      ],
-      "notes": "Created src/downloader/error_classification.py with unified is_network_failure(), is_escalation_error(), classify_error_category(), classify_error_severity(), ERROR_SEVERITY_PATTERNS, SEVERITY_MULTIPLIERS, and threshold constants. download_segments.py imports _is_network_failure, _is_escalation_error, classify_error_category, NETWORK_FAILURE_THRESHOLD, BOT_DETECTION_ABORT_THRESHOLD from shared module. core.py imports ERROR_SEVERITY_PATTERNS, SEVERITY_MULTIPLIERS, classify_error_severity from shared module. All 365 relevant tests pass (7 pre-existing failures unrelated to this change)."
-    },
-    {
-      "id": "US-52-007",
-      "title": "Add bot-detection abort threshold to prevent futile download attempts",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "When consecutive_bot_detections exceeds bot_detection_abort_threshold (config, default 15), the stage aborts with a clear error message",
-        "Abort message includes the count of bot detections and recommends checking cookie config",
-        "Bot-detection errors do NOT reset the network failure abort counter (remove line 558-560 reset behavior if still present)",
-        "Unit test verifies stage aborts after threshold consecutive bot detections",
-        "Unit test verifies mixed bot-detection and success resets the counter",
-        "Bot-detection abort is logged as a stage-level failure with 'bot_detection_abort' category"
-      ],
-      "notes": "Fixed bot-detection abort threshold and added bot_detection_abort category. Commit 73e30bd. Originally marked as hard story due to DateTime null crash in ralph (not a story failure). Manually restored after fixing the ralph bug."
-    },
-    {
-      "id": "US-52-008",
-      "title": "Add integration test for download_segments checkpoint restore roundtrip",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Integration test creates MatchResult objects with primary_match.video_segment.source_file populated",
-        "Test serializes matches through the ITERATIVE_MATCH checkpoint save path",
-        "Test deserializes via Match.from_dict() and verifies video_file is preserved",
-        "Test verifies download_segments._collect_matched_segments() correctly extracts video_id from restored matches",
-        "Test covers both MatchResult (with primary_match) and plain Match (with video_file) structures",
-        "Test file placed at tests/test_download_segments_restore.py"
-      ],
-      "notes": "Tier: P1 (data integrity). 12 tests in tests/test_download_segments_restore.py covering: (1) MatchResult serialization preserves source_file as video_file, (2) plain Match serialization, (3) batch serialization, (4) Match.from_dict roundtrip for both MatchResult and plain Match, (5) restore_matches_from_dicts batch, (6) _collect_matched_segments extracts video_id from restored matches, (7) mixed match types, (8) empty video_file rejection, (9) timing preservation, (10) deduplication after roundtrip. All 12 tests pass."
-    },
-    {
-      "id": "US-52-009",
-      "title": "Add config validation for download segment settings at pipeline startup",
-      "priority": "low",
-      "passes": true,
-      "notes": "Tier: P2 (fail-fast diagnostics). Files: src/stages/download_segments.py (stage __init__ or run method), src/config/sections/download.py (cookies_from_browser field). Without cookies, every Python API download triggers bot-detection. This validation catches the misconfiguration early with a clear diagnostic message instead of letting the user discover it through N failed downloads. Warning-only because the user may intentionally rely on cookie_rotation or have cookies in another path.",
-      "acceptanceCriteria": [
-        "Pipeline startup validates download.cookies_from_browser is set when segment downloads are expected",
-        "Warning logged if cookies_from_browser is empty and no cookiefile/cookie_rotation is configured",
-        "Validation runs during DOWNLOAD_SEGMENTS stage init (not at pipeline-level to avoid false positives for --match-only)",
-        "Unit test verifies warning is logged when no cookie source is configured",
-        "Unit test verifies no warning when cookies_from_browser is set",
-        "Validation does not block execution (warning only, not error)"
-      ]
-    },
-    {
-      "id": "US-52-010",
-      "title": "Consolidate segment download stats tracking into a SegmentDownloadStats dataclass",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create SegmentDownloadStats dataclass with fields: succeeded, failed, cached, attempted, total, retry_count, segment_durations, total_bytes, error_categories, error_aggregator",
-        "Replace the inline stats dict in _download_segments() with the dataclass instance",
-        "Stats dataclass has increment_success(), increment_failure(category), increment_cached() methods",
-        "All stat access points in _download_segments and _print_progress updated to use the dataclass",
-        "Unit test verifies stat increment methods and field defaults",
-        "No behavioral change — purely structural refactor"
-      ],
-      "notes": "Tier: Refactor (type safety). Files: src/stages/download_segments.py:581-592 (stats dict), plus all references to stats['succeeded'] etc throughout the method. The current stats dict is initialized inline with 10+ keys and accessed via string keys throughout a 200+ line method. A dataclass provides IDE autocompletion, prevents typo bugs (stats['suceeded']), and makes the contract explicit."
-    },
-    {
-      "id": "US-52-011",
-      "title": "Add escalation tier distribution to stage completion metrics",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Stage completion metrics include a tier_distribution dict showing count of downloads at each escalation tier",
-        "Tier distribution is populated from escalation_mgr.keyword_states at end of _download_segments",
-        "StageMetrics.escalation_summary includes tier_distribution alongside existing fields",
-        "Tier distribution is persisted to checkpoint under stage_metrics.DOWNLOAD_SEGMENTS",
-        "Unit test verifies tier_distribution is correctly populated from mock escalation state",
-        "Unit test verifies tier_distribution appears in checkpoint after stage completion"
-      ],
-      "notes": "Added tier_distribution dict to escalation_summary, populated from escalation_mgr.keyword_states. 9 new tests in test_tier_distribution.py all pass."
-    },
-    {
-      "id": "US-52-012",
-      "title": "Add architecture focus area to ralph-config.json with relevant files and test patterns",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add 'architecture' entry to focusAreas array in ralph-config.json with category 'core'",
-        "Add 'architecture' entry to testPatterns with patterns covering download_segments, iterative_match, and error classification tests",
-        "Add 'architecture' entry to relevantFiles listing download_segments.py, iterative_match.py, error classification module, escalation_manager.py",
-        "Queue.json focusAreas entry for 'architecture' is consistent with the new config entry",
-        "Verify ralph-config.json is valid JSON after modification"
-      ],
-      "notes": "Added 'architecture' to ralph-config.json: (1) focusAreas array with id='architecture', category='core', description covering cross-cutting concerns. (2) testPatterns with patterns for download_segments, iterative_match, error_classification, escalation, and tier tests. (3) relevantFiles listing download_segments.py, iterative_match.py, error_classification.py, escalation_manager.py, circuit_breaker.py. (4) Added to focusAreaCategories.core.areas array. Queue.json already had 'architecture' entry — now consistent. JSON validated."
-    }
-  ]
+    "userStories": [
+        {
+            "id": "US-53-001",
+            "title": "Generate sprint stories for quality focus area",
+            "priority": "high",
+            "passes": true,
+            "notes": "Seed story completed. Generated 11 stories (US-53-002 through US-53-012) covering: scoring config extraction, confidence audit trail, embedding validation, match diversity metrics, network failure pattern accuracy, cookie propagation for Python API, stall detection config, global escalation state, iterative match serialization robustness, scoring threshold documentation, and pool normalization transparency. Stories derived from user interview (6 download_segments issues) plus codebase analysis of src/matching/ hardcoded thresholds and silent failures.",
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'quality'",
+                "Add stories US-53-002 through US-53-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-53-NNN to be unique across sprints",
+                "Mark this story (US-53-001) as passes: true when done"
+            ]
+        },
+        {
+            "id": "US-53-002",
+            "title": "Extract hardcoded scoring thresholds into MatchingScoringConfig dataclass",
+            "priority": "high",
+            "passes": true,
+            "notes": "Completed. Created MatchingScoringConfig dataclass with 20 configurable fields covering: confidence floor/warning, entity match boosts, keyword overlap thresholds, transcript quality thresholds, multimodal default weights, semantic coherence thresholds, and pool normalization constants. Wired into MatchingConfig with __post_init__ for nested dict-to-dataclass conversion. Updated scoring.py functions (apply_entity_match_boost, calculate_transcript_quality, compute_multimodal_score, calculate_keyword_overlap_score, compute_semantic_coherence, normalize_confidence_by_pool, MatchScoring class) to read from config with getattr() fallback. Added scoring section to config.yaml with commented defaults. All 1247 tests pass (1 pre-existing failure unrelated).",
+            "acceptanceCriteria": [
+                "Create MatchingScoringConfig dataclass in src/config/sections/matching.py with fields for: confidence_floor (default 0.05), low_confidence_warning_threshold (default 0.15), entity_match_boosts (dict with 1/2/3+ keys), keyword_overlap_thresholds (dict), transcript_quality_thresholds (high/medium), multimodal_default_weights (embedding/keyword/entity/visual)",
+                "Wire MatchingScoringConfig into the existing MatchingConfig dataclass with __post_init__ for nested dict-to-dataclass conversion",
+                "Update scoring.py to read thresholds from config instead of module-level constants, with getattr() fallback to current defaults",
+                "Add scoring section to config.yaml with commented defaults matching current hardcoded values",
+                "Verify python -m py_compile src/config/sections/matching.py and python -m py_compile src/matching/scoring.py both succeed"
+            ]
+        },
+        {
+            "id": "US-53-003",
+            "title": "Add confidence score audit trail to MatchResult",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: T2 (medium, touches scoring pipeline). Source files: src/matching/scoring.py (apply_all_adjustments around line 1677-1712 where penalties/boosts applied silently), src/matching/tiered_matcher.py (match_segment method where final score assembled), src/utils.py (MatchResult dataclass). Currently when a match confidence is 0.52, there's no way to tell which penalties/boosts contributed. The scoring chain applies timing penalty, topic penalty, broll boost, etc. but doesn't record what fired.",
+            "acceptanceCriteria": [
+                "Add confidence_breakdown field (list of dicts with keys: component, adjustment, reason) to MatchResult or as a separate dataclass",
+                "Modify apply_all_adjustments() in scoring.py to populate the breakdown list with each penalty/boost applied (name, delta, reason string)",
+                "Log confidence breakdown at DEBUG level when match finalized: e.g. 'confidence: 0.85 -> 0.75 (topic_penalty: -0.10, timing_penalty: -0.00)'",
+                "Ensure breakdown is serializable (dict/list) so it survives checkpoint JSON serialization",
+                "Add test that verifies breakdown list is populated when adjustments are applied"
+            ]
+        },
+        {
+            "id": "US-53-004",
+            "title": "Add embedding validation before matching starts",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: T1 (small, validation logic). Source files: src/matching/main.py (line 195 where embedding_search called without pre-validation), src/embeddings.py (lines 680, 727, 796 where embeddings computed/cached). When embedding API fails midway, some segments get None embeddings. Code continues with degraded quality but no clear indication. FAISS queries return garbage matches if embeddings have inconsistent dimensions or aren't normalized.",
+            "acceptanceCriteria": [
+                "Add validate_embedding_integrity() function in src/embeddings.py that checks: no None values, consistent dimensions across all embeddings, norms approximately 1.0 (unit vectors for cosine similarity)",
+                "Call validate_embedding_integrity() in src/matching/main.py before embedding search, log WARNING with count of invalid embeddings and skip those segments",
+                "Log the embedding cache hit/miss rate during the matching stage at INFO level",
+                "Handle the case where all embeddings are None gracefully (skip embedding-based matching, fall back to keyword-only)",
+                "Add test for validate_embedding_integrity() with mixed valid/None/wrong-dimension inputs"
+            ]
+        },
+        {
+            "id": "US-53-005",
+            "title": "Add match diversity metrics and source concentration warnings",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: T2 (medium, metrics + logging). Source files: src/matching/main.py (lines 420-443 where only V1 source concentration tracked), src/stages/match.py (stage output where metrics could be reported). Currently only V1 track source concentration is analyzed. No detection of temporal clustering, no V2-V6 diversity metrics, no warning when variety constraints get relaxed (line 232 logs debug only).",
+            "acceptanceCriteria": [
+                "Compute source concentration ratio for each track (V1-V8) as percentage of clips from the most-used source video",
+                "Log WARNING when any track has >60% of clips from a single source video",
+                "Detect and log temporal clustering: when 3+ consecutive segments use the same source video",
+                "Include diversity metrics in the stage completion log: unique sources per track, max concentration ratio, temporal cluster count",
+                "Add test that verifies diversity warnings fire when mock matches have >60% concentration from one source"
+            ]
+        },
+        {
+            "id": "US-53-006",
+            "title": "Harden _is_network_failure pattern matching for Python API error format",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: T1 (small, regex + tests). Source files: src/downloader/error_classification.py (where _is_network_failure patterns live after US-52-006 extraction), src/stages/download_segments.py (lines 536-557 where network failure abort logic uses these patterns). The Python API exception message format may differ from subprocess stderr. Specific patterns needed: 'Errno 11001' (DNS), ffmpeg exit code 0xFFFFFEC6 (-314 signed) from network loss, and 'Failed to resolve' patterns. Bot-detection errors (403, 'Sign in') currently reset the network counter instead of contributing to abort threshold.",
+            "acceptanceCriteria": [
+                "Add Python API error format patterns to _is_network_failure() in error_classification.py: 'Errno 11001', 'Failed to resolve', 'getaddrinfo failed', ffmpeg exit code patterns (4294967158, -314)",
+                "Add test cases for each new pattern in test_error_classification.py verifying they return True for network failures",
+                "Verify that existing subprocess-format patterns still match correctly (no regression)",
+                "Add test case for the ffmpeg unsigned exit code 4294967158 and its signed equivalent -314",
+                "Ensure the module compiles cleanly: python -m py_compile src/downloader/error_classification.py"
+            ]
+        },
+        {
+            "id": "US-53-007",
+            "title": "Add cookie propagation to download_segments Python API calls",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: T2 (medium, config + integration). Source files: src/stages/download_segments.py (the _build_ydl_opts method where ydl_opts assembled — US-52-005 builder), src/config/sections/download.py (download config dataclass), config.yaml (download section). The Python API in download_segments.py doesn't read ~/.config/yt-dlp/config, so it gets zero cookies. CLI works because it reads --cookies-from-browser firefox from that config. Need to inject cookiesfrombrowser into ydl_opts from download config. Check if _build_ydl_opts already handles this from the US-52-005 builder work.",
+            "acceptanceCriteria": [
+                "Verify _build_ydl_opts() in download_segments.py injects cookiesfrombrowser or cookiefile into ydl_opts from download config",
+                "If not present, add cookies_from_browser field to download config dataclass (default: ['firefox']) and inject ydl_opts['cookiesfrombrowser'] = config value",
+                "Add cookiefile fallback: if cookiesfrombrowser fails (no browser installed), fall back to a configured cookie file path",
+                "Add config.yaml entry under download section: cookies_from_browser with commented default ['firefox']",
+                "Add test that verifies _build_ydl_opts() output dict contains 'cookiesfrombrowser' key when config has cookies_from_browser set"
+            ]
+        },
+        {
+            "id": "US-53-008",
+            "title": "Make segment_stall_timeout and bot-detection thresholds configurable in config.yaml",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: T1 (small, config additions). Source files: src/stages/download_segments.py (lines 684-691 where _stall_timeout read with hardcoded fallback 120, lines 586-597 where bot thresholds read), src/config/sections/download.py (download config dataclass), src/downloader/error_classification.py (module-level NETWORK_FAILURE_THRESHOLD=3, BOT_DETECTION_ABORT_THRESHOLD). The stall timeout and bot-detection abort/floor thresholds are read from config with getattr fallback, but the actual config.yaml entries may not exist. This story ensures they're documented and present.",
+            "acceptanceCriteria": [
+                "Add segment_stall_timeout (default: 120), bot_detection_tier_floor_threshold (default: 5), bot_detection_abort_threshold (default: 15) fields to download config dataclass if not already present",
+                "Add these fields to config.yaml download section with comments explaining each threshold's purpose",
+                "Verify the fields are read correctly in download_segments.py _download_segments() method via getattr with matching defaults",
+                "Add network_failure_threshold (default: 3) to config if it's only a module-level constant",
+                "Verify python -m py_compile src/config/sections/download.py succeeds"
+            ]
+        },
+        {
+            "id": "US-53-009",
+            "title": "Log scoring component breakdown for low-confidence matches",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: T1 (small, logging additions). Source files: src/matching/scoring.py (lines 1044-1164 multimodal scoring where component scores silently clamped, lines 1110-1119 NaN/Inf handling, lines 587-616 low-confidence pattern analysis). When multimodal components fail (keyword_overlap=0, entity_match=0), the score drops to embedding-only without visibility. NaN→0.0 and Inf→1.0 conversions happen silently. The low-confidence pattern analyzer detects abstract content but doesn't correlate to which scoring penalties fired.",
+            "acceptanceCriteria": [
+                "Log at WARNING level when any multimodal component score is NaN or Inf (before clamping), including which component and the raw value",
+                "Log at DEBUG level the component breakdown for every scored match: embedding_similarity, keyword_overlap, entity_match, visual_similarity with their weights",
+                "Log at INFO level when multimodal scoring falls back to embedding-only mode (all non-embedding components are 0)",
+                "Add a summary log at end of matching stage: count of matches where multimodal was fully active vs embedding-only fallback",
+                "Add test that verifies NaN component triggers WARNING log using caplog fixture"
+            ]
+        },
+        {
+            "id": "US-53-010",
+            "title": "Improve iterative match serialization robustness for checkpoint restore",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: T1 (small, defensive coding). Source files: src/stages/iterative_match.py (lines 440-469 serialization, lines 458-468 drill-into fallback added by previous sprint). The else branch now has a drill-into fallback for MatchResult (US-52 work), but there's no validation that the restored data is actually usable. Match.from_dict() can still reject entries silently. This story adds validation logging so failed restores are visible.",
+            "acceptanceCriteria": [
+                "Add validation logging when serialized match has empty video_file after all fallback attempts — log WARNING with match index and available attributes",
+                "Add a summary log after serialization: 'Serialized N matches, M had empty video_file (skipped)' at INFO level",
+                "Add defensive None check on primary_match.video_segment.source_file (could be None even when video_segment exists)",
+                "Verify that checkpoint restore round-trip works: serialize matches, write to JSON, read back, deserialize — count should match",
+                "Add test with mock MatchResult where primary_match.video_segment.source_file is None to verify the fallback logs correctly"
+            ]
+        },
+        {
+            "id": "US-53-011",
+            "title": "Add confidence variance validation to prevent false certainty in adaptive threshold",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: T1 (small, validation + logging). Source files: src/matching/tiered_matcher.py (lines 243-254 where variance computed on top-5 scores only), src/matching/scoring.py (lines 62-72 where adaptive threshold reduced for low variance). If top-5 scores are nearly identical (e.g., all 0.85), variance=0 but code treats it as 'clear winner'. Adaptive threshold reduces for low variance (silently), potentially skipping LLM reranking for uncertain matches.",
+            "acceptanceCriteria": [
+                "Add minimum variance floor (0.02) — when computed variance < floor, treat as 'uncertain' rather than 'clear winner' for adaptive threshold decisions",
+                "Compute variance on top-10 candidates instead of top-5 when pool size >= 10, falling back to top-5 for smaller pools",
+                "Log at DEBUG level the variance computation: candidate count, computed variance, whether adaptive threshold adjustment applied",
+                "Add NaN/Inf guard on variance computation (statistics.stdev can raise on single-element lists)",
+                "Add test that verifies variance floor prevents adaptive threshold reduction when top-5 scores are within 0.01 of each other"
+            ]
+        },
+        {
+            "id": "US-53-012",
+            "title": "Add pool normalization transparency logging",
+            "priority": "low",
+            "passes": false,
+            "notes": "Tier: T1 (small, logging only). Source files: src/matching/scoring.py (lines 1803-1908 pool normalization, lines 1868-1880 small pool boost / large pool penalty logic). Pool normalization adjusts scores based on candidate pool size but the adjustment is opaque — reason strings show the factor but not why. Constants REFERENCE_SIZE=50, MIN_FACTOR=0.8, MAX_FACTOR=1.2, SMALL=10, LARGE=100 are hardcoded at lines 1479-1484.",
+            "acceptanceCriteria": [
+                "Log at DEBUG level for each segment: pool_size, top margin (score difference between 1st and 2nd candidate), normalization factor applied, and reason category (small_pool_boost / large_pool_penalty / no_adjustment)",
+                "Log at INFO level a summary after all segments normalized: count of segments receiving boost vs penalty vs no adjustment",
+                "Expose pool normalization constants (REFERENCE_SIZE, MIN_FACTOR, MAX_FACTOR, SMALL_POOL_THRESHOLD, LARGE_POOL_THRESHOLD) to the MatchingScoringConfig from US-53-002 if that story is complete, otherwise use getattr fallback with current defaults",
+                "Add test verifying pool normalization logs appear for a small pool (size=5) and a large pool (size=200) using caplog fixture"
+            ]
+        }
+    ]
 }

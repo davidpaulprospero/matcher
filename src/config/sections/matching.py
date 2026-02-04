@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Optional
 
 __all__ = [
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
     'ChapterDetectionConfig',
+    'MatchingScoringConfig',
     'MatchingConfig',
 ]
 
@@ -96,6 +97,70 @@ class ChapterDetectionConfig:
     min_chapter_confidence: float = 0.5  # Filter low-confidence chapters
     min_chapter_segments: int = 3  # Minimum segments per chapter
     max_chapters: int = 20  # Maximum chapters to detect
+
+
+@dataclass
+class MatchingScoringConfig:
+    """Scoring thresholds and weights for match confidence calculations.
+
+    Extracted from hardcoded constants in src/matching/scoring.py (US-53-002).
+    All fields have defaults matching the original hardcoded values.
+    """
+
+    # Confidence floor and warning (applied in MatchScoring.apply_all_adjustments)
+    confidence_floor: float = 0.05  # Minimum confidence after all penalties
+    low_confidence_warning_threshold: float = 0.15  # Warn when penalized below this
+
+    # Entity match boosts (graduated by match count)
+    entity_match_boosts: Dict[str, float] = field(default_factory=lambda: {
+        '1': 0.05,   # 1 entity match
+        '2': 0.08,   # 2 entity matches
+        '3+': 0.12,  # 3 or more entity matches
+    })
+
+    # Keyword overlap score thresholds (match count -> score)
+    keyword_overlap_thresholds: Dict[str, float] = field(default_factory=lambda: {
+        '1': 0.35,
+        '2': 0.55,
+        '3': 0.75,
+        '4': 0.90,
+        '5+': 1.0,
+    })
+
+    # Transcript quality thresholds
+    transcript_quality_high: float = 0.8   # Score above this = high quality
+    transcript_quality_medium: float = 0.5  # Score above this = medium quality
+    transcript_min_words_good: int = 50     # Word count for "good" quality
+    transcript_min_words_medium: int = 20   # Word count for "medium" quality
+
+    # Multimodal default weights (must sum to 1.0)
+    multimodal_default_weights: Dict[str, float] = field(default_factory=lambda: {
+        'text_embedding': 0.40,
+        'keyword_overlap': 0.25,
+        'entity_match': 0.20,
+        'visual_description': 0.15,
+    })
+
+    # Semantic coherence thresholds
+    semantic_coherence_smooth_threshold: float = 0.6  # Above this = smooth flow
+    semantic_coherence_abrupt_threshold: float = 0.3  # Below this = abrupt transition
+    semantic_coherence_smooth_boost: float = 0.03     # Boost for smooth flow
+    semantic_coherence_abrupt_penalty: float = 0.05   # Penalty for abrupt transition
+
+    # Pool normalization constants
+    pool_normalization_reference_size: int = 50   # Reference pool size
+    pool_normalization_min_factor: float = 0.8    # Min normalization factor
+    pool_normalization_max_factor: float = 1.2    # Max normalization factor
+    pool_small_threshold: int = 10                # Pool "small" below this
+    pool_large_threshold: int = 100               # Pool "large" above this
+    pool_tight_margin_threshold: float = 0.05     # Top-2 score diff for "tight margin"
+
+    def __post_init__(self):
+        # Convert dict keys to strings if loaded from YAML as ints
+        if isinstance(self.entity_match_boosts, dict):
+            self.entity_match_boosts = {str(k): v for k, v in self.entity_match_boosts.items()}
+        if isinstance(self.keyword_overlap_thresholds, dict):
+            self.keyword_overlap_thresholds = {str(k): v for k, v in self.keyword_overlap_thresholds.items()}
 
 
 @dataclass
@@ -300,6 +365,9 @@ class MatchingConfig:
     # Enhanced chapter detection
     chapter_detection: ChapterDetectionConfig = None
 
+    # Scoring thresholds (US-53-002)
+    scoring: MatchingScoringConfig = None
+
     def __post_init__(self):
         if self.location_matching is None:
             self.location_matching = LocationMatchingConfig()
@@ -310,3 +378,8 @@ class MatchingConfig:
             self.chapter_detection = ChapterDetectionConfig()
         elif isinstance(self.chapter_detection, dict):
             self.chapter_detection = ChapterDetectionConfig(**self.chapter_detection)
+
+        if self.scoring is None:
+            self.scoring = MatchingScoringConfig()
+        elif isinstance(self.scoring, dict):
+            self.scoring = MatchingScoringConfig(**self.scoring)
