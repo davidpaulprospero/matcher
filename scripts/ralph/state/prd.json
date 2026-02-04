@@ -76,8 +76,8 @@
             "id": "US-53-005",
             "title": "Add match diversity metrics and source concentration warnings",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T2 (medium, metrics + logging). Source files: src/matching/main.py (lines 420-443 where only V1 source concentration tracked), src/stages/match.py (stage output where metrics could be reported). Currently only V1 track source concentration is analyzed. No detection of temporal clustering, no V2-V6 diversity metrics, no warning when variety constraints get relaxed (line 232 logs debug only).",
+            "passes": true,
+            "notes": "Added TrackDiversityMetrics/DiversityReport to src/matching/metrics.py. Computes per-track (V1-V8) concentration ratio and temporal clustering. Warnings at >60% concentration and 3+ consecutive same-source. Integrated into match_all_segments dashboard and MatchStage checkpoint data. 32 tests in test_diversity_metrics.py.",
             "acceptanceCriteria": [
                 "Compute source concentration ratio for each track (V1-V8) as percentage of clips from the most-used source video",
                 "Log WARNING when any track has >60% of clips from a single source video",
@@ -90,8 +90,8 @@
             "id": "US-53-006",
             "title": "Harden _is_network_failure pattern matching for Python API error format",
             "priority": "high",
-            "passes": false,
-            "notes": "Tier: T1 (small, regex + tests). Source files: src/downloader/error_classification.py (where _is_network_failure patterns live after US-52-006 extraction), src/stages/download_segments.py (lines 536-557 where network failure abort logic uses these patterns). The Python API exception message format may differ from subprocess stderr. Specific patterns needed: 'Errno 11001' (DNS), ffmpeg exit code 0xFFFFFEC6 (-314 signed) from network loss, and 'Failed to resolve' patterns. Bot-detection errors (403, 'Sign in') currently reset the network counter instead of contributing to abort threshold.",
+            "passes": true,
+            "notes": "Completed. Most patterns (Errno 11001, Failed to resolve, getaddrinfo failed, unsigned ffmpeg 4294967158) were already present from US-52-004/US-52-006. Added signed ffmpeg exit code -314 to FFMPEG_NETWORK_EXIT_CODES tuple (was only unsigned 4294967158). Renamed FFMPEG_NETWORK_EXIT_CODE to FFMPEG_NETWORK_EXIT_CODES tuple. Added 3 new tests for signed -314 (basic, wrapped in DownloadError, classify_error_category integration). All 81 tests in test_error_classification.py pass with no regressions.",
             "acceptanceCriteria": [
                 "Add Python API error format patterns to _is_network_failure() in error_classification.py: 'Errno 11001', 'Failed to resolve', 'getaddrinfo failed', ffmpeg exit code patterns (4294967158, -314)",
                 "Add test cases for each new pattern in test_error_classification.py verifying they return True for network failures",
