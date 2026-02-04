@@ -976,5 +976,146 @@ class TestGapModeExtend:
         assert MAX_CLIP_EXTENSION_FACTOR == 2.0
 
 
+class TestVoiceoverDurationValidation:
+    """Test voiceover audio duration validation against SRT timeline."""
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
+    def test_warns_when_audio_shorter_than_srt(self, mock_windows_path, mock_duration, caplog):
+        """Test warning when actual VO audio (100s) is shorter than last SRT end (120s)."""
+        import logging
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 100.0  # Audio is 100s
+        caplog.set_level(logging.WARNING)
+
+        # Last segment ends at 120s — audio will be cut off
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=60.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            ),
+            MockMatchResult(
+                primary=MockMatch(file="video2.mp4", start=60.0, end=120.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+        config = MockConfig(output=MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        ))
+
+        timeline = create_timeline(matches, config, voiceover_path="vo.mp3")
+
+        assert "shorter than" in caplog.text
+        assert "cut off" in caplog.text
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
+    def test_info_when_excessive_trailing_silence(self, mock_windows_path, mock_duration, caplog):
+        """Test info log when trailing silence exceeds 30 seconds."""
+        import logging
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 200.0  # Audio is 200s
+        caplog.set_level(logging.INFO)
+
+        # Last segment ends at 100s — 100s of trailing silence
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=50.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            ),
+            MockMatchResult(
+                primary=MockMatch(file="video2.mp4", start=50.0, end=100.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+        config = MockConfig(output=MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        ))
+
+        timeline = create_timeline(matches, config, voiceover_path="vo.mp3")
+
+        assert "trailing" in caplog.text
+        assert "alignment issue" in caplog.text
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
+    def test_no_warning_when_durations_match(self, mock_windows_path, mock_duration, caplog):
+        """Test no warning when VO duration is close to SRT end."""
+        import logging
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 105.0  # Audio is 105s
+        caplog.set_level(logging.WARNING)
+
+        # Last segment ends at 100s — 5s trailing (under 30s threshold)
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=100.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+        config = MockConfig(output=MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        ))
+
+        timeline = create_timeline(matches, config, voiceover_path="vo.mp3")
+
+        # No warning or "shorter" messages
+        assert "shorter than" not in caplog.text
+        assert "trailing" not in caplog.text
+
+    @patch('src.otio.timeline._get_media_duration')
+    @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
+    def test_validation_respects_time_scale_factor(self, mock_windows_path, mock_duration, caplog):
+        """Test that validation uses scaled SRT end time, not raw."""
+        import logging
+
+        mock_windows_path.side_effect = lambda x: x
+        mock_duration.return_value = 100.0
+        caplog.set_level(logging.WARNING)
+
+        # Last segment ends at 80s raw, but with time_scale_factor=0 (auto),
+        # scaled = 100/80 * 80 = 100, so no cutoff warning expected
+        matches = [
+            MockMatchResult(
+                primary=MockMatch(file="video1.mp4", start=0.0, end=80.0),
+                alternatives=[],
+                secondaries=[],
+                strategies={}
+            )
+        ]
+        output_config = MockOutputConfig(
+            include_alternatives=False,
+            include_strategy_tracks=False
+        )
+        output_config.time_scale_factor = 0.0  # auto-calculate
+        config = MockConfig(output=output_config)
+
+        timeline = create_timeline(matches, config, voiceover_path="vo.mp3")
+
+        # Auto time_scale = 100/80 = 1.25, scaled end = 80*1.25 = 100
+        # actual=100 == scaled=100, no warning
+        assert "shorter than" not in caplog.text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
