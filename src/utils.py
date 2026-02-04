@@ -459,9 +459,12 @@ class Match:
     # Reuse tracking
     clip_reuse_count: int = 0
 
+    # Match type marker (e.g., 'gap' for gap matches created by create_gap_match)
+    match_type: str = ""
+
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict (handles numpy types)"""
-        return {
+        result = {
             'voiceover_segment': self.voiceover_segment.to_dict(),
             'video_segment': self.video_segment.to_dict(),
             'video_scene': self.video_scene.to_dict() if self.video_scene else None,
@@ -472,6 +475,9 @@ class Match:
             'embedding_similarity': float(self.embedding_similarity),  # Convert numpy float
             'clip_reuse_count': int(self.clip_reuse_count)
         }
+        if self.match_type:
+            result['match_type'] = self.match_type
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "Match":
@@ -484,7 +490,8 @@ class Match:
             is_keyword_match=bool(data.get('is_keyword_match', False)),
             is_visual_match=bool(data.get('is_visual_match', False)),
             embedding_similarity=float(data.get('embedding_similarity', 0.0)),
-            clip_reuse_count=int(data.get('clip_reuse_count', 0))
+            clip_reuse_count=int(data.get('clip_reuse_count', 0)),
+            match_type=data.get('match_type', '')
         )
 
 
