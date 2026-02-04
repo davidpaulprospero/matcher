@@ -123,6 +123,27 @@ $mutations = @(
             $config = $configJson | ConvertFrom-Json
             $config.stallDetection.storyCompletionEarlyExit.enabled -eq $true
         }
+    },
+    @{
+        Name = "M11: Remove exit code override (would cause false failures)"
+        Find = 'Overriding exit code'
+        Replace = 'REMOVED_OVERRIDE'
+        Target = "source"
+        Test = {
+            param($funcBody)
+            $funcBody -match 'Overriding exit code'
+        }
+    },
+    @{
+        Name = "M12: Override exit code to -1 instead of 0"
+        Find = '$exitCode = 0'
+        Replace = '$exitCode = -1'
+        Target = "source"
+        Test = {
+            param($funcBody)
+            $overrideBlock = [regex]::Match($funcBody, 'Overriding exit code[\s\S]{0,200}?\$exitCode\s*=\s*(\d+)').Groups[1].Value
+            $overrideBlock -eq '0'
+        }
     }
 )
 
