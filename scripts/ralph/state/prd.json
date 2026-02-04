@@ -1,7 +1,7 @@
 ﻿{
-    "sprintNumber":  57,
-    "focusArea":  "architecture",
-    "branchName":  "ralph/sprint-57",
+    "sprintNumber":  58,
+    "focusArea":  "download",
+    "branchName":  "ralph/sprint-58",
     "projectContext":  {
                            "sourceDir":  "src/",
                            "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,179 +11,179 @@
                        },
     "userStories":  [
                         {
-                            "id":  "US-57-001",
-                            "title":  "Generate sprint stories for architecture focus area",
+                            "id":  "US-58-001",
+                            "title":  "Generate sprint stories for download focus area",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027architecture\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027download\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027architecture\u0027",
-                                                       "Add stories US-57-002 through US-57-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027download\u0027",
+                                                       "Add stories US-58-002 through US-58-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-57-NNN to be unique across sprints",
-                                                       "Mark this story (US-57-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-58-NNN to be unique across sprints",
+                                                       "Mark this story (US-58-001) as passes: true when done"
                                                    ],
-                            "notes":  "Seed story. Generated 11 architecture stories (US-57-002 through US-57-012) based on user interview context (corrupted match data, version check, cookie validation) and codebase exploration of cross-cutting architectural concerns."
+                            "notes":  "Evidence gate: 5/11 criteria verified (45%). Minimum: 90%."
                         },
                         {
-                            "id":  "US-57-002",
-                            "title":  "Add batch-level diagnostics for corrupted match data during checkpoint restore",
+                            "id":  "US-58-002",
+                            "title":  "Add version field to download checkpoint schema",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "restore_matches_from_dicts() in src/state.py aggregates validation failures and emits a single summary log line: \u0027{n} of {total} match entries have empty source_file (likely all gap matches)\u0027 instead of individual ValueError per entry",
-                                                       "When \u003e50% of match entries fail validation, log a WARNING with actionable advice: \u0027Re-run MATCH stage with --match-only\u0027",
-                                                       "Validation errors are still collected individually but logged as DEBUG level, not ERROR",
-                                                       "Add a test that passes 100 match dicts with 80 having empty source_file and verifies the summary log message appears exactly once",
-                                                       "Add a test that passes match dicts with all valid source_file and verifies no summary warning is emitted"
+                                                       "DownloadCheckpoint dataclass in src/stages/download_segments.py has a `schema_version: int = 1` field",
+                                                       "The `from_dict` classmethod logs a warning when loaded checkpoint has a different schema_version than current",
+                                                       "The `to_dict` method includes schema_version in serialized output",
+                                                       "Test verifies that loading a checkpoint without schema_version defaults to 1 (backward compat)",
+                                                       "Test verifies that loading a checkpoint with mismatched schema_version logs a warning"
                                                    ],
-                            "notes":  "Implementation in src/state.py:160-218 (restore_matches_from_dicts). Tests in tests/test_match_serialization.py::TestBatchDiagnostics (4 tests). Individual errors logged at DEBUG, summary at WARNING, actionable advice when \u003e50% fail."
+                            "notes":  "Tier: S (small). DONE: Added schema_version: int = 1 to DownloadCheckpoint in src/downloader/checkpoint.py (not download_segments.py as story stated). from_dict defaults missing field to 1, warns on mismatch. to_dict uses asdict() which auto-includes. 5 new tests in test_downloader_checkpoint.py. All 41 tests pass."
                         },
                         {
-                            "id":  "US-57-003",
-                            "title":  "Centralize checkpoint version constant and fix false-positive version warning",
+                            "id":  "US-58-003",
+                            "title":  "Add initialization diagnostics to cookie rotator",
+                            "priority":  "medium",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "CookieRotator.__init__ logs a summary line: \u0027Cookie rotator: X/N cookies valid (Y invalid)\u0027 after validation",
+                                                       "CookieRotator has a `get_status()` method returning a dict with keys: total, valid, invalid, cooldown, exhausted",
+                                                       "When `continue_on_partial=True` and some cookies fail validation, the invalid count and reasons are included in the summary log",
+                                                       "Test verifies get_status() returns correct counts after init with mixed valid/invalid cookie files",
+                                                       "Test verifies the summary log message is emitted during __init__"
+                                                   ],
+                            "notes":  "Tier: S (small). DONE: Updated __init__ summary log to format 'Cookie rotator: X/N cookies valid (Y invalid)'. Added required keys (total, valid, invalid, cooldown, exhausted) to get_status() while preserving legacy keys. Invalid reasons logged when continue_on_partial=True. 5 new tests in TestInitDiagnostics class. All 43 tests pass."
+                        },
+                        {
+                            "id":  "US-58-004",
+                            "title":  "Validate retry configuration bounds in VideoDownloader init",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Define CURRENT_CHECKPOINT_VERSION = \u00272.0\u0027 as a module-level constant in src/checkpoint.py",
-                                                       "The checkpoint write path uses CURRENT_CHECKPOINT_VERSION instead of any hardcoded string when setting the version field",
-                                                       "The version validation check (around line 528) compares against CURRENT_CHECKPOINT_VERSION instead of hardcoded \u00271.0\u0027",
-                                                       "Add a test that creates a checkpoint with the current version and verifies no version warning is logged during validation",
-                                                       "Add a test that creates a checkpoint with version \u00271.0\u0027 and verifies a migration/upgrade notice is logged (not a false alarm)"
+                                                       "VideoDownloader.__init__ validates max_retries_per_video is in range [0, 20] and raises ValueError if not",
+                                                       "VideoDownloader.__init__ validates retry_backoff is in range [1.0, 10.0] and raises ValueError if not",
+                                                       "A warning is logged if total max backoff time (initial_delay * backoff^max_retries) exceeds 600 seconds",
+                                                       "Test verifies ValueError raised for negative max_retries_per_video",
+                                                       "Test verifies ValueError raised for retry_backoff below 1.0",
+                                                       "Test verifies warning logged when computed max backoff exceeds threshold"
                                                    ],
-                            "notes":  "Defined CURRENT_CHECKPOINT_VERSION = \u00272.0\u0027 in src/checkpoint.py. Updated CheckpointData default, migration path, and _validate_checkpoint_data to use the constant. Fixed test_checkpoint_coverage.py tests that had versions swapped. Added 4 new tests in TestCheckpointVersionConstant class covering: current version no warning, old version migration notice, default matches constant, save writes current version. All 303 checkpoint tests pass."
+                            "notes":  "Implemented: Added validation block in VideoDownloader.__init__ (core.py ~line 299) that checks max_retries in [0,20] and retry_backoff in [1.0,10.0], raising ValueError for out-of-bounds. Logs warning when sum of retry_delay*backoff^i exceeds 600s. 7 tests added to TestRetryConfigValidation in test_downloader_retry.py. All 28 tests pass."
                         },
                         {
-                            "id":  "US-57-004",
-                            "title":  "Add startup validation for cookies_from_browser PATH availability",
+                            "id":  "US-58-005",
+                            "title":  "Deduplicate escalation trigger regex from category definitions",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "The combined trigger regex in EscalationManager is built dynamically from _TRIGGER_CATEGORIES patterns rather than a separate hardcoded regex",
+                                                       "A startup assertion in __init__ verifies all patterns in _TRIGGER_CATEGORIES compile as valid regex",
+                                                       "The `_categorize_error` method uses _TRIGGER_CATEGORIES as the single source of truth",
+                                                       "Test verifies that all patterns from _TRIGGER_CATEGORIES match the combined regex",
+                                                       "Test verifies that invalid regex patterns in _TRIGGER_CATEGORIES raise an error at init time"
+                                                   ],
+                            "notes":  "Tier: M (medium). Source files: src/downloader/escalation_manager.py (lines 24-52 main regex, lines 54-68 _TRIGGER_CATEGORIES). Currently the main regex and category patterns are defined separately, meaning a 429 error can match both \u0027429\u0027 and \u0027rate.?limit\u0027 patterns. Building from a single source prevents drift and ensures mutual exclusion."
+                        },
+                        {
+                            "id":  "US-58-006",
+                            "title":  "Cap circuit breaker jitter to respect max_pause_seconds",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "The final pause duration after jitter application never exceeds max_pause_seconds",
+                                                       "Jitter is applied before the max_pause_seconds cap in the calculation pipeline",
+                                                       "Test verifies that with jitter_factor=0.5 and pause near max_pause_seconds, the result is capped at max_pause_seconds",
+                                                       "Test verifies that jitter still applies when pause is well below max_pause_seconds",
+                                                       "Existing circuit breaker tests continue to pass"
+                                                   ],
+                            "notes":  "Tier: S (small). Source files: src/downloader/circuit_breaker.py (lines 265 _get_effective_pause_seconds caps before jitter, lines 269-286 _apply_jitter adds after). Currently jitter can push the total pause over max_pause_seconds by up to (jitter_factor * 100)%. Fix: apply cap after jitter, or apply jitter before cap in _get_effective_pause_seconds."
+                        },
+                        {
+                            "id":  "US-58-007",
+                            "title":  "Clean up cooldown dict entries for removed cookies",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "CookieRotator._remove_invalid_cookie also removes the entry from _failed_cookies dict if present",
+                                                       "CookieRotator._remove_invalid_cookie also removes the entry from _cooldown_until dict if present",
+                                                       "Test verifies that after a cookie is marked failed then removed, _failed_cookies no longer contains that path",
+                                                       "Test verifies that repeated fail+remove cycles do not grow the _failed_cookies dict unboundedly",
+                                                       "Existing cookie rotator tests continue to pass"
+                                                   ],
+                            "notes":  "Tier: S (small). Source files: src/downloader/cookie_rotator.py (lines 232-250 mark_failed, _remove_invalid_cookie). Currently when a failed cookie is removed from the active list, its cooldown timestamp remains in _failed_cookies dict. This is a memory leak: dict grows without bound if cookies keep failing and being removed. Fix is a 2-line cleanup in _remove_invalid_cookie."
+                        },
+                        {
+                            "id":  "US-58-008",
+                            "title":  "Add batch-level diagnostics to match data restore",
                             "priority":  "high",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "When download config has cookies_from_browser set, validate at pipeline startup (before any stage runs) that the specified browser executable is findable via shutil.which or platform-appropriate lookup",
-                                                       "On validation failure, log a clear WARNING: \u0027cookies_from_browser is set to \"{browser}\" but it is not found on PATH. Tier 3 cookie extraction will fail. Set download.cookies_path instead or install {browser}.\u0027",
-                                                       "Validation does NOT block pipeline startup — it is a warning, not an error (pipeline can still work without Tier 3)",
-                                                       "Add a test that mocks shutil.which to return None for the configured browser and verifies the warning is emitted",
-                                                       "Add a test that mocks shutil.which to return a path and verifies no warning is emitted"
+                                                       "When match restore encounters multiple entries with empty source_file, a single summary warning is logged: \u0027{N} match entries have empty source_file (likely all gap matches)\u0027",
+                                                       "Individual ValueError exceptions for empty source_file are suppressed when batch count exceeds 10",
+                                                       "The summary includes a recommendation: \u0027Re-run MATCH stage with --match-only\u0027",
+                                                       "Test verifies that restoring 100 entries with empty source_file produces one summary log, not 100 individual errors",
+                                                       "Test verifies that restoring entries with other invalid fields (e.g., non-string video_file) still raise individual errors"
                                                    ],
-                            "notes":  "Evidence gate: 3/5 criteria verified (60%). Minimum: 90%."
+                            "notes":  "Tier: M (medium). Source files: src/state.py (lines 125-127 restore validation), src/stages/match.py (lines 182-183 serialization). The interview notes describe 566 entries with empty source_file generating 566 individual ValueErrors. This overwhelms logs and obscures the root cause. Fix: collect empty-source_file errors, emit batch summary, keep individual errors for other validation failures."
                         },
                         {
-                            "id":  "US-57-005",
-                            "title":  "Extract create_gap_match factory function to eliminate scattered gap match creation",
-                            "priority":  "medium",
-                            "passes":  true,
+                            "id":  "US-58-009",
+                            "title":  "Validate cookies_from_browser PATH availability at startup",
+                            "priority":  "high",
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Create a create_gap_match(vo_segment, reason: str) -\u003e Match function in src/matching/tiered_matcher.py that encapsulates gap match construction with voiceover_segment=vo_segment, video_segment=vo_segment, confidence=0.0",
-                                                       "All gap match creation sites in tiered_matcher.py (at least 3 locations around lines 606, 639, 646) use the factory function instead of inline Match() construction",
-                                                       "The factory function sets a is_gap_match=True flag or match_type=\u0027gap\u0027 attribute on the returned Match for downstream identification",
-                                                       "Add a test that verifies create_gap_match returns a Match with confidence=0.0 and the gap marker attribute",
-                                                       "Add a test that verifies the gap match\u0027s video_segment is the same object as voiceover_segment (self-reference pattern)"
+                                                       "During download subsystem initialization, if cookies_from_browser is set, shutil.which() checks the browser is on PATH",
+                                                       "If the browser is not found, a clear warning is logged: \u0027cookies_from_browser is set to {browser} but it is not found on PATH. Cookie extraction will fail at Tier 3. Set cookies_path instead.\u0027",
+                                                       "The warning is emitted once at startup, not on every download attempt",
+                                                       "Test verifies warning is logged when cookies_from_browser is set to a non-existent browser",
+                                                       "Test verifies no warning when cookies_from_browser is set to an available browser"
                                                    ],
-                            "notes":  "Added create_gap_match() factory in tiered_matcher.py:76, match_type=gap field on Match dataclass in utils.py:463, replaced 2 inline gap match sites, 7 tests in test_create_gap_match.py all pass. Serialization roundtrip supported via to_dict/from_dict."
+                            "notes":  "Tier: S (small). Source files: src/downloader/core.py (VideoDownloader.__init__ or check_dependencies), src/config/sections/download.py (cookies_from_browser field). The interview notes specifically call out Firefox not being on PATH causing Tier 3 failures. A startup check prevents silent failures hours into a pipeline run. Use shutil.which() which is already imported in the codebase."
                         },
                         {
-                            "id":  "US-57-006",
-                            "title":  "Extract match serialization logic into shared MatchSerializer utility",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Create a MatchSerializer class or module-level function serialize_match_to_dict(match) in src/matching/ that extracts the common serialization logic from src/stages/match.py lines 171-217",
-                                                       "Both MATCH and ITERATIVE_MATCH stage checkpoint serialization paths use the shared serializer instead of duplicated inline logic",
-                                                       "The serializer handles both primary_match (MatchResult) and direct video_segment (Match) formats via a single code path",
-                                                       "Add a test that serializes a Match with a valid video_segment and verifies source_file, video_start, video_end are present in the output dict",
-                                                       "Add a test that serializes a gap match (empty source_file) and verifies the serializer does not raise — returns the dict with empty source_file"
-                                                   ],
-                            "notes":  "Created src/matching/serialization.py with _extract_match_core(), serialize_match_for_match_stage(), serialize_match_for_iterative_stage(), and is_empty_source(). Both MATCH and ITERATIVE_MATCH stages now import and use the shared serializer. Handles MatchResult (primary_match path), direct Match (video_segment path), and flat match (video_file path) via single _extract_match_core. 8 new tests in TestSharedMatchSerializer class, all 61 serialization tests pass."
-                        },
-                        {
-                            "id":  "US-57-007",
-                            "title":  "Split download_segments main loop into focused sub-methods",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "The main download loop in src/stages/download_segments.py (lines 540-897) is refactored into sub-methods: _prepare_download_context(), _check_preconditions(), _execute_download(), _handle_result()",
-                                                       "Each sub-method is no longer than 80 lines",
-                                                       "The main loop body calls the sub-methods sequentially and reads as a high-level narrative of the download process",
-                                                       "All existing tests in tests/test_download_segment*.py continue to pass without modification",
-                                                       "Add at least one test for _check_preconditions() that verifies circuit breaker open state returns a skip reason"
-                                                   ],
-                            "notes":  "All sub-methods implemented: _prepare_download_context (47 lines), _check_preconditions (45 lines), _execute_download (78 lines), _handle_result (54 lines). Main _download_segments loop (76 lines) calls them sequentially. All 72 existing tests pass. TestCheckPreconditionsUnit added with 3 tests including circuit breaker open state skip reason verification."
-                        },
-                        {
-                            "id":  "US-57-008",
-                            "title":  "Extract error pattern categories in error classification module",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Restructure NETWORK_FAILURE_PATTERNS and similar pattern tuples in src/downloader/error_classification.py (lines 22-40) into a categorized dict: ERROR_PATTERNS = {\u0027dns\u0027: [...], \u0027tcp\u0027: [...], \u0027tls\u0027: [...], \u0027http\u0027: [...]}",
-                                                       "classify_error_severity() uses the categorized structure and includes the error sub-category in its return value or log output",
-                                                       "The flat tuple interface is preserved as a computed property or module-level constant derived from the categorized dict for backward compatibility",
-                                                       "Add a test that verifies \u0027getaddrinfo failed\u0027 is classified under the \u0027dns\u0027 sub-category",
-                                                       "Add a test that verifies \u0027HTTP Error 403\u0027 is classified under the \u0027http\u0027 sub-category",
-                                                       "Add a test that verifies the flattened pattern tuple contains all patterns from all categories"
-                                                   ],
-                            "notes":  "Implemented: ERROR_PATTERNS dict with dns/tcp/tls/http/ffmpeg sub-categories. classify_network_subcategory() returns sub-category. classify_error_severity() logs sub-category via logger.debug. NETWORK_FAILURE_PATTERNS flat tuple derived for backward compat. NETWORK_ERROR_PATTERNS alias preserved. 164 tests pass including 22 new tests for sub-category classification."
-                        },
-                        {
-                            "id":  "US-57-009",
-                            "title":  "Extract circuit breaker pause calculation into composable strategy",
+                            "id":  "US-58-010",
+                            "title":  "Document and extract timeout precedence constants in download core",
                             "priority":  "low",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Extract _get_effective_pause_seconds() logic in src/downloader/circuit_breaker.py (lines 160-223) into separate methods: _base_pause(), _escalation_adjusted_pause(), _budget_adjusted_pause()",
-                                                       "Extract _cap_pause_duration(pause: float) -\u003e float method used by both _get_effective_pause_seconds and _apply_jitter to eliminate duplicated capping logic (lines 225-270)",
-                                                       "The combined pause calculation produces identical results to the current implementation for all code paths",
-                                                       "Add a test that verifies pause capping is consistent between the effective pause and jitter paths (same max_pause applied)",
-                                                       "Add a test that verifies escalation tier increases the pause duration proportionally"
+                                                       "The _run_download_cmd method has a docstring explaining the timeout selection precedence: (1) timeout_override param, (2) tier-specific download_timeouts, (3) config default, (4) adaptive multiplier",
+                                                       "The 1.5x stall-to-max timeout multiplier at line ~2067-2068 is extracted to a named constant STALL_TO_MAX_TIMEOUT_RATIO with explanatory comment",
+                                                       "The named constant is defined at module level or in DownloadConfig",
+                                                       "Test verifies STALL_TO_MAX_TIMEOUT_RATIO is used (not a magic number) by checking the constant exists and is referenced"
                                                    ],
-                            "notes":  "Implemented: Extracted _base_pause(), _escalation_adjusted_pause(), _budget_adjusted_pause(), _cap_pause_duration() from _get_effective_pause_seconds(). _apply_jitter now uses shared _cap_pause_duration(). 6 new tests added (3 capping consistency, 3 escalation proportional). All 182 existing circuit breaker tests pass (10 pre-existing failures unrelated)."
+                            "notes":  "Tier: S (small). Source files: src/downloader/core.py (lines 1996-2006 _run_download_cmd timeout logic, lines 2067-2068 magic 1.5x multiplier). Currently timeout logic has three sources of truth plus an adaptive multiplier with no documentation of precedence. The 1.5x multiplier relationship between stall timeout and max timeout is unexplained."
                         },
                         {
-                            "id":  "US-57-010",
-                            "title":  "Add STAGE_FIELD_MAP auto-generation from CheckpointData dataclass",
-                            "priority":  "low",
-                            "passes":  true,
+                            "id":  "US-58-011",
+                            "title":  "Add per-keyword strategy exhaustion tracking to rate limit budget",
+                            "priority":  "medium",
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Replace the manually-maintained STAGE_FIELD_MAP dict in src/checkpoint.py (lines 42-50) with an auto-generated mapping derived from CheckpointData dataclass field annotations or a decorator",
-                                                       "The auto-generation mechanism maps stage names (e.g., \u0027ANALYZE\u0027) to their corresponding CheckpointData field names (e.g., \u0027analyze\u0027) using a consistent naming convention",
-                                                       "Add a validation check at module load time that asserts every entry in STAGE_ORDER has a corresponding field in CheckpointData, raising ImportError if not",
-                                                       "Add a test that verifies STAGE_FIELD_MAP contains entries for all stages in STAGE_ORDER",
-                                                       "Add a test that verifies adding a stage to STAGE_ORDER without a corresponding CheckpointData field raises an error"
+                                                       "RateLimitBudget has a `keywords_exhausted_strategies` dict tracking which keywords have exhausted which strategies (cookies, vpn, impersonation)",
+                                                       "When a keyword exhausts cookie rotations, subsequent calls to should_attempt_strategy(\u0027cookies\u0027, keyword) return False for that keyword",
+                                                       "Other keywords are not affected by one keyword\u0027s exhaustion",
+                                                       "Test verifies that keyword A exhausting cookies does not block keyword B from trying cookies",
+                                                       "Test verifies that per-keyword exhaustion persists across retry attempts for the same keyword",
+                                                       "Existing rate limit budget tests continue to pass"
                                                    ],
-                            "notes":  "Evidence gate: 4/5 criteria verified (80%). Minimum: 90%."
+                            "notes":  "Tier: M (medium). Source files: src/downloader/rate_limit_budget.py (RateLimitBudget class), src/downloader/core.py (lines 449-485 _share_budget_across_keywords). Currently when one keyword exhausts cookie rotations, subsequent keywords also skip cookies even though the rotator might work for different search terms. Keywords processed earlier unfairly consume more budget."
                         },
                         {
-                            "id":  "US-57-011",
-                            "title":  "Extract magic number constants from state restoration and matching",
+                            "id":  "US-58-012",
+                            "title":  "Enrich download subprocess error context with command metadata",
                             "priority":  "low",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Extract DEFAULT_MATCH_DURATION_SECONDS = 10.0 constant from the hardcoded fallback in src/state.py line 146 (video_end = video_start + 10.0)",
-                                                       "Extract DEFAULT_GAP_CONFIDENCE = 0.0 constant used in gap match creation in src/matching/tiered_matcher.py",
-                                                       "All usage sites reference the named constants instead of inline numeric literals",
-                                                       "Add a test that verifies restore_matches_from_dicts uses DEFAULT_MATCH_DURATION_SECONDS when video_end is missing from match data",
-                                                       "Each constant has a docstring or inline comment explaining when the fallback triggers"
+                                                       "When a yt-dlp subprocess fails, the error log includes: (1) which call site triggered it (keyword search, ID download, audio, segment, caption), (2) the current escalation tier, (3) whether impersonation was active",
+                                                       "The call site identifier is passed as a `context` parameter to _run_download_cmd",
+                                                       "Error classification in error_classification.py receives the context metadata for enriched error categorization",
+                                                       "Test verifies that error logs from different call sites include the correct context identifier",
+                                                       "Test verifies that the context parameter is optional for backward compatibility"
                                                    ],
-                            "notes":  "Tier: Low priority cleanup. Source files: src/state.py (line 146 for 10.0 fallback), src/matching/tiered_matcher.py (lines 606-613 for 0.0 confidence). Magic numbers scattered across restoration and matching logic make it unclear what the defaults represent and where they came from. Named constants document intent and make future changes safer."
-                        },
-                        {
-                            "id":  "US-57-012",
-                            "title":  "Split pipeline config validation into schema validation and runtime environment checks",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Split _validate_config() in src/pipeline.py (lines 136-183) into two methods: _validate_config_schema() (pure config checks, no I/O) and _validate_runtime_environment() (filesystem/PATH checks)",
-                                                       "_validate_config_schema() can be called without any filesystem access and validates required fields, type constraints, and value ranges",
-                                                       "_validate_runtime_environment() checks cache_dir writability, browser availability, and other I/O-dependent preconditions",
-                                                       "Both methods return List[str] of validation errors, and the caller combines them",
-                                                       "Add a test that calls _validate_config_schema() with an invalid config and verifies errors are returned without touching the filesystem"
-                                                   ],
-                            "notes":  "Split _validate_config() into _validate_config_schema() (pure config checks, no I/O) and _validate_runtime_environment() (filesystem/PATH checks). Both return List[str]. Added 12 tests in test_pipeline_config_schema_validation.py including a test that verifies no filesystem access occurs during schema validation."
+                            "notes":  "Tier: M (medium). Source files: src/downloader/core.py (_run_download_cmd at ~line 1996, 8 call sites listed in prompt.md), src/downloader/error_classification.py. Currently when a subprocess fails, the error log doesn\u0027t indicate which of the 8 call sites triggered it. Adding context helps diagnose whether failures are keyword-search-specific, download-specific, or caption-specific. The context parameter should be optional with default None."
                         }
                     ]
 }
