@@ -106,7 +106,7 @@
             "id": "US-50-007",
             "title": "Expand _is_network_failure() patterns to cover Python API exception format and Windows DNS errors",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "_is_network_failure() in src/stages/download_segments.py matches Python API DownloadError messages containing 'Errno 11001' (Windows DNS resolution failure)",
                 "_is_network_failure() matches the unsigned ffmpeg exit code 4294967158 (0xFFFFFEC6, signed -314) as a network failure",
@@ -114,7 +114,7 @@
                 "A unit test for each new pattern verifies _is_network_failure() returns True",
                 "A unit test verifies existing patterns (connection refused, timeout) still match after changes"
             ],
-            "notes": "Tier: P2 coverage. Source file: src/stages/download_segments.py, _NETWORK_FAILURE_PATTERNS regex (lines 33-43), _is_network_failure() (lines 49-68). The subprocess-based detection works on stderr strings, but the Python API wraps errors in DownloadError with different formatting. Test with actual Python API error messages from logs to ensure pattern matching works."
+            "notes": "Pre-implemented in US-49-006. All patterns already in _NETWORK_FAILURE_PATTERNS (Errno 11001, URLError, ConnectionResetError, ffmpeg exit code 4294967158). 16 tests in TestIsNetworkFailurePythonApiFormat + 1 in TestNetworkFailureCircuitBreaker all pass. No code changes needed."
         },
         {
             "id": "US-50-008",
