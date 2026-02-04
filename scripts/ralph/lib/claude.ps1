@@ -833,7 +833,7 @@ function Resolve-ClaudeResult {
         $gitStats = Get-GitDiffStats
 
         # Diff quality scoring
-        $diffOutput = git diff HEAD~1 2>$null
+        $diffOutput = git diff HEAD~1 -- ":(exclude)scripts/ralph/state/" ":(exclude)scripts/ralph/session/" ":(exclude)scripts/ralph/archive/" 2>$null
         $diffQuality = Get-DiffQualityScore -DiffOutput $diffOutput
         if ($diffQuality.warnings.Count -gt 0) {
             foreach ($warn in $diffQuality.warnings) {
