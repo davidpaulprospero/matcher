@@ -49,7 +49,7 @@
             "id": "US-52-003",
             "title": "Fix iterative_match serialization to extract video_file from MatchResult structure",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In iterative_match.py else branch (around line 452), drill into match.primary_match.video_segment.source_file when available",
                 "Fall back to getattr(match, 'video_file', '') only when primary_match is None or has no video_segment",

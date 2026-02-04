@@ -455,6 +455,18 @@ class IterativeMatchStage(Stage):
                         video_end = getattr(match, 'video_end', 0.0)
                         confidence = getattr(match, 'confidence', 0.0)
 
+                        # Drill into primary_match.video_segment if available
+                        # (MatchResult that reached else branch unexpectedly)
+                        if not video_file:
+                            pm = getattr(match, 'primary_match', None)
+                            if pm is not None:
+                                vs = getattr(pm, 'video_segment', None)
+                                if vs is not None:
+                                    video_file = getattr(vs, 'source_file', '')
+                                    video_start = getattr(vs, 'start_time', video_start)
+                                    video_end = getattr(vs, 'end_time', video_end)
+                                confidence = getattr(pm, 'confidence', confidence)
+
                         if not video_file:
                             logger.warning(
                                 f"Match {i} serialized with empty video_file "
