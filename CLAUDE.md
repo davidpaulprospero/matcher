@@ -394,6 +394,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-04 | Fix: Ralph queue not advancing — TrueAutoLoop and AdaptiveOvernightLoop missing `Update-QueueProgress` after sprint completion, causing infinite re-sprints on same focus area |
 | 2026-02-04 | Fix: Ralph early exit code override — `taskkill /T /F` produces exit code 1, causing false "story failed" → FAST-FAIL abort; now overrides to 0 when `storyCompletionDetected` is true |
 | 2026-02-04 | Feat: Ralph story completion early exit — when prd.json shows `passes:true`, kill Claude after 15s grace period instead of waiting for stall timeout (was up to 45min for quality focus area) |
 | 2026-02-04 | Fix: Bot-abort tests use `stats.field` attribute access (not `stats['field']`) after `SegmentDownloadStats` dataclass migration |
