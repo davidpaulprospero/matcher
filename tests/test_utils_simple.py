@@ -1192,5 +1192,238 @@ Valid subtitle
         assert len(segments) >= 0
 
 
+@pytest.mark.fast
+class TestMatchResultRoundTrip:
+    """Test MatchResult serialization round-trip (to_dict/from_dict)."""
+
+    def _make_voiceover_segment(self):
+        return SRTSegment(
+            index=1, start_time=0.0, end_time=5.0,
+            text="Voiceover text about nature",
+            source_file="", keywords=["nature", "wildlife"]
+        )
+
+    def _make_video_segment(self, source_file="video_abc123.mp4"):
+        return SRTSegment(
+            index=1, start_time=10.0, end_time=20.0,
+            text="Video transcript about animals",
+            source_file=source_file,
+            keywords=["animals"], topics=["wildlife"]
+        )
+
+    def _make_scene(self):
+        return SceneInfo(
+            video_path="/test/video.mp4", scene_index=0,
+            start_time=10.0, end_time=20.0,
+            description="Wildlife scene", visual_keywords=["animal", "grass"]
+        )
+
+    def _make_match(self, confidence=0.85, source_file="video_abc123.mp4"):
+        return Match(
+            voiceover_segment=self._make_voiceover_segment(),
+            video_segment=self._make_video_segment(source_file),
+            video_scene=self._make_scene(),
+            confidence=confidence,
+            reasoning="Good keyword match",
+            is_keyword_match=True,
+            is_visual_match=False,
+            embedding_similarity=0.78,
+            clip_reuse_count=1
+        )
+
+    def _make_full_match_result(self):
+        """Create a fully populated MatchResult with all nested types."""
+        primary = self._make_match(confidence=0.92, source_file="primary_vid.mp4")
+
+        alt1 = AlternativeMatch(
+            video_segment=self._make_video_segment("alt1_vid.mp4"),
+            video_scene=self._make_scene(),
+            confidence=0.80, reasoning="Alternative 1",
+            diversity_score=0.6
+        )
+        alt2 = AlternativeMatch(
+            video_segment=self._make_video_segment("alt2_vid.mp4"),
+            video_scene=None, confidence=0.75,
+            reasoning="Alternative 2", diversity_score=0.4
+        )
+
+        secondary = AlternativeMatch(
+            video_segment=self._make_video_segment("sec_vid.mp4"),
+            video_scene=self._make_scene(),
+            confidence=0.70, reasoning="Secondary match",
+            diversity_score=0.9
+        )
+
+        strat = StrategyMatch(
+            video_segment=self._make_video_segment("strat_vid.mp4"),
+            video_scene=None, confidence=0.65,
+            reasoning="Embedding diversity pick",
+            strategy="embedding_diversity"
+        )
+
+        return MatchResult(
+            primary_match=primary,
+            alternatives=[alt1, alt2],
+            secondary_matches=[secondary],
+            strategy_matches=[strat],
+            has_gap=False, gap_reason="",
+            confidence_variance=0.12,
+            matched_keywords=["nature", "wildlife"],
+            confidence_breakdown=[
+                {"component": "embedding", "adjustment": 0.1, "reason": "high similarity"}
+            ]
+        )
+
+    @pytest.mark.fast
+    def test_full_round_trip_preserves_all_fields(self):
+        """MatchResult.to_dict() -> from_dict() preserves all top-level fields."""
+        original = self._make_full_match_result()
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        # Top-level scalars
+        assert restored.has_gap == original.has_gap
+        assert restored.gap_reason == original.gap_reason
+        assert restored.confidence_variance == pytest.approx(original.confidence_variance)
+        assert restored.matched_keywords == original.matched_keywords
+        assert restored.confidence_breakdown == original.confidence_breakdown
+
+        # Primary match
+        assert restored.primary_match.confidence == pytest.approx(original.primary_match.confidence)
+        assert restored.primary_match.reasoning == original.primary_match.reasoning
+        assert restored.primary_match.is_keyword_match == original.primary_match.is_keyword_match
+        assert restored.primary_match.is_visual_match == original.primary_match.is_visual_match
+        assert restored.primary_match.embedding_similarity == pytest.approx(original.primary_match.embedding_similarity)
+        assert restored.primary_match.clip_reuse_count == original.primary_match.clip_reuse_count
+
+        # Collection sizes
+        assert len(restored.alternatives) == 2
+        assert len(restored.secondary_matches) == 1
+        assert len(restored.strategy_matches) == 1
+
+    @pytest.mark.fast
+    def test_empty_collections_round_trip(self):
+        """MatchResult with empty alternatives/secondary/strategy serializes correctly."""
+        primary = self._make_match()
+        original = MatchResult(
+            primary_match=primary,
+            alternatives=[],
+            secondary_matches=[],
+            strategy_matches=[],
+            has_gap=True,
+            gap_reason="No good match",
+            confidence_variance=0.0,
+            matched_keywords=[]
+        )
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        assert restored.alternatives == []
+        assert restored.secondary_matches == []
+        assert restored.strategy_matches == []
+        assert restored.has_gap is True
+        assert restored.gap_reason == "No good match"
+        assert restored.matched_keywords == []
+
+    @pytest.mark.fast
+    def test_nested_video_segment_source_file_preserved(self):
+        """primary_match.video_segment.source_file survives serialization."""
+        source_file = "special_video_XyZ12345.mp4"
+        primary = self._make_match(source_file=source_file)
+        original = MatchResult(primary_match=primary)
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        assert restored.primary_match.video_segment.source_file == source_file
+
+    @pytest.mark.fast
+    def test_alternative_match_diversity_score_round_trip(self):
+        """AlternativeMatch.diversity_score survives round-trip."""
+        alt = AlternativeMatch(
+            video_segment=self._make_video_segment("alt.mp4"),
+            video_scene=self._make_scene(),
+            confidence=0.82,
+            reasoning="Diverse source",
+            diversity_score=0.95
+        )
+
+        original = MatchResult(
+            primary_match=self._make_match(),
+            alternatives=[alt],
+            secondary_matches=[alt]
+        )
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        assert restored.alternatives[0].diversity_score == pytest.approx(0.95)
+        assert restored.alternatives[0].confidence == pytest.approx(0.82)
+        assert restored.alternatives[0].reasoning == "Diverse source"
+        assert restored.alternatives[0].video_segment.source_file == "alt.mp4"
+
+        assert restored.secondary_matches[0].diversity_score == pytest.approx(0.95)
+
+    @pytest.mark.fast
+    def test_strategy_match_strategy_field_round_trip(self):
+        """StrategyMatch.strategy value survives round-trip."""
+        strategies = ["visual_first", "different_source", "keyword_only", "embedding_diversity"]
+
+        for strategy_name in strategies:
+            strat = StrategyMatch(
+                video_segment=self._make_video_segment(f"{strategy_name}.mp4"),
+                video_scene=None,
+                confidence=0.70,
+                reasoning=f"Picked by {strategy_name}",
+                strategy=strategy_name
+            )
+
+            original = MatchResult(
+                primary_match=self._make_match(),
+                strategy_matches=[strat]
+            )
+
+            data = original.to_dict()
+            restored = MatchResult.from_dict(data)
+
+            assert restored.strategy_matches[0].strategy == strategy_name
+            assert restored.strategy_matches[0].confidence == pytest.approx(0.70)
+            assert restored.strategy_matches[0].video_segment.source_file == f"{strategy_name}.mp4"
+
+    @pytest.mark.fast
+    def test_json_serializable(self):
+        """to_dict() output is JSON-serializable (no numpy, no custom objects)."""
+        original = self._make_full_match_result()
+
+        data = original.to_dict()
+
+        # Should not raise
+        json_str = json.dumps(data)
+        assert isinstance(json_str, str)
+
+        # Round-trip through JSON
+        parsed = json.loads(json_str)
+        restored = MatchResult.from_dict(parsed)
+
+        assert restored.primary_match.confidence == pytest.approx(original.primary_match.confidence)
+        assert len(restored.alternatives) == len(original.alternatives)
+
+    @pytest.mark.fast
+    def test_voiceover_segment_preserved_in_primary(self):
+        """Voiceover segment fields survive round-trip through primary_match."""
+        original = self._make_full_match_result()
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        vo = restored.primary_match.voiceover_segment
+        assert vo.text == "Voiceover text about nature"
+        assert vo.start_time == 0.0
+        assert vo.end_time == 5.0
+        assert vo.keywords == ["nature", "wildlife"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
