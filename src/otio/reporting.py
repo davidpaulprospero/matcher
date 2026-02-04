@@ -177,26 +177,12 @@ def generate_segment_map(
         Path to the generated segment map JSON file
     """
     # Parse timeline start timecode to frame offset
-    tc_parts = timeline_start_tc.split(':')
-    start_frame_offset = (
-        int(tc_parts[0]) * 3600 +
-        int(tc_parts[1]) * 60 +
-        int(tc_parts[2])
-    ) * int(frame_rate) + int(tc_parts[3])
+    from .utils import parse_timecode_to_frames, frames_to_tc as _frames_to_tc
+    start_frame_offset = parse_timecode_to_frames(timeline_start_tc, frame_rate)
 
     def frames_to_tc(frames: int) -> str:
         """Convert frame count to timecode string."""
-        total_frames = frames + start_frame_offset
-        fps = int(frame_rate)
-
-        frame_in_sec = total_frames % fps
-        total_secs = total_frames // fps
-        secs = total_secs % 60
-        total_mins = total_secs // 60
-        mins = total_mins % 60
-        hours = total_mins // 60
-
-        return f"{hours:02d}:{mins:02d}:{secs:02d}:{frame_in_sec:02d}"
+        return _frames_to_tc(frames, fps=frame_rate, start_frame_offset=start_frame_offset)
 
     segments = []
 

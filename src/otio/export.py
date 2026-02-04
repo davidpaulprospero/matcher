@@ -318,7 +318,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
     Returns:
         Path to the generated EDL file
     """
-    from .utils import get_confidence_color
+    from .utils import get_confidence_color, parse_timecode_to_frames, frames_to_tc as _frames_to_tc
 
     # Determine timecode separator based on drop_frame mode
     # Drop-frame uses semicolon between seconds and frames (HH:MM:SS;FF)
@@ -326,28 +326,11 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
     tc_separator = ';' if drop_frame else ':'
 
     # Parse timeline start timecode to frame offset
-    # Handle both colon and semicolon separators in input
-    tc_parts = timeline_start_tc.replace(';', ':').split(':')
-    start_frame_offset = (
-        int(tc_parts[0]) * 3600 +
-        int(tc_parts[1]) * 60 +
-        int(tc_parts[2])
-    ) * int(frame_rate) + int(tc_parts[3])
+    start_frame_offset = parse_timecode_to_frames(timeline_start_tc, frame_rate)
 
     def frames_to_tc(frames: int) -> str:
         """Convert frame count to timecode string."""
-        total_frames = frames + start_frame_offset
-        fps = int(frame_rate)
-
-        frame_in_sec = total_frames % fps
-        total_secs = total_frames // fps
-        secs = total_secs % 60
-        total_mins = total_secs // 60
-        mins = total_mins % 60
-        hours = total_mins // 60
-
-        # Use semicolon before frames for drop-frame, colon for non-drop-frame
-        return f"{hours:02d}:{mins:02d}:{secs:02d}{tc_separator}{frame_in_sec:02d}"
+        return _frames_to_tc(frames, fps=frame_rate, start_frame_offset=start_frame_offset, separator=tc_separator)
 
     # DaVinci Resolve EDL color mapping
     color_to_edl = {

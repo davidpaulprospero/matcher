@@ -25,6 +25,7 @@ from src.otio.utils import (
     get_segment_file_offset,
     is_segment_file,
     frames_to_tc,
+    parse_timecode_to_frames,
     get_confidence_color,
     create_clip_with_timewarp,
     _validate_clip_metadata,
@@ -361,6 +362,63 @@ class TestTimecodeConversion:
         # Both should be 1 second
         assert tc1 is not None
         assert tc2 is not None
+
+    @pytest.mark.fast
+    def test_frames_to_tc_zero_frames(self):
+        """Test 0 frames returns all-zero timecode."""
+        assert frames_to_tc(0, fps=30.0) == "00:00:00:00"
+        assert frames_to_tc(0, fps=24.0) == "00:00:00:00"
+
+    @pytest.mark.fast
+    def test_frames_to_tc_with_start_offset(self):
+        """Test frames_to_tc with start_frame_offset (e.g. 01:00:00:00)."""
+        # 01:00:00:00 at 30fps = 108000 frames offset
+        offset = parse_timecode_to_frames("01:00:00:00", 30.0)
+        assert offset == 108000
+        tc = frames_to_tc(0, fps=30.0, start_frame_offset=offset)
+        assert tc == "01:00:00:00"
+        # 90 frames = 3 seconds at 30fps
+        tc = frames_to_tc(90, fps=30.0, start_frame_offset=offset)
+        assert tc == "01:00:03:00"
+
+    @pytest.mark.fast
+    def test_frames_to_tc_drop_frame_separator(self):
+        """Test drop-frame separator (semicolon before frames)."""
+        tc = frames_to_tc(15, fps=30.0, separator=';')
+        assert tc == "00:00:00;15"
+        # With offset
+        offset = parse_timecode_to_frames("01:00:00;00", 30.0)
+        tc = frames_to_tc(0, fps=30.0, start_frame_offset=offset, separator=';')
+        assert tc == "01:00:00;00"
+
+    @pytest.mark.fast
+    def test_frames_to_tc_29_97_rounded(self):
+        """Test with 29.97fps (rounded to int 29 internally)."""
+        # 29.97 -> int(29.97) = 29 fps for frame counting
+        tc = frames_to_tc(29, fps=29.97)
+        # 29 frames at int(29.97)=29 fps = 1 second, 0 frames
+        assert tc == "00:00:01:00"
+
+    @pytest.mark.fast
+    def test_parse_timecode_to_frames_standard(self):
+        """Test parsing standard non-drop-frame timecode."""
+        # 01:00:00:00 at 30fps = (1*3600 + 0*60 + 0) * 30 + 0 = 108000
+        assert parse_timecode_to_frames("01:00:00:00", 30.0) == 108000
+        # 00:01:00:00 at 30fps = 60 * 30 = 1800
+        assert parse_timecode_to_frames("00:01:00:00", 30.0) == 1800
+
+    @pytest.mark.fast
+    def test_parse_timecode_to_frames_drop_frame(self):
+        """Test parsing drop-frame timecode with semicolon separator."""
+        # Should handle ';' same as ':'
+        assert parse_timecode_to_frames("01:00:00;00", 30.0) == 108000
+        assert parse_timecode_to_frames("00:00:01;15", 30.0) == 45
+
+    @pytest.mark.fast
+    def test_parse_timecode_to_frames_with_frame_remainder(self):
+        """Test parsing timecode with non-zero frame component."""
+        # 00:00:01:15 at 30fps = 1*30 + 15 = 45
+        assert parse_timecode_to_frames("00:00:01:15", 30.0) == 45
 
 
 class TestConfidenceColor:
