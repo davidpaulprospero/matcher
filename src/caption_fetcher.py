@@ -55,6 +55,7 @@ from src.caption.enums import (
 )
 from src.caption.error_handling import categorize_caption_error
 from src.caption.retry_budget import BatchRetryBudget
+from src.caption_timeout_manager import FormatTimeoutPolicy
 
 if TYPE_CHECKING:
     from .config import Config
@@ -2325,6 +2326,21 @@ class CaptionFetcher:
             except AttributeError:
                 pass
 
+        # Per-format timeout policy (US-59-005)
+        # Uses FormatTimeoutPolicy for format-specific timeouts with progressive fallback
+        format_timeouts = None
+        if config:
+            try:
+                caption_first = getattr(config.download, 'caption_first', None)
+                if caption_first:
+                    format_timeouts = getattr(caption_first, 'format_timeouts', None)
+            except AttributeError:
+                pass
+        if format_timeouts and isinstance(format_timeouts, dict):
+            self._format_timeout_policy = FormatTimeoutPolicy(timeouts=format_timeouts)
+        else:
+            self._format_timeout_policy = FormatTimeoutPolicy()
+
         # Pre-flight language cache: video_id -> List[AvailableLanguage] (US-59-002)
         # Avoids redundant --list-subs calls when _fetch_subtitle is called
         # multiple times for the same video (e.g., different language/auto combos)
@@ -4100,10 +4116,11 @@ class CaptionFetcher:
 
         # Try each format in preference order (US-006)
         last_error = None
-        for fmt in self._preferred_formats:
+        for fallback_level, fmt in enumerate(self._preferred_formats):
             try:
                 result = self._fetch_subtitle_with_format(
-                    video_url, video_id, temp_dir, language, auto_generated, fmt
+                    video_url, video_id, temp_dir, language, auto_generated, fmt,
+                    fallback_level=fallback_level
                 )
                 if result and result.segments:
                     logger.info(
@@ -4142,7 +4159,8 @@ class CaptionFetcher:
         temp_dir: Path,
         language: str,
         auto_generated: bool,
-        subtitle_format: str
+        subtitle_format: str,
+        fallback_level: int = 0
     ) -> Optional[CaptionResult]:
         """Fetch subtitle in a specific format.
 
@@ -4153,6 +4171,8 @@ class CaptionFetcher:
             language: Language code.
             auto_generated: Whether to fetch auto-generated captions.
             subtitle_format: Format to request (json3, vtt, srt).
+            fallback_level: Position in format preference order (0=first, 1=second, etc.)
+                           Used by FormatTimeoutPolicy for progressive timeout reduction.
 
         Returns:
             CaptionResult if successful, None if no captions for this format.
@@ -4181,11 +4201,20 @@ class CaptionFetcher:
         cmd.extend(self._get_cookies_args())
 
         try:
+            # Use per-format timeout from FormatTimeoutPolicy (US-59-005)
+            format_timeout = self._format_timeout_policy.get_timeout(
+                subtitle_format, fallback_level
+            )
+            logger.debug(
+                f"Caption {video_id}: {subtitle_format} timeout={format_timeout:.1f}s "
+                f"(fallback_level={fallback_level})"
+            )
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self._timeout,
+                timeout=format_timeout,
                 encoding='utf-8',
                 errors='replace'
             )
