@@ -41,16 +41,9 @@ LEGACY_STAGES = [
     "TRANSCRIBE", "SCENE_DETECTION", "BROLL_MATCH"
 ]
 
-# Mapping from stage name to CheckpointData field name
-# OUTPUT has no checkpoint field (it's the terminal stage)
-STAGE_FIELD_MAP = {
-    "ANALYZE": "analyze",
-    "VIDEO_SEARCH": "video_search",
-    "CAPTION": "caption",
-    "MATCH": "match",
-    "ITERATIVE_MATCH": "iterative_match",
-    "DOWNLOAD_SEGMENTS": "download_segments",
-}
+# STAGE_FIELD_MAP is auto-generated after CheckpointData is defined (see below).
+# Terminal stages with no checkpoint data field:
+_STAGE_FIELD_MAP_TERMINAL = {"OUTPUT"}
 
 
 @dataclass
@@ -148,6 +141,51 @@ class CheckpointData:
                 )
 
         return warnings
+
+
+def _build_stage_field_map():
+    """Auto-generate STAGE_FIELD_MAP from STAGE_ORDER and CheckpointData fields.
+
+    Convention: stage name lowercased (e.g., "VIDEO_SEARCH" -> "video_search").
+    Terminal stages listed in _STAGE_FIELD_MAP_TERMINAL are excluded.
+    """
+    field_map = {}
+    checkpoint_fields = set(CheckpointData.__dataclass_fields__.keys())
+    for stage in STAGE_ORDER:
+        if stage in _STAGE_FIELD_MAP_TERMINAL:
+            continue
+        field_name = stage.lower()
+        if field_name in checkpoint_fields:
+            field_map[stage] = field_name
+    return field_map
+
+
+def _validate_stage_field_map():
+    """Validate every non-terminal STAGE_ORDER entry has a CheckpointData field.
+
+    Raises ImportError at module load time if a stage is missing its field,
+    preventing silent drift between STAGE_ORDER and CheckpointData.
+    """
+    checkpoint_fields = set(CheckpointData.__dataclass_fields__.keys())
+    missing = []
+    for stage in STAGE_ORDER:
+        if stage in _STAGE_FIELD_MAP_TERMINAL:
+            continue
+        field_name = stage.lower()
+        if field_name not in checkpoint_fields:
+            missing.append(f"{stage} -> {field_name}")
+    if missing:
+        raise ImportError(
+            f"STAGE_ORDER / CheckpointData drift detected. "
+            f"The following stages have no corresponding CheckpointData field: "
+            f"{', '.join(missing)}. "
+            f"Add a Dict[str, Any] field named after the stage (lowercased) to CheckpointData."
+        )
+
+
+# Build and validate at module load time
+STAGE_FIELD_MAP = _build_stage_field_map()
+_validate_stage_field_map()
 
 
 class CheckpointManager:
