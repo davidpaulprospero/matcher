@@ -201,6 +201,127 @@ def _validate_entity_images(entity_images: Dict) -> Dict:
     return validated
 
 
+def validate_media_paths(
+    matches: List['MatchResult'],
+    downloaded_segments: Optional[List] = None,
+) -> Dict[str, object]:
+    """
+    Pre-flight validation of all media paths before timeline assembly.
+
+    Scans every match (primary, alternatives, secondary, strategy) and checks
+    each source file for common issues. Returns a summary dict so callers can
+    log a concise table instead of discovering problems mid-build.
+
+    Args:
+        matches: List of MatchResult from matching stage.
+        downloaded_segments: Optional segment list from audio-first download.
+
+    Returns:
+        Dict with keys:
+            valid (int): count of valid paths
+            audio_only (list[str]): segment indices with audio-only files
+            missing (list[str]): segment indices with missing files
+            problematic_path (list[str]): segment indices with problematic paths
+            non_media (list[str]): segment indices with non-media files
+            total (int): total paths checked
+    """
+    # Build segment file lookup from downloaded_segments
+    segment_files: Dict[str, str] = {}
+    if downloaded_segments:
+        for seg in downloaded_segments:
+            vid_id = seg.video_id
+            if vid_id not in segment_files:
+                segment_files[vid_id] = seg.file
+
+    summary: Dict[str, object] = {
+        'valid': 0,
+        'audio_only': [],
+        'missing': [],
+        'problematic_path': [],
+        'non_media': [],
+        'total': 0,
+    }
+
+    def _resolve_source(source_file: str) -> str:
+        """Resolve source file through downloaded segments if available."""
+        if segment_files and source_file and ('/' not in source_file and '\\' not in source_file):
+            # Looks like a video ID — check segment lookup
+            return segment_files.get(source_file, source_file)
+        return source_file
+
+    def _check(source_file: str, segment_label: str) -> None:
+        """Check a single source file and update summary."""
+        resolved = _resolve_source(source_file)
+        summary['total'] += 1
+
+        if not resolved:
+            summary['missing'].append(segment_label)
+            return
+
+        if _is_audio_only(resolved):
+            summary['audio_only'].append(segment_label)
+        elif _has_problematic_path(resolved):
+            summary['problematic_path'].append(segment_label)
+        elif _is_non_media(resolved):
+            summary['non_media'].append(segment_label)
+        elif _is_missing_file(resolved):
+            summary['missing'].append(segment_label)
+        else:
+            summary['valid'] += 1
+
+    for idx, match_result in enumerate(matches):
+        label = f"S{idx:03d}"
+
+        # Primary match
+        _check(match_result.primary_match.video_segment.source_file, label)
+
+        # Alternatives (V2-V3)
+        for alt_i, alt in enumerate(match_result.alternatives):
+            _check(alt.video_segment.source_file, f"{label}-alt{alt_i}")
+
+        # Secondary matches (V4-V6)
+        for sec_i, sec in enumerate(match_result.secondary_matches):
+            _check(sec.video_segment.source_file, f"{label}-sec{sec_i}")
+
+        # Strategy matches (V7+)
+        if match_result.strategy_matches:
+            for strat_i, strat in enumerate(match_result.strategy_matches):
+                _check(strat.video_segment.source_file, f"{label}-strat{strat_i}")
+
+    return summary
+
+
+def _log_media_validation_summary(summary: Dict[str, object]) -> None:
+    """Log a human-readable table of the pre-flight media validation results."""
+    valid = summary['valid']
+    audio_only = summary['audio_only']
+    missing = summary['missing']
+    problematic = summary['problematic_path']
+    non_media = summary['non_media']
+    total = summary['total']
+
+    issue_parts = []
+    if audio_only:
+        ids = ','.join(audio_only[:10])
+        suffix = f'... +{len(audio_only) - 10} more' if len(audio_only) > 10 else ''
+        issue_parts.append(f"{len(audio_only)} audio-only ({ids}{suffix})")
+    if missing:
+        ids = ','.join(missing[:10])
+        suffix = f'... +{len(missing) - 10} more' if len(missing) > 10 else ''
+        issue_parts.append(f"{len(missing)} missing ({ids}{suffix})")
+    if problematic:
+        ids = ','.join(problematic[:10])
+        suffix = f'... +{len(problematic) - 10} more' if len(problematic) > 10 else ''
+        issue_parts.append(f"{len(problematic)} problematic-path ({ids}{suffix})")
+    if non_media:
+        ids = ','.join(non_media[:10])
+        suffix = f'... +{len(non_media) - 10} more' if len(non_media) > 10 else ''
+        issue_parts.append(f"{len(non_media)} non-media ({ids}{suffix})")
+
+    issues_str = ', '.join(issue_parts) if issue_parts else 'none'
+    logger.info(f"Media Validation: {valid} valid, {issues_str} (total: {total})")
+
+
 def create_timeline(
     matches: List['MatchResult'],
     config: 'Config',
@@ -256,6 +377,12 @@ def create_timeline(
                 'start': seg.original_start,
                 'end': seg.original_end
             })
+
+    # =========================================================================
+    # PRE-FLIGHT MEDIA VALIDATION
+    # =========================================================================
+    media_summary = validate_media_paths(matches, downloaded_segments)
+    _log_media_validation_summary(media_summary)
 
     # =========================================================================
     # MEDIA PATH NORMALIZATION
