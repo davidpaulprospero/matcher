@@ -17,45 +17,13 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 import opentimelineio as otio
 
-from .utils import create_clip_with_timewarp, get_confidence_color, get_segment_file_offset
-
-# Audio-only extensions that cause DaVinci to hang
-AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
-
-
-def _is_audio_only(file_path: str) -> bool:
-    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
-    ext = Path(file_path).suffix.lower()
-    return ext in AUDIO_ONLY_EXTS
-
-
-def _has_problematic_path(file_path: str) -> bool:
-    """
-    Check if file path has characters that cause DaVinci OTIO import to hang.
-
-    Problematic patterns:
-    - Corrupted unicode (replacement char U+FFFD shown as �)
-    - Non-ASCII characters in paths (accents, special chars)
-    - Extended unicode that Windows/DaVinci can't handle
-    """
-    try:
-        # Check for replacement character (corrupted unicode)
-        if '\ufffd' in file_path or '�' in file_path:
-            return True
-
-        # Check if path is pure ASCII - non-ASCII can cause issues
-        # Allow common safe chars but flag exotic unicode
-        for char in file_path:
-            code = ord(char)
-            # Allow ASCII printable (32-126), forward/back slash, colon
-            if code > 127:
-                # Non-ASCII character found
-                return True
-
-        return False
-    except Exception:
-        # If we can't even check the path, it's problematic
-        return True
+from .utils import (
+    create_clip_with_timewarp,
+    get_confidence_color,
+    get_segment_file_offset,
+    _is_audio_only,
+    _has_problematic_path,
+)
 
 
 if TYPE_CHECKING:

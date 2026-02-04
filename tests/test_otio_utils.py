@@ -29,7 +29,11 @@ from src.otio.utils import (
     create_clip_with_timewarp,
     _validate_clip_metadata,
     validate_timeline_clips,
-    ClipValidationError
+    ClipValidationError,
+    _has_problematic_path,
+    _is_audio_only,
+    AUDIO_ONLY_EXTS,
+    NON_MEDIA_EXTS,
 )
 import numpy as np
 
@@ -944,6 +948,96 @@ class TestTimelineClipsValidation:
         clip_names = [e.clip_name for e in errors]
         assert "Invalid1" in clip_names
         assert "Invalid2" in clip_names
+
+
+class TestHasProblematicPath:
+    """Test _has_problematic_path handles unicode, replacement chars, and ASCII-only paths."""
+
+    @pytest.mark.fast
+    def test_ascii_path_is_not_problematic(self):
+        """Test that a standard ASCII path is not flagged."""
+        assert _has_problematic_path("C:/Videos/test_video.mp4") is False
+
+    @pytest.mark.fast
+    def test_ascii_path_with_spaces(self):
+        """Test that ASCII path with spaces is not flagged."""
+        assert _has_problematic_path("C:/My Videos/test video.mp4") is False
+
+    @pytest.mark.fast
+    def test_replacement_char_ufffd(self):
+        """Test that unicode replacement character U+FFFD is detected."""
+        assert _has_problematic_path("C:/Videos/test\ufffdvideo.mp4") is True
+
+    @pytest.mark.fast
+    def test_non_ascii_accented_chars(self):
+        """Test that accented characters are detected as problematic."""
+        assert _has_problematic_path("C:/Videos/caf\u00e9_video.mp4") is True
+
+    @pytest.mark.fast
+    def test_non_ascii_cjk_chars(self):
+        """Test that CJK characters are detected as problematic."""
+        assert _has_problematic_path("C:/Videos/\u4e2d\u6587_video.mp4") is True
+
+    @pytest.mark.fast
+    def test_emoji_in_path(self):
+        """Test that emoji characters are detected as problematic."""
+        assert _has_problematic_path("C:/Videos/\U0001f600_video.mp4") is True
+
+    @pytest.mark.fast
+    def test_empty_path(self):
+        """Test that an empty path is not flagged (no problematic chars)."""
+        assert _has_problematic_path("") is False
+
+    @pytest.mark.fast
+    def test_windows_backslash_path(self):
+        """Test that Windows backslash paths are not flagged."""
+        assert _has_problematic_path("C:\\Users\\test\\video.mp4") is False
+
+    @pytest.mark.fast
+    def test_mixed_replacement_and_ascii(self):
+        """Test path with replacement char mixed into otherwise ASCII path."""
+        assert _has_problematic_path("E:/Edit Job/client/stock/\ufffd_invalid.mp4") is True
+
+
+class TestIsAudioOnly:
+    """Test _is_audio_only detects audio-only file extensions."""
+
+    @pytest.mark.fast
+    def test_mp3_is_audio(self):
+        assert _is_audio_only("video.mp3") is True
+
+    @pytest.mark.fast
+    def test_wav_is_audio(self):
+        assert _is_audio_only("audio.wav") is True
+
+    @pytest.mark.fast
+    def test_mp4_is_not_audio(self):
+        assert _is_audio_only("video.mp4") is False
+
+    @pytest.mark.fast
+    def test_mkv_is_not_audio(self):
+        assert _is_audio_only("video.mkv") is False
+
+    @pytest.mark.fast
+    def test_case_insensitive(self):
+        assert _is_audio_only("audio.MP3") is True
+        assert _is_audio_only("audio.Flac") is True
+
+
+class TestSharedConstants:
+    """Test that shared constants are accessible from utils."""
+
+    @pytest.mark.fast
+    def test_audio_only_exts_contains_mp3(self):
+        assert '.mp3' in AUDIO_ONLY_EXTS
+
+    @pytest.mark.fast
+    def test_non_media_exts_contains_srt(self):
+        assert '.srt' in NON_MEDIA_EXTS
+
+    @pytest.mark.fast
+    def test_non_media_exts_contains_json(self):
+        assert '.json' in NON_MEDIA_EXTS
 
 
 if __name__ == "__main__":
