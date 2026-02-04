@@ -157,8 +157,111 @@ class CircuitBreaker:
         """
         self._budget = budget
 
+    def _base_pause(self) -> float:
+        """Get the base pause duration from config.
+
+        Returns:
+            Base pause duration in seconds.
+        """
+        return self.config.pause_seconds
+
+    def _escalation_adjusted_pause(self, pause: float) -> float:
+        """Apply escalation-based extension to a pause duration.
+
+        Doubles the pause when >50% of active keywords are at Tier 3.
+
+        Args:
+            pause: Current pause duration in seconds.
+
+        Returns:
+            Adjusted pause duration (2x if escalation threshold met, unchanged otherwise).
+        """
+        if self._escalation_manager is None:
+            return pause
+
+        try:
+            from .types import EscalationTier
+
+            total_keywords = self._escalation_manager.get_active_keyword_count()
+            if total_keywords > 0:
+                tier3_keywords = self._escalation_manager.get_keywords_at_tier(
+                    EscalationTier.FULL_BYPASS
+                )
+                tier3_pct = len(tier3_keywords) / total_keywords
+
+                if tier3_pct > 0.5:
+                    adjusted = pause * 2.0
+                    logger.info(
+                        f"Circuit breaker extended: {tier3_pct:.0%} keywords at Tier 3 "
+                        f"(pause {self._base_pause():.0f}s -> {adjusted:.0f}s)"
+                    )
+                    return adjusted
+        except ImportError:
+            pass
+
+        return pause
+
+    def _budget_adjusted_pause(self, pause: float) -> float:
+        """Apply budget-aware extension to a pause duration.
+
+        Extensions:
+        - Fully exhausted budget: 2.5x
+        - Nearly exhausted (>80%): 1.5x
+        - Healthy: no change
+
+        Args:
+            pause: Current pause duration in seconds.
+
+        Returns:
+            Adjusted pause duration based on budget state.
+        """
+        if self._budget is None:
+            return pause
+
+        original_pause = pause
+        if self._budget.is_exhausted():
+            pause = pause * 2.5
+            budget_status = "exhausted"
+        elif self._budget.is_nearly_exhausted():
+            pause = pause * 1.5
+            budget_status = "nearly exhausted"
+        else:
+            budget_status = None
+
+        if budget_status is not None:
+            logger.info(
+                f"Circuit breaker pause extended {original_pause:.0f}s -> "
+                f"{pause:.0f}s (budget {budget_status})"
+            )
+
+        return pause
+
+    def _cap_pause_duration(self, pause: float) -> float:
+        """Cap a pause duration at max_pause_seconds.
+
+        Used by both _get_effective_pause_seconds and _apply_jitter to ensure
+        consistent capping behavior.
+
+        Args:
+            pause: Pause duration in seconds.
+
+        Returns:
+            Capped pause duration, at most max_pause_seconds.
+        """
+        max_pause = getattr(self.config, 'max_pause_seconds', 300.0)
+        if pause > max_pause:
+            logger.debug(
+                f"Circuit breaker pause capped: {pause:.1f}s -> {max_pause:.0f}s "
+                f"(max_pause_seconds={max_pause:.0f})"
+            )
+            pause = max_pause
+        return pause
+
     def _get_effective_pause_seconds(self) -> float:
         """Get the effective pause duration, possibly extended by escalation and budget state.
+
+        Composes _base_pause, _escalation_adjusted_pause, _budget_adjusted_pause,
+        and _cap_pause_duration into a single pause calculation pipeline.
 
         Extensions applied (multiplicative):
         - EscalationManager: 2x when >50% of active keywords are at Tier 3
@@ -169,57 +272,10 @@ class CircuitBreaker:
         Returns:
             Effective pause duration in seconds.
         """
-        base_pause = self.config.pause_seconds
-        pause = base_pause
-
-        # Escalation-based extension
-        if self._escalation_manager is not None:
-            try:
-                from .types import EscalationTier
-
-                total_keywords = self._escalation_manager.get_active_keyword_count()
-                if total_keywords > 0:
-                    tier3_keywords = self._escalation_manager.get_keywords_at_tier(
-                        EscalationTier.FULL_BYPASS
-                    )
-                    tier3_pct = len(tier3_keywords) / total_keywords
-
-                    if tier3_pct > 0.5:
-                        pause = pause * 2.0
-                        logger.info(
-                            f"Circuit breaker extended: {tier3_pct:.0%} keywords at Tier 3 "
-                            f"(pause {base_pause:.0f}s -> {pause:.0f}s)"
-                        )
-            except ImportError:
-                pass
-
-        # Budget-aware extension
-        if self._budget is not None:
-            original_pause = pause
-            if self._budget.is_exhausted():
-                pause = pause * 2.5
-                budget_status = "exhausted"
-            elif self._budget.is_nearly_exhausted():
-                pause = pause * 1.5
-                budget_status = "nearly exhausted"
-            else:
-                budget_status = None
-
-            if budget_status is not None:
-                logger.info(
-                    f"Circuit breaker pause extended {original_pause:.0f}s -> "
-                    f"{pause:.0f}s (budget {budget_status})"
-                )
-
-        # Cap at max_pause_seconds
-        max_pause = getattr(self.config, 'max_pause_seconds', 300.0)
-        if pause > max_pause:
-            logger.debug(
-                f"Circuit breaker pause capped: {pause:.0f}s -> {max_pause:.0f}s "
-                f"(max_pause_seconds={max_pause:.0f})"
-            )
-            pause = max_pause
-
+        pause = self._base_pause()
+        pause = self._escalation_adjusted_pause(pause)
+        pause = self._budget_adjusted_pause(pause)
+        pause = self._cap_pause_duration(pause)
         return pause
 
     def _apply_jitter(self, delay: float) -> float:
@@ -259,13 +315,8 @@ class CircuitBreaker:
             jittered_delay = delay
             self._last_jitter_applied = 0.0
 
-        # Cap at max_pause_seconds
-        max_pause = getattr(self.config, 'max_pause_seconds', 300.0)
-        if jittered_delay > max_pause:
-            logger.debug(
-                f"Circuit breaker jittered delay capped: {jittered_delay:.1f}s -> {max_pause:.0f}s"
-            )
-            jittered_delay = max_pause
+        # Cap at max_pause_seconds using shared capping logic
+        jittered_delay = self._cap_pause_duration(jittered_delay)
 
         return jittered_delay
 

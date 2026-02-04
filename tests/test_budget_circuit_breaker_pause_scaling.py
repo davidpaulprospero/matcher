@@ -552,3 +552,144 @@ class TestSetBudgetMethod:
         assert breaker._budget is budget1
         breaker.set_budget(budget2)
         assert breaker._budget is budget2
+
+
+# ============================================================================
+# Test Composable Pause Strategy (US-57-009)
+# ============================================================================
+
+
+class TestCapPauseDurationConsistency:
+    """Test that _cap_pause_duration is consistent between effective pause and jitter paths."""
+
+    @pytest.mark.fast
+    def test_same_max_cap_in_effective_pause_and_jitter(self):
+        """Both _get_effective_pause_seconds and _apply_jitter use the same max_pause cap."""
+        config = CircuitBreakerConfig(
+            pause_seconds=200.0,
+            max_pause_seconds=250.0,
+            jitter_factor=0.0,  # Disable jitter randomness for deterministic test
+        )
+        breaker = CircuitBreaker(config)
+
+        # Set exhausted budget to push effective pause above cap: 200 * 2.5 = 500
+        budget = RateLimitBudget()
+        budget.max_rotations = 10
+        budget.max_vpn_switches = 5
+        budget.max_backoff_time = 300.0
+        budget.rotations_used = 10
+        budget.vpn_switches_used = 5
+        budget.backoff_time_spent = 300.0
+        breaker.set_budget(budget)
+
+        effective = breaker._get_effective_pause_seconds()
+        assert effective == 250.0  # Capped
+
+        # Jitter path with a value above cap should also cap at same max
+        jittered = breaker._apply_jitter(400.0)
+        assert jittered == 250.0  # Same cap applied
+
+        # Both use the same _cap_pause_duration method
+        assert breaker._cap_pause_duration(999.0) == 250.0
+
+    @pytest.mark.fast
+    def test_cap_pause_duration_shared_by_both_paths(self):
+        """_cap_pause_duration is the single source of truth for capping."""
+        config = CircuitBreakerConfig(
+            pause_seconds=100.0,
+            max_pause_seconds=150.0,
+        )
+        breaker = CircuitBreaker(config)
+
+        # Values under cap pass through
+        assert breaker._cap_pause_duration(100.0) == 100.0
+        assert breaker._cap_pause_duration(150.0) == 150.0
+
+        # Values over cap are capped
+        assert breaker._cap_pause_duration(151.0) == 150.0
+        assert breaker._cap_pause_duration(1000.0) == 150.0
+
+    @pytest.mark.fast
+    def test_cap_applied_identically_with_different_max_values(self):
+        """Custom max_pause_seconds is respected by both paths."""
+        for max_pause in [50.0, 100.0, 200.0, 500.0]:
+            config = CircuitBreakerConfig(
+                pause_seconds=10.0,
+                max_pause_seconds=max_pause,
+                jitter_factor=0.0,
+            )
+            breaker = CircuitBreaker(config)
+
+            # Both effective pause cap and jitter cap use the same max
+            over_max = max_pause + 100.0
+            assert breaker._cap_pause_duration(over_max) == max_pause
+            assert breaker._apply_jitter(over_max) == max_pause
+
+
+class TestEscalationProportionalPauseIncrease:
+    """Test that escalation tier increases pause duration proportionally."""
+
+    @pytest.mark.fast
+    def test_escalation_doubles_base_pause(self):
+        """Escalation at >50% Tier 3 doubles the pause from base."""
+        config = CircuitBreakerConfig(
+            pause_seconds=60.0,
+            max_pause_seconds=500.0,
+        )
+        breaker = CircuitBreaker(config)
+
+        # No escalation: base pause
+        assert breaker._get_effective_pause_seconds() == 60.0
+
+        # Mock escalation manager with >50% at Tier 3
+        mock_em = MagicMock()
+        mock_em.get_active_keyword_count.return_value = 10
+        mock_em.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6']
+        breaker.set_escalation_manager(mock_em)
+
+        effective = breaker._get_effective_pause_seconds()
+        assert effective == 120.0  # 60 * 2.0
+
+        # Proportional: double the base
+        base = breaker._base_pause()
+        escalated = breaker._escalation_adjusted_pause(base)
+        assert escalated == base * 2.0
+
+    @pytest.mark.fast
+    def test_escalation_below_threshold_no_increase(self):
+        """Escalation at <=50% Tier 3 does not increase pause."""
+        config = CircuitBreakerConfig(
+            pause_seconds=60.0,
+            max_pause_seconds=500.0,
+        )
+        breaker = CircuitBreaker(config)
+
+        # Mock escalation manager with exactly 50% at Tier 3 (not >50%)
+        mock_em = MagicMock()
+        mock_em.get_active_keyword_count.return_value = 10
+        mock_em.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5']  # 50%
+        breaker.set_escalation_manager(mock_em)
+
+        base = breaker._base_pause()
+        escalated = breaker._escalation_adjusted_pause(base)
+        assert escalated == base  # No increase at exactly 50%
+
+    @pytest.mark.fast
+    def test_escalation_proportional_with_different_base_pauses(self):
+        """Escalation 2x multiplier is proportional regardless of base pause."""
+        mock_em = MagicMock()
+        mock_em.get_active_keyword_count.return_value = 4
+        mock_em.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3']  # 75% > 50%
+
+        for base_seconds in [30.0, 60.0, 120.0, 200.0]:
+            config = CircuitBreakerConfig(
+                pause_seconds=base_seconds,
+                max_pause_seconds=1000.0,  # High cap to avoid interference
+            )
+            breaker = CircuitBreaker(config)
+            breaker.set_escalation_manager(mock_em)
+
+            effective = breaker._get_effective_pause_seconds()
+            assert effective == base_seconds * 2.0, (
+                f"Expected {base_seconds * 2.0} for base={base_seconds}, got {effective}"
+            )
