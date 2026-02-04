@@ -492,6 +492,11 @@ class CaptionFirstConfig:
     # Set to empty dict {} to use FormatTimeoutPolicy defaults.
     format_timeouts: Dict[str, float] = field(default_factory=dict)
 
+    # Allow auto-generated caption fallback (US-59-007)
+    # When True, _fetch_subtitle will retry with auto_generated=True if manual
+    # captions are unavailable. When False, only manual captions are accepted.
+    allow_auto_generated: bool = True
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.circuit_breaker, dict):
