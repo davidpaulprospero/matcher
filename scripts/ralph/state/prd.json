@@ -111,8 +111,8 @@
                 "The tracker integrates into create_timeline() before track building begins",
                 "Add test simulating 400 segments with all tracks enabled, verify auto-disable triggers at threshold"
             ],
-            "passes": false,
-            "notes": "Tier: enhancement (medium risk). Source files: src/otio/timeline.py:36-37 (thresholds), src/otio/timeline.py:163-188 (_log_clip_count_warnings — currently post-hoc logging only), src/otio/timeline.py:410-424 (track count determination). Formula: clips = segments * (1 + num_alternatives + num_secondary + len(strategy_tracks) + entity_tracks). For 100 segments with all 10 tracks: ~1000 clips. For 400 segments: ~4000 clips (over limit). The auto-lite should modify the config values (num_alternatives, include_strategy_tracks) before track building."
+            "passes": true,
+            "notes": "Implemented ClipBudgetTracker in src/otio/tracks.py. Integrates into create_timeline() before track building. At WARNING (>=2500 clips) logs recommendation to disable V4-V8. At ERROR (>=3000 clips) auto-disables strategy tracks (V7-V8) by setting config.output.include_strategy_tracks=False. 13 tests in tests/test_clip_budget_tracker.py cover estimation, warning, auto-disable, and edge cases including 400-segment scenario."
         },
         {
             "id": "US-56-008",

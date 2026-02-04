@@ -683,3 +683,109 @@ class EntityVideoTrackBuilder(TrackBuilder):
             _add_entity_videos_to_track(video_track, entity_videos, self.matches, self.frame_rate, self.config, time_scale_factor)
 
         return video_track, audio_track
+
+
+# ============================================================
+# Clip Budget Tracker
+# ============================================================
+
+class ClipBudgetTracker:
+    """
+    Estimates total clip count before timeline assembly and auto-disables
+    tracks when the count would exceed DaVinci Resolve's safe limits.
+
+    DaVinci Resolve OTIO import hangs when total clips exceed ~3130.
+    This tracker runs *before* track building to proactively reduce
+    track count rather than just logging warnings after the fact.
+
+    Formula: clips = segments * (1 + num_alternatives + num_secondary + len(strategy_tracks) + entity_tracks)
+    """
+
+    # Import thresholds from timeline module to stay in sync
+    WARNING_THRESHOLD = 2500
+    ERROR_THRESHOLD = 3000
+
+    def __init__(
+        self,
+        match_count: int,
+        num_alternatives: int,
+        num_secondary: int,
+        strategy_track_names: list,
+        has_entity_images: bool = False,
+        has_entity_videos: bool = False,
+    ):
+        self.match_count = match_count
+        self.num_alternatives = num_alternatives
+        self.num_secondary = num_secondary
+        self.strategy_track_names = list(strategy_track_names)
+        self.has_entity_images = has_entity_images
+        self.has_entity_videos = has_entity_videos
+        self._actions_taken: list = []
+
+    def estimate_clips(self) -> int:
+        """
+        Estimate total clip count based on match count and enabled tracks.
+
+        Each segment produces one clip per enabled track.
+        Entity tracks (V9, V10) contribute roughly 1 clip per segment when populated.
+        """
+        track_count = 1  # V1 primary always present
+        track_count += self.num_alternatives  # V2-V3
+        track_count += self.num_secondary  # V4-V6
+        track_count += len(self.strategy_track_names)  # V7-V8
+        if self.has_entity_images:
+            track_count += 1  # V9
+        if self.has_entity_videos:
+            track_count += 1  # V10
+
+        return self.match_count * track_count
+
+    def check_and_adjust(self, config: 'Config') -> int:
+        """
+        Check estimated clip count against thresholds and auto-adjust config.
+
+        Modifies config.output in-place when thresholds are exceeded:
+        - WARNING (>=2500): Logs recommendation to disable V4-V8
+        - ERROR (>=3000): Auto-disables strategy tracks (V7-V8)
+
+        Args:
+            config: Pipeline configuration (may be modified in-place)
+
+        Returns:
+            Final estimated clip count after adjustments
+        """
+        estimated = self.estimate_clips()
+
+        if estimated >= self.ERROR_THRESHOLD:
+            # Auto-disable strategy tracks (V7-V8) to bring count down
+            logger.warning(
+                f"ClipBudgetTracker: Estimated {estimated} clips exceeds error threshold "
+                f"({self.ERROR_THRESHOLD}). Auto-disabling strategy tracks (V7-V8) to reduce clip count."
+            )
+            self._actions_taken.append(
+                f"Auto-disabled strategy tracks (V7-V8): {estimated} clips >= {self.ERROR_THRESHOLD} threshold"
+            )
+
+            # Modify config to disable strategy tracks
+            config.output.include_strategy_tracks = False
+            self.strategy_track_names = []
+
+            # Recalculate after adjustment
+            estimated = self.estimate_clips()
+            logger.info(f"ClipBudgetTracker: After disabling strategy tracks, estimated {estimated} clips")
+
+        elif estimated >= self.WARNING_THRESHOLD:
+            logger.warning(
+                f"ClipBudgetTracker: Estimated {estimated} clips approaching DaVinci limit. "
+                f"Consider disabling V4-V8 tracks (secondary/strategy) to reduce clip count."
+            )
+            self._actions_taken.append(
+                f"Warning: {estimated} clips >= {self.WARNING_THRESHOLD} threshold"
+            )
+
+        return estimated
+
+    @property
+    def actions_taken(self) -> list:
+        """Return list of actions taken by the tracker."""
+        return list(self._actions_taken)
