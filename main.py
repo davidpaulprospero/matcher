@@ -587,7 +587,11 @@ def main():
                 print(f"  ✓ All preflight checks passed")
 
     # Run the pipeline
-    if runner:
+    dry_run = getattr(args, 'dry_run', False)
+    if dry_run:
+        # Dry-run mode bypasses self-healing; validate directly
+        success = pipeline.run(resume=args.resume, dry_run=True)
+    elif runner:
         success = runner.run_pipeline(pipeline, resume=args.resume)
     else:
         success = pipeline.run(resume=args.resume)
