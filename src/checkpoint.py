@@ -655,6 +655,47 @@ class CheckpointManager:
         logger.debug(f"Saving intermediate checkpoint for {stage}")
         self._atomic_save()
 
+    def save_stage_timing_summary(
+        self,
+        stage_timings: Dict[str, float],
+        total_duration: float,
+        skipped_stages: set
+    ):
+        """
+        Persist pipeline timing summary to checkpoint stage_metrics.
+
+        Stores per-stage duration and a '_pipeline' entry with total duration
+        so timing data is available for post-run analysis.
+
+        Args:
+            stage_timings: Map of stage_name -> elapsed seconds for stages that ran.
+            total_duration: Total pipeline wall-clock duration in seconds.
+            skipped_stages: Set of stage names that were restored from checkpoint.
+        """
+        if self.data is None:
+            return
+
+        # Merge timing into existing stage_metrics (don't overwrite per-stage metrics)
+        for stage_name, elapsed in stage_timings.items():
+            if stage_name not in self.data.stage_metrics:
+                self.data.stage_metrics[stage_name] = {}
+            self.data.stage_metrics[stage_name]['duration_seconds'] = elapsed
+
+        # Mark skipped stages
+        for stage_name in skipped_stages:
+            if stage_name not in self.data.stage_metrics:
+                self.data.stage_metrics[stage_name] = {}
+            self.data.stage_metrics[stage_name]['skipped'] = True
+
+        # Store pipeline-level timing summary
+        self.data.stage_metrics['_pipeline'] = {
+            'total_duration_seconds': total_duration,
+            'stages_run': list(stage_timings.keys()),
+            'stages_skipped': list(skipped_stages),
+        }
+
+        self._atomic_save()
+
     def mark_stage_incomplete(self, stage: str):
         """
         Mark a stage as incomplete so it will be re-run.
