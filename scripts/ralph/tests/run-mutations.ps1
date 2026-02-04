@@ -71,8 +71,8 @@ $mutations = @(
     },
     @{
         Name = "M6: Remove earlyExitEnabled guard"
-        Find = '$earlyExitEnabled -and $prdUpdated -and $StoryId'
-        Replace = '$prdUpdated -and $StoryId'
+        Find = '$earlyExitEnabled -and ($prdUpdated -or $periodicRecheck) -and $StoryId'
+        Replace = '($prdUpdated -or $periodicRecheck) -and $StoryId'
         Target = "source"
         Test = {
             param($funcBody)
@@ -143,6 +143,38 @@ $mutations = @(
             param($funcBody)
             $overrideBlock = [regex]::Match($funcBody, 'Overriding exit code[\s\S]{0,200}?\$exitCode\s*=\s*(\d+)').Groups[1].Value
             $overrideBlock -eq '0'
+        }
+    },
+    @{
+        Name = "M13: Change periodic recheck interval from 30 to 60"
+        Find = '$earlyExitRecheckIntervalSec = 30'
+        Replace = '$earlyExitRecheckIntervalSec = 60'
+        Target = "source"
+        Test = {
+            param($funcBody)
+            $funcBody -match '\$earlyExitRecheckIntervalSec\s*=\s*30' -and
+            $funcBody -notmatch '\$earlyExitRecheckIntervalSec\s*=\s*60'
+        }
+    },
+    @{
+        Name = "M14: Remove periodicRecheck from guard condition"
+        Find = '($prdUpdated -or $periodicRecheck)'
+        Replace = '$prdUpdated'
+        Target = "source"
+        Test = {
+            param($funcBody)
+            $guardLine = ($funcBody -split "`n" | Where-Object { $_ -match 'earlyExitEnabled.*prdUpdated.*StoryId' })
+            $guardLine -match '\$periodicRecheck'
+        }
+    },
+    @{
+        Name = "M15: Initialize lastEarlyExitRecheck to 999 instead of 0"
+        Find = '$lastEarlyExitRecheck = 0'
+        Replace = '$lastEarlyExitRecheck = 999'
+        Target = "source"
+        Test = {
+            param($funcBody)
+            $funcBody -match '\$lastEarlyExitRecheck\s*=\s*0'
         }
     }
 )
