@@ -28,11 +28,16 @@ def _make_download_config(
     *,
     cookies_from_browser: str = '',
     cookies_path: str = '',
+    cookie_rotation_enabled: bool = False,
+    cookie_rotation_files: list = None,
 ):
     """Create a mock download config with cookie settings."""
     cfg = MagicMock()
     cfg.cookies_from_browser = cookies_from_browser
     cfg.cookies_path = cookies_path
+    # US-52-009: cookie_rotation sub-config
+    cfg.cookie_rotation.enabled = cookie_rotation_enabled
+    cfg.cookie_rotation.cookie_files = cookie_rotation_files or []
     return cfg
 
 
@@ -162,3 +167,55 @@ class TestNoWarningWhenConfigured:
 
         warning_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert not warning_msgs, f"Expected no warnings, got: {warning_msgs}"
+
+
+# ---------------------------------------------------------------------------
+# US-52-009: Cookie rotation as a valid cookie source
+# ---------------------------------------------------------------------------
+
+@pytest.mark.fast
+class TestCookieRotationAsSource:
+    """US-52-009: No warning when cookie_rotation is enabled with files."""
+
+    def test_no_warning_with_cookie_rotation_enabled(self, caplog):
+        """No warning when cookie_rotation is enabled with cookie files."""
+        cfg = _make_download_config(
+            cookie_rotation_enabled=True,
+            cookie_rotation_files=['cookies/main.txt', 'cookies/backup.txt'],
+        )
+
+        with caplog.at_level(logging.WARNING):
+            DownloadVideoSegmentsStage._validate_cookie_config(cfg)
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert not warning_msgs, f"Expected no warnings, got: {warning_msgs}"
+
+    def test_warning_with_cookie_rotation_disabled(self, caplog):
+        """Warning still emitted when cookie_rotation is disabled (no other source)."""
+        cfg = _make_download_config(
+            cookie_rotation_enabled=False,
+            cookie_rotation_files=['cookies/main.txt'],
+        )
+
+        with caplog.at_level(logging.WARNING):
+            DownloadVideoSegmentsStage._validate_cookie_config(cfg)
+
+        assert any(
+            'No cookie source configured' in rec.message
+            for rec in caplog.records
+        ), f"Expected warning when rotation disabled, got: {[r.message for r in caplog.records]}"
+
+    def test_warning_with_cookie_rotation_no_files(self, caplog):
+        """Warning still emitted when cookie_rotation is enabled but has no files."""
+        cfg = _make_download_config(
+            cookie_rotation_enabled=True,
+            cookie_rotation_files=[],
+        )
+
+        with caplog.at_level(logging.WARNING):
+            DownloadVideoSegmentsStage._validate_cookie_config(cfg)
+
+        assert any(
+            'No cookie source configured' in rec.message
+            for rec in caplog.records
+        ), f"Expected warning when rotation has no files, got: {[r.message for r in caplog.records]}"

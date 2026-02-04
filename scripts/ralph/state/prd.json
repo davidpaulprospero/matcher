@@ -138,7 +138,8 @@
                             "id":  "US-52-009",
                             "title":  "Add config validation for download segment settings at pipeline startup",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
+                            "notes":  "Pre-implemented as US-50-012. Added cookie_rotation check (US-52-009 AC2) and 3 new tests for cookie_rotation as valid source.",
                             "acceptanceCriteria":  [
                                                        "Pipeline startup validates download.cookies_from_browser is set when segment downloads are expected",
                                                        "Warning logged if cookies_from_browser is empty and no cookiefile/cookie_rotation is configured",

@@ -135,10 +135,11 @@ class DownloadVideoSegmentsStage(Stage):
 
     @staticmethod
     def _validate_cookie_config(download_config) -> None:
-        """US-50-012: Validate cookie configuration at stage init.
+        """US-50-012 / US-52-009: Validate cookie configuration at stage init.
 
         Emits warnings when:
-        - No cookie source is configured (neither cookies_from_browser nor cookies_path)
+        - No cookie source is configured (neither cookies_from_browser,
+          cookies_path, nor cookie_rotation with files)
         - cookies_from_browser is set to a browser that isn't installed
 
         These warnings appear once at stage startup, not per-download.
@@ -146,7 +147,15 @@ class DownloadVideoSegmentsStage(Stage):
         cookies_from_browser = getattr(download_config, 'cookies_from_browser', '')
         cookies_path = getattr(download_config, 'cookies_path', '')
 
-        if not cookies_from_browser and not cookies_path:
+        # US-52-009: Also check cookie_rotation as a valid cookie source
+        cookie_rotation = getattr(download_config, 'cookie_rotation', None)
+        has_cookie_rotation = False
+        if cookie_rotation is not None:
+            rotation_enabled = getattr(cookie_rotation, 'enabled', False)
+            rotation_files = getattr(cookie_rotation, 'cookie_files', [])
+            has_cookie_rotation = rotation_enabled and bool(rotation_files)
+
+        if not cookies_from_browser and not cookies_path and not has_cookie_rotation:
             logger.warning(
                 "No cookie source configured. YouTube will likely block all download "
                 "requests with 403/bot-detection errors. "
