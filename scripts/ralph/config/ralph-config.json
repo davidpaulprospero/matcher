@@ -232,6 +232,10 @@
             "extendTimeoutOnPytest": true,
             "pytestTimeoutMultiplier": 3.0
         },
+        "storyCompletionEarlyExit": {
+            "enabled": true,
+            "gracePeriodSeconds": 15
+        },
         "focusAreaOverrides": {
             "testing": { "stallThreshold": 300, "killThreshold": 600 },
             "unit-tests": { "stallThreshold": 300, "killThreshold": 600 },

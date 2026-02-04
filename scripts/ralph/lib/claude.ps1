@@ -260,7 +260,8 @@ function Invoke-ClaudeWithInfiniteRetry {
                 -Prompt $Prompt `
                 -OutFile $OutFile `
                 -ErrFile $ErrFile `
-                -FocusArea $FocusArea
+                -FocusArea $FocusArea `
+                -StoryId $StoryId
 
             # Success or non-timeout failure
             if (-not $result.TimedOut) {
@@ -346,6 +347,8 @@ function Invoke-ClaudeSubprocess {
         Path to write stdout log
     .PARAMETER ErrFile
         Path to write stderr log
+    .PARAMETER StoryId
+        Story ID to monitor for early exit when marked passes:true in prd.json
     .RETURNS
         Hashtable: Exited, ExitCode, Output, ResourceSamples, ExecutionStart, ExecutionEnd, TimedOut
     #>
@@ -355,7 +358,8 @@ function Invoke-ClaudeSubprocess {
         [Parameter(Mandatory)][string]$Prompt,
         [Parameter(Mandatory)][string]$OutFile,
         [Parameter(Mandatory)][string]$ErrFile,
-        [string]$FocusArea = ""
+        [string]$FocusArea = "",
+        [string]$StoryId = ""
     )
 
     # Get timeout from config
@@ -448,6 +452,13 @@ function Invoke-ClaudeSubprocess {
         $testRunnerDetected = $false
         $testRunnerAnnounced = $false
 
+        # Early exit: track when story is marked done in prd.json
+        $earlyExitConfig = $script:Config.stallDetection.storyCompletionEarlyExit
+        $earlyExitEnabled = if ($earlyExitConfig -and $null -ne $earlyExitConfig.enabled) { $earlyExitConfig.enabled } else { $true }
+        $storyCompletionDetected = $false
+        $storyCompletionTime = $null
+        $storyCompletionGraceSec = if ($earlyExitConfig -and $earlyExitConfig.gracePeriodSeconds) { $earlyExitConfig.gracePeriodSeconds } else { 15 }
+
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
             $timeSinceProgress += $checkIntervalSec
@@ -497,8 +508,38 @@ function Invoke-ClaudeSubprocess {
                     }
                 }
 
+                # Early exit: check if story was marked done in prd.json
+                if ($earlyExitEnabled -and $prdUpdated -and $StoryId -and -not $storyCompletionDetected) {
+                    try {
+                        $prdJson = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
+                        $story = $prdJson.userStories | Where-Object { $_.id -eq $StoryId }
+                        if ($story -and $story.passes -eq $true) {
+                            $storyCompletionDetected = $true
+                            $storyCompletionTime = Get-Date
+                            Write-Host "  [$mins min] Story $StoryId marked DONE - grace period ${storyCompletionGraceSec}s for commit..." -ForegroundColor Green
+                        }
+                    } catch {
+                        # PRD read failed (file locked, etc.) - skip this check
+                    }
+                }
+
+                # Early exit: kill Claude after grace period expires
+                if ($storyCompletionDetected -and $storyCompletionTime) {
+                    $sinceCompletion = ((Get-Date) - $storyCompletionTime).TotalSeconds
+                    if ($sinceCompletion -ge $storyCompletionGraceSec) {
+                        Write-Host "  [$mins min] Grace period expired - terminating Claude (story already done)" -ForegroundColor Yellow
+                        try { taskkill /T /F /PID $process.Id 2>$null | Out-Null } catch {}
+                        if (-not $process.HasExited) {
+                            try { $process.Kill() } catch {}
+                        }
+                        Start-Sleep -Milliseconds 500
+                        break
+                    }
+                }
+
                 if ($prdUpdated -or $progressUpdated -or $gitChanged -or $bufferGrowing -or $cpuActive -or $testRunnerActive) {
-                    $reason = if ($prdUpdated) { "prd.json" } `
+                    $reason = if ($prdUpdated -and $storyCompletionDetected) { "prd.json (story DONE, grace period)" } `
+                        elseif ($prdUpdated) { "prd.json" } `
                         elseif ($progressUpdated) { "progress.txt" } `
                         elseif ($gitChanged) { "git changes" } `
                         elseif ($cpuActive) { "CPU active (+$([math]::Round($cpuDelta, 1))s)" } `
