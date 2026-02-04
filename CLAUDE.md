@@ -394,6 +394,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-04 | Fix: Ralph `Invoke-ClaudeWithInfiniteRetry` timeout/exception returns missing `ExecutionStart`/`ExecutionEnd` — caused `Cannot convert null to System.DateTime` crash in `Log-ClaudeInvocation` |
 | 2026-02-04 | Fix: Ralph monitoring loop freeze — disable Console Quick Edit Mode at startup (Rule 36) |
 | 2026-02-02 | Removed project_config.yaml auto-merge — use `--config` flag for per-project settings |
 | 2026-02-01 | Caption-first always on, removed `--caption-first` flag, cookie rotation in caption fetcher, removed max_keywords param, fixed LLM text response format |

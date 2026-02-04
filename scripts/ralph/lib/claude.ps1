@@ -243,6 +243,8 @@ function Invoke-ClaudeWithInfiniteRetry {
                 Exited = $false
                 ExitCode = $null
                 Output = ""
+                ExecutionStart = $StoryStartTime
+                ExecutionEnd = Get-Date
             }
         }
 
@@ -301,6 +303,8 @@ function Invoke-ClaudeWithInfiniteRetry {
                 Output = $_.ToString()
                 ErrorMessage = $_.ToString()
                 ErrorType = "exception"
+                ExecutionStart = $StoryStartTime
+                ExecutionEnd = Get-Date
             }
         }
     }
