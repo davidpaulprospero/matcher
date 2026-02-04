@@ -25,20 +25,41 @@ logger = logging.getLogger(__name__)
 # Standard NLE frame rates
 STANDARD_NLE_RATES = {23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0}
 
+# NTSC rates that require ntsc=TRUE in FCP7 XML and drop-frame timecode
+NTSC_RATES = {23.976, 29.97, 59.94}
 
-def _validate_frame_rate(frame_rate: float) -> int:
+
+def _is_ntsc_rate(frame_rate: float) -> bool:
+    """
+    Check if a frame rate is an NTSC rate (23.976, 29.97, or 59.94 fps).
+
+    NTSC rates use a 1000/1001 ratio (e.g., 30000/1001 = 29.97).
+    These require <ntsc>TRUE</ntsc> in FCP7 XML and may use drop-frame
+    timecode in EDL exports.
+
+    Args:
+        frame_rate: The frame rate to check
+
+    Returns:
+        True if the frame rate is an NTSC rate (within 0.01 tolerance)
+    """
+    return any(abs(frame_rate - ntsc) < 0.01 for ntsc in NTSC_RATES)
+
+
+def _validate_frame_rate(frame_rate: float) -> Tuple[int, bool]:
     """
     Validate and convert frame rate for XML timebase element.
 
     NLE software expects integer timebases. This function:
     1. Logs a warning if the rate is non-standard
     2. Rounds to nearest integer for XML compatibility
+    3. Detects NTSC rates for the <ntsc> XML element
 
     Args:
         frame_rate: The frame rate to validate (e.g., 29.97, 30.0)
 
     Returns:
-        Integer timebase for XML (always an integer)
+        Tuple of (integer timebase, is_ntsc flag) for XML generation
     """
     # Check if it's a standard NLE rate (within 0.01 tolerance)
     is_standard = any(abs(frame_rate - std) < 0.01 for std in STANDARD_NLE_RATES)
@@ -50,8 +71,10 @@ def _validate_frame_rate(frame_rate: float) -> int:
             f"Rounding to {round(frame_rate)} for XML timebase."
         )
 
+    is_ntsc = _is_ntsc_rate(frame_rate)
+
     # Round to nearest integer for XML timebase
-    return round(frame_rate)
+    return round(frame_rate), is_ntsc
 
 
 def _build_segment_lookup(downloaded_segments: Optional[List]) -> Dict:
@@ -149,7 +172,8 @@ def generate_resolve_xml_with_bins(
         List of paths to generated XML files
     """
     base_path = Path(output_path).with_suffix('')
-    fps_int = _validate_frame_rate(frame_rate)
+    fps_int, is_ntsc = _validate_frame_rate(frame_rate)
+    ntsc_str = 'TRUE' if is_ntsc else 'FALSE'
 
     # Build segment lookup for audio-first mode resolution
     segment_lookup = _build_segment_lookup(downloaded_segments)
@@ -280,7 +304,7 @@ def generate_resolve_xml_with_bins(
             f'                        <duration>{duration_frames}</duration>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
-            '                            <ntsc>FALSE</ntsc>',
+            f'                            <ntsc>{ntsc_str}</ntsc>',
             '                        </rate>',
             # File definition at clip level - this is where DaVinci looks for it
             f'                        <file id="{file_info["file_id"]}">',
@@ -288,13 +312,13 @@ def generate_resolve_xml_with_bins(
             f'                            <pathurl>{path_url}</pathurl>',
             '                            <rate>',
             f'                                <timebase>{fps_int}</timebase>',
-            '                                <ntsc>FALSE</ntsc>',
+            f'                                <ntsc>{ntsc_str}</ntsc>',
             '                            </rate>',
             f'                            <duration>{duration_frames}</duration>',
             '                            <timecode>',
             '                                <rate>',
             f'                                    <timebase>{fps_int}</timebase>',
-            '                                    <ntsc>FALSE</ntsc>',
+            f'                                    <ntsc>{ntsc_str}</ntsc>',
             '                                </rate>',
             '                                <string>00:00:00:00</string>',
             '                                <frame>0</frame>',
@@ -352,12 +376,12 @@ def generate_resolve_xml_with_bins(
         f'                <duration>{total_frames}</duration>',
         '                <rate>',
         f'                    <timebase>{fps_int}</timebase>',
-        '                    <ntsc>FALSE</ntsc>',
+        f'                    <ntsc>{ntsc_str}</ntsc>',
         '                </rate>',
         '                <timecode>',
         '                    <rate>',
         f'                        <timebase>{fps_int}</timebase>',
-        '                        <ntsc>FALSE</ntsc>',
+        f'                        <ntsc>{ntsc_str}</ntsc>',
         '                    </rate>',
         f'                    <string>{timeline_start_tc}</string>',
         f'                    <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
@@ -520,7 +544,8 @@ def generate_resolve_xml_with_bins(
                 generated_paths,
                 logger,
                 timeline_start_tc=timeline_start_tc,
-                frame_rate=frame_rate
+                frame_rate=frame_rate,
+                is_ntsc=is_ntsc
             )
 
         # Generate separate XMLs for conflicting files (one file per XML)
@@ -538,7 +563,8 @@ def generate_resolve_xml_with_bins(
                 logger,
                 bin_name_override=f"Media - {folder_name}",
                 timeline_start_tc=timeline_start_tc,
-                frame_rate=frame_rate
+                frame_rate=frame_rate,
+                is_ntsc=is_ntsc
             )
 
     return generated_paths
@@ -553,7 +579,8 @@ def _write_media_xml_part(
     logger,
     bin_name_override: str = None,
     timeline_start_tc: str = '01:00:00:00',
-    frame_rate: float = 30.0
+    frame_rate: float = 30.0,
+    is_ntsc: bool = False
 ):
     """Write a single media XML part file.
 
@@ -563,6 +590,7 @@ def _write_media_xml_part(
     - Empty <sequence> sibling to trigger proper import
     """
     bin_name = bin_name_override or f"Media Part {part_idx}"
+    ntsc_str = 'TRUE' if is_ntsc else 'FALSE'
 
     part_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -604,7 +632,7 @@ def _write_media_xml_part(
             f'                <name>{unique_name}</name>',
             '                <rate>',
             f'                    <timebase>{fps_int}</timebase>',
-            '                    <ntsc>FALSE</ntsc>',
+            f'                    <ntsc>{ntsc_str}</ntsc>',
             '                </rate>',
             '                <media>',
         ])
@@ -622,13 +650,13 @@ def _write_media_xml_part(
                 f'                                    <pathurl>{path_url}</pathurl>',
                 '                                    <rate>',
                 f'                                        <timebase>{fps_int}</timebase>',
-                '                                        <ntsc>FALSE</ntsc>',
+                f'                                        <ntsc>{ntsc_str}</ntsc>',
                 '                                    </rate>',
                 f'                                    <duration>{duration_frames}</duration>',
                 '                                    <timecode>',
                 '                                        <rate>',
                 f'                                            <timebase>{fps_int}</timebase>',
-                '                                            <ntsc>FALSE</ntsc>',
+                f'                                            <ntsc>{ntsc_str}</ntsc>',
                 '                                        </rate>',
                 '                                        <string>00:00:00:00</string>',
                 '                                        <frame>0</frame>',
@@ -665,13 +693,13 @@ def _write_media_xml_part(
                 f'                                    <pathurl>{path_url}</pathurl>',
                 '                                    <rate>',
                 f'                                        <timebase>{fps_int}</timebase>',
-                '                                        <ntsc>FALSE</ntsc>',
+                f'                                        <ntsc>{ntsc_str}</ntsc>',
                 '                                    </rate>',
                 f'                                    <duration>{duration_frames}</duration>',
                 '                                    <timecode>',
                 '                                        <rate>',
                 f'                                            <timebase>{fps_int}</timebase>',
-                '                                            <ntsc>FALSE</ntsc>',
+                f'                                            <ntsc>{ntsc_str}</ntsc>',
                 '                                        </rate>',
                 '                                        <string>00:00:00:00</string>',
                 '                                        <frame>0</frame>',
@@ -696,17 +724,17 @@ def _write_media_xml_part(
         f'        <name>{bin_name} - Import Helper</name>',
         '        <rate>',
         f'            <timebase>{fps_int}</timebase>',
-        '            <ntsc>FALSE</ntsc>',
+        f'            <ntsc>{ntsc_str}</ntsc>',
         '        </rate>',
         '        <duration>1</duration>',
         '        <timecode>',
         '            <rate>',
         f'                <timebase>{fps_int}</timebase>',
-        '                <ntsc>FALSE</ntsc>',
+        f'                <ntsc>{ntsc_str}</ntsc>',
         '            </rate>',
         f'            <string>{timeline_start_tc}</string>',
         f'            <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
-        '            <displayformat>NDF</displayformat>',
+        f'            <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
         '        </timecode>',
         '        <media>',
         '            <video>',
@@ -755,7 +783,8 @@ def generate_davinci_sequence_xml(
     Returns:
         Path to generated XML file
     """
-    fps_int = _validate_frame_rate(frame_rate)
+    fps_int, is_ntsc = _validate_frame_rate(frame_rate)
+    ntsc_str = 'TRUE' if is_ntsc else 'FALSE'
 
     # Build segment lookup for audio-first mode resolution
     segment_lookup = _build_segment_lookup(downloaded_segments)
@@ -775,17 +804,17 @@ def generate_davinci_sequence_xml(
         f'        <duration>{total_frames}</duration>',
         '        <rate>',
         f'            <timebase>{fps_int}</timebase>',
-        '            <ntsc>FALSE</ntsc>',
+        f'            <ntsc>{ntsc_str}</ntsc>',
         '        </rate>',
         '        <in>-1</in>',
         '        <out>-1</out>',
         '        <timecode>',
         f'            <string>{timeline_start_tc}</string>',
         f'            <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
-        '            <displayformat>NDF</displayformat>',
+        f'            <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
         '            <rate>',
         f'                <timebase>{fps_int}</timebase>',
-        '                <ntsc>FALSE</ntsc>',
+        f'                <ntsc>{ntsc_str}</ntsc>',
         '            </rate>',
         '        </timecode>',
         '        <media>',
@@ -848,7 +877,7 @@ def generate_davinci_sequence_xml(
             f'                        <duration>{file_duration}</duration>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
-            '                            <ntsc>FALSE</ntsc>',
+            f'                            <ntsc>{ntsc_str}</ntsc>',
             '                        </rate>',
             f'                        <start>{timeline_pos}</start>',
             f'                        <end>{timeline_pos + target_frames}</end>',
@@ -859,16 +888,16 @@ def generate_davinci_sequence_xml(
             f'                            <duration>{file_duration}</duration>',
             '                            <rate>',
             f'                                <timebase>{fps_int}</timebase>',
-            '                                <ntsc>FALSE</ntsc>',
+            f'                                <ntsc>{ntsc_str}</ntsc>',
             '                            </rate>',
             f'                            <name>{clip_name}</name>',
             f'                            <pathurl>{path_url}</pathurl>',
             '                            <timecode>',
             '                                <string>00:00:00:00</string>',
-            '                                <displayformat>NDF</displayformat>',
+            f'                                <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
             '                                <rate>',
             f'                                    <timebase>{fps_int}</timebase>',
-            '                                    <ntsc>FALSE</ntsc>',
+            f'                                    <ntsc>{ntsc_str}</ntsc>',
             '                                </rate>',
             '                            </timecode>',
             '                            <media>',
@@ -909,7 +938,7 @@ def generate_davinci_sequence_xml(
             f'                        <duration>{clip["file_duration"]}</duration>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
-            '                            <ntsc>FALSE</ntsc>',
+            f'                            <ntsc>{ntsc_str}</ntsc>',
             '                        </rate>',
             f'                        <start>{clip["start"]}</start>',
             f'                        <end>{clip["end"]}</end>',

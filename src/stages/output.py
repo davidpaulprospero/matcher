@@ -626,13 +626,20 @@ class OutputStage(Stage):
         save_edl_func: callable
     ) -> Path:
         """Generate EDL file"""
+        from src.otio.xml_export import _is_ntsc_rate
+
         edl_path = output_dir / "timeline.edl"
+        frame_rate = getattr(config.output, 'frame_rate', 30.0)
+        # Auto-detect drop-frame for NTSC rates (29.97, 59.94)
+        # 23.976 is NTSC but uses non-drop-frame timecode (24fps timebase)
+        drop_frame = _is_ntsc_rate(frame_rate) and round(frame_rate) in (30, 60)
         save_edl_func(
             state.matches,
             str(edl_path),
-            frame_rate=getattr(config.output, 'frame_rate', 30.0),
+            frame_rate=frame_rate,
             timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
-            entities=state.extracted_entities or []
+            entities=state.extracted_entities or [],
+            drop_frame=drop_frame
         )
         print(f"  + EDL: {edl_path}")
         return edl_path

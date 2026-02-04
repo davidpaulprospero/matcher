@@ -83,8 +83,8 @@
                 "Add test verifying XML output with 29.97fps has <ntsc>TRUE</ntsc> and 30fps has <ntsc>FALSE</ntsc>",
                 "Add test verifying _validate_frame_rate correctly identifies NTSC rates (23.976, 29.97, 59.94)"
             ],
-            "passes": false,
-            "notes": "Tier: enhancement (medium risk). Source files: src/otio/xml_export.py:29-54 (_validate_frame_rate), src/otio/xml_export.py:354,358,692,698,770,779 (all <ntsc>FALSE</ntsc> elements). NTSC rates are 23.976, 29.97, 59.94 — these should set ntsc=TRUE in the XML. The current code always writes FALSE which may cause import issues in DaVinci when project is set to NTSC. STANDARD_NLE_RATES at xml_export.py:26 already lists them."
+            "passes": true,
+            "notes": "Completed. Added _is_ntsc_rate() helper and NTSC_RATES constant. Modified _validate_frame_rate() to return (int, bool) tuple. Replaced all hardcoded <ntsc>FALSE</ntsc> with dynamic ntsc_str across generate_resolve_xml_with_bins, _write_media_xml_part, and generate_davinci_sequence_xml. Updated <displayformat> to use DF for NTSC rates. Updated _generate_edl in output.py to auto-detect drop_frame for 29.97/59.94 fps. Added TestNTSCDetection class with 10 tests covering _is_ntsc_rate, _validate_frame_rate tuple return, and XML output for NTSC/non-NTSC rates. Updated 7 existing tests to unpack tuple. All 11 unit tests pass; XML generation tests have pre-existing SRTSegment.end vs end_time fixture issue."
         },
         {
             "id": "US-56-006",
