@@ -63,7 +63,7 @@
             "id": "US-52-004",
             "title": "Add network failure pattern tests for Python API exception format",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test cases for _is_network_failure() with Python API exception message format (yt_dlp.utils.DownloadError wrapping)",
                 "Test covers 'Errno 11001' (DNS resolution failure) pattern matching",
@@ -72,7 +72,7 @@
                 "Verify _is_network_failure() returns True for all Python API formatted network errors",
                 "Add any missing patterns to _is_network_failure() if tests reveal gaps"
             ],
-            "notes": "Tier: P2 (improved abort detection). Files: src/stages/download_segments.py (function _is_network_failure around line 60-90). The detection relies on regex matching against exception messages. The Python API wraps errors differently than subprocess stderr — e.g., yt_dlp.utils.DownloadError('ERROR: ...') vs raw stderr lines. The specific patterns from production logs (Errno 11001, exit code 0xFFFFFEC6) need verified coverage."
+            "notes": "Added TestIsNetworkFailurePythonApiExceptionFormat class (17 tests) to test_error_classification.py. Added 'Failed to resolve' pattern to _NETWORK_FAILURE_PATTERNS (was missing — curl_cffi DNS failure). Tests cover: Errno 11001 in 4 wrapping formats, ffmpeg exit code 4294967158 in 3 formats, 'Failed to resolve' in 4 formats, plus 3 classify_error_category integration tests and 3 negative cases. All 78 tests pass."
         },
         {
             "id": "US-52-005",
