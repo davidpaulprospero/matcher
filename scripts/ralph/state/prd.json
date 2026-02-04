@@ -63,7 +63,7 @@
             "id": "US-51-004",
             "title": "Add consecutive bot-detection counter with global tier floor",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "A shared consecutive bot-detection counter tracks 403/Sign-in errors across all video IDs in the download loop",
                 "When bot-detection counter exceeds a configurable threshold (default 5), a global tier floor is set so new downloads start at the highest available tier instead of Tier 1",
@@ -72,7 +72,7 @@
                 "Unit test verifies global tier floor activates after threshold consecutive bot-detection errors",
                 "Unit test verifies download loop aborts after abort-threshold bot-detection errors"
             ],
-            "notes": "Tier: P2 improvement. Source: src/stages/download_segments.py — the download loop around lines 590-870. Each video_id currently creates fresh escalation state starting at Tier 1. When YouTube blocks broadly, every video independently fails at Tier 1 and gets queued for retry. Add a module-level or loop-scoped counter. The EscalationManager already has set_circuit_breaker() wired (line 549-552) and shortcut-to-max logic in escalation_manager.py:361-369. The new counter should also call escalation_mgr.set_global_tier_floor() or equivalent. Config: download.bot_detection_abort_threshold (default 10), download.bot_detection_tier_floor_threshold (default 5)."
+            "notes": "Pre-implemented by US-49-005 (tier floor) and US-49-008 (abort threshold). All 6 acceptance criteria met by existing code: consecutive_bot_detections counter at download_segments.py:525, tier floor at lines 797-808, abort at lines 811-842, network counter isolation at lines 846-871. Config: download.bot_detection_tier_floor_threshold (default 5) and download.bot_detection_abort_threshold (default 10) in src/config/sections/download.py and config.yaml. Tests: test_bot_detection_global_counter.py (5 tests) and test_download_segments_bot_abort.py (7 tests). Fixed stale file bug in test_success_resets_counter_and_clears_tier_floor (used tempfile instead of hardcoded /tmp path)."
         },
         {
             "id": "US-51-005",
