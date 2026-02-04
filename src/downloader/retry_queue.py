@@ -90,6 +90,11 @@ class BatchRetryConfig:
     # for both to clear. Prevents deadlock when CB and cooldown overlap.
     max_combined_wait_seconds: float = 300.0
 
+    # Maximum retries per individual video across pipeline restarts (US-51-010).
+    # Videos exceeding this count are permanently skipped.
+    # Unlike max_passes (batch-level), this tracks per-video retry_count.
+    max_retries_per_video: int = 3
+
     # Jitter factor for randomizing delay durations (0.0 to 1.0)
     # Delay is computed as: base_delay * (1 + random.uniform(-jitter, +jitter))
     # Default 0.2 means ±20% randomization to prevent thundering herd
@@ -493,9 +498,25 @@ class RetryQueue:
     def finish_retry_pass(self) -> None:
         """Finish the current retry pass.
 
-        Moves videos that have exhausted all retry passes to permanently
-        failed. Should be called after processing all items in a pass.
+        Moves videos that have exhausted all retry passes or exceeded
+        max_retries_per_video to permanently failed. Should be called
+        after processing all items in a pass.
         """
+        # US-51-010: Check per-video retry limit
+        per_video_exceeded = []
+        for video_id, item in list(self.items.items()):
+            if item.retry_count >= self.config.max_retries_per_video:
+                per_video_exceeded.append(video_id)
+                self._failed_ids.add(video_id)
+                del self.items[video_id]
+
+        if per_video_exceeded:
+            logger.warning(
+                f"Batch retry: {len(per_video_exceeded)} video(s) permanently "
+                f"skipped after exceeding max_retries_per_video="
+                f"{self.config.max_retries_per_video}"
+            )
+
         # Check if we've exhausted all passes
         if self.current_pass >= self.config.max_passes:
             # Move remaining items to permanently failed
@@ -593,9 +614,12 @@ class RetryQueue:
                     'keyword': item.keyword,
                     'tier': item.tier,
                     'error_message': item.error_message,
+                    'failure_reason': item.error_message,  # US-51-010: alias
                     'retry_count': item.retry_count,
                     'error_category': item.error_category,
                     'escalation_tier': item.escalation_tier,
+                    'last_tier_attempted': item.escalation_tier,  # US-51-010: alias
+                    'timestamp': item.added_at,  # US-51-010: when video was first queued
                 }
                 for item in self.items.values()
             ],
@@ -623,20 +647,31 @@ class RetryQueue:
         for item_data in data.get('items', []):
             video_id = item_data.get('video_id')
             if video_id:
+                # US-51-010: Skip videos that have exceeded max_retries_per_video
+                retry_count = item_data.get('retry_count', 0)
+                if retry_count >= self.config.max_retries_per_video:
+                    self._failed_ids.add(video_id)
+                    logger.info(
+                        f"Retry queue: permanently skipping {video_id} "
+                        f"(retry_count={retry_count} >= max_retries_per_video="
+                        f"{self.config.max_retries_per_video})"
+                    )
+                    continue
                 self.items[video_id] = RetryItem(
                     video_id=video_id,
                     keyword=item_data.get('keyword', ''),
                     tier=item_data.get('tier', 'short'),
                     error_message=item_data.get('error_message', ''),
-                    retry_count=item_data.get('retry_count', 0),
+                    retry_count=retry_count,
+                    added_at=item_data.get('timestamp', time.time()),
                     error_category=item_data.get('error_category', 'video_specific'),
                     escalation_tier=item_data.get('escalation_tier', 1),
                 )
 
-        # Restore state
+        # Restore state (merge failed_ids to preserve US-51-010 max_retries_per_video skips)
         self.current_pass = data.get('current_pass', 0)
         self._completed_ids = set(data.get('completed_ids', []))
-        self._failed_ids = set(data.get('failed_ids', []))
+        self._failed_ids.update(data.get('failed_ids', []))
         self._total_added = data.get('total_added', 0)
         self._total_retried = data.get('total_retried', 0)
 
