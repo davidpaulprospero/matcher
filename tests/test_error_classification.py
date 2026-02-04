@@ -522,6 +522,23 @@ class TestIsNetworkFailurePythonApiExceptionFormat:
         error = "ERROR: [youtube] vid1: ffmpeg exited with code 4294967158"
         assert _is_network_failure(error) is True
 
+    # --- ffmpeg exit code -314 (signed equivalent of 4294967158) ---
+
+    def test_ffmpeg_signed_exit_code_minus_314(self):
+        """ffmpeg signed exit code -314 (signed equivalent of unsigned 4294967158)."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code -314"
+        assert _is_network_failure(error) is True
+
+    def test_ffmpeg_signed_exit_code_minus_314_in_download_error(self):
+        """ffmpeg signed exit code -314 wrapped in DownloadError."""
+        error = "ERROR: [youtube] vid1: ffmpeg exited with code -314"
+        assert _is_network_failure(error) is True
+
+    def test_classify_ffmpeg_signed_exit_code_as_network(self):
+        """classify_error_category returns 'network' for ffmpeg signed exit code -314."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code -314"
+        assert classify_error_category(error) == 'network'
+
     # --- 'Failed to resolve' hostname pattern ---
 
     def test_failed_to_resolve_hostname_curl(self):
