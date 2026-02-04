@@ -72,6 +72,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _record_breakdown(breakdown: list, component: str, before: float, after: float, reason: str):
+    """Record a scoring adjustment in the confidence breakdown list."""
+    if reason:
+        breakdown.append({
+            'component': component,
+            'adjustment': round(after - before, 4),
+            'reason': reason,
+        })
+
+
 class TieredMatcher:
     """
     Two-stage matcher with embedding search + LLM reranking.
@@ -647,30 +657,41 @@ class TieredMatcher:
             scene = self._get_scene_for_segment(best_seg, scenes)
 
             # Apply scoring adjustments (same as normal path for consistency)
+            confidence_breakdown = []
+            prev = boosted_confidence
             adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
                 boosted_confidence, vo_segment, best_seg,
                 video_topics=self.video_topics,
                 chapter_matching_enabled=self.chapter_matching_enabled,
                 topic_mismatch_penalty=self.topic_mismatch_penalty
             )
+            _record_breakdown(confidence_breakdown, 'topic_penalty', prev, adjusted_confidence, topic_penalty_reason)
 
+            prev = adjusted_confidence
             adjusted_confidence, broll_reason = apply_broll_boost(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'broll_boost', prev, adjusted_confidence, broll_reason)
 
             # US-007: Apply caption quality adjustment
+            prev = adjusted_confidence
             adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'caption_quality', prev, adjusted_confidence, caption_quality_reason)
 
             # US-008 Sprint 7: Apply timing penalty for poor caption timing
+            prev = adjusted_confidence
             adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'timing_penalty', prev, adjusted_confidence, timing_penalty_reason)
 
+            prev = adjusted_confidence
             adjusted_confidence, project_reason = apply_current_project_boost(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
             # Ensure we don't drop below minimum confidence after adjustments
             min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
@@ -716,12 +737,18 @@ class TieredMatcher:
 
             confidence_variance = self._calculate_confidence_variance(valid_candidates)
 
+            # Log confidence breakdown at DEBUG level (US-53-003)
+            if confidence_breakdown:
+                parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
+                logger.debug(f"confidence: {boosted_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+
             return MatchResult(
                 primary_match=match,
                 alternatives=alternatives,
                 secondary_matches=secondary_matches,
                 confidence_variance=confidence_variance,
-                matched_keywords=matched_keywords_for_check
+                matched_keywords=matched_keywords_for_check,
+                confidence_breakdown=confidence_breakdown,
             )
 
         if top_similarity >= skip_threshold:
@@ -731,30 +758,41 @@ class TieredMatcher:
             scene = self._get_scene_for_segment(best_seg, scenes)
 
             # Apply scoring adjustments using refactored functions
+            confidence_breakdown = []
+            prev = top_similarity
             adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
                 top_similarity, vo_segment, best_seg,
                 video_topics=self.video_topics,
                 chapter_matching_enabled=self.chapter_matching_enabled,
                 topic_mismatch_penalty=self.topic_mismatch_penalty
             )
+            _record_breakdown(confidence_breakdown, 'topic_penalty', prev, adjusted_confidence, topic_penalty_reason)
 
+            prev = adjusted_confidence
             adjusted_confidence, broll_reason = apply_broll_boost(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'broll_boost', prev, adjusted_confidence, broll_reason)
 
             # US-007: Apply caption quality adjustment
+            prev = adjusted_confidence
             adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'caption_quality', prev, adjusted_confidence, caption_quality_reason)
 
             # US-008 Sprint 7: Apply timing penalty for poor caption timing
+            prev = adjusted_confidence
             adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'timing_penalty', prev, adjusted_confidence, timing_penalty_reason)
 
+            prev = adjusted_confidence
             adjusted_confidence, project_reason = apply_current_project_boost(
                 adjusted_confidence, best_seg, self.config
             )
+            _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
@@ -800,12 +838,18 @@ class TieredMatcher:
             # Extract matched keywords between voiceover and selected video
             matched_keywords = self._extract_matched_keywords(vo_segment, best_seg)
 
+            # Log confidence breakdown at DEBUG level (US-53-003)
+            if confidence_breakdown:
+                parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
+                logger.debug(f"confidence: {top_similarity:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+
             return MatchResult(
                 primary_match=match,
                 alternatives=alternatives,
                 secondary_matches=secondary_matches,
                 confidence_variance=confidence_variance,
-                matched_keywords=matched_keywords
+                matched_keywords=matched_keywords,
+                confidence_breakdown=confidence_breakdown,
             )
 
         # Build context and call LLMReranker (handles caching internally)
@@ -867,30 +911,41 @@ class TieredMatcher:
             base_confidence = min(1.0, confidence + keyword_boost)
 
         # Apply remaining scoring adjustments (penalties/boosts not captured by multimodal)
+        confidence_breakdown = []
+        prev = base_confidence
         adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
             base_confidence, vo_segment, best_seg,
             video_topics=self.video_topics,
             chapter_matching_enabled=self.chapter_matching_enabled,
             topic_mismatch_penalty=self.topic_mismatch_penalty
         )
+        _record_breakdown(confidence_breakdown, 'topic_penalty', prev, adjusted_confidence, topic_penalty_reason)
 
+        prev = adjusted_confidence
         adjusted_confidence, broll_reason = apply_broll_boost(
             adjusted_confidence, best_seg, self.config
         )
+        _record_breakdown(confidence_breakdown, 'broll_boost', prev, adjusted_confidence, broll_reason)
 
         # US-007: Apply caption quality adjustment
+        prev = adjusted_confidence
         adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
             adjusted_confidence, best_seg, self.config
         )
+        _record_breakdown(confidence_breakdown, 'caption_quality', prev, adjusted_confidence, caption_quality_reason)
 
         # US-008 Sprint 7: Apply timing penalty for poor caption timing
+        prev = adjusted_confidence
         adjusted_confidence, timing_penalty_reason = apply_timing_penalty(
             adjusted_confidence, best_seg, self.config
         )
+        _record_breakdown(confidence_breakdown, 'timing_penalty', prev, adjusted_confidence, timing_penalty_reason)
 
+        prev = adjusted_confidence
         adjusted_confidence, project_reason = apply_current_project_boost(
             adjusted_confidence, best_seg, self.config
         )
+        _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
         final_reasoning = reasoning
         if multimodal_enabled:
@@ -976,6 +1031,11 @@ class TieredMatcher:
         if total_elapsed > 2.0:
             logger.info(f"  match_segment: TOTAL time for segment was {total_elapsed:.2f}s")
 
+        # Log confidence breakdown at DEBUG level (US-53-003)
+        if confidence_breakdown:
+            parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
+            logger.debug(f"confidence: {base_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+
         return MatchResult(
             primary_match=match,
             alternatives=alternatives,
@@ -983,7 +1043,8 @@ class TieredMatcher:
             has_gap=has_gap,
             gap_reason=gap_reason,
             confidence_variance=confidence_variance,
-            matched_keywords=matched_keywords
+            matched_keywords=matched_keywords,
+            confidence_breakdown=confidence_breakdown,
         )
 
     def review_with_local_llm(self, matches: List[MatchResult]) -> List[MatchResult]:

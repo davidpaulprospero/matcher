@@ -178,7 +178,8 @@ class MatchStage(Stage):
                             'start_time': float(start_time),
                             'confidence': float(conf),
                             'confidence_variance': float(conf_variance),
-                            'matched_keywords': list(matched_kws) if matched_kws else []
+                            'matched_keywords': list(matched_kws) if matched_kws else [],
+                            'confidence_breakdown': list(m.confidence_breakdown) if m.confidence_breakdown else [],
                         })
                     # Handle direct Match structure (no confidence_variance/matched_keywords available)
                     elif hasattr(m, 'video_segment'):
@@ -192,7 +193,8 @@ class MatchStage(Stage):
                             'start_time': float(start_time),
                             'confidence': float(conf),
                             'confidence_variance': 0.0,  # Not available for direct Match
-                            'matched_keywords': []  # Not available for direct Match
+                            'matched_keywords': [],  # Not available for direct Match
+                            'confidence_breakdown': [],
                         })
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")

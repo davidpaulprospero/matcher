@@ -1565,7 +1565,7 @@ class MatchScoring:
 
     Usage:
         scoring = MatchScoring(config)
-        confidence, reason = scoring.apply_all_adjustments(
+        confidence, reason, breakdown = scoring.apply_all_adjustments(
             base_confidence, vo_segment, video_segment, video_topics
         )
     """
@@ -1739,7 +1739,7 @@ class MatchScoring:
         video_topics: Optional[dict] = None,
         chapter_matching_enabled: bool = False,
         topic_mismatch_penalty: float = 0.15
-    ) -> Tuple[float, str]:
+    ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
 
@@ -1756,12 +1756,15 @@ class MatchScoring:
             topic_mismatch_penalty: Maximum topic mismatch penalty
 
         Returns:
-            Tuple of (adjusted_confidence, combined_reason)
+            Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
+            where confidence_breakdown is a list of dicts with keys: component, adjustment, reason
         """
         original_confidence = confidence
         reasons = []
+        breakdown = []
 
         # 1. Topic penalty
+        prev = confidence
         confidence, topic_reason = apply_topic_penalty(
             confidence, vo_segment, video_segment,
             video_topics or {},
@@ -1770,39 +1773,49 @@ class MatchScoring:
         )
         if topic_reason:
             reasons.append(topic_reason)
+            breakdown.append({'component': 'topic_penalty', 'adjustment': round(confidence - prev, 4), 'reason': topic_reason})
 
         # 2. B-roll boost
+        prev = confidence
         confidence, broll_reason = apply_broll_boost(
             confidence, video_segment, self.config
         )
         if broll_reason:
             reasons.append(broll_reason)
+            breakdown.append({'component': 'broll_boost', 'adjustment': round(confidence - prev, 4), 'reason': broll_reason})
 
         # 3. Caption quality adjustment
+        prev = confidence
         confidence, caption_reason = apply_caption_quality_adjustment(
             confidence, video_segment, self.config
         )
         if caption_reason:
             reasons.append(caption_reason)
+            breakdown.append({'component': 'caption_quality', 'adjustment': round(confidence - prev, 4), 'reason': caption_reason})
 
         # 4. Timing penalty
+        prev = confidence
         confidence, timing_reason = apply_timing_penalty(
             confidence, video_segment, self.config
         )
         if timing_reason:
             reasons.append(timing_reason)
+            breakdown.append({'component': 'timing_penalty', 'adjustment': round(confidence - prev, 4), 'reason': timing_reason})
 
         # 5. Project boost (global cache penalty)
+        prev = confidence
         confidence, project_reason = apply_current_project_boost(
             confidence, video_segment, self.config
         )
         if project_reason:
             reasons.append(project_reason)
+            breakdown.append({'component': 'project_boost', 'adjustment': round(confidence - prev, 4), 'reason': project_reason})
 
         # 6. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
+            breakdown.append({'component': 'confidence_floor', 'adjustment': round(floor - confidence, 4), 'reason': f'confidence floor applied: {floor}'})
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
@@ -1817,7 +1830,14 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        return confidence, combined_reason
+        # 8. Log confidence breakdown at DEBUG level (US-53-003)
+        if breakdown:
+            parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
+            logger.debug(
+                f"confidence: {original_confidence:.2f} -> {confidence:.2f} ({', '.join(parts)})"
+            )
+
+        return confidence, combined_reason, breakdown
 
     def calculate_adaptive_threshold(
         self,

@@ -514,6 +514,7 @@ class MatchResult:
     gap_reason: str = ""
     confidence_variance: float = 0.0  # Std dev of top-N candidate similarities (high variance = uncertain match)
     matched_keywords: List[str] = field(default_factory=list)  # Common keywords between voiceover and video transcript
+    confidence_breakdown: List[Dict[str, Any]] = field(default_factory=list)  # Audit trail: [{component, adjustment, reason}]
 
 
 @dataclass
