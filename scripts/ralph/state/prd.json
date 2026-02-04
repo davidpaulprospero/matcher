@@ -182,7 +182,7 @@
       "id": "US-51-012",
       "title": "Add pipeline stage timing histograms to completion summary",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Pipeline completion summary includes per-stage duration (wall-clock seconds) in a formatted table",
         "Stage timing data is persisted to checkpoint under stage_metrics for post-run analysis",
@@ -191,7 +191,7 @@
         "Unit test verifies timing data is collected and formatted correctly",
         "Unit test verifies skipped stages are marked as 'skipped' in the summary"
       ],
-      "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 342-463 (run loop) \u00e2\u20ac\u201d stage timing is partially implemented via StageMetrics (US-49-012) but there is no end-of-pipeline summary that aggregates all stage timings into a readable table. The stage_metrics dict in CheckpointData (checkpoint.py:96) stores per-stage metrics. Add a _print_timing_summary() method to PipelineOrchestrator that reads from self.stage_metrics after the run loop completes. Format as: Stage | Duration | % of Total."
+      "notes": "Added _print_timing_summary() to PipelineOrchestrator. Logs formatted table (Stage | Duration | % of Total) after pipeline completion. Skipped stages show 'skipped'. Timing persisted to checkpoint via save_stage_timing_summary(). 21 tests covering format, skipped stages, persistence, edge cases."
     }
   ]
 }
