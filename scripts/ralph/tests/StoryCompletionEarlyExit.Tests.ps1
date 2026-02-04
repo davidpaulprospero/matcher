@@ -158,6 +158,34 @@ Describe 'Early exit grace period and kill logic' -Tag 'Unit', 'EarlyExit' {
     }
 }
 
+Describe 'Exit code override after early exit kill' -Tag 'Unit', 'EarlyExit' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+        $funcPattern = 'function Invoke-ClaudeSubprocess\s*\{([\s\S]*?)^\}'
+        $script:funcBody = [regex]::Match($script:claudeSource, $funcPattern, 'Multiline').Groups[1].Value
+    }
+
+    It 'overrides non-zero exit code to 0 when storyCompletionDetected' {
+        $script:funcBody | Should -Match '\$storyCompletionDetected\s+-and\s+\$exitCode\s+-ne\s+0'
+    }
+
+    It 'sets exitCode to 0 in the override block' {
+        $overrideBlock = [regex]::Match($script:funcBody, 'storyCompletionDetected\s+-and\s+\$exitCode\s+-ne\s+0[\s\S]{0,300}?\$exitCode\s*=\s*0').Value
+        $overrideBlock | Should -Not -BeNullOrEmpty
+    }
+
+    It 'override happens AFTER process exit code is read' {
+        # exitCode = $process.ExitCode must come BEFORE the override
+        $exitCodeReadPos = $script:funcBody.IndexOf('$exitCode = $process.ExitCode')
+        $overridePos = $script:funcBody.IndexOf('Overriding exit code')
+        $exitCodeReadPos | Should -BeLessThan $overridePos
+    }
+
+    It 'logs the override with cyan color' {
+        $script:funcBody | Should -Match 'Overriding exit code.*ForegroundColor Cyan'
+    }
+}
+
 Describe 'Activity reason includes story DONE context' -Tag 'Unit', 'EarlyExit' {
     BeforeAll {
         $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
@@ -258,6 +286,20 @@ Describe 'Mutation testing - early exit values' -Tag 'Unit', 'EarlyExit', 'Mutat
         $graceBlock = [regex]::Match($script:funcBody, 'Grace period expired[\s\S]{0,500}?break').Value
         $graceBlock | Should -Not -BeNullOrEmpty
         $graceBlock | Should -Match 'taskkill /T /F /PID'
+    }
+
+    It 'exit code override sets exactly 0 not -1 or 1' {
+        $overrideLine = ($script:funcBody -split "`n" | Where-Object { $_ -match 'Overriding exit code' })
+        $overrideLine | Should -Not -BeNullOrEmpty
+        # The line after the log should set exitCode = 0
+        $overrideBlock = [regex]::Match($script:funcBody, 'Overriding exit code[\s\S]{0,200}?\$exitCode\s*=\s*(\d+)').Groups[1].Value
+        $overrideBlock | Should -Be '0'
+    }
+
+    It 'exit code override checks -ne 0 not -eq 1 (handles any non-zero)' {
+        $guardLine = ($script:funcBody -split "`n" | Where-Object { $_ -match 'storyCompletionDetected.*exitCode' })
+        $guardLine | Should -Match '-ne\s+0'
+        $guardLine | Should -Not -Match '-eq\s+1'
     }
 }
 

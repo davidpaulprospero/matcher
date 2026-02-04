@@ -607,6 +607,12 @@ function Invoke-ClaudeSubprocess {
             Start-Sleep -Milliseconds 500  # Give async event handlers time to process final chunks
             $exitCode = $process.ExitCode
         }
+
+        # Early exit override: taskkill produces exit code 1, but story actually succeeded
+        if ($storyCompletionDetected -and $exitCode -ne 0) {
+            Write-Host "  [INFO] Overriding exit code $exitCode -> 0 (story completed, killed after grace period)" -ForegroundColor Cyan
+            $exitCode = 0
+        }
     }
     finally {
         # Timeout-protected event cleanup — Remove-Job can deadlock when child processes
