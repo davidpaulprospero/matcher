@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
+from .error_aggregator import ErrorAggregator
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -587,6 +588,7 @@ class DownloadVideoSegmentsStage(Stage):
             'segment_durations': [],   # Per-segment download durations (seconds)
             'total_bytes': 0,          # Total bytes downloaded (from output file sizes)
             'error_categories': {},    # US-49-009: Per-category error counts
+            'error_aggregator': ErrorAggregator(),  # US-51-011: Categorized error aggregation
         }
 
         # Get escalation manager, circuit breaker, and cookie rotator from downloader
@@ -837,6 +839,8 @@ class DownloadVideoSegmentsStage(Stage):
                 # US-49-009: Track error by category for end-of-stage summary
                 _err_cat = classify_error_category(error_msg)
                 stats['error_categories'][_err_cat] = stats['error_categories'].get(_err_cat, 0) + 1
+                # US-51-011: Feed error aggregator with category and message
+                stats['error_aggregator'].record(error_msg, _err_cat)
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
                 # US-48-005: Record failure with escalation manager for tier progression
@@ -1084,10 +1088,11 @@ class DownloadVideoSegmentsStage(Stage):
 
     @staticmethod
     def _log_error_summary(stats: Dict[str, Any]) -> None:
-        """US-49-009: Log structured error summary with per-category breakdown.
+        """US-49-009 + US-51-011: Log structured error summary with per-category breakdown.
 
-        Logs at INFO level with category counts, and at WARNING level with
-        actionable guidance when >50% of failures are bot-detection.
+        Logs at INFO level with category counts and sample messages, and at
+        WARNING level with actionable guidance when >50% of failures are
+        bot-detection.
         """
         error_cats = stats.get('error_categories', {})
         failed = stats.get('failed', 0)
@@ -1102,6 +1107,11 @@ class DownloadVideoSegmentsStage(Stage):
             f"{stats.get('total', 0) - stats.get('attempted', 0)} | "
             f"errors by category: {', '.join(summary_parts) if summary_parts else 'uncategorized'}"
         )
+
+        # US-51-011: Log categorized table with sample messages via ErrorAggregator
+        aggregator = stats.get('error_aggregator')
+        if aggregator and aggregator.total_errors > 0:
+            aggregator.log_summary(stage_name='DOWNLOAD_SEGMENTS')
 
         # Actionable guidance when >50% of failures are bot-detection
         bot_count = error_cats.get('bot_detection', 0)

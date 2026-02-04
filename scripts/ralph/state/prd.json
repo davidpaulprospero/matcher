@@ -167,7 +167,7 @@
       "id": "US-51-011",
       "title": "Add stage-level error aggregation with categorized failure summary",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Each pipeline stage collects errors into categorized buckets (network, auth, timeout, validation, unknown) during execution",
         "Stage completion summary logs a table of error_category -> count -> sample_message",
