@@ -455,6 +455,7 @@ class EscalationManager:
         with lock:
             state = self._get_state(keyword)
             state.consecutive_403s += 1
+            state.consecutive_successes = 0  # Reset success streak on any failure
             self._total_403s += 1
 
             # Delegate escalation decision to strategy
@@ -526,7 +527,9 @@ class EscalationManager:
     def record_success(self, keyword: str) -> None:
         """Record a successful download for a keyword.
 
-        Resets the 403 counter but keeps the current tier (sticky escalation).
+        Increments consecutive_successes and resets 403 counter. If
+        de_escalation is enabled and consecutive_successes reaches the
+        threshold, decreases tier by 1.
 
         Args:
             keyword: The download keyword or video ID.
@@ -534,8 +537,30 @@ class EscalationManager:
         lock = self._get_lock(keyword)
         with lock:
             state = self._get_state(keyword)
-            state.record_success()
+            old_tier = state.current_tier
+
+            # Get de-escalation config from extractor config (with defaults)
+            de_escalation_enabled = True
+            de_escalation_threshold = 5
+            if self._extractor_config is not None:
+                de_escalation_enabled = getattr(
+                    self._extractor_config, 'de_escalation_enabled', True
+                )
+                de_escalation_threshold = getattr(
+                    self._extractor_config, 'de_escalation_threshold', 5
+                )
+
+            de_escalated = state.record_success(
+                de_escalation_threshold=de_escalation_threshold,
+                de_escalation_enabled=de_escalation_enabled,
+            )
             self._total_successes += 1
+
+            if de_escalated:
+                logger.info(
+                    f"De-escalation: keyword={keyword} tier {old_tier.name}->{state.current_tier.name} "
+                    f"after {de_escalation_threshold} consecutive successes"
+                )
 
     def record_slow_speed(self, keyword: str, speed_mbps: float = 0.0) -> None:
         """Record a slow download speed signal for preemptive escalation.

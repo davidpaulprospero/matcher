@@ -1384,6 +1384,8 @@ download:
     escalation_threshold: 2     # Consecutive 403s before escalating to next tier
     cooldown_seconds: 300.0     # Seconds before de-escalating back to lower tier
     max_tier: 3                 # Maximum tier (1=impersonate, 2=extractor-args, 3=full bypass)
+    de_escalation_enabled: true # Drop tier on sustained success (US-61-006)
+    de_escalation_threshold: 5  # Consecutive successes needed to de-escalate by 1 tier
 
   # Cross-keyword rate limit budget: shared resource limits across all keywords
   # When one keyword exhausts rotations, other keywords skip directly to VPN

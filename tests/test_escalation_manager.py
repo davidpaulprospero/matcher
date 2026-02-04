@@ -69,6 +69,8 @@ class FakeExtractorArgsConfig:
     escalation_threshold: int = 2
     cooldown_seconds: float = 300.0
     max_tier: int = 3
+    de_escalation_enabled: bool = True
+    de_escalation_threshold: int = 5
 
 
 def _make_impersonation_manager(targets=None):
@@ -1645,3 +1647,167 @@ class TestCircuitBreakerWiring:
         result = manager.get_escalation_args("keyword_b")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
         assert result.rotate_cookies is False
+
+
+# ---------------------------------------------------------------------------
+# US-61-006: De-escalation on sustained success
+# ---------------------------------------------------------------------------
+
+@pytest.mark.fast
+class TestDeEscalation:
+    """Test de-escalation logic - tier decreases on consecutive successes.
+
+    Verifies that consecutive_successes tracking and de-escalation threshold
+    correctly drop tier levels when sustained success is detected.
+    """
+
+    def test_five_consecutive_successes_at_tier_3_drops_to_tier_2(self, imp_manager):
+        """AC: 5 consecutive successes at Tier 3 drops to Tier 2."""
+        config = FakeExtractorArgsConfig(
+            de_escalation_enabled=True,
+            de_escalation_threshold=5,
+        )
+        manager = EscalationManager(imp_manager, config)
+
+        # Fast-track to Tier 3 via failures (bypass cooldown)
+        call_count = [0]
+        base = 1000.0
+
+        def advancing_time():
+            call_count[0] += 1
+            return base + call_count[0] * 400
+
+        with patch_time_modules(advancing_time):
+            # Tier 1 -> 2
+            manager.record_failure("kw", "403")
+            manager.record_failure("kw", "403")
+            # Tier 2 -> 3
+            manager.record_failure("kw", "403")
+            manager.record_failure("kw", "403")
+
+        # Confirm we're at Tier 3
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.FULL_BYPASS
+
+        # Record 4 successes - should stay at Tier 3
+        for _ in range(4):
+            manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.FULL_BYPASS
+
+        # 5th success triggers de-escalation to Tier 2
+        manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_de_escalation_disabled_stays_at_tier(self, imp_manager):
+        """When de_escalation_enabled=False, tier is sticky regardless of successes."""
+        config = FakeExtractorArgsConfig(
+            de_escalation_enabled=False,
+            de_escalation_threshold=5,
+        )
+        manager = EscalationManager(imp_manager, config)
+
+        # Fast-track to Tier 2
+        manager.record_failure("kw", "403")
+        manager.record_failure("kw", "403")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Record 10 successes - should stay at Tier 2 (de-escalation disabled)
+        for _ in range(10):
+            manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_de_escalation_resets_consecutive_successes(self, imp_manager):
+        """After de-escalation, consecutive_successes counter resets."""
+        config = FakeExtractorArgsConfig(
+            de_escalation_enabled=True,
+            de_escalation_threshold=3,  # Lower threshold for easier testing
+        )
+        manager = EscalationManager(imp_manager, config)
+
+        # Fast-track to Tier 3
+        call_count = [0]
+        base = 1000.0
+
+        def advancing_time():
+            call_count[0] += 1
+            return base + call_count[0] * 400
+
+        with patch_time_modules(advancing_time):
+            manager.record_failure("kw", "403")
+            manager.record_failure("kw", "403")
+            manager.record_failure("kw", "403")
+            manager.record_failure("kw", "403")
+
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.FULL_BYPASS
+
+        # 3 successes to de-escalate Tier 3 -> 2
+        for _ in range(3):
+            manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Counter should be reset - need 3 more successes for Tier 2 -> 1
+        for _ in range(2):
+            manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS  # Still at Tier 2
+
+        # 3rd success triggers de-escalation to Tier 1
+        manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+    def test_no_de_escalation_below_tier_1(self, imp_manager):
+        """Cannot de-escalate below Tier 1 (IMPERSONATE_ONLY)."""
+        config = FakeExtractorArgsConfig(
+            de_escalation_enabled=True,
+            de_escalation_threshold=2,
+        )
+        manager = EscalationManager(imp_manager, config)
+
+        # Start at Tier 1 (default)
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # Record many successes - should stay at Tier 1 (can't go lower)
+        for _ in range(10):
+            manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+    def test_failure_resets_consecutive_successes(self, imp_manager):
+        """A failure resets consecutive_successes counter."""
+        config = FakeExtractorArgsConfig(
+            de_escalation_enabled=True,
+            de_escalation_threshold=5,
+        )
+        manager = EscalationManager(imp_manager, config)
+
+        # Escalate to Tier 2
+        manager.record_failure("kw", "403")
+        manager.record_failure("kw", "403")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Record 4 successes (one short of threshold)
+        for _ in range(4):
+            manager.record_success("kw")
+
+        # A failure should reset the success counter
+        manager.record_failure("kw", "403")
+
+        # Now 5 more successes should be needed for de-escalation
+        for _ in range(4):
+            manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS  # Still Tier 2
+
+        # 5th success triggers de-escalation
+        manager.record_success("kw")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
