@@ -43,7 +43,7 @@
                 "Unit test verifies timeout fires when ydl.download() blocks beyond threshold",
                 "Unit test verifies escalation is triggered after stall timeout"
             ],
-            "notes": "Pre-implemented by US-49-004. Verified all 6 acceptance criteria met: (1) ydl.download() wrapped in ThreadPoolExecutor at download_segments.py:720-740, configurable via segment_stall_timeout (default 120s) in download.py:1192 and config.yaml:1347. (2) TimeoutError raised on stall at line 737. (3) Error feeds into retry via except Exception at line 776, classified as 'timeout' by classify_error_category, added to retry queue. (4) socket_timeout unchanged — separate config. (5) test_stall_timeout_triggers_on_hung_download passes. (6) test_stall_timeout_increments_failure_and_feeds_retry_queue and test_stall_timeout_error_does_not_trigger_bot_escalation both pass. All 6 tests in TestSegmentStallTimeout pass."
+            "notes": "Pre-implemented by US-49-004. Verified all 6 acceptance criteria met: (1) ydl.download() wrapped in ThreadPoolExecutor at download_segments.py:720-740, configurable via segment_stall_timeout (default 120s) in download.py:1192 and config.yaml:1347. (2) TimeoutError raised on stall at line 737. (3) Error feeds into retry via except Exception at line 776, classified as 'timeout' by classify_error_category, added to retry queue. (4) socket_timeout unchanged \u00e2\u20ac\u201d separate config. (5) test_stall_timeout_triggers_on_hung_download passes. (6) test_stall_timeout_increments_failure_and_feeds_retry_queue and test_stall_timeout_error_does_not_trigger_bot_escalation both pass. All 6 tests in TestSegmentStallTimeout pass."
         },
         {
             "id": "US-51-003",
@@ -79,15 +79,14 @@
             "title": "Harden _is_network_failure pattern matching for Python API error format",
             "priority": "medium",
             "passes": true,
-            "notes": "Added 'Connection refused' and 'Connection timed out' to _NETWORK_FAILURE_PATTERNS. All existing patterns already handled DownloadError wrapping and ffmpeg exit code. Added TestIsNetworkFailureHardened class with 21 tests covering DownloadError wrapping, ffmpeg codes, new patterns, and bot-detection exclusion. Updated test_download_segments_error_summary.py to reflect new classification.",
+            "notes": "Tier: P2 bug fix. Source: src/stages/download_segments.py lines 31-73. The _NETWORK_FAILURE_PATTERNS tuple and _is_network_failure() function. Current patterns include 'Errno 11001' and 'getaddrinfo failed' but the Python API wraps these in 'ERROR: unable to download webpage: <urlopen error ...>' format which may not match simple substring checks. The _FFMPEG_NETWORK_EXIT_CODE constant handles the ffmpeg exit code. Verify the patterns also work with yt_dlp.utils.DownloadError exception message format. Add 'Connection refused' and 'Connection timed out' patterns.",
             "acceptanceCriteria": [
                 "_is_network_failure() at download_segments.py recognizes Python API DownloadError wrapping of DNS failures (e.g., 'ERROR: unable to download webpage: <urlopen error [Errno 11001]>')",
                 "_is_network_failure() recognizes ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as a network failure",
                 "_is_network_failure() recognizes 'Connection refused' and 'Connection timed out' patterns",
                 "Unit test covers all new patterns with exact error strings from production logs",
                 "Unit test verifies bot-detection patterns ('Sign in to confirm', '403 Forbidden') are NOT classified as network failures"
-            ],
-            "notes": "Tier: P2 bug fix. Source: src/stages/download_segments.py lines 31-73. The _NETWORK_FAILURE_PATTERNS tuple and _is_network_failure() function. Current patterns include 'Errno 11001' and 'getaddrinfo failed' but the Python API wraps these in 'ERROR: unable to download webpage: <urlopen error ...>' format which may not match simple substring checks. The _FFMPEG_NETWORK_EXIT_CODE constant handles the ffmpeg exit code. Verify the patterns also work with yt_dlp.utils.DownloadError exception message format. Add 'Connection refused' and 'Connection timed out' patterns."
+            ]
         },
         {
             "id": "US-51-006",
@@ -123,7 +122,7 @@
             "id": "US-51-008",
             "title": "Add stage restore validation with mismatch warnings",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Each stage's restore() method validates that checkpoint data matches expected schema/keys before restoring",
                 "When checkpoint data has missing required keys, restore() logs a WARNING with the missing keys and returns False",
@@ -132,7 +131,7 @@
                 "Unit test verifies restore() returns False and logs warning when given checkpoint data with missing keys",
                 "Unit test verifies pipeline re-runs stage when restore returns False"
             ],
-            "notes": "Tier: P2 improvement. Source: src/pipeline.py lines 342-355 (restore logic in run loop), and individual stage restore() methods in src/stages/*.py. Currently when restore() fails, pipeline.py line 354 logs a warning but continues — the stage may run with partially restored state. The fix should make restore() more defensive about data shape, and pipeline.py should re-run the stage (not just warn) when restore fails. Check each stage's restore() in: download_segments.py, iterative_match.py, match.py, caption_stage.py, video_search.py."
+            "notes": "Implemented: Added schema/key validation to restore() in ANALYZE, VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH stages. Pipeline.py now re-runs stage instead of continuing when restore() returns False. 22 new tests in test_stage_restore_validation.py. All 380 related tests pass."
         },
         {
             "id": "US-51-009",
@@ -147,7 +146,7 @@
                 "Unit test verifies dry-run does not modify state or checkpoint",
                 "Unit test verifies dry-run correctly identifies stages that would fail validation"
             ],
-            "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 281-466 (run method) — the dry_run parameter already exists in the method signature (line 289) but the implementation at lines 409-414 only logs 'DRY RUN' and skips stage.run(). It doesn't call validate_inputs() for subsequent stages or produce a summary. Enhance to iterate all stages, call validate_inputs() on each, and produce a structured summary. CLI: src/cli/args.py for --dry-run flag."
+            "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 281-466 (run method) \u00e2\u20ac\u201d the dry_run parameter already exists in the method signature (line 289) but the implementation at lines 409-414 only logs 'DRY RUN' and skips stage.run(). It doesn't call validate_inputs() for subsequent stages or produce a summary. Enhance to iterate all stages, call validate_inputs() on each, and produce a structured summary. CLI: src/cli/args.py for --dry-run flag."
         },
         {
             "id": "US-51-010",
@@ -158,11 +157,11 @@
                 "Videos that fail all escalation tiers in DOWNLOAD_SEGMENTS are saved to a retry_queue list in checkpoint data",
                 "On pipeline resume, the retry queue is loaded and those videos are retried before processing new segments",
                 "Retry queue entries include video_id, last_tier_attempted, failure_reason, and timestamp",
-                "Retry queue has a configurable max_retries_per_video (default 3) — videos exceeding this are permanently skipped",
+                "Retry queue has a configurable max_retries_per_video (default 3) \u00e2\u20ac\u201d videos exceeding this are permanently skipped",
                 "Unit test verifies retry queue is persisted to checkpoint on stage completion",
                 "Unit test verifies retry queue is loaded and processed on resume"
             ],
-            "notes": "Tier: P2 improvement. Source: src/stages/download_segments.py — the download loop saves failed_segment_ids but these are not persisted to checkpoint. On resume, all segments are retried from scratch. The checkpoint data dict (saved around line 870+) should include a 'retry_queue' key with structured entries. The restore() method should load this queue. Existing pattern: checkpoint.py STAGE_FIELD_MAP maps 'DOWNLOAD_SEGMENTS' -> 'download_segments' field in CheckpointData."
+            "notes": "Tier: P2 improvement. Source: src/stages/download_segments.py \u00e2\u20ac\u201d the download loop saves failed_segment_ids but these are not persisted to checkpoint. On resume, all segments are retried from scratch. The checkpoint data dict (saved around line 870+) should include a 'retry_queue' key with structured entries. The restore() method should load this queue. Existing pattern: checkpoint.py STAGE_FIELD_MAP maps 'DOWNLOAD_SEGMENTS' -> 'download_segments' field in CheckpointData."
         },
         {
             "id": "US-51-011",
@@ -177,7 +176,7 @@
                 "Unit test verifies error aggregation collects and categorizes errors correctly",
                 "Unit test verifies completion summary includes all error categories with counts"
             ],
-            "notes": "Tier: P3 improvement. Source: src/stages/download_segments.py — errors are currently logged individually but not aggregated. The stage completion log (around line 870+) shows counts but not categorized breakdowns. Add an ErrorAggregator class (could live in src/stages/base.py or src/stages/utils.py) that stages can use. Error categories should align with existing _is_network_failure() and _is_bot_detection() patterns. This builds on the StageMetrics infrastructure from US-49-012."
+            "notes": "Tier: P3 improvement. Source: src/stages/download_segments.py \u00e2\u20ac\u201d errors are currently logged individually but not aggregated. The stage completion log (around line 870+) shows counts but not categorized breakdowns. Add an ErrorAggregator class (could live in src/stages/base.py or src/stages/utils.py) that stages can use. Error categories should align with existing _is_network_failure() and _is_bot_detection() patterns. This builds on the StageMetrics infrastructure from US-49-012."
         },
         {
             "id": "US-51-012",
@@ -192,7 +191,7 @@
                 "Unit test verifies timing data is collected and formatted correctly",
                 "Unit test verifies skipped stages are marked as 'skipped' in the summary"
             ],
-            "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 342-463 (run loop) — stage timing is partially implemented via StageMetrics (US-49-012) but there is no end-of-pipeline summary that aggregates all stage timings into a readable table. The stage_metrics dict in CheckpointData (checkpoint.py:96) stores per-stage metrics. Add a _print_timing_summary() method to PipelineOrchestrator that reads from self.stage_metrics after the run loop completes. Format as: Stage | Duration | % of Total."
+            "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 342-463 (run loop) \u00e2\u20ac\u201d stage timing is partially implemented via StageMetrics (US-49-012) but there is no end-of-pipeline summary that aggregates all stage timings into a readable table. The stage_metrics dict in CheckpointData (checkpoint.py:96) stores per-stage metrics. Add a _print_timing_summary() method to PipelineOrchestrator that reads from self.stage_metrics after the run loop completes. Format as: Stage | Duration | % of Total."
         }
     ]
 }

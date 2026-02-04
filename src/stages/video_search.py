@@ -280,6 +280,21 @@ class VideoSearchStage(Stage):
             if not data:
                 return False
 
+            # US-51-008: Validate checkpoint data schema before restoring
+            if not isinstance(data, dict):
+                logger.warning(f"VIDEO_SEARCH restore: expected dict, got {type(data).__name__}")
+                return False
+
+            required_keys = {'video_ids'}
+            missing = required_keys - set(data.keys())
+            if missing:
+                logger.warning(f"VIDEO_SEARCH restore: missing required keys: {missing}")
+                return False
+
+            if not isinstance(data['video_ids'], list):
+                logger.warning(f"VIDEO_SEARCH restore: 'video_ids' expected list, got {type(data['video_ids']).__name__}")
+                return False
+
             # Restore video IDs
             state.video_ids = data.get('video_ids', [])
 
