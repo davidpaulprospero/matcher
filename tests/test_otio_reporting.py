@@ -1032,5 +1032,215 @@ class TestEntityTrackCoverage:
         assert data['track_coverage']['V10']['status'] == 'unavailable'
 
 
+# =============================================================================
+# TEST: Schema Versioning and Metadata Enrichment (US-56-011)
+# =============================================================================
+
+class TestSchemaVersioning:
+    """Test schema_version, pipeline_info, and matching_strategy fields."""
+
+    @pytest.mark.fast
+    def test_schema_version_present(self, mock_matches, tmp_path):
+        """Test that schema_version field is present and set to '2.0'."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert 'schema_version' in data
+        assert data['schema_version'] == '2.0'
+
+    @pytest.mark.fast
+    def test_pipeline_info_present(self, mock_matches, tmp_path):
+        """Test that pipeline_info section is present with required fields."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert 'pipeline_info' in data
+        info = data['pipeline_info']
+        assert 'pipeline_version' in info
+        assert 'otio_module_version' in info
+        assert 'config_hash' in info
+        assert 'generation_timestamp' in info
+
+        # config_hash should be a hex string
+        assert isinstance(info['config_hash'], str)
+        assert len(info['config_hash']) == 12
+
+    @pytest.mark.fast
+    def test_matching_strategy_in_segments(self, mock_matches, tmp_path):
+        """Test that each segment includes matching_strategy field."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        for seg in data['segments']:
+            assert 'matching_strategy' in seg, f"Segment {seg['id']} missing matching_strategy"
+            assert seg['matching_strategy'] in ('semantic', 'keyword', 'hybrid', 'visual', 'unknown')
+
+    @pytest.mark.fast
+    def test_matching_strategy_keyword(self, tmp_path):
+        """Test that keyword match is correctly identified."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Keyword match',
+            is_keyword_match=True
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['segments'][0]['matching_strategy'] == 'keyword'
+
+    @pytest.mark.fast
+    def test_matching_strategy_hybrid(self, tmp_path):
+        """Test that hybrid (keyword + embedding) match is correctly identified."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.95, reasoning='Hybrid match',
+            is_keyword_match=True, embedding_similarity=0.85
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['segments'][0]['matching_strategy'] == 'hybrid'
+
+    @pytest.mark.fast
+    def test_matching_strategy_semantic(self, tmp_path):
+        """Test that semantic (embedding-only) match is correctly identified."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.8, reasoning='Semantic match',
+            embedding_similarity=0.75
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['segments'][0]['matching_strategy'] == 'semantic'
+
+    @pytest.mark.fast
+    def test_backward_compatible_new_fields_are_additive(self, mock_matches, tmp_path):
+        """Test backward compatibility: new fields don't break existing structure."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0,
+            source_srt="voiceover.srt",
+            timeline_start_tc="01:00:00:00"
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # All original fields still present
+        assert 'generated_at' in data
+        assert 'source_srt' in data
+        assert 'frame_rate' in data
+        assert 'timeline_start_tc' in data
+        assert 'total_segments' in data
+        assert 'total_frames' in data
+        assert 'total_duration_sec' in data
+        assert 'track_coverage' in data
+        assert 'segments' in data
+
+        # New fields are additive
+        assert 'schema_version' in data
+        assert 'pipeline_info' in data
+
+        # Segment entries still have all original fields plus new one
+        seg = data['segments'][0]
+        assert 'id' in seg
+        assert 'start_frame' in seg
+        assert 'v1_clip' in seg
+        assert 'matching_strategy' in seg
+
+    @pytest.mark.fast
+    def test_empty_matches_still_has_schema_version(self, tmp_path):
+        """Test that schema_version is present even with empty matches."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=[],
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['schema_version'] == '2.0'
+        assert 'pipeline_info' in data
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

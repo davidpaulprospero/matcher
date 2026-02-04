@@ -6,6 +6,7 @@ Migrated from otio_builder.py - provides segment mapping and statistics.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -198,6 +199,29 @@ def _calculate_track_coverage(
     return track_stats
 
 
+def _infer_matching_strategy(match) -> str:
+    """
+    Infer the matching strategy used for a primary Match object.
+
+    Examines match quality indicators to determine which strategy
+    produced the match (semantic, keyword, hybrid, visual, or unknown).
+    """
+    is_keyword = getattr(match, 'is_keyword_match', False)
+    is_visual = getattr(match, 'is_visual_match', False)
+    embedding_sim = getattr(match, 'embedding_similarity', 0.0)
+
+    if is_keyword and embedding_sim > 0:
+        return 'hybrid'
+    elif is_keyword:
+        return 'keyword'
+    elif is_visual:
+        return 'visual'
+    elif embedding_sim > 0:
+        return 'semantic'
+    else:
+        return 'unknown'
+
+
 def generate_segment_map(
     matches: List['MatchResult'],
     output_path: str,
@@ -259,6 +283,7 @@ def generate_segment_map(
             "end_tc": frames_to_tc(end_frame),
             "voiceover_text": vo_seg.text,
             "duration_sec": round(target_duration, 3),
+            "matching_strategy": _infer_matching_strategy(match),
             "v1_clip": {
                 "file": clip_file,
                 "confidence": round(match.confidence, 3),
@@ -301,8 +326,27 @@ def generate_segment_map(
         entity_videos=entity_videos
     )
 
+    # Build pipeline_info section
+    from .. import __version__ as pipeline_version
+    from ..otio import __version__ as otio_module_version
+
+    # Generate config hash from output-relevant settings
+    config_summary = json.dumps({
+        "frame_rate": frame_rate,
+        "timeline_start_tc": timeline_start_tc,
+    }, sort_keys=True)
+    config_hash = hashlib.md5(config_summary.encode()).hexdigest()[:12]
+
+    pipeline_info = {
+        "pipeline_version": pipeline_version,
+        "otio_module_version": otio_module_version,
+        "config_hash": config_hash,
+        "generation_timestamp": datetime.now().isoformat(),
+    }
+
     # Build output structure
     segment_map = {
+        "schema_version": "2.0",
         "generated_at": datetime.now().isoformat(),
         "source_srt": source_srt,
         "frame_rate": frame_rate,
@@ -310,6 +354,7 @@ def generate_segment_map(
         "total_segments": len(segments),
         "total_frames": total_frames,
         "total_duration_sec": round(total_frames / frame_rate, 3),
+        "pipeline_info": pipeline_info,
         "track_coverage": track_coverage,
         "segments": segments
     }
