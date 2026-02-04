@@ -12,6 +12,11 @@ from src.state import Match, restore_matches_from_dicts
 from src.stages.match import MatchStage
 from src.stages.iterative_match import IterativeMatchStage
 from src.state import PipelineState
+from src.matching.serialization import (
+    serialize_match_for_match_stage,
+    serialize_match_for_iterative_stage,
+    is_empty_source,
+)
 
 
 # ============================================================================
@@ -638,79 +643,12 @@ class TestIterativeMatchSerializesMatchResult:
 # ============================================================================
 
 def _serialize_match(match, index=0):
-    """Replicate the iterative_match serialization logic for unit testing.
+    """Delegate to the shared serializer (iterative stage format) for unit testing.
 
-    This mirrors src/stages/iterative_match.py serialization loop so we
-    can test the serialization in isolation without running the full stage.
+    US-57-006: This now uses the shared MatchSerializer instead of duplicating
+    the serialization logic inline.
     """
-    if hasattr(match, 'primary_match') and match.primary_match:
-        pm = match.primary_match
-        source_file = ''
-        video_start = 0.0
-        video_end = 0.0
-        conf = 0.0
-
-        if hasattr(pm, 'video_segment') and pm.video_segment:
-            source_file = getattr(pm.video_segment, 'source_file', '') or ''
-            video_start = getattr(pm.video_segment, 'start_time', 0.0)
-            video_end = getattr(pm.video_segment, 'end_time', 0.0)
-
-        conf = getattr(pm, 'confidence', 0.0)
-
-        if not source_file:
-            import logging
-            avail_attrs = [a for a in ('video_segment', 'confidence', 'reasoning')
-                           if hasattr(pm, a)]
-            logging.getLogger('stages.iterative_match').warning(
-                f"Match {index}: empty video_file after all fallback attempts "
-                f"(type={type(match).__name__}, pm_attrs={avail_attrs})"
-            )
-
-        return {
-            'segment_index': index,
-            'video_file': source_file,
-            'video_start': float(video_start),
-            'video_end': float(video_end),
-            'confidence': float(conf),
-            'strategy': getattr(match, 'strategy', getattr(pm, 'reasoning', '')),
-            'reason': getattr(pm, 'reasoning', ''),
-            'face_score': getattr(match, 'face_score', 0.5),
-        }
-    else:
-        video_file = getattr(match, 'video_file', '')
-        video_start = getattr(match, 'video_start', 0.0)
-        video_end = getattr(match, 'video_end', 0.0)
-        confidence = getattr(match, 'confidence', 0.0)
-
-        # Drill into primary_match.video_segment if available
-        if not video_file:
-            pm = getattr(match, 'primary_match', None)
-            if pm is not None:
-                vs = getattr(pm, 'video_segment', None)
-                if vs is not None:
-                    video_file = getattr(vs, 'source_file', '') or ''
-                    video_start = getattr(vs, 'start_time', video_start)
-                    video_end = getattr(vs, 'end_time', video_end)
-                confidence = getattr(pm, 'confidence', confidence)
-
-        if not video_file:
-            import logging
-            avail_attrs = [a for a in dir(match) if not a.startswith('_')][:10]
-            logging.getLogger('stages.iterative_match').warning(
-                f"Match {index}: empty video_file after all fallback attempts "
-                f"(type={type(match).__name__}, attrs={avail_attrs})"
-            )
-
-        return {
-            'segment_index': getattr(match, 'segment_index', index),
-            'video_file': video_file,
-            'video_start': float(video_start),
-            'video_end': float(video_end),
-            'confidence': float(confidence),
-            'strategy': getattr(match, 'strategy', ''),
-            'reason': getattr(match, 'reason', ''),
-            'face_score': getattr(match, 'face_score', 0.5),
-        }
+    return serialize_match_for_iterative_stage(match, index)
 
 
 class TestVideoFileSerializationDrillDown:
@@ -835,9 +773,8 @@ class TestElseBranchMatchSerialization:
         assert restored.video_end == 20.0
         assert restored.confidence == 0.9
 
-    def test_matchresult_no_primary_match_logs_warning(self, caplog):
-        """MatchResult with primary_match=None logs warning about empty video_file."""
-        import logging
+    def test_matchresult_no_primary_match_detected_as_empty(self):
+        """MatchResult with primary_match=None is detected as empty source by is_empty_source."""
         from src.utils import SRTSegment, Match as UtilsMatch, MatchResult
 
         dummy_vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy')
@@ -850,60 +787,27 @@ class TestElseBranchMatchSerialization:
         mr = MatchResult(primary_match=dummy_match)
         mr.primary_match = None  # Force into else branch
 
-        with caplog.at_level(logging.WARNING):
-            serialized = _serialize_match(mr, index=7)
-
+        serialized = _serialize_match(mr, index=7)
         assert serialized['video_file'] == ''
         assert serialized['segment_index'] == 7
 
-        # Verify warning was logged about empty video_file
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any('empty video_file' in msg for msg in warning_messages), \
-            f"Expected warning about empty video_file, got: {warning_messages}"
+        # Verify is_empty_source detects the empty source
+        assert is_empty_source(mr, 7) is True
 
-    def test_matchresult_no_primary_match_warning_includes_type(self, caplog):
-        """Warning message includes the type name (MatchResult) for debugging."""
-        import logging
+    def test_matchresult_with_valid_source_not_empty(self):
+        """MatchResult with valid source_file is not detected as empty."""
         from src.utils import SRTSegment, Match as UtilsMatch, MatchResult
 
-        dummy_vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy')
-        dummy_vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy',
-                               source_file='dummy.mp4')
-        dummy_match = UtilsMatch(
-            voiceover_segment=dummy_vo, video_segment=dummy_vid,
-            video_scene=None, confidence=0.0, reasoning='',
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='vo')
+        vid_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='vid',
+                             source_file='valid_vid.mp4')
+        primary = UtilsMatch(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.8, reasoning='test',
         )
-        mr = MatchResult(primary_match=dummy_match)
-        mr.primary_match = None
+        mr = MatchResult(primary_match=primary)
 
-        with caplog.at_level(logging.WARNING):
-            _serialize_match(mr, index=0)
-
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any('MatchResult' in msg for msg in warning_messages), \
-            f"Expected type 'MatchResult' in warning, got: {warning_messages}"
-
-    def test_matchresult_no_primary_match_warning_includes_attrs(self, caplog):
-        """Warning message includes available attributes for debugging."""
-        import logging
-        from src.utils import SRTSegment, Match as UtilsMatch, MatchResult
-
-        dummy_vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy')
-        dummy_vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text='dummy',
-                               source_file='dummy.mp4')
-        dummy_match = UtilsMatch(
-            voiceover_segment=dummy_vo, video_segment=dummy_vid,
-            video_scene=None, confidence=0.0, reasoning='',
-        )
-        mr = MatchResult(primary_match=dummy_match)
-        mr.primary_match = None
-
-        with caplog.at_level(logging.WARNING):
-            _serialize_match(mr, index=0)
-
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any('attrs=' in msg for msg in warning_messages), \
-            f"Expected 'attrs=' in warning, got: {warning_messages}"
+        assert is_empty_source(mr, 0) is False
 
 
 # ============================================================================
@@ -1059,29 +963,17 @@ class TestNoneSourceFileFallbackLogging:
         serialized = _serialize_match(mr, index=0)
         assert serialized['video_file'] == ''
 
-    def test_none_source_file_logs_warning(self, caplog):
-        """source_file=None should log a WARNING with match index."""
-        import logging
-
+    def test_none_source_file_detected_as_empty(self):
+        """source_file=None is detected as empty source by is_empty_source."""
         mr = self._make_match_result_with_none_source_file()
-        with caplog.at_level(logging.WARNING):
-            _serialize_match(mr, index=5)
+        assert is_empty_source(mr, 5) is True
 
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any('Match 5' in msg and 'empty video_file' in msg for msg in warning_messages), \
-            f"Expected warning about Match 5 empty video_file, got: {warning_messages}"
-
-    def test_none_source_file_warning_includes_pm_attrs(self, caplog):
-        """Warning for None source_file includes available pm attributes."""
-        import logging
-
+    def test_none_source_file_serializes_without_error(self):
+        """source_file=None serializes without raising — returns empty video_file."""
         mr = self._make_match_result_with_none_source_file()
-        with caplog.at_level(logging.WARNING):
-            _serialize_match(mr, index=3)
-
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any('pm_attrs=' in msg for msg in warning_messages), \
-            f"Expected 'pm_attrs=' in warning, got: {warning_messages}"
+        serialized = _serialize_match(mr, index=3)
+        assert serialized['video_file'] == ''
+        assert serialized['segment_index'] == 3
 
     def test_none_source_file_preserves_other_fields(self):
         """Even with None source_file, other fields are preserved correctly."""
@@ -1189,3 +1081,117 @@ class TestCheckpointRoundTrip:
         restored = restore_matches_from_dicts(loaded['matches'])
         # All matches had empty video_file → None result
         assert restored is None
+
+
+# ============================================================================
+# US-57-006: Shared MatchSerializer tests
+# ============================================================================
+
+class TestSharedMatchSerializer:
+    """US-57-006: Verify the shared serialize_match_for_*_stage functions
+    produce correct output for both Match and MatchResult objects."""
+
+    def _make_utils_match(self, source_file='vid_shared_test', start_time=5.0,
+                          end_time=15.0, confidence=0.85):
+        """Create a utils.Match with a valid video_segment."""
+        from src.utils import SRTSegment, Match as UtilsMatch
+
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=10.0, text='voiceover')
+        vid_seg = SRTSegment(
+            index=0, start_time=start_time, end_time=end_time,
+            text='video caption', source_file=source_file,
+        )
+        return UtilsMatch(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=confidence, reasoning='shared test',
+        )
+
+    def _make_match_result(self, source_file='vid_shared_mr', start_time=3.0,
+                           end_time=13.0, confidence=0.9):
+        """Create a MatchResult wrapping a utils.Match."""
+        from src.utils import MatchResult
+        primary = self._make_utils_match(source_file, start_time, end_time, confidence)
+        return MatchResult(primary_match=primary)
+
+    def _make_gap_match(self):
+        """Create a gap match (source_file='') via create_gap_match factory."""
+        from src.utils import SRTSegment
+        from src.matching.tiered_matcher import create_gap_match
+
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=10.0, text='gap segment')
+        return create_gap_match(vo_seg, reason='no suitable match')
+
+    def test_serialize_match_with_valid_video_segment(self):
+        """AC4: Serialize a Match with valid video_segment — source_file, video_start,
+        video_end must be present in the output dict."""
+        match = self._make_utils_match(
+            source_file='vid_ac4_test', start_time=2.0, end_time=12.0, confidence=0.88,
+        )
+
+        # Test match stage format
+        result_match = serialize_match_for_match_stage(match, index=0)
+        assert result_match['source_file'] == 'vid_ac4_test'
+        assert result_match['start_time'] == 2.0
+        assert result_match['confidence'] == 0.88
+
+        # Test iterative stage format
+        result_iter = serialize_match_for_iterative_stage(match, index=0)
+        assert result_iter['video_file'] == 'vid_ac4_test'
+        assert result_iter['video_start'] == 2.0
+        assert result_iter['video_end'] == 12.0
+        assert result_iter['confidence'] == 0.88
+
+    def test_serialize_gap_match_does_not_raise(self):
+        """AC5: Serialize a gap match (empty source_file) — does not raise,
+        returns dict with empty source_file."""
+        gap = self._make_gap_match()
+
+        # Match stage format — must not raise
+        result_match = serialize_match_for_match_stage(gap, index=0)
+        assert result_match['source_file'] == ''
+        assert result_match['confidence'] == 0.0
+        assert 'start_time' in result_match
+
+        # Iterative stage format — must not raise
+        result_iter = serialize_match_for_iterative_stage(gap, index=0)
+        assert result_iter['video_file'] == ''
+        assert result_iter['confidence'] == 0.0
+        assert 'video_start' in result_iter
+        assert 'video_end' in result_iter
+
+    def test_match_result_serialization_via_shared(self):
+        """MatchResult serialized via shared serializer extracts nested source_file."""
+        mr = self._make_match_result(
+            source_file='vid_mr_shared', start_time=4.0, end_time=14.0, confidence=0.92,
+        )
+        result = serialize_match_for_iterative_stage(mr, index=0)
+        assert result['video_file'] == 'vid_mr_shared'
+        assert result['video_start'] == 4.0
+        assert result['video_end'] == 14.0
+        assert result['confidence'] == 0.92
+
+    def test_match_stage_format_keys(self):
+        """Match stage serializer includes expected keys."""
+        match = self._make_utils_match()
+        result = serialize_match_for_match_stage(match, index=3)
+        expected_keys = {'segment_index', 'source_file', 'start_time', 'confidence',
+                         'confidence_variance', 'matched_keywords', 'confidence_breakdown'}
+        assert set(result.keys()) == expected_keys
+
+    def test_iterative_stage_format_keys(self):
+        """Iterative stage serializer includes expected keys."""
+        match = self._make_utils_match()
+        result = serialize_match_for_iterative_stage(match, index=3)
+        expected_keys = {'segment_index', 'video_file', 'video_start', 'video_end',
+                         'confidence', 'strategy', 'reason', 'face_score'}
+        assert set(result.keys()) == expected_keys
+
+    def test_is_empty_source_gap_match(self):
+        """is_empty_source returns True for gap match."""
+        gap = self._make_gap_match()
+        assert is_empty_source(gap, 0) is True
+
+    def test_is_empty_source_valid_match(self):
+        """is_empty_source returns False for match with valid source_file."""
+        match = self._make_utils_match(source_file='valid_vid')
+        assert is_empty_source(match, 0) is False

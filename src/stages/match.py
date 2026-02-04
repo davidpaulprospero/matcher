@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
 from ..logger import get_global_logger
 from ..matching.scoring import get_multimodal_tracker
+from ..matching.serialization import serialize_match_for_match_stage
 from ..utils import is_embeddings_empty
 
 if TYPE_CHECKING:
@@ -172,46 +173,7 @@ class MatchStage(Stage):
             serialized_matches = []
             for i, m in enumerate(matches):
                 try:
-                    # Handle MatchResult structure (has primary_match)
-                    if hasattr(m, 'primary_match') and m.primary_match:
-                        pm = m.primary_match
-                        source_file = ''
-                        start_time = 0.0
-                        conf = 0.0
-
-                        if hasattr(pm, 'video_segment') and pm.video_segment:
-                            source_file = getattr(pm.video_segment, 'source_file', '')
-                            start_time = getattr(pm.video_segment, 'start_time', 0.0)
-
-                        conf = getattr(pm, 'confidence', 0.0)
-                        # confidence_variance and matched_keywords always present on MatchResult (dataclass defaults)
-                        conf_variance = m.confidence_variance
-                        matched_kws = m.matched_keywords
-
-                        serialized_matches.append({
-                            'segment_index': i,
-                            'source_file': source_file,
-                            'start_time': float(start_time),
-                            'confidence': float(conf),
-                            'confidence_variance': float(conf_variance),
-                            'matched_keywords': list(matched_kws) if matched_kws else [],
-                            'confidence_breakdown': list(m.confidence_breakdown) if m.confidence_breakdown else [],
-                        })
-                    # Handle direct Match structure (no confidence_variance/matched_keywords available)
-                    elif hasattr(m, 'video_segment'):
-                        source_file = getattr(m.video_segment, 'source_file', '')
-                        start_time = getattr(m.video_segment, 'start_time', 0.0)
-                        conf = getattr(m, 'confidence', 0.0)
-
-                        serialized_matches.append({
-                            'segment_index': i,
-                            'source_file': source_file,
-                            'start_time': float(start_time),
-                            'confidence': float(conf),
-                            'confidence_variance': 0.0,  # Not available for direct Match
-                            'matched_keywords': [],  # Not available for direct Match
-                            'confidence_breakdown': [],
-                        })
+                    serialized_matches.append(serialize_match_for_match_stage(m, i))
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
 
