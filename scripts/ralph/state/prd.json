@@ -76,7 +76,7 @@
                             "id":  "US-59-005",
                             "title":  "Integrate FormatTimeoutPolicy into _fetch_subtitle_with_format",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "_fetch_subtitle_with_format() uses FormatTimeoutPolicy.get_timeout(subtitle_format, fallback_level) instead of the flat self._timeout for the subprocess.run timeout parameter",
                                                        "fallback_level is derived from the format\u0027s position in the current preference order (0 for first format, 1 for second, etc.)",
@@ -84,7 +84,7 @@
                                                        "Unit test verifies that json3 gets a longer timeout (45s) than vtt/srt (25s) as defined in FormatTimeoutPolicy defaults",
                                                        "Unit test verifies that the third format attempt gets a reduced timeout (0.8x multiplier per fallback_level)"
                                                    ],
-                            "notes":  "Tier: enhancement. FormatTimeoutPolicy exists at src/caption_timeout_manager.py:416-457 with per-format timeouts (json3: 45s, srv3: 30s, vtt: 25s, srt: 25s) and progressive fallback reduction (0.8x per level), but is never imported or used in src/caption_fetcher.py. Currently _fetch_subtitle_with_format() at line 4108 uses flat self._timeout (default 30s) for all formats. Key files: src/caption_fetcher.py (line 4108, line 2292 for __init__), src/caption_timeout_manager.py (lines 416-457 FormatTimeoutPolicy class)."
+                            "notes":  "Implemented US-59-005: Integrated FormatTimeoutPolicy into CaptionFetcher. _fetch_subtitle_with_format() now uses format-specific timeouts (json3=45s, srv3=30s, vtt/srt=25s) with 0.8x progressive fallback reduction. Added format_timeouts config field to CaptionFirstConfig for overrides. 12 unit tests in tests/test_format_timeout_policy_integration.py verify defaults, fallback reduction, and CaptionFetcher integration."
                         },
                         {
                             "id":  "US-59-006",

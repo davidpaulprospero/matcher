@@ -485,6 +485,13 @@ class CaptionFirstConfig:
     # Disable to use the existing per-stage rate limiting only
     use_global_coordinator: bool = True
 
+    # Per-format timeout overrides (US-59-005)
+    # Maps subtitle format names to base timeout in seconds.
+    # Used by FormatTimeoutPolicy for format-specific timeouts instead of flat timeout.
+    # Defaults (in FormatTimeoutPolicy): json3=45s, srv3=30s, vtt=25s, srt=25s
+    # Set to empty dict {} to use FormatTimeoutPolicy defaults.
+    format_timeouts: Dict[str, float] = field(default_factory=dict)
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.circuit_breaker, dict):
