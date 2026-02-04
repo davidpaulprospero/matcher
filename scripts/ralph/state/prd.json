@@ -49,7 +49,7 @@
             "id": "US-51-003",
             "title": "Fix iterative_match else-branch match serialization for plain Match objects",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "The else branch in iterative_match.py match serialization (around line 450-461) correctly extracts video_file from Match objects that have a video_file attribute",
                 "For MatchResult objects that fall into the else branch (lacking primary_match), video_file extraction uses safe navigation through available attributes",
@@ -57,7 +57,7 @@
                 "Unit test with a mock Match object (has video_file) serializes correctly via the else branch",
                 "Unit test with a mock MatchResult (no primary_match, no video_file) serializes with empty string and logs warning"
             ],
-            "notes": "Tier: P1 bug fix. Source: src/stages/iterative_match.py lines 450-461. The else branch does getattr(match, 'video_file', '') which always returns '' for MatchResult objects (they don't have video_file). The if-branch (lines 440-449) correctly drills into match.primary_match.video_segment.source_file. The else-branch should attempt the same drill-down before falling back. Compare with src/stages/match.py:167 which navigates primary_match.video_segment.source_file. Match.from_dict() rejects matches with empty video_file on restore, losing all iterative match results."
+            "notes": "Fixed: else-branch now extracts video_file via getattr for plain Match objects, and logs warning with type name when video_file is empty (for MatchResult with primary_match=None). Added 4 tests in TestElseBranchMatchSerialization. Updated _serialize_match test helper to mirror production code."
         },
         {
             "id": "US-51-004",
