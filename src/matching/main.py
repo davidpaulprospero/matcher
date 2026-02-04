@@ -486,6 +486,11 @@ def match_all_segments(
 
     logger.info("=" * 60)
 
+    # === SOURCE DIVERSITY METRICS (US-53-005) ===
+    from .metrics import compute_diversity_metrics, log_diversity_metrics
+    diversity_report = compute_diversity_metrics(results)
+    log_diversity_metrics(diversity_report)
+
     # Analyze low confidence segments
     analyze_low_confidence_segments(results)
 
