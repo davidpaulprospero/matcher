@@ -1,188 +1,189 @@
-﻿{
-    "sprintNumber":  56,
-    "focusArea":  "otio",
-    "branchName":  "ralph/sprint-56",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-56-001",
-                            "title":  "Generate sprint stories for otio focus area",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027otio\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027otio\u0027",
-                                                       "Add stories US-56-002 through US-56-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-56-NNN to be unique across sprints",
-                                                       "Mark this story (US-56-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Seed story completed. Analyzed src/otio/ (9 modules: timeline.py, tracks.py, entities.py, export.py, xml_export.py, reporting.py, utils.py, types.py, __init__.py) and tests/ (15 test files). Found: 3x duplicated _has_problematic_path, 2x duplicated _is_audio_only, hardcoded 01:00:00:00 in xml_export not using config, duplicated frames_to_tc, limited EDL colors, no NTSC detection, logging-only clip warnings, no audio validation, no segment map versioning, V9/V10 always show gaps in stats."
-                        },
-                        {
-                            "id":  "US-56-002",
-                            "title":  "Deduplicate _has_problematic_path and _is_audio_only across otio modules",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "_has_problematic_path is defined ONLY in src/otio/utils.py and imported by timeline.py, tracks.py, and entities.py",
-                                                       "_is_audio_only is defined ONLY in src/otio/utils.py (or timeline.py) and imported by tracks.py — no duplicate definitions remain",
-                                                       "AUDIO_ONLY_EXTS constant is defined once and shared across all modules that need it",
-                                                       "All existing tests in tests/test_otio_*.py continue to pass after the refactor",
-                                                       "Add test in tests/test_otio_utils.py verifying _has_problematic_path handles unicode, replacement chars, and ASCII-only paths"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Completed. Moved _has_problematic_path, _is_audio_only, AUDIO_ONLY_EXTS, NON_MEDIA_EXTS to src/otio/utils.py. Updated imports in timeline.py, tracks.py, entities.py to use shared definitions. Removed 3 duplicate _has_problematic_path definitions and 2 duplicate _is_audio_only definitions. Added 17 new tests (TestHasProblematicPath, TestIsAudioOnly, TestSharedConstants) in test_otio_utils.py covering unicode, replacement chars, CJK, emoji, ASCII paths, and audio extension detection. All 172 core otio tests pass (2 pre-existing failures unrelated to this change)."
-                        },
-                        {
-                            "id":  "US-56-003",
-                            "title":  "Extract shared frames_to_tc into otio utils and eliminate duplication",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "A single frames_to_tc(frames, frame_rate, start_frame_offset, separator) function exists in src/otio/utils.py",
-                                                       "src/otio/export.py:337-350 uses the shared function instead of defining its own",
-                                                       "src/otio/reporting.py:187-199 uses the shared function instead of defining its own",
-                                                       "Timecode parsing logic (tc_parts splitting at export.py:330-335 and reporting.py:180-185) is extracted into a parse_timecode_to_frames() utility",
-                                                       "Add tests verifying frames_to_tc for edge cases: 0 frames, frame_rate=29.97 rounded, drop-frame separator"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Extracted frames_to_tc(frames, fps, start_frame_offset, separator) and parse_timecode_to_frames(timecode, frame_rate) into src/otio/utils.py. Updated export.py and reporting.py to use shared functions. Added 9 new edge case tests. All 92 otio_utils tests pass."
-                        },
-                        {
-                            "id":  "US-56-004",
-                            "title":  "Use configurable timeline_start_tc in XML export instead of hardcoded 01:00:00:00",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "generate_davinci_media_xml() accepts timeline_start_tc parameter and uses it in the 3 hardcoded locations",
-                                                       "generate_davinci_sequence_xml() accepts timeline_start_tc parameter and uses it in the 3 hardcoded locations",
-                                                       "The \u003cstring\u003e element at xml_export.py:361 uses the parameter instead of literal \u002701:00:00:00\u0027",
-                                                       "The \u003cframe\u003e calculation at xml_export.py:362 uses parsed timecode instead of fps_int*3600",
-                                                       "Add test verifying XML output with non-default timecode (e.g., \u002700:00:00:00\u0027) contains correct \u003cstring\u003e and \u003cframe\u003e values"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Completed. Added timeline_start_tc parameter (default \u002701:00:00:00\u0027) to generate_resolve_xml_with_bins, _write_media_xml_part, and generate_davinci_sequence_xml. Replaced all 3 hardcoded \u002701:00:00:00\u0027 strings and fps_int*3600 calculations with the parameter and parse_timecode_to_frames(). Updated output.py callers to pass config.output.timeline_start_tc. Added 7 tests in TestConfigurableTimelineStartTC covering default/custom timecodes for all 3 XML locations. All tests pass."
-                        },
-                        {
-                            "id":  "US-56-005",
-                            "title":  "Add NTSC flag detection for drop-frame timecodes in XML export",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "_validate_frame_rate returns a tuple (timebase_int, is_ntsc) instead of just int, or a separate _is_ntsc_rate function exists",
-                                                       "XML \u003cntsc\u003e elements use \u0027TRUE\u0027 for 29.97 and 59.94 fps timebases instead of always \u0027FALSE\u0027",
-                                                       "EDL FCM line uses \u0027DROP FRAME\u0027 when frame rate is 29.97 or 59.94 and drop_frame=True",
-                                                       "Add test verifying XML output with 29.97fps has \u003cntsc\u003eTRUE\u003c/ntsc\u003e and 30fps has \u003cntsc\u003eFALSE\u003c/ntsc\u003e",
-                                                       "Add test verifying _validate_frame_rate correctly identifies NTSC rates (23.976, 29.97, 59.94)"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Completed. Added _is_ntsc_rate() helper and NTSC_RATES constant. Modified _validate_frame_rate() to return (int, bool) tuple. Replaced all hardcoded \u003cntsc\u003eFALSE\u003c/ntsc\u003e with dynamic ntsc_str across generate_resolve_xml_with_bins, _write_media_xml_part, and generate_davinci_sequence_xml. Updated \u003cdisplayformat\u003e to use DF for NTSC rates. Updated _generate_edl in output.py to auto-detect drop_frame for 29.97/59.94 fps. Added TestNTSCDetection class with 10 tests covering _is_ntsc_rate, _validate_frame_rate tuple return, and XML output for NTSC/non-NTSC rates. Updated 7 existing tests to unpack tuple. All 11 unit tests pass; XML generation tests have pre-existing SRTSegment.end vs end_time fixture issue."
-                        },
-                        {
-                            "id":  "US-56-006",
-                            "title":  "Add pre-flight media validation before timeline assembly",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "A validate_media_paths(matches, downloaded_segments) function exists that runs BEFORE create_timeline()",
-                                                       "It reports missing files, audio-only files, problematic paths, and non-media files in a summary dict",
-                                                       "The summary includes counts by category and lists affected segment indices",
-                                                       "create_timeline() calls validate_media_paths() at the top and logs a summary before proceeding",
-                                                       "Add test with mock match results containing mixed valid/invalid paths, verify summary accuracy"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Implemented validate_media_paths() in src/otio/timeline.py. Scans all match types (primary, alternatives, secondary, strategy) using existing _is_audio_only, _has_problematic_path, _is_non_media, _is_missing_file. Returns summary dict with counts by category and affected segment labels (S000, S001-alt0, etc.). create_timeline() calls it at the top before path normalization and logs a human-readable summary via _log_media_validation_summary(). 13 tests in tests/test_preflight_media_validation.py cover all categories, mixed issues, alt/sec/strat matches, downloaded_segments resolution, empty inputs."
-                        },
-                        {
-                            "id":  "US-56-007",
-                            "title":  "Add proactive clip budget tracking with auto-lite mode",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "A ClipBudgetTracker class exists that estimates total clips before timeline assembly based on match count and enabled tracks",
-                                                       "When estimated clips exceed CLIP_COUNT_WARNING_THRESHOLD (2500), it logs a recommendation to disable V4-V8 tracks",
-                                                       "When estimated clips exceed CLIP_COUNT_ERROR_THRESHOLD (3000), it auto-disables strategy tracks (V7-V8) and logs the action",
-                                                       "The tracker integrates into create_timeline() before track building begins",
-                                                       "Add test simulating 400 segments with all tracks enabled, verify auto-disable triggers at threshold"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Implemented ClipBudgetTracker in src/otio/tracks.py. Integrates into create_timeline() before track building. At WARNING (\u003e=2500 clips) logs recommendation to disable V4-V8. At ERROR (\u003e=3000 clips) auto-disables strategy tracks (V7-V8) by setting config.output.include_strategy_tracks=False. 13 tests in tests/test_clip_budget_tracker.py cover estimation, warning, auto-disable, and edge cases including 400-segment scenario."
-                        },
-                        {
-                            "id":  "US-56-008",
-                            "title":  "Add voiceover audio duration validation against SRT timeline",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "When actual_vo_duration is detected, compare it against the last segment\u0027s end time (scaled by time_scale_factor)",
-                                                       "Log a warning if actual audio is shorter than timeline end (content will be cut off)",
-                                                       "Log info if trailing silence exceeds 30 seconds (potential alignment issue)",
-                                                       "The validation runs at timeline.py after actual_vo_duration is determined (around line 512-524)",
-                                                       "Add test with actual_vo_duration=100s but last_srt_end=120s, verify warning is logged"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Added VO duration validation in timeline.py after time_scale_factor calculation. Warns when audio shorter than scaled SRT end (cutoff), logs info when trailing silence \u003e30s. 4 tests added."
-                        },
-                        {
-                            "id":  "US-56-009",
-                            "title":  "Enhance _find_audio_for_voiceover with size-based selection and validation",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "_find_audio_for_voiceover returns the largest audio file when multiple candidates exist in the same directory",
-                                                       "The function logs which file was selected and its size when multiple candidates are found",
-                                                       "If only one candidate exists, it is returned without size comparison (current behavior preserved)",
-                                                       "Add test with 3 mock audio files of different sizes in a temp directory, verify largest is selected",
-                                                       "Add test with single audio file, verify current first-match behavior is preserved"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Refactored _find_audio_for_voiceover to collect all candidates and return largest by file size. Added logging when multiple candidates found. 7 tests added covering size-based selection, single file, no candidates, duplicate prevention, and log verification."
-                        },
-                        {
-                            "id":  "US-56-010",
-                            "title":  "Fix V9/V10 track coverage stats to reflect actual entity clip data",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "_calculate_track_coverage accepts optional entity_images and entity_videos parameters",
-                                                       "When entity data is provided, V9/V10 stats reflect actual clip counts instead of always showing gaps",
-                                                       "When entity data is not provided, V9/V10 stats show \u0027N/A\u0027 or are omitted instead of misleading 100% gap",
-                                                       "Add test with mock entity_images dict containing 5 entities, verify V9 clip_count \u003e 0",
-                                                       "Add test without entity data, verify V9/V10 coverage is reported as unavailable"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Fixed. _calculate_track_coverage now accepts entity_images/entity_videos params. V9/V10 use actual entity data when provided, show unavailable status when not. Output.py caller threads entity data. 5 new tests pass (30/30 total). Also fixed .start/.end -> .start_time/.end_time bug."
-                        },
-                        {
-                            "id":  "US-56-011",
-                            "title":  "Add segment map schema versioning and metadata enrichment",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "generate_segment_map output JSON includes a \u0027schema_version\u0027 field set to \u00272.0\u0027",
-                                                       "Each segment entry includes \u0027matching_strategy\u0027 field extracted from match metadata (e.g., \u0027semantic\u0027, \u0027keyword\u0027, \u0027hybrid\u0027)",
-                                                       "The output JSON includes a \u0027pipeline_info\u0027 section with stage versions and config hash",
-                                                       "Backward-compatible: existing downstream tools ignore new fields gracefully",
-                                                       "Add test verifying schema_version is present and segment entries contain matching_strategy field"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Completed. Added schema_version '2.0', pipeline_info (pipeline_version, otio_module_version, config_hash, generation_timestamp), and matching_strategy per segment (inferred from Match.is_keyword_match, is_visual_match, embedding_similarity → keyword/semantic/hybrid/visual/unknown). 8 new tests in TestSchemaVersioning class, all 38 reporting tests pass. Backward-compatible: new fields are additive only."
-                        },
-                        {
-                            "id":  "US-56-012",
-                            "title":  "Add comprehensive EDL confidence color mapping for all tiers",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "EDL color mapping covers all confidence levels returned by get_confidence_color(): GREEN, CYAN, YELLOW, ORANGE, RED, PINK, BLUE, PURPLE",
-                                                       "Unknown/unmapped colors fall back to \u0027White\u0027 instead of being silently dropped",
-                                                       "The color mapping is defined as a constant (EDL_COLOR_MAP) in export.py, not inline in the function",
-                                                       "Add test generating EDL with all confidence levels (0.0 to 1.0 range), verify each maps to a valid EDL color",
-                                                       "Add test for entity markers verifying PINK maps correctly"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: enhancement (low risk). Source files: src/otio/export.py:352-360 (color_to_edl dict with 6 entries: GREEN-\u003eMint, CYAN-\u003eCyan, YELLOW-\u003eYellow, ORANGE-\u003eOrange, RED-\u003eRed, PINK-\u003ePink). get_confidence_color in src/otio/utils.py returns color strings based on confidence score thresholds. The current inline dict may not cover all colors returned by get_confidence_color (e.g., if BLUE or PURPLE are added). Extract to module-level constant, add fallback for unknown colors, and ensure DaVinci Resolve recognizes all mapped EDL color names."
-                        }
-                    ]
+{
+    "sprintNumber": 57,
+    "focusArea": "architecture",
+    "branchName": "ralph/sprint-57",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-57-001",
+            "title": "Generate sprint stories for architecture focus area",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'architecture' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'architecture'",
+                "Add stories US-57-002 through US-57-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-57-NNN to be unique across sprints",
+                "Mark this story (US-57-001) as passes: true when done"
+            ],
+            "notes": "Seed story. Generated 11 architecture stories (US-57-002 through US-57-012) based on user interview context (corrupted match data, version check, cookie validation) and codebase exploration of cross-cutting architectural concerns."
+        },
+        {
+            "id": "US-57-002",
+            "title": "Add batch-level diagnostics for corrupted match data during checkpoint restore",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "restore_matches_from_dicts() in src/state.py aggregates validation failures and emits a single summary log line: '{n} of {total} match entries have empty source_file (likely all gap matches)' instead of individual ValueError per entry",
+                "When >50% of match entries fail validation, log a WARNING with actionable advice: 'Re-run MATCH stage with --match-only'",
+                "Validation errors are still collected individually but logged as DEBUG level, not ERROR",
+                "Add a test that passes 100 match dicts with 80 having empty source_file and verifies the summary log message appears exactly once",
+                "Add a test that passes match dicts with all valid source_file and verifies no summary warning is emitted"
+            ],
+            "notes": "Tier: High priority fix from user interview. Implemented: restore_matches_from_dicts now counts empty_source_count separately, logs individual errors at DEBUG, emits single summary WARNING with counts, and advises --match-only when >50% fail. 4 new tests in TestBatchDiagnostics class. Files modified: src/state.py, tests/test_match_serialization.py."
+        },
+        {
+            "id": "US-57-003",
+            "title": "Centralize checkpoint version constant and fix false-positive version warning",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Define CURRENT_CHECKPOINT_VERSION = '2.0' as a module-level constant in src/checkpoint.py",
+                "The checkpoint write path uses CURRENT_CHECKPOINT_VERSION instead of any hardcoded string when setting the version field",
+                "The version validation check (around line 528) compares against CURRENT_CHECKPOINT_VERSION instead of hardcoded '1.0'",
+                "Add a test that creates a checkpoint with the current version and verifies no version warning is logged during validation",
+                "Add a test that creates a checkpoint with version '1.0' and verifies a migration/upgrade notice is logged (not a false alarm)"
+            ],
+            "notes": "Tier: High priority fix from user interview. Source files: src/checkpoint.py (line 528 for version check, and the write path that sets data.version). The current code compares against '1.0' but current checkpoints are written with version '2.0', causing every validation to emit a misleading warning. Single constant eliminates drift between write and validation."
+        },
+        {
+            "id": "US-57-004",
+            "title": "Add startup validation for cookies_from_browser PATH availability",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "When download config has cookies_from_browser set, validate at pipeline startup (before any stage runs) that the specified browser executable is findable via shutil.which or platform-appropriate lookup",
+                "On validation failure, log a clear WARNING: 'cookies_from_browser is set to \"{browser}\" but it is not found on PATH. Tier 3 cookie extraction will fail. Set download.cookies_path instead or install {browser}.'",
+                "Validation does NOT block pipeline startup — it is a warning, not an error (pipeline can still work without Tier 3)",
+                "Add a test that mocks shutil.which to return None for the configured browser and verifies the warning is emitted",
+                "Add a test that mocks shutil.which to return a path and verifies no warning is emitted"
+            ],
+            "notes": "Tier: High priority fix from user interview. Source files: src/downloader/core.py (browser detection around lines 185-241), src/pipeline.py (startup validation around lines 136-183). The user had cookies_from_browser: firefox configured but Firefox not on PATH, causing silent Tier 3 failures. Early warning prevents debugging 403 errors that trace back to missing browser."
+        },
+        {
+            "id": "US-57-005",
+            "title": "Extract create_gap_match factory function to eliminate scattered gap match creation",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Create a create_gap_match(vo_segment, reason: str) -> Match function in src/matching/tiered_matcher.py that encapsulates gap match construction with voiceover_segment=vo_segment, video_segment=vo_segment, confidence=0.0",
+                "All gap match creation sites in tiered_matcher.py (at least 3 locations around lines 606, 639, 646) use the factory function instead of inline Match() construction",
+                "The factory function sets a is_gap_match=True flag or match_type='gap' attribute on the returned Match for downstream identification",
+                "Add a test that verifies create_gap_match returns a Match with confidence=0.0 and the gap marker attribute",
+                "Add a test that verifies the gap match's video_segment is the same object as voiceover_segment (self-reference pattern)"
+            ],
+            "notes": "Tier: Medium priority refactor. Source files: src/matching/tiered_matcher.py (lines 606-613, 639-646 — three inline gap match constructions). Sprint 45 cleaned up legacy stage references; this continues architectural cleanup in the matching subsystem. Gap matches are a distinct concept that should have a single creation point for consistent behavior."
+        },
+        {
+            "id": "US-57-006",
+            "title": "Extract match serialization logic into shared MatchSerializer utility",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Create a MatchSerializer class or module-level function serialize_match_to_dict(match) in src/matching/ that extracts the common serialization logic from src/stages/match.py lines 171-217",
+                "Both MATCH and ITERATIVE_MATCH stage checkpoint serialization paths use the shared serializer instead of duplicated inline logic",
+                "The serializer handles both primary_match (MatchResult) and direct video_segment (Match) formats via a single code path",
+                "Add a test that serializes a Match with a valid video_segment and verifies source_file, video_start, video_end are present in the output dict",
+                "Add a test that serializes a gap match (empty source_file) and verifies the serializer does not raise — returns the dict with empty source_file"
+            ],
+            "notes": "Tier: Medium priority refactor. Source files: src/stages/match.py (lines 171-217, serialize path with duplicate primary_match vs video_segment branches), src/stages/iterative_match.py (similar serialization around lines 419-431). The current duplication means bug fixes to serialization must be applied in two places. Shared serializer enforces consistent checkpoint format."
+        },
+        {
+            "id": "US-57-007",
+            "title": "Split download_segments main loop into focused sub-methods",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "The main download loop in src/stages/download_segments.py (lines 540-897) is refactored into sub-methods: _prepare_download_context(), _check_preconditions(), _execute_download(), _handle_result()",
+                "Each sub-method is no longer than 80 lines",
+                "The main loop body calls the sub-methods sequentially and reads as a high-level narrative of the download process",
+                "All existing tests in tests/test_download_segment*.py continue to pass without modification",
+                "Add at least one test for _check_preconditions() that verifies circuit breaker open state returns a skip reason"
+            ],
+            "notes": "Tier: Medium priority refactor. Source files: src/stages/download_segments.py (lines 540-897, the 357-line download loop). The loop currently mixes candidate filtering, circuit breaker checks, escalation decisions, retry queue management, progress callbacks, and error classification. Extract into sub-methods following single responsibility principle. Do NOT change behavior — pure structural refactor."
+        },
+        {
+            "id": "US-57-008",
+            "title": "Extract error pattern categories in error classification module",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Restructure NETWORK_FAILURE_PATTERNS and similar pattern tuples in src/downloader/error_classification.py (lines 22-40) into a categorized dict: ERROR_PATTERNS = {'dns': [...], 'tcp': [...], 'tls': [...], 'http': [...]}",
+                "classify_error_severity() uses the categorized structure and includes the error sub-category in its return value or log output",
+                "The flat tuple interface is preserved as a computed property or module-level constant derived from the categorized dict for backward compatibility",
+                "Add a test that verifies 'getaddrinfo failed' is classified under the 'dns' sub-category",
+                "Add a test that verifies 'HTTP Error 403' is classified under the 'http' sub-category",
+                "Add a test that verifies the flattened pattern tuple contains all patterns from all categories"
+            ],
+            "notes": "Tier: Medium priority refactor. Source files: src/downloader/error_classification.py (lines 22-40 for pattern lists, lines 160-192 for classify_error_severity). Currently patterns are flat tuples with no sub-categorization, making error reports less informative. Categorized structure enables better diagnostics (e.g., 'DNS errors: 3, HTTP errors: 12') without changing classification behavior."
+        },
+        {
+            "id": "US-57-009",
+            "title": "Extract circuit breaker pause calculation into composable strategy",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Extract _get_effective_pause_seconds() logic in src/downloader/circuit_breaker.py (lines 160-223) into separate methods: _base_pause(), _escalation_adjusted_pause(), _budget_adjusted_pause()",
+                "Extract _cap_pause_duration(pause: float) -> float method used by both _get_effective_pause_seconds and _apply_jitter to eliminate duplicated capping logic (lines 225-270)",
+                "The combined pause calculation produces identical results to the current implementation for all code paths",
+                "Add a test that verifies pause capping is consistent between the effective pause and jitter paths (same max_pause applied)",
+                "Add a test that verifies escalation tier increases the pause duration proportionally"
+            ],
+            "notes": "Tier: Low priority refactor. Source files: src/downloader/circuit_breaker.py (lines 160-270). The current implementation has pause calculation logic interleaved with escalation and budget checks, plus duplicated capping logic between _get_effective_pause_seconds and _apply_jitter. Extracting into composable methods improves testability without changing behavior."
+        },
+        {
+            "id": "US-57-010",
+            "title": "Add STAGE_FIELD_MAP auto-generation from CheckpointData dataclass",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Replace the manually-maintained STAGE_FIELD_MAP dict in src/checkpoint.py (lines 42-50) with an auto-generated mapping derived from CheckpointData dataclass field annotations or a decorator",
+                "The auto-generation mechanism maps stage names (e.g., 'ANALYZE') to their corresponding CheckpointData field names (e.g., 'analyze') using a consistent naming convention",
+                "Add a validation check at module load time that asserts every entry in STAGE_ORDER has a corresponding field in CheckpointData, raising ImportError if not",
+                "Add a test that verifies STAGE_FIELD_MAP contains entries for all stages in STAGE_ORDER",
+                "Add a test that verifies adding a stage to STAGE_ORDER without a corresponding CheckpointData field raises an error"
+            ],
+            "notes": "Tier: Low priority improvement. Source files: src/checkpoint.py (lines 42-50 for STAGE_FIELD_MAP, STAGE_ORDER list). Sprint 45 story US-45-007 added sync validation between checkpoint.py and ralph-config.json; this story extends that principle to the internal STAGE_FIELD_MAP -> CheckpointData relationship. Prevents drift when adding new pipeline stages."
+        },
+        {
+            "id": "US-57-011",
+            "title": "Extract magic number constants from state restoration and matching",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Extract DEFAULT_MATCH_DURATION_SECONDS = 10.0 constant from the hardcoded fallback in src/state.py line 146 (video_end = video_start + 10.0)",
+                "Extract DEFAULT_GAP_CONFIDENCE = 0.0 constant used in gap match creation in src/matching/tiered_matcher.py",
+                "All usage sites reference the named constants instead of inline numeric literals",
+                "Add a test that verifies restore_matches_from_dicts uses DEFAULT_MATCH_DURATION_SECONDS when video_end is missing from match data",
+                "Each constant has a docstring or inline comment explaining when the fallback triggers"
+            ],
+            "notes": "Tier: Low priority cleanup. Source files: src/state.py (line 146 for 10.0 fallback), src/matching/tiered_matcher.py (lines 606-613 for 0.0 confidence). Magic numbers scattered across restoration and matching logic make it unclear what the defaults represent and where they came from. Named constants document intent and make future changes safer."
+        },
+        {
+            "id": "US-57-012",
+            "title": "Split pipeline config validation into schema validation and runtime environment checks",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Split _validate_config() in src/pipeline.py (lines 136-183) into two methods: _validate_config_schema() (pure config checks, no I/O) and _validate_runtime_environment() (filesystem/PATH checks)",
+                "_validate_config_schema() can be called without any filesystem access and validates required fields, type constraints, and value ranges",
+                "_validate_runtime_environment() checks cache_dir writability, browser availability, and other I/O-dependent preconditions",
+                "Both methods return List[str] of validation errors, and the caller combines them",
+                "Add a test that calls _validate_config_schema() with an invalid config and verifies errors are returned without touching the filesystem"
+            ],
+            "notes": "Tier: Low priority refactor. Source files: src/pipeline.py (lines 136-183, _validate_config method). Sprint 45 story US-45-010 moved config validation before checkpoint loading; this story refines the validation itself by separating pure schema checks from I/O-dependent environment checks. Schema validation can run in CI without a real filesystem, enabling faster feedback."
+        }
+    ]
 }
