@@ -76,8 +76,9 @@ class TestClassifyErrorCategoryGranular:
     def test_timeout_returns_timeout(self):
         assert classify_error_category("ydl.download() stalled for 120s") == 'timeout'
 
-    def test_timed_out_returns_timeout(self):
-        assert classify_error_category("Connection timed out") == 'timeout'
+    def test_connection_timed_out_returns_network(self):
+        """US-51-005: 'Connection timed out' is now classified as network (systemic)."""
+        assert classify_error_category("Connection timed out") == 'network'
 
     def test_video_unavailable_returns_video_specific(self):
         assert classify_error_category("Video unavailable") == 'video_specific'

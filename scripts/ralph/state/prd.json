@@ -78,7 +78,8 @@
             "id": "US-51-005",
             "title": "Harden _is_network_failure pattern matching for Python API error format",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
+            "notes": "Added 'Connection refused' and 'Connection timed out' to _NETWORK_FAILURE_PATTERNS. All existing patterns already handled DownloadError wrapping and ffmpeg exit code. Added TestIsNetworkFailureHardened class with 21 tests covering DownloadError wrapping, ffmpeg codes, new patterns, and bot-detection exclusion. Updated test_download_segments_error_summary.py to reflect new classification.",
             "acceptanceCriteria": [
                 "_is_network_failure() at download_segments.py recognizes Python API DownloadError wrapping of DNS failures (e.g., 'ERROR: unable to download webpage: <urlopen error [Errno 11001]>')",
                 "_is_network_failure() recognizes ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as a network failure",

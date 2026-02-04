@@ -94,10 +94,10 @@ class TestClassifyErrorCategory:
         error = "HTTP Error 429: Too Many Requests"
         assert classify_error_category(error) == 'bot_detection'
 
-    def test_connection_refused_is_video_specific(self):
-        """Connection refused is video_specific (transient, not DNS-systemic)."""
+    def test_connection_refused_is_network(self):
+        """Connection refused classified as network (systemic when widespread)."""
         error = "ConnectionRefusedError: [Errno 111] Connection refused"
-        assert classify_error_category(error) == 'video_specific'
+        assert classify_error_category(error) == 'network'
 
     def test_generic_download_error_is_video_specific(self):
         """Generic yt-dlp download error classified as video_specific."""
@@ -329,3 +329,132 @@ class TestIsNetworkFailurePythonApiFormat:
         """Rate limiting (429) is transient/video-specific, NOT systemic network failure."""
         error = "HTTP Error 429: Too Many Requests"
         assert _is_network_failure(error) is False
+
+
+# =============================================================================
+# US-51-005: Harden _is_network_failure pattern matching
+# =============================================================================
+
+class TestIsNetworkFailureHardened:
+    """US-51-005: Verify _is_network_failure() handles Python API DownloadError
+    wrapping, ffmpeg exit codes, and new connection patterns.
+
+    Tests use exact error strings from production logs.
+    """
+
+    # --- Python API DownloadError wrapping of DNS failures ---
+
+    def test_download_error_wraps_dns_urlopen(self):
+        """DownloadError wraps DNS failure in '<urlopen error ...>' format."""
+        error = "ERROR: unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert _is_network_failure(error) is True
+
+    def test_download_error_wraps_name_resolution(self):
+        """DownloadError wraps 'Name or service not known' via urlopen."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: <urlopen error [Errno -2] Name or service not known>"
+        assert _is_network_failure(error) is True
+
+    def test_download_error_wraps_no_address(self):
+        """DownloadError wraps 'No address associated with hostname'."""
+        error = "ERROR: [youtube] xyz789: Unable to download API page: <urlopen error [Errno -5] No address associated with hostname>"
+        assert _is_network_failure(error) is True
+
+    def test_download_error_wraps_temp_resolution(self):
+        """DownloadError wraps 'Temporary failure in name resolution'."""
+        error = "ERROR: [youtube] vid1: Unable to download webpage: <urlopen error [Errno -3] Temporary failure in name resolution>"
+        assert _is_network_failure(error) is True
+
+    def test_download_error_wraps_network_unreachable(self):
+        """DownloadError wraps 'Network is unreachable'."""
+        error = "ERROR: [youtube] vid2: Unable to download video data: <urlopen error [Errno 101] Network is unreachable>"
+        assert _is_network_failure(error) is True
+
+    # --- ffmpeg exit code recognition ---
+
+    def test_ffmpeg_exit_code_in_postprocessing(self):
+        """ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) in postprocessing."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158"
+        assert _is_network_failure(error) is True
+
+    def test_ffmpeg_exit_code_bare(self):
+        """ffmpeg exit code in bare error string."""
+        error = "ffmpeg exited with code 4294967158"
+        assert _is_network_failure(error) is True
+
+    def test_ffmpeg_exit_code_with_stderr(self):
+        """ffmpeg exit code with additional stderr context."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158 (stderr: Connection reset)"
+        assert _is_network_failure(error) is True
+
+    # --- Connection refused pattern ---
+
+    def test_connection_refused_errno_111(self):
+        """Connection refused with Linux errno 111."""
+        error = "ConnectionRefusedError: [Errno 111] Connection refused"
+        assert _is_network_failure(error) is True
+
+    def test_connection_refused_in_download_error(self):
+        """Connection refused wrapped in yt-dlp DownloadError."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: <urlopen error [Errno 111] Connection refused>"
+        assert _is_network_failure(error) is True
+
+    def test_connection_refused_windows(self):
+        """Connection refused on Windows (Errno 10061)."""
+        error = "ERROR: [youtube] vid1: Unable to download: <urlopen error [Errno 10061] Connection refused>"
+        assert _is_network_failure(error) is True
+
+    # --- Connection timed out pattern ---
+
+    def test_connection_timed_out_basic(self):
+        """Basic 'Connection timed out' error."""
+        error = "Connection timed out"
+        assert _is_network_failure(error) is True
+
+    def test_connection_timed_out_in_download_error(self):
+        """Connection timed out wrapped in yt-dlp DownloadError."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: <urlopen error [Errno 110] Connection timed out>"
+        assert _is_network_failure(error) is True
+
+    def test_connection_timed_out_windows(self):
+        """Connection timed out on Windows (Errno 10060)."""
+        error = "ERROR: [youtube] vid1: Unable to download: <urlopen error [Errno 10060] Connection timed out>"
+        assert _is_network_failure(error) is True
+
+    # --- Bot-detection patterns must NOT be classified as network failures ---
+
+    def test_sign_in_confirm_not_network(self):
+        """'Sign in to confirm' bot-detection is NOT network failure."""
+        error = "ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies"
+        assert _is_network_failure(error) is False
+
+    def test_403_forbidden_not_network(self):
+        """'403 Forbidden' access error is NOT network failure."""
+        error = "ERROR: [youtube] def456: HTTP Error 403: Forbidden"
+        assert _is_network_failure(error) is False
+
+    def test_sign_in_age_not_network(self):
+        """'Sign in to confirm your age' is NOT network failure."""
+        error = "ERROR: [youtube] ghi789: Sign in to confirm your age"
+        assert _is_network_failure(error) is False
+
+    def test_bot_captcha_not_network(self):
+        """CAPTCHA/bot challenge is NOT network failure."""
+        error = "ERROR: [youtube] jkl012: Join this channel to get access to members-only content"
+        assert _is_network_failure(error) is False
+
+    def test_video_unavailable_not_network(self):
+        """Video unavailable is NOT network failure."""
+        error = "ERROR: [youtube] mno345: Video unavailable"
+        assert _is_network_failure(error) is False
+
+    # --- classify_error_category integration for new patterns ---
+
+    def test_classify_connection_refused_as_network(self):
+        """classify_error_category returns 'network' for Connection refused."""
+        error = "ConnectionRefusedError: [Errno 111] Connection refused"
+        assert classify_error_category(error) == 'network'
+
+    def test_classify_connection_timed_out_as_network(self):
+        """classify_error_category returns 'network' for Connection timed out."""
+        error = "ERROR: [youtube] vid1: Unable to download: Connection timed out"
+        assert classify_error_category(error) == 'network'

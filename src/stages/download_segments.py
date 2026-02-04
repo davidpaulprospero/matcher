@@ -41,6 +41,8 @@ _NETWORK_FAILURE_PATTERNS = (
     'Temporary failure in name resolution',
     'URLError',              # Python urllib wrapper (e.g. URLError: <urlopen error ...>)
     'ConnectionResetError',  # Python API: connection dropped mid-transfer
+    'Connection refused',    # Server rejecting connections (systemic when widespread)
+    'Connection timed out',  # TCP connection timeout (systemic when widespread)
 )
 
 # ffmpeg exit code 0xFFFFFEC6 = 4294967158 unsigned = -314 signed (network error)
