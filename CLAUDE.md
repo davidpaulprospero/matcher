@@ -394,6 +394,8 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-05 | Fix: PHANTOM false-positive — `Log-StoryVerification` return value leaked to pipeline in timeout/failure paths of `Resolve-ClaudeResult`, making `$resolution.Success` truthy via array member enumeration; suppressed with `$null =` |
+| 2026-02-05 | Fix: Evidence gate diff excludes Ralph metadata dirs (`state/`, `session/`, `archive/`) — `prd.json` (40K chars) consumed entire 8K truncation budget, causing 0% criteria verified on valid implementations |
 | 2026-02-04 | Feat: Replace keyword evidence gate with LLM-based criteria verification — `Confirm-CriteriaEvidence` sends single haiku call instead of per-criterion keyword matching; falls back to `Search-CriterionEvidence` when CLI unavailable |
 | 2026-02-04 | Feat: Ralph evidence threshold gate — stories rejected when <90% of acceptance criteria have verifiable evidence; previously exit code 0 alone was sufficient to pass regardless of actual evidence |
 | 2026-02-04 | Fix: Ralph queue not advancing — TrueAutoLoop and AdaptiveOvernightLoop missing `Update-QueueProgress` after sprint completion, causing infinite re-sprints on same focus area |
