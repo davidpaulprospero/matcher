@@ -28,6 +28,7 @@ from .utils import (
     _has_problematic_path,
 )
 from .entities import _add_entity_images_to_track, _add_entity_videos_to_track
+from .tracks import ClipBudgetTracker
 
 # DaVinci Resolve clip count thresholds (see Rule 15 in CLAUDE.md)
 # DaVinci OTIO import hangs when total clips exceed ~3130
@@ -513,6 +514,24 @@ def create_timeline(
         "embedding_diversity": "Embedding-Diversity",
         "broll_only": "B-roll Only"
     }
+
+    # =========================================================================
+    # CLIP BUDGET CHECK (proactive - before track building)
+    # =========================================================================
+    clip_budget = ClipBudgetTracker(
+        match_count=len(matches),
+        num_alternatives=num_alternatives,
+        num_secondary=num_secondary,
+        strategy_track_names=strategy_names,
+        has_entity_images=bool(entity_images),
+        has_entity_videos=bool(entity_videos),
+    )
+    estimated_clips = clip_budget.check_and_adjust(config)
+    logger.info(f"Clip budget: {estimated_clips} estimated clips for {len(matches)} segments")
+
+    # Re-read strategy config in case budget tracker disabled strategy tracks
+    if not config.output.include_strategy_tracks:
+        strategy_names = []
 
     # Create video tracks
     video_tracks = []
