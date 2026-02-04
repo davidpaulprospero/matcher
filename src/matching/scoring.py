@@ -12,6 +12,7 @@ Provides confidence adjustments for:
 
 from typing import Any, Tuple, List, Optional, TYPE_CHECKING
 import logging
+import math
 import statistics
 
 from ..utils import SRTSegment
@@ -1020,6 +1021,47 @@ VALID_MULTIMODAL_WEIGHT_KEYS = set(DEFAULT_MULTIMODAL_WEIGHTS.keys())
 WEIGHT_SUM_TOLERANCE = 0.01
 
 
+class MultimodalScoringTracker:
+    """Tracks multimodal vs embedding-only fallback counts during a matching run.
+
+    US-53-009: Provides summary statistics for scoring component usage.
+    """
+
+    def __init__(self):
+        self.multimodal_active_count = 0
+        self.embedding_only_count = 0
+
+    def record_multimodal(self):
+        self.multimodal_active_count += 1
+
+    def record_embedding_only(self):
+        self.embedding_only_count += 1
+
+    def reset(self):
+        self.multimodal_active_count = 0
+        self.embedding_only_count = 0
+
+    def log_summary(self):
+        """Log summary of multimodal vs embedding-only match counts."""
+        total = self.multimodal_active_count + self.embedding_only_count
+        if total == 0:
+            return
+        logger.info(
+            f"Multimodal scoring summary: {self.multimodal_active_count}/{total} matches used "
+            f"full multimodal scoring, {self.embedding_only_count}/{total} fell back to "
+            f"embedding-only (all non-embedding components were 0)"
+        )
+
+
+# Module-level tracker instance, reset per matching run
+_multimodal_tracker = MultimodalScoringTracker()
+
+
+def get_multimodal_tracker() -> MultimodalScoringTracker:
+    """Get the module-level multimodal scoring tracker."""
+    return _multimodal_tracker
+
+
 def validate_multimodal_weights(weights: dict) -> dict:
     """
     Validate and normalize multimodal scoring weights.
@@ -1151,10 +1193,29 @@ def compute_multimodal_score(
             'weights_used': w
         }
 
+    # US-53-009: Check for NaN/Inf before clamping and log WARNING
+    component_names = {
+        'embedding_similarity': embedding_similarity,
+        'keyword_overlap': keyword_overlap_score,
+        'entity_match': entity_match_score,
+        'visual_description': visual_description_score,
+    }
+    for comp_name, comp_value in component_names.items():
+        if math.isnan(comp_value):
+            logger.warning(
+                f"Multimodal component '{comp_name}' is NaN (raw value: {comp_value!r}), "
+                f"clamping to 0.0"
+            )
+        elif math.isinf(comp_value):
+            clamped_to = 1.0 if comp_value > 0 else 0.0
+            logger.warning(
+                f"Multimodal component '{comp_name}' is Inf (raw value: {comp_value!r}), "
+                f"clamping to {clamped_to}"
+            )
+
     # Clamp input scores to [0, 1] range, handling NaN and Inf
     def safe_clamp(value: float) -> float:
         """Clamp value to [0, 1], converting NaN/Inf to valid values."""
-        import math
         if math.isnan(value):
             return 0.0
         if math.isinf(value):
@@ -1204,10 +1265,27 @@ def compute_multimodal_score(
 
     reason = f"multimodal({' + '.join(reason_parts)})={multimodal_score:.3f}"
 
+    # US-53-009: DEBUG log component breakdown for every scored match
     logger.debug(
-        f"Multimodal score: emb={emb_clamped:.3f}, kw={kw_clamped:.3f}, "
-        f"ent={ent_clamped:.3f}, vis={vis_clamped:.3f} -> {multimodal_score:.3f}"
+        f"Multimodal component breakdown: "
+        f"embedding_similarity={emb_clamped:.3f} (weight={w.get('text_embedding', 0.4):.2f}), "
+        f"keyword_overlap={kw_clamped:.3f} (weight={w.get('keyword_overlap', 0.25):.2f}), "
+        f"entity_match={ent_clamped:.3f} (weight={w.get('entity_match', 0.2):.2f}), "
+        f"visual_similarity={vis_clamped:.3f} (weight={w.get('visual_description', 0.15):.2f}) "
+        f"-> score={multimodal_score:.3f}"
     )
+
+    # US-53-009: Track multimodal vs embedding-only and log INFO for fallback
+    is_embedding_only = (kw_clamped == 0.0 and ent_clamped == 0.0 and vis_clamped == 0.0)
+    if is_embedding_only:
+        logger.info(
+            f"Multimodal scoring fell back to embedding-only: all non-embedding components "
+            f"are 0 (keyword_overlap={kw_clamped}, entity_match={ent_clamped}, "
+            f"visual_similarity={vis_clamped}), score={multimodal_score:.3f}"
+        )
+        _multimodal_tracker.record_embedding_only()
+    else:
+        _multimodal_tracker.record_multimodal()
 
     return multimodal_score, reason, component_scores
 

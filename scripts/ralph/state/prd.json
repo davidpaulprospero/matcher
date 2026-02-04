@@ -132,8 +132,8 @@
             "id": "US-53-009",
             "title": "Log scoring component breakdown for low-confidence matches",
             "priority": "medium",
-            "passes": false,
-            "notes": "Tier: T1 (small, logging additions). Source files: src/matching/scoring.py (lines 1044-1164 multimodal scoring where component scores silently clamped, lines 1110-1119 NaN/Inf handling, lines 587-616 low-confidence pattern analysis). When multimodal components fail (keyword_overlap=0, entity_match=0), the score drops to embedding-only without visibility. NaN→0.0 and Inf→1.0 conversions happen silently. The low-confidence pattern analyzer detects abstract content but doesn't correlate to which scoring penalties fired.",
+            "passes": true,
+            "notes": "Implemented: WARNING log for NaN/Inf components before clamping, DEBUG log for component breakdown on every scored match, INFO log for embedding-only fallback, summary log at end of matching stage via MultimodalScoringTracker, 7 new tests in TestScoringComponentLogging class. Files: src/matching/scoring.py, src/stages/match.py, tests/test_multimodal_scoring.py.",
             "acceptanceCriteria": [
                 "Log at WARNING level when any multimodal component score is NaN or Inf (before clamping), including which component and the raw value",
                 "Log at DEBUG level the component breakdown for every scored match: embedding_similarity, keyword_overlap, entity_match, visual_similarity with their weights",
