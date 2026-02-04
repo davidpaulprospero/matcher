@@ -394,6 +394,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-04 | Feat: Ralph story completion early exit — when prd.json shows `passes:true`, kill Claude after 15s grace period instead of waiting for stall timeout (was up to 45min for quality focus area) |
 | 2026-02-04 | Fix: Bot-abort tests use `stats.field` attribute access (not `stats['field']`) after `SegmentDownloadStats` dataclass migration |
 | 2026-02-04 | Fix: Ralph `Invoke-ClaudeWithInfiniteRetry` timeout/exception returns missing `ExecutionStart`/`ExecutionEnd` — caused `Cannot convert null to System.DateTime` crash in `Log-ClaudeInvocation` |
 | 2026-02-04 | Fix: Ralph monitoring loop freeze — disable Console Quick Edit Mode at startup (Rule 36) |
