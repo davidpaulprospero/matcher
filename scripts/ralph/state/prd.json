@@ -42,7 +42,7 @@
                                                        "Add test verifying captionless video triggers fast-fail path and only invokes 1 subprocess"
                                                    ],
                             "passes":  true,
-                            "notes":  "Complete. Pre-flight list-subs check was implemented in US-59-002 and US-60-005. Added DEBUG log line 'Caption fast-fail: no subtitles for {video_id}' at line 4483. Test test_no_captions_triggers_single_ytdlp_call verifies only 1 subprocess call. All 12 tests in test_caption_preflight.py pass."
+                            "notes":  "Complete. Pre-flight list-subs check was implemented in US-59-002 and US-60-005. Added DEBUG log line \u0027Caption fast-fail: no subtitles for {video_id}\u0027 at line 4483. Test test_no_captions_triggers_single_ytdlp_call verifies only 1 subprocess call. All 12 tests in test_caption_preflight.py pass."
                         },
                         {
                             "id":  "US-61-003",
@@ -56,7 +56,7 @@
                                                        "Add test verifying caption CB trip affects download CB state and vice versa"
                                                    ],
                             "passes":  true,
-                            "notes":  "Complete. Added bidirectional circuit breaker cascade coordination: (1) set_download_circuit_breaker() and set_caption_circuit_breaker() methods for linking CBs, (2) _cascade_failure_to_download/caption() increments sibling CB's failure counter on each failure, (3) _cascade_trip_to_download/caption() propagates open state when CB trips, (4) circuit_breaker_cascade config option (default: true) in both CaptionCircuitBreakerConfig and CircuitBreakerConfig. Test file tests/test_circuit_breaker_cascade.py with 26 tests verifying all acceptance criteria."
+                            "notes":  "Complete. Implementation in src/caption/circuit_breaker.py and src/downloader/circuit_breaker.py with set_download_circuit_breaker()/set_caption_circuit_breaker() linking, _cascade_failure_to_*() and _cascade_trip_to_*() propagation methods. Config sections updated with circuit_breaker_cascade option. Comprehensive tests in tests/test_circuit_breaker_cascade.py (26 tests) verifying bidirectional failure/trip propagation, config options, and edge cases. All tests pass."
                         },
                         {
                             "id":  "US-61-004",
