@@ -669,6 +669,29 @@ def create_timeline(
         logger.info(f"Time scale factor: {time_scale_factor:.4f} (stretching SRT timestamps)")
         print(f"  ✓ Time scale: {time_scale_factor:.4f}x")
 
+    # =========================================================================
+    # VOICEOVER DURATION vs SRT TIMELINE VALIDATION
+    # =========================================================================
+    if actual_vo_duration and matches:
+        last_srt_end = matches[-1].primary_match.voiceover_segment.end
+        scaled_srt_end = last_srt_end * time_scale_factor
+        if scaled_srt_end > 0:
+            if actual_vo_duration < scaled_srt_end:
+                shortfall = scaled_srt_end - actual_vo_duration
+                logger.warning(
+                    f"Voiceover audio ({actual_vo_duration:.1f}s) is shorter than "
+                    f"scaled SRT timeline end ({scaled_srt_end:.1f}s) — "
+                    f"last {shortfall:.1f}s of content will be cut off"
+                )
+                print(f"  ⚠ VO audio shorter than SRT timeline by {shortfall:.1f}s — content may be cut off")
+            elif actual_vo_duration > scaled_srt_end + 30:
+                trailing = actual_vo_duration - scaled_srt_end
+                logger.info(
+                    f"Voiceover audio ({actual_vo_duration:.1f}s) has {trailing:.1f}s trailing "
+                    f"silence after last SRT segment ({scaled_srt_end:.1f}s) — "
+                    f"potential alignment issue"
+                )
+
     # Gap distribution mode - how to handle gaps between segments
     # - "scale": Scale SRT gaps by time_scale_factor (default)
     # - "proportional": Recalculate gaps to distribute content evenly
