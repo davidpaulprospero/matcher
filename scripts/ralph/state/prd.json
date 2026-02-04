@@ -90,7 +90,7 @@
                             "id":  "US-59-006",
                             "title":  "Add early termination in batch fetch when all errors are \u0027no captions\u0027",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "fetch_captions_batch() tracks a counter of consecutive CaptionUnavailableError results across the batch",
                                                        "When 80% or more of the last 10 videos return CaptionUnavailableError, a warning is logged suggesting the source may not have captions",
@@ -98,7 +98,7 @@
                                                        "CaptionMetrics records the unavailable_count and unavailable_rate in the batch summary",
                                                        "Unit test verifies that a batch of 20 videos where first 10 all lack captions triggers the warning and the remaining 10 use pre-flight-only mode"
                                                    ],
-                            "notes":  "Tier: enhancement. fetch_captions_batch() at src/caption_fetcher.py:3230 already has error pattern detection (US-007 Sprint 7) at lines 3337-3354 with modes \u0027abort\u0027/\u0027warn\u0027/\u0027skip\u0027, but this only covers rate limits and geoblocking patterns — not systematic \u0027no captions available\u0027 patterns. The existing 30% threshold logic at line 3337 can be extended. CaptionMetrics at line 6710 tracks error_categories but doesn\u0027t have an unavailable-specific counter. Key files: src/caption_fetcher.py (lines 3230-3922 fetch_captions_batch, lines 3337-3354 error pattern detection, lines 6710+ CaptionMetrics)."
+                            "notes":  "Implemented US-59-006: Added unavailable pattern detection to BatchProcessor. Rolling window of last 10 results tracks CaptionUnavailableError rate. When 80%+ are unavailable, logs warning and switches remaining videos to preflight-only mode (has_captions check before full fetch). CaptionMetrics records unavailable_count and unavailable_rate in summary/to_dict/from_dict. 7 unit tests in TestBatchProcessorUnavailableDetection verify threshold detection, preflight switching, metrics tracking, and serialization. All 34 batch processor tests + 91 related tests pass."
                         },
                         {
                             "id":  "US-59-007",

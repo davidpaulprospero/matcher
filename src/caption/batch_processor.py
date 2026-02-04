@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Union
@@ -70,6 +71,9 @@ class BatchProcessorConfig:
     slow_threshold_ratio: float = 0.8  # 80% of timeout = slow
     # US-37-011: Batch progress reporting interval
     progress_report_interval: int = 25  # Log progress every N videos
+    # US-59-006: Unavailable early termination settings
+    unavailable_window_size: int = 10  # Rolling window size for unavailable detection
+    unavailable_threshold: float = 0.8  # 80% of window must be unavailable to trigger
 
 
 @dataclass
@@ -86,6 +90,9 @@ class BatchResult:
     # Early termination when success rate drops below threshold (US-37-009)
     early_terminated: bool = False
     early_termination_reason: Optional[str] = None
+    # US-59-006: Unavailable pattern detection
+    unavailable_switched_to_preflight: bool = False
+    unavailable_count: int = 0
 
 
 class BatchProcessor:
@@ -215,6 +222,14 @@ class BatchProcessor:
         )
         worker_tracker.initialize_workers(self.config.max_workers)
 
+        # US-59-006: Track consecutive unavailable results for early preflight switching
+        unavailable_window: deque = deque(
+            maxlen=self.config.unavailable_window_size
+        )
+        unavailable_total_count = [0]  # Mutable counter for closures
+        preflight_only_mode = [False]  # Mutable flag for closures
+        unavailable_lock = threading.Lock()
+
         # Thread to worker mapping
         thread_to_worker: Dict[int, int] = {}
         thread_lock = threading.Lock()
@@ -297,6 +312,22 @@ class BatchProcessor:
                 metrics.record_fetch_attempt(video_id)
 
             try:
+                # US-59-006: In preflight-only mode, do list-subs check first
+                # and skip full format attempts if no subs found
+                if preflight_only_mode[0]:
+                    try:
+                        has_subs = self.fetcher.has_captions(video_id)
+                    except Exception:
+                        has_subs = False
+                    if not has_subs:
+                        elapsed = time.perf_counter() - start_time
+                        worker_tracker.worker_complete(worker_id)
+                        from .exceptions import CaptionUnavailableError
+                        raise CaptionUnavailableError(
+                            video_id=video_id,
+                            reason='preflight_no_subs'
+                        )
+
                 result = self.fetcher.fetch_captions_auto_language_with_retry(
                     video_id,
                     preferred_language=preferred_language
@@ -351,6 +382,10 @@ class BatchProcessor:
                     'worker_id': worker_id,
                 })
 
+                # US-59-006: Track success in rolling window
+                with unavailable_lock:
+                    unavailable_window.append(False)
+
                 return video_id, result
 
             except Exception as e:
@@ -369,6 +404,31 @@ class BatchProcessor:
                         'elapsed_seconds': elapsed,
                     }
                     reason = 'unavailable'
+
+                    # US-59-006: Track unavailable in rolling window (inside worker thread)
+                    with unavailable_lock:
+                        unavailable_total_count[0] += 1
+                        unavailable_window.append(True)
+                        if (
+                            len(unavailable_window) >= self.config.unavailable_window_size
+                            and not preflight_only_mode[0]
+                        ):
+                            unavail_in_window = sum(1 for x in unavailable_window if x)
+                            unavail_rate = unavail_in_window / len(unavailable_window)
+                            if unavail_rate >= self.config.unavailable_threshold:
+                                preflight_only_mode[0] = True
+                                logger.warning(
+                                    f"Unavailable pattern detected: {unavail_in_window}/"
+                                    f"{len(unavailable_window)} recent videos lack captions "
+                                    f"({unavail_rate:.0%}). Source may not have captions. "
+                                    f"Switching remaining videos to pre-flight-only mode."
+                                )
+                                _notify_progress('', 'unavailable_pattern', {
+                                    'unavailable_in_window': unavail_in_window,
+                                    'window_size': len(unavailable_window),
+                                    'unavailable_rate': unavail_rate,
+                                    'total_unavailable': unavailable_total_count[0],
+                                })
                 else:
                     # Record failure in circuit breaker (fetch errors trip it)
                     if circuit_breaker and circuit_breaker.is_enabled:
@@ -393,6 +453,10 @@ class BatchProcessor:
 
                     if not isinstance(e, CaptionFetchError):
                         logger.exception(f"Unexpected error fetching {video_id}")
+
+                    # US-59-006: Track non-unavailable error in window
+                    with unavailable_lock:
+                        unavailable_window.append(False)
 
                 # Record failure in metrics
                 if metrics:
@@ -654,6 +718,20 @@ class BatchProcessor:
 
                     if pattern_detector and not pattern_handled:
                         pattern_detector.record_error(video_id, str(e))
+
+        # US-59-006: Record unavailable count and preflight switch status
+        batch_result.unavailable_count = unavailable_total_count[0]
+        batch_result.unavailable_switched_to_preflight = preflight_only_mode[0]
+
+        # Record unavailable metrics
+        if metrics and unavailable_total_count[0] > 0:
+            total_fetched = batch_result.success_count + batch_result.error_count
+            unavail_rate = (
+                unavailable_total_count[0] / total_fetched if total_fetched > 0 else 0.0
+            )
+            metrics.record_unavailable_summary(
+                unavailable_total_count[0], unavail_rate
+            )
 
         logger.info(
             f"Batch caption fetch complete: {len(self._results)} processed, "

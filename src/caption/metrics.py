@@ -160,6 +160,11 @@ class CaptionMetrics:
     # Summary dict stored here after batch completion
     batch_retry_budget: Optional[Dict[str, Any]] = None
 
+    # US-59-006: Batch unavailable tracking
+    # Count and rate of CaptionUnavailableError results in the batch
+    unavailable_count: int = 0
+    unavailable_rate: float = 0.0
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -250,6 +255,8 @@ class CaptionMetrics:
                 'failures': self.failures,
                 'cache_hits': self.cache_hits,
                 'total_segments': self.total_segments,
+                'unavailable_count': self.unavailable_count,
+                'unavailable_rate': self.unavailable_rate,
             }
 
     # =========================================================================
@@ -389,6 +396,26 @@ class CaptionMetrics:
                 self.video_fetch_times[video_id] = elapsed_seconds
 
         logger.debug(f"Caption fetch failure for {video_id or 'unknown'}: {reason}")
+
+    def record_unavailable_summary(
+        self,
+        count: int,
+        rate: float,
+    ) -> None:
+        """Record batch-level unavailable summary (US-59-006).
+
+        Called by BatchProcessor after batch completion to store the
+        total unavailable count and rate in the batch summary.
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Args:
+            count: Total number of CaptionUnavailableError results.
+            rate: Ratio of unavailable to total fetched (0.0-1.0).
+        """
+        with self._lock:
+            self.unavailable_count = count
+            self.unavailable_rate = round(rate, 4)
 
     def record_error_category(
         self,
@@ -1035,6 +1062,13 @@ class CaptionMetrics:
                 f"{self.pre_check_api_calls_saved} API calls saved"
             )
 
+        # US-59-006: Unavailable summary
+        if self.unavailable_count > 0:
+            lines.append(
+                f"  Unavailable: {self.unavailable_count} videos "
+                f"({self.unavailable_rate:.1%} of fetched)"
+            )
+
         if self.total_processed > 0:
             lines.append(
                 f"  Success rate: {self.success_rate}%, "
@@ -1196,6 +1230,8 @@ class CaptionMetrics:
                 cid: pattern.to_dict()
                 for cid, pattern in self.channel_patterns.items()
             },
+            'unavailable_count': self.unavailable_count,
+            'unavailable_rate': self.unavailable_rate,
         }
 
     @classmethod
@@ -1246,6 +1282,8 @@ class CaptionMetrics:
                 cid: ChannelCaptionPattern.from_dict(pattern_data)
                 for cid, pattern_data in data.get('channel_patterns', {}).items()
             },
+            unavailable_count=data.get('unavailable_count', 0),
+            unavailable_rate=data.get('unavailable_rate', 0.0),
         )
 
     def export_json(
