@@ -98,6 +98,126 @@ def _to_numpy(embeddings: Union[List, Any]) -> Any:
     return embeddings
 
 
+@dataclass
+class EmbeddingValidationResult:
+    """Result of embedding integrity validation."""
+    total_count: int
+    valid_count: int
+    none_count: int
+    wrong_dimension_count: int
+    unnormalized_count: int
+    expected_dimension: Optional[int]
+    valid_indices: List[int]
+    invalid_indices: List[int]
+
+    @property
+    def is_valid(self) -> bool:
+        """True if all embeddings are valid."""
+        return self.valid_count == self.total_count
+
+    @property
+    def all_none(self) -> bool:
+        """True if every embedding is None."""
+        return self.none_count == self.total_count
+
+
+def validate_embedding_integrity(
+    embeddings: Any,
+    norm_tolerance: float = 0.1
+) -> EmbeddingValidationResult:
+    """
+    Validate embedding integrity before matching.
+
+    Checks:
+    - No None values in the embedding list
+    - Consistent dimensions across all embeddings
+    - Norms approximately 1.0 (unit vectors for cosine similarity)
+
+    Args:
+        embeddings: List or numpy array of embedding vectors. Individual
+            entries may be None if the embedding API failed for that segment.
+        norm_tolerance: Acceptable deviation from unit norm (default 0.1,
+            i.e. norms between 0.9 and 1.1 are considered normalized).
+
+    Returns:
+        EmbeddingValidationResult with counts and valid/invalid indices.
+    """
+    import numpy as np
+
+    total = len(embeddings) if embeddings is not None else 0
+    if total == 0:
+        return EmbeddingValidationResult(
+            total_count=0, valid_count=0, none_count=0,
+            wrong_dimension_count=0, unnormalized_count=0,
+            expected_dimension=None,
+            valid_indices=[], invalid_indices=[],
+        )
+
+    # Determine expected dimension from first non-None embedding
+    expected_dim = None
+    for emb in embeddings:
+        if emb is not None:
+            try:
+                vec = np.asarray(emb, dtype='float32')
+                expected_dim = vec.shape[-1] if vec.ndim >= 1 else None
+                break
+            except Exception:
+                continue
+
+    none_count = 0
+    wrong_dim_count = 0
+    unnorm_count = 0
+    valid_indices = []
+    invalid_indices = []
+
+    for i, emb in enumerate(embeddings):
+        if emb is None:
+            none_count += 1
+            invalid_indices.append(i)
+            continue
+
+        try:
+            vec = np.asarray(emb, dtype='float32').flatten()
+        except Exception:
+            invalid_indices.append(i)
+            none_count += 1
+            continue
+
+        # Check dimension
+        if expected_dim is not None and vec.shape[0] != expected_dim:
+            wrong_dim_count += 1
+            invalid_indices.append(i)
+            continue
+
+        # Check norm (unit vector for cosine similarity)
+        norm = float(np.linalg.norm(vec))
+        if norm < 1e-6:
+            # Zero vector — treat as invalid
+            unnorm_count += 1
+            invalid_indices.append(i)
+            continue
+        if abs(norm - 1.0) > norm_tolerance:
+            unnorm_count += 1
+            # Still usable but flag it — don't exclude
+            valid_indices.append(i)
+            continue
+
+        valid_indices.append(i)
+
+    valid_count = len(valid_indices)
+
+    return EmbeddingValidationResult(
+        total_count=total,
+        valid_count=valid_count,
+        none_count=none_count,
+        wrong_dimension_count=wrong_dim_count,
+        unnormalized_count=unnorm_count,
+        expected_dimension=expected_dim,
+        valid_indices=valid_indices,
+        invalid_indices=invalid_indices,
+    )
+
+
 def cleanup_embeddings():
     """
     Unload local embedding models and free memory.

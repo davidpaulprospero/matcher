@@ -17,6 +17,7 @@ from .tracking import TimelineVarietyTracker, GlobalClipTracker
 from .strategies import StrategyMatcher
 from .embedding_search import EmbeddingSearch
 from ..utils import SRTSegment, MatchResult, ProgressBar
+from ..embeddings import validate_embedding_integrity
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -178,10 +179,40 @@ def match_all_segments(
 
     logger.info(f"Starting matching loop with {len(video_segments)} video candidates...")
 
-    # Initialize embedding search with video segments and embeddings
-    embedding_search = EmbeddingSearch.from_matching_config(
-        mc, video_embeddings, video_segments, embedding_index
-    )
+    # Validate embedding integrity before matching
+    vo_validation = validate_embedding_integrity(voiceover_embeddings)
+    vid_validation = validate_embedding_integrity(video_embeddings)
+
+    if vo_validation.none_count > 0 or vo_validation.wrong_dimension_count > 0:
+        logger.warning(
+            f"Voiceover embedding issues: {vo_validation.none_count} None, "
+            f"{vo_validation.wrong_dimension_count} wrong dimension "
+            f"(out of {vo_validation.total_count} total)"
+        )
+    if vid_validation.none_count > 0 or vid_validation.wrong_dimension_count > 0:
+        logger.warning(
+            f"Video embedding issues: {vid_validation.none_count} None, "
+            f"{vid_validation.wrong_dimension_count} wrong dimension "
+            f"(out of {vid_validation.total_count} total)"
+        )
+
+    # Handle all-None embeddings: fall back to keyword-only matching
+    if vo_validation.all_none or vid_validation.all_none:
+        which = "voiceover" if vo_validation.all_none else "video"
+        logger.warning(
+            f"All {which} embeddings are None — skipping embedding-based matching, "
+            f"falling back to keyword-only matching"
+        )
+        # Create a dummy embedding search that will return no candidates;
+        # the matcher will rely on keyword/text matching only
+        embedding_search = EmbeddingSearch.from_matching_config(
+            mc, [], [], None
+        )
+    else:
+        # Initialize embedding search with video segments and embeddings
+        embedding_search = EmbeddingSearch.from_matching_config(
+            mc, video_embeddings, video_segments, embedding_index
+        )
 
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Log first segment to confirm loop started

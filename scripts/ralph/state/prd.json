@@ -48,8 +48,8 @@
             "id": "US-53-003",
             "title": "Add confidence score audit trail to MatchResult",
             "priority": "high",
-            "passes": false,
-            "notes": "Tier: T2 (medium, touches scoring pipeline). Source files: src/matching/scoring.py (apply_all_adjustments around line 1677-1712 where penalties/boosts applied silently), src/matching/tiered_matcher.py (match_segment method where final score assembled), src/utils.py (MatchResult dataclass). Currently when a match confidence is 0.52, there's no way to tell which penalties/boosts contributed. The scoring chain applies timing penalty, topic penalty, broll boost, etc. but doesn't record what fired.",
+            "passes": true,
+            "notes": "Added confidence_breakdown field (list of dicts with component/adjustment/reason) to MatchResult. Modified apply_all_adjustments to return 3-tuple with breakdown. Updated all 3 tiered_matcher scoring paths with _record_breakdown helper. Added DEBUG logging. Updated checkpoint serialization. 9 new tests, all 184 related tests pass.",
             "acceptanceCriteria": [
                 "Add confidence_breakdown field (list of dicts with keys: component, adjustment, reason) to MatchResult or as a separate dataclass",
                 "Modify apply_all_adjustments() in scoring.py to populate the breakdown list with each penalty/boost applied (name, delta, reason string)",
@@ -62,8 +62,8 @@
             "id": "US-53-004",
             "title": "Add embedding validation before matching starts",
             "priority": "high",
-            "passes": false,
-            "notes": "Tier: T1 (small, validation logic). Source files: src/matching/main.py (line 195 where embedding_search called without pre-validation), src/embeddings.py (lines 680, 727, 796 where embeddings computed/cached). When embedding API fails midway, some segments get None embeddings. Code continues with degraded quality but no clear indication. FAISS queries return garbage matches if embeddings have inconsistent dimensions or aren't normalized.",
+            "passes": true,
+            "notes": "Completed. Added validate_embedding_integrity() in src/embeddings.py with EmbeddingValidationResult dataclass — checks None values, dimension consistency, and norm validation. Integrated into src/matching/main.py before EmbeddingSearch creation with WARNING logs for invalid embeddings and graceful fallback to keyword-only matching when all embeddings are None. Added embedding cache hit/miss rate INFO logging in src/stages/match.py. Added 13 new tests in tests/test_embedding_validation.py covering: basic validation, None detection, dimension checks, norm checks, mixed inputs, numpy arrays. All 118 embedding-related tests pass.",
             "acceptanceCriteria": [
                 "Add validate_embedding_integrity() function in src/embeddings.py that checks: no None values, consistent dimensions across all embeddings, norms approximately 1.0 (unit vectors for cosine similarity)",
                 "Call validate_embedding_integrity() in src/matching/main.py before embedding search, log WARNING with count of invalid embeddings and skip those segments",
