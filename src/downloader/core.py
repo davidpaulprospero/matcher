@@ -59,79 +59,12 @@ from ..rate_limit.coordinator import GlobalRateLimitCoordinator, RateLimitConfig
 logger = logging.getLogger(__name__)
 
 
-# Error severity mapping for adaptive backoff multiplier (US-008)
-# Maps error patterns (case-insensitive) to severity levels
-# Severity determines backoff multiplier: low=1.5x, medium=2.0x, high=3.0x
-ERROR_SEVERITY_PATTERNS = {
-    # High severity: quota exceeded, bot detection, severe blocks
-    'high': [
-        'quota exceeded',
-        'daily quota',
-        'bot detection',
-        'automated',
-        'suspicious activity',
-        'account suspended',
-        'ip blocked',
-        'ip has been blocked',
-        'permanently banned',
-    ],
-    # Medium severity: standard rate limits, too many requests
-    'medium': [
-        'too many requests',
-        '429',
-        'rate limit',
-        'please try again later',
-        'temporarily unavailable',
-    ],
-    # Low severity: brief rate limits, minor throttling
-    'low': [
-        'sign in',
-        'login required',
-        'confirm your age',
-        'slow down',
-    ],
-}
-
-# Multipliers for each severity level
-SEVERITY_MULTIPLIERS = {
-    'low': 1.5,
-    'medium': 2.0,
-    'high': 3.0,
-}
-
-
-def classify_error_severity(error_message: str) -> str:
-    """Classify error message severity for adaptive backoff.
-
-    Examines the error message for known patterns and returns the
-    severity level that should determine the backoff multiplier.
-
-    Args:
-        error_message: Error string from yt-dlp or YouTube
-
-    Returns:
-        Severity level: 'low', 'medium', or 'high'
-        Defaults to 'medium' if no pattern matches.
-    """
-    error_lower = error_message.lower()
-
-    # Check high severity first (most impactful)
-    for pattern in ERROR_SEVERITY_PATTERNS['high']:
-        if pattern in error_lower:
-            return 'high'
-
-    # Check medium severity (standard rate limits)
-    for pattern in ERROR_SEVERITY_PATTERNS['medium']:
-        if pattern in error_lower:
-            return 'medium'
-
-    # Check low severity (minor issues)
-    for pattern in ERROR_SEVERITY_PATTERNS['low']:
-        if pattern in error_lower:
-            return 'low'
-
-    # Default to medium if no pattern matches
-    return 'medium'
+# US-52-006: Error classification delegated to shared module
+from .error_classification import (
+    ERROR_SEVERITY_PATTERNS,
+    SEVERITY_MULTIPLIERS,
+    classify_error_severity,
+)
 
 
 @dataclass
