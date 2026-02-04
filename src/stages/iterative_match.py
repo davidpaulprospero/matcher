@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from . import Stage, StageResult, StageMetrics, register_stage, validate_required_state_attrs
 from ..downloader.search_cache import SearchResultsCache
+from ..matching.serialization import serialize_match_for_iterative_stage, is_empty_source
 from ..utils import extract_video_id
 
 if TYPE_CHECKING:
@@ -423,78 +424,14 @@ class IterativeMatchStage(Stage):
             empty_video_file_count = 0
             for i, match in enumerate(state.matches):
                 try:
-                    # Handle MatchResult structure (has primary_match with video_segment)
-                    if hasattr(match, 'primary_match') and match.primary_match:
-                        pm = match.primary_match
-                        source_file = ''
-                        video_start = 0.0
-                        video_end = 0.0
-                        conf = 0.0
+                    if is_empty_source(match, i):
+                        logger.warning(
+                            f"Match {i}: empty video_file after all fallback attempts "
+                            f"(type={type(match).__name__})"
+                        )
+                        empty_video_file_count += 1
 
-                        if hasattr(pm, 'video_segment') and pm.video_segment:
-                            source_file = getattr(pm.video_segment, 'source_file', '') or ''
-                            video_start = getattr(pm.video_segment, 'start_time', 0.0)
-                            video_end = getattr(pm.video_segment, 'end_time', 0.0)
-
-                        conf = getattr(pm, 'confidence', 0.0)
-
-                        if not source_file:
-                            avail_attrs = [a for a in ('video_segment', 'confidence', 'reasoning')
-                                           if hasattr(pm, a)]
-                            logger.warning(
-                                f"Match {i}: empty video_file after all fallback attempts "
-                                f"(type={type(match).__name__}, pm_attrs={avail_attrs})"
-                            )
-                            empty_video_file_count += 1
-
-                        serialized_matches.append({
-                            'segment_index': i,
-                            'video_file': source_file,
-                            'video_start': float(video_start),
-                            'video_end': float(video_end),
-                            'confidence': float(conf),
-                            'strategy': getattr(match, 'strategy', getattr(pm, 'reasoning', '')),
-                            'reason': getattr(pm, 'reasoning', ''),
-                            'face_score': getattr(match, 'face_score', 0.5),
-                        })
-                    # Handle simple Match structure (state.Match with video_file directly)
-                    # or MatchResult with primary_match=None (gap/fallback)
-                    else:
-                        video_file = getattr(match, 'video_file', '')
-                        video_start = getattr(match, 'video_start', 0.0)
-                        video_end = getattr(match, 'video_end', 0.0)
-                        confidence = getattr(match, 'confidence', 0.0)
-
-                        # Drill into primary_match.video_segment if available
-                        # (MatchResult that reached else branch unexpectedly)
-                        if not video_file:
-                            pm = getattr(match, 'primary_match', None)
-                            if pm is not None:
-                                vs = getattr(pm, 'video_segment', None)
-                                if vs is not None:
-                                    video_file = getattr(vs, 'source_file', '') or ''
-                                    video_start = getattr(vs, 'start_time', video_start)
-                                    video_end = getattr(vs, 'end_time', video_end)
-                                confidence = getattr(pm, 'confidence', confidence)
-
-                        if not video_file:
-                            avail_attrs = [a for a in dir(match) if not a.startswith('_')][:10]
-                            logger.warning(
-                                f"Match {i}: empty video_file after all fallback attempts "
-                                f"(type={type(match).__name__}, attrs={avail_attrs})"
-                            )
-                            empty_video_file_count += 1
-
-                        serialized_matches.append({
-                            'segment_index': getattr(match, 'segment_index', i),
-                            'video_file': video_file,
-                            'video_start': float(video_start),
-                            'video_end': float(video_end),
-                            'confidence': float(confidence),
-                            'strategy': getattr(match, 'strategy', ''),
-                            'reason': getattr(match, 'reason', ''),
-                            'face_score': getattr(match, 'face_score', 0.5),
-                        })
+                    serialized_matches.append(serialize_match_for_iterative_stage(match, i))
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
 
