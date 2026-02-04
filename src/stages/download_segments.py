@@ -687,84 +687,26 @@ class DownloadVideoSegmentsStage(Stage):
                 # Download segment using yt-dlp with downloader's infrastructure
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
-                # Read segment config from download config with fallback defaults
+                # US-52-005: Build ydl_opts via builder (config, cookies, escalation)
                 _dl_cfg = getattr(self.downloader, 'download_config', None) if self.downloader else None
-                _socket_timeout = 30
-                _max_res = 1080
-                _seg_format = 'best[height<={segment_max_resolution}]'
-                if _dl_cfg:
-                    _seg_sock = getattr(_dl_cfg, 'segment_socket_timeout', 0)
-                    _socket_timeout = _seg_sock if _seg_sock else getattr(_dl_cfg, 'socket_timeout', 30)
-                    _max_res = getattr(_dl_cfg, 'segment_max_resolution', 1080)
-                    _seg_format = getattr(_dl_cfg, 'segment_format', _seg_format)
-
-                # US-51-006: Per-download progress hook for observability
                 _progress_hook = self._make_progress_hook(video_id, stats)
 
-                ydl_opts = {
-                    'format': _seg_format.format(segment_max_resolution=_max_res),
-                    'outtmpl': str(output_file),
-                    'quiet': True,
-                    'no_warnings': True,
-                    # Time-based download options
-                    'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
-                    'force_keyframes_at_cuts': True,
-                    # Network resilience (matches core.py subprocess args)
-                    'socket_timeout': _socket_timeout,
-                    'retries': 10,
-                    'fragment_retries': 10,
-                    # US-51-006: Progress hook for download observability
-                    'progress_hooks': [_progress_hook],
-                }
+                ydl_opts, escalation_result = self._build_ydl_opts(
+                    video_id=video_id,
+                    start=start,
+                    end=end,
+                    output_file=output_file,
+                    download_config=_dl_cfg,
+                    escalation_mgr=escalation_mgr,
+                    cookie_rotator=cookie_rotator,
+                    progress_hooks=[_progress_hook],
+                )
 
-                # US-49-002: Propagate cookie auth to Python API (yt-dlp doesn't read CLI config)
-                # The yt-dlp Python API key is 'cookiesfrombrowser' (list) not --cookies-from-browser
-                if _dl_cfg:
-                    _browser = getattr(_dl_cfg, 'cookies_from_browser', '')
-                    if _browser:
-                        ydl_opts['cookiesfrombrowser'] = [_browser]
-                    else:
-                        # Fallback: use cookies_path or first cookie_rotation file
-                        _cookies_path = getattr(_dl_cfg, 'cookies_path', '')
-                        if not _cookies_path:
-                            _cookie_rotation = getattr(_dl_cfg, 'cookie_rotation', None)
-                            if _cookie_rotation:
-                                _cookie_files = getattr(_cookie_rotation, 'cookie_files', [])
-                                if _cookie_files:
-                                    _cookies_path = _cookie_files[0]
-                        if _cookies_path:
-                            ydl_opts['cookiefile'] = _cookies_path
-
-                # US-48-005: Apply escalation tiers (impersonation + extractor_args + cookies)
-                escalation_result = None
-                if escalation_mgr:
-                    try:
-                        escalation_result = escalation_mgr.get_escalation_args(video_id)
-                        _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
-
-                        # Tier 3: apply cookie rotation (overrides baseline cookies)
-                        if escalation_result.rotate_cookies and cookie_rotator:
-                            cookie_path = cookie_rotator.get_current_cookie()
-                            if cookie_path:
-                                ydl_opts['cookiefile'] = cookie_path
-                                # Remove browser cookies when using rotated cookie file
-                                ydl_opts.pop('cookiesfrombrowser', None)
-
-                        if escalation_result.tier.value > 1:
-                            logger.info(
-                                f"Segment {video_id}: using escalation tier "
-                                f"{escalation_result.tier.name}"
-                            )
-                    except Exception as esc_err:
-                        logger.debug(f"Escalation lookup failed for {video_id}: {esc_err}")
-                elif self.downloader and getattr(self.downloader, 'impersonation_manager', None):
-                    # Fallback: direct impersonation only (no escalation manager)
-                    try:
-                        imp_args = self.downloader.impersonation_manager.get_impersonate_args()
-                        if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
-                            ydl_opts['impersonate'] = imp_args[1]
-                    except Exception:
-                        pass
+                if escalation_result and escalation_result.tier.value > 1:
+                    logger.info(
+                        f"Segment {video_id}: using escalation tier "
+                        f"{escalation_result.tier.name}"
+                    )
 
                 # US-49-004: Read stall timeout for process-level hang detection
                 _stall_timeout = 120  # fallback
@@ -1027,6 +969,111 @@ class DownloadVideoSegmentsStage(Stage):
 
         return _hook
 
+    def _build_ydl_opts(
+        self,
+        *,
+        video_id: str,
+        start: float,
+        end: float,
+        output_file: Path,
+        download_config,
+        escalation_mgr=None,
+        cookie_rotator=None,
+        progress_hooks: Optional[List] = None,
+    ) -> tuple:
+        """Build ydl_opts dict for a yt-dlp Python API download call.
+
+        US-52-005: Extracts the repeated ydl_opts construction from
+        _download_segments and the retry loop into a single builder.
+
+        Encapsulates:
+        - Base options (format, output, ranges, timeouts, retries)
+        - Cookie propagation (cookiesfrombrowser / cookiefile fallback)
+        - Escalation application (impersonation, extractor_args, cookie rotation)
+
+        Args:
+            video_id: YouTube video ID.
+            start: Segment start time in seconds.
+            end: Segment end time in seconds.
+            output_file: Path for the downloaded file.
+            download_config: Download config object (or None).
+            escalation_mgr: Optional EscalationManager instance.
+            cookie_rotator: Optional CookieRotator instance.
+            progress_hooks: Optional list of progress hook callables.
+
+        Returns:
+            (ydl_opts, escalation_result) tuple. escalation_result may be None.
+        """
+        # Read segment config from download config with fallback defaults
+        _socket_timeout = 30
+        _max_res = 1080
+        _seg_format = 'best[height<={segment_max_resolution}]'
+        if download_config:
+            _seg_sock = getattr(download_config, 'segment_socket_timeout', 0)
+            _socket_timeout = _seg_sock if _seg_sock else getattr(download_config, 'socket_timeout', 30)
+            _max_res = getattr(download_config, 'segment_max_resolution', 1080)
+            _seg_format = getattr(download_config, 'segment_format', _seg_format)
+
+        ydl_opts: Dict[str, Any] = {
+            'format': _seg_format.format(segment_max_resolution=_max_res),
+            'outtmpl': str(output_file),
+            'quiet': True,
+            'no_warnings': True,
+            # Time-based download options
+            'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
+            'force_keyframes_at_cuts': True,
+            # Network resilience (matches core.py subprocess args)
+            'socket_timeout': _socket_timeout,
+            'retries': 10,
+            'fragment_retries': 10,
+        }
+
+        if progress_hooks:
+            ydl_opts['progress_hooks'] = progress_hooks
+
+        # US-49-002: Propagate cookie auth to Python API
+        if download_config:
+            _browser = getattr(download_config, 'cookies_from_browser', '')
+            if _browser:
+                ydl_opts['cookiesfrombrowser'] = [_browser]
+            else:
+                _cookies_path = getattr(download_config, 'cookies_path', '')
+                if not _cookies_path:
+                    _cookie_rotation = getattr(download_config, 'cookie_rotation', None)
+                    if _cookie_rotation:
+                        _cookie_files = getattr(_cookie_rotation, 'cookie_files', [])
+                        if _cookie_files:
+                            _cookies_path = _cookie_files[0]
+                if _cookies_path:
+                    ydl_opts['cookiefile'] = _cookies_path
+
+        # US-48-005: Apply escalation tiers (impersonation + extractor_args + cookies)
+        escalation_result = None
+        if escalation_mgr:
+            try:
+                escalation_result = escalation_mgr.get_escalation_args(video_id)
+                _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
+
+                # Tier 3: apply cookie rotation (overrides baseline cookies)
+                if escalation_result.rotate_cookies and cookie_rotator:
+                    cookie_path = cookie_rotator.get_current_cookie()
+                    if cookie_path:
+                        ydl_opts['cookiefile'] = cookie_path
+                        # Remove browser cookies when using rotated cookie file
+                        ydl_opts.pop('cookiesfrombrowser', None)
+            except Exception as esc_err:
+                logger.debug(f"Escalation lookup failed for {video_id}: {esc_err}")
+        elif self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+            # Fallback: direct impersonation only (no escalation manager)
+            try:
+                imp_args = self.downloader.impersonation_manager.get_impersonate_args()
+                if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
+                    ydl_opts['impersonate'] = imp_args[1]
+            except Exception:
+                pass
+
+        return ydl_opts, escalation_result
+
     @staticmethod
     def _print_progress(current: int, total: int, stats: Dict[str, int]) -> None:
         """Print running progress line after each download attempt."""
@@ -1224,46 +1271,6 @@ class DownloadVideoSegmentsStage(Stage):
             try:
                 url = f"https://www.youtube.com/watch?v={video_id}"
 
-                # Read segment config from download config with fallback defaults
-                _dl_cfg = getattr(self.downloader, 'download_config', None)
-                _socket_timeout = 30
-                _max_res = 1080
-                _seg_format = 'best[height<={segment_max_resolution}]'
-                if _dl_cfg:
-                    _seg_sock = getattr(_dl_cfg, 'segment_socket_timeout', 0)
-                    _socket_timeout = _seg_sock if _seg_sock else getattr(_dl_cfg, 'socket_timeout', 30)
-                    _max_res = getattr(_dl_cfg, 'segment_max_resolution', 1080)
-                    _seg_format = getattr(_dl_cfg, 'segment_format', _seg_format)
-
-                ydl_opts = {
-                    'format': _seg_format.format(segment_max_resolution=_max_res),
-                    'outtmpl': str(output_file),
-                    'quiet': True,
-                    'no_warnings': True,
-                    'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
-                    'force_keyframes_at_cuts': True,
-                    # Network resilience (matches core.py subprocess args)
-                    'socket_timeout': _socket_timeout,
-                    'retries': 10,
-                    'fragment_retries': 10,
-                }
-
-                # US-49-002: Propagate cookie auth to Python API (retry path)
-                if _dl_cfg:
-                    _browser = getattr(_dl_cfg, 'cookies_from_browser', '')
-                    if _browser:
-                        ydl_opts['cookiesfrombrowser'] = [_browser]
-                    else:
-                        _cookies_path = getattr(_dl_cfg, 'cookies_path', '')
-                        if not _cookies_path:
-                            _cookie_rotation = getattr(_dl_cfg, 'cookie_rotation', None)
-                            if _cookie_rotation:
-                                _cookie_files = getattr(_cookie_rotation, 'cookie_files', [])
-                                if _cookie_files:
-                                    _cookies_path = _cookie_files[0]
-                        if _cookies_path:
-                            ydl_opts['cookiefile'] = _cookies_path
-
                 # US-49-010: Apply stored escalation tier floor before getting args.
                 # This ensures the retry starts at the tier where the original
                 # download failed (or higher), avoiding wasted lower-tier attempts.
@@ -1281,25 +1288,17 @@ class DownloadVideoSegmentsStage(Stage):
                     except (ValueError, Exception):
                         pass
 
-                # US-48-005: Apply escalation tiers for retry
-                if escalation_mgr:
-                    try:
-                        escalation_result = escalation_mgr.get_escalation_args(video_id)
-                        _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
-                        if escalation_result.rotate_cookies and cookie_rotator:
-                            cookie_path = cookie_rotator.get_current_cookie()
-                            if cookie_path:
-                                ydl_opts['cookiefile'] = cookie_path
-                                ydl_opts.pop('cookiesfrombrowser', None)
-                    except Exception:
-                        pass
-                elif self.downloader.impersonation_manager:
-                    try:
-                        imp_args = self.downloader.impersonation_manager.get_impersonate_args()
-                        if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
-                            ydl_opts['impersonate'] = imp_args[1]
-                    except Exception:
-                        pass
+                # US-52-005: Build ydl_opts via builder (retry path)
+                _dl_cfg = getattr(self.downloader, 'download_config', None)
+                ydl_opts, _esc_result = self._build_ydl_opts(
+                    video_id=video_id,
+                    start=start,
+                    end=end,
+                    output_file=output_file,
+                    download_config=_dl_cfg,
+                    escalation_mgr=escalation_mgr,
+                    cookie_rotator=cookie_rotator,
+                )
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
