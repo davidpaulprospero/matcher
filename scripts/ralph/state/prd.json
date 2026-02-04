@@ -132,7 +132,7 @@
                             "id":  "US-59-009",
                             "title":  "Add caption fetch performance summary to CaptionMetrics",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "CaptionMetrics gains a record_format_attempt(video_id, format_name, success, elapsed_seconds) method that tracks per-format attempt counts and durations",
                                                        "CaptionMetrics gains a get_performance_summary() method returning a dict with: total_subprocess_calls, total_subprocess_seconds, avg_seconds_per_call, calls_saved_by_preflight, calls_saved_by_negative_cache",
