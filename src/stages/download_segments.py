@@ -395,6 +395,21 @@ class DownloadVideoSegmentsStage(Stage):
                     except Exception as esc_err:
                         logger.debug(f"Could not collect escalation summary: {esc_err}")
 
+            # US-52-011: Add tier_distribution from escalation_mgr.keyword_states
+            # Shows count of downloads at each escalation tier for diagnosing
+            # whether YouTube is broadly blocking (all Tier 3+) vs isolated failures.
+            if self.downloader:
+                _esc_mgr_td = getattr(self.downloader, 'escalation_manager', None)
+                if _esc_mgr_td and hasattr(_esc_mgr_td, 'keyword_states'):
+                    try:
+                        tier_distribution: Dict[str, int] = {}
+                        for _kw, _state in _esc_mgr_td.keyword_states.items():
+                            tier_name = _state.current_tier.name
+                            tier_distribution[tier_name] = tier_distribution.get(tier_name, 0) + 1
+                        escalation_summary['tier_distribution'] = tier_distribution
+                    except Exception as td_err:
+                        logger.debug(f"Could not collect tier distribution: {td_err}")
+
             # US-50-009: Add bot_detection_count and network_failure_count from error categories
             escalation_summary['bot_detection_count'] = download_stats.error_categories.get('bot_detection', 0)
             escalation_summary['network_failure_count'] = download_stats.error_categories.get('network', 0)
