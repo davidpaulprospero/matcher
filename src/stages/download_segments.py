@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import shutil
 import statistics
 import time
 from pathlib import Path
@@ -212,8 +213,54 @@ class DownloadVideoSegmentsStage(Stage):
     name = "DOWNLOAD_SEGMENTS"
     description = "Download matched video segments"
 
+    # Browsers that yt-dlp supports for cookie extraction
+    _KNOWN_BROWSERS = ('firefox', 'chrome', 'edge', 'safari', 'opera', 'brave')
+
     def __init__(self):
         self.downloader = None
+
+    @staticmethod
+    def _validate_cookie_config(download_config) -> None:
+        """US-50-012: Validate cookie configuration at stage init.
+
+        Emits warnings when:
+        - No cookie source is configured (neither cookies_from_browser nor cookies_path)
+        - cookies_from_browser is set to a browser that isn't installed
+
+        These warnings appear once at stage startup, not per-download.
+        """
+        cookies_from_browser = getattr(download_config, 'cookies_from_browser', '')
+        cookies_path = getattr(download_config, 'cookies_path', '')
+
+        if not cookies_from_browser and not cookies_path:
+            logger.warning(
+                "No cookie source configured. YouTube will likely block all download "
+                "requests with 403/bot-detection errors. "
+                "Set download.cookies_from_browser to your browser name "
+                "(firefox, chrome, edge, safari, opera, brave) in config.yaml"
+            )
+            return
+
+        if cookies_from_browser:
+            # Best-effort check: see if the browser executable is on PATH
+            browser_exe = cookies_from_browser.lower()
+            # Map browser names to common executable names
+            _exe_map = {
+                'firefox': 'firefox',
+                'chrome': 'google-chrome' if shutil.which('google-chrome') else 'chrome',
+                'edge': 'msedge',
+                'safari': 'safari',
+                'opera': 'opera',
+                'brave': 'brave',
+            }
+            exe_name = _exe_map.get(browser_exe, browser_exe)
+            if not shutil.which(exe_name) and not shutil.which(browser_exe):
+                logger.warning(
+                    f"cookies_from_browser is set to '{cookies_from_browser}' but "
+                    f"'{cookies_from_browser}' does not appear to be installed "
+                    f"(not found on PATH). Cookie extraction may fail. "
+                    f"Verify the browser is installed or use a cookies_path file instead."
+                )
 
     def run(
         self,
@@ -240,6 +287,9 @@ class DownloadVideoSegmentsStage(Stage):
             # Get download settings from config
             download_config = config.download
             buffer_seconds = download_config.segment_buffer
+
+            # US-50-012: Validate cookie configuration early (before download loop)
+            self._validate_cookie_config(download_config)
 
             print(f"  Downloading matched segments")
             print(f"    Buffer: {buffer_seconds}s before/after each match")

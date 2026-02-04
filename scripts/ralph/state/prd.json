@@ -162,7 +162,7 @@
             "id": "US-50-011",
             "title": "Add retry queue tier persistence so retried downloads start at their last escalation tier",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When a download fails and is queued for retry, the current escalation tier is stored with the retry entry",
                 "When retrying, the download starts at the stored tier (or the global tier floor, whichever is higher) instead of Tier 1",
@@ -170,13 +170,13 @@
                 "A unit test verifies that if the global tier floor is Tier 3 and the stored retry tier is Tier 2, the retry starts at Tier 3",
                 "A unit test verifies that videos with no stored tier (legacy retry entries) default to Tier 1"
             ],
-            "notes": "Tier: P2 efficiency. Source file: src/stages/download_segments.py. The retry queue at the stage level re-enqueues failed video IDs but doesn't persist escalation state. Each retry restarts at Tier 1, wasting time re-escalating through tiers that already failed. The EscalationManager tracks per-keyword tier state internally — check if keyword_id maps to video_id and if state persists across the retry pass. Sprint 49 story US-49-010 added tier persistence across passes — verify integration."
+            "notes": "Pre-implemented in US-49-010. Added 10 unit tests covering all 5 ACs: tier storage on retry add, retry starts at stored tier, global floor overrides lower stored tier, legacy entries default to Tier 1. Commit 3e13f91."
         },
         {
             "id": "US-50-012",
             "title": "Add download config validation that warns when no cookie source is configured",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "During pipeline startup (or download_segments stage init), if neither cookies_from_browser nor cookies_path is configured, a WARNING log is emitted explaining that YouTube will likely block all requests",
                 "The warning includes actionable guidance: 'Set download.cookies_from_browser to your browser name (firefox, chrome, etc.) in config.yaml'",
@@ -184,7 +184,7 @@
                 "A unit test verifies the warning is emitted when no cookie config is present",
                 "A unit test verifies no warning when cookies_from_browser is properly configured"
             ],
-            "notes": "Tier: P1 UX/safety. Source files: src/stages/download_segments.py (stage init or _build_ydl_opts), src/config/sections/download.py. This provides early feedback to users about missing cookies — the #1 cause of bot-detection failures. The validation should happen early (stage init, not per-download) to avoid log spam. Could also check if the browser cookie extraction actually works by attempting a dry-run import."
+            "notes": "Implemented _validate_cookie_config() static method on DownloadVideoSegmentsStage. Called once at stage startup (in run() before download loop). Checks: (1) no cookie source → WARNING with actionable guidance, (2) browser not on PATH → WARNING (best-effort via shutil.which). 8 unit tests in test_download_cookie_validation.py: 3 for no-cookie warning (AC1/AC2), 2 for missing browser (AC3), 3 for no-warning-when-configured (AC5). All 8 pass."
         }
     ]
 }
