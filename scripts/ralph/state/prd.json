@@ -93,7 +93,7 @@
             "id": "US-51-006",
             "title": "Add per-download progress hooks for segment download observability",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "ydl_opts includes a 'progress_hooks' callback that logs download progress at INFO level for segments taking >30s",
                 "Progress hook logs bytes downloaded, estimated total, and download speed when status is 'downloading' and elapsed >30s",

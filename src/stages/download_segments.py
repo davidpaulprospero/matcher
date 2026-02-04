@@ -389,6 +389,11 @@ class DownloadVideoSegmentsStage(Stage):
             # US-50-009: Log structured escalation summary at stage completion
             self._log_escalation_summary(escalation_summary)
 
+            # US-51-006: Include progress hook data in escalation_summary for checkpoint
+            progress_hooks_data = download_stats.get('progress_hooks_data', {})
+            if progress_hooks_data:
+                escalation_summary['download_progress'] = progress_hooks_data
+
             # Stage metrics for pipeline observability (US-49-009 + US-49-012)
             metrics = StageMetrics(
                 items_processed=download_stats['succeeded'] + download_stats['cached'],
@@ -645,6 +650,9 @@ class DownloadVideoSegmentsStage(Stage):
                     _max_res = getattr(_dl_cfg, 'segment_max_resolution', 1080)
                     _seg_format = getattr(_dl_cfg, 'segment_format', _seg_format)
 
+                # US-51-006: Per-download progress hook for observability
+                _progress_hook = self._make_progress_hook(video_id, stats)
+
                 ydl_opts = {
                     'format': _seg_format.format(segment_max_resolution=_max_res),
                     'outtmpl': str(output_file),
@@ -657,6 +665,8 @@ class DownloadVideoSegmentsStage(Stage):
                     'socket_timeout': _socket_timeout,
                     'retries': 10,
                     'fragment_retries': 10,
+                    # US-51-006: Progress hook for download observability
+                    'progress_hooks': [_progress_hook],
                 }
 
                 # US-49-002: Propagate cookie auth to Python API (yt-dlp doesn't read CLI config)
@@ -910,6 +920,62 @@ class DownloadVideoSegmentsStage(Stage):
         self._log_error_summary(stats)
 
         return downloaded, stats
+
+    @staticmethod
+    def _make_progress_hook(video_id: str, stats: Dict[str, Any]) -> callable:
+        """Create a yt-dlp progress_hooks callback for per-download observability.
+
+        US-51-006: Logs download progress at INFO level for segments taking >30s,
+        and logs final file size/time on completion. Accumulates totals into
+        stats['progress_hooks_data'] for stage metrics.
+
+        Args:
+            video_id: YouTube video ID being downloaded.
+            stats: The stage stats dict; progress data is accumulated under
+                   stats['progress_hooks_data'].
+
+        Returns:
+            A callable suitable for ydl_opts['progress_hooks'].
+        """
+        hook_data = stats.setdefault('progress_hooks_data', {
+            'total_downloaded_bytes': 0,
+            'segments_with_progress': 0,
+            'segments_finished': 0,
+        })
+        _last_log_elapsed = [0.0]  # mutable container for closure
+
+        def _hook(d: Dict[str, Any]) -> None:
+            status = d.get('status', '')
+            elapsed = d.get('elapsed', 0.0) or 0.0
+
+            if status == 'downloading' and elapsed > 30:
+                # Throttle: only log every 15s of elapsed time
+                if elapsed - _last_log_elapsed[0] >= 15:
+                    _last_log_elapsed[0] = elapsed
+                    downloaded = d.get('downloaded_bytes') or 0
+                    total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    speed = d.get('speed') or 0
+                    speed_str = f"{speed / 1024:.0f} KB/s" if speed else "unknown"
+                    total_str = f"{total_bytes / (1024 * 1024):.1f}MB" if total_bytes else "unknown"
+                    logger.info(
+                        f"Segment {video_id}: downloading — "
+                        f"{downloaded / (1024 * 1024):.1f}MB / {total_str} "
+                        f"@ {speed_str} (elapsed {elapsed:.0f}s)"
+                    )
+                    hook_data['segments_with_progress'] += 1
+
+            elif status == 'finished':
+                total_bytes = d.get('total_bytes') or d.get('downloaded_bytes') or 0
+                if total_bytes:
+                    hook_data['total_downloaded_bytes'] += total_bytes
+                hook_data['segments_finished'] += 1
+                if elapsed and elapsed > 0:
+                    logger.info(
+                        f"Segment {video_id}: finished — "
+                        f"{total_bytes / (1024 * 1024):.1f}MB in {elapsed:.1f}s"
+                    )
+
+        return _hook
 
     @staticmethod
     def _print_progress(current: int, total: int, stats: Dict[str, int]) -> None:
