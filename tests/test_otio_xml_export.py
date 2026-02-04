@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from src.otio.xml_export import generate_resolve_xml_with_bins, _write_media_xml_part
+from src.otio.xml_export import generate_resolve_xml_with_bins, generate_davinci_sequence_xml, _write_media_xml_part
 from src.utils import Match, MatchResult, SRTSegment
 
 
@@ -390,6 +390,227 @@ class TestXMLStructure:
         assert timecode is not None
         assert timecode.find('string') is not None
         assert timecode.find('string').text == '01:00:00:00'  # Default timeline start
+
+
+class TestConfigurableTimelineStartTC:
+    """Test configurable timeline_start_tc across all XML export functions (US-56-004)"""
+
+    @pytest.fixture
+    def vo_vid_matches(self):
+        """Create mock matches using Mock objects with .start/.end attrs as expected by xml_export."""
+        # The xml_export code uses vo_seg.end/vo_seg.start (not end_time/start_time)
+        # Use Mock objects to provide the expected interface
+        def _make_vo_seg(start, end):
+            seg = Mock()
+            seg.start = start
+            seg.end = end
+            return seg
+
+        def _make_vid_seg(source_file, start_time, end_time):
+            seg = Mock()
+            seg.source_file = source_file
+            seg.start_time = start_time
+            seg.end_time = end_time
+            return seg
+
+        match1 = Mock()
+        match1.primary_match.voiceover_segment = _make_vo_seg(0.0, 3.0)
+        match1.primary_match.video_segment = _make_vid_seg("/videos/clip1.mp4", 10.0, 13.0)
+        match1.alternatives = []
+        match1.secondary_matches = []
+        match1.strategy_matches = []
+
+        match2 = Mock()
+        match2.primary_match.voiceover_segment = _make_vo_seg(3.0, 6.0)
+        match2.primary_match.video_segment = _make_vid_seg("/videos/clip2.mp4", 20.0, 23.0)
+        match2.alternatives = []
+        match2.secondary_matches = []
+        match2.strategy_matches = []
+
+        return [match1, match2]
+
+    @pytest.mark.fast
+    def test_sequence_xml_default_timecode(self, vo_vid_matches, tmp_path):
+        """Test generate_davinci_sequence_xml uses default 01:00:00:00"""
+        path = generate_davinci_sequence_xml(
+            vo_vid_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0
+        )
+
+        tree = ET.parse(path)
+        root = tree.getroot()
+
+        timecode = root.find('.//timecode')
+        assert timecode is not None
+        assert timecode.find('string').text == '01:00:00:00'
+        assert timecode.find('frame').text == '108000'  # 30 * 3600
+
+    @pytest.mark.fast
+    def test_sequence_xml_custom_timecode(self, vo_vid_matches, tmp_path):
+        """Test generate_davinci_sequence_xml with non-default timecode"""
+        path = generate_davinci_sequence_xml(
+            vo_vid_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0,
+            timeline_start_tc='00:00:00:00'
+        )
+
+        tree = ET.parse(path)
+        root = tree.getroot()
+
+        timecode = root.find('.//timecode')
+        assert timecode is not None
+        assert timecode.find('string').text == '00:00:00:00'
+        assert timecode.find('frame').text == '0'
+
+    @pytest.mark.fast
+    def test_project_xml_custom_timecode_zero(self, vo_vid_matches, tmp_path):
+        """Test project XML uses custom timeline_start_tc='00:00:00:00'"""
+        paths = generate_resolve_xml_with_bins(
+            vo_vid_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=30.0,
+            timeline_start_tc='00:00:00:00'
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        timecode = root.find('.//sequence/timecode')
+        assert timecode is not None
+        assert timecode.find('string').text == '00:00:00:00'
+        assert timecode.find('frame').text == '0'
+
+    @pytest.mark.fast
+    def test_project_xml_custom_timecode_10h(self, vo_vid_matches, tmp_path):
+        """Test project XML with 10:00:00:00 start timecode at 24fps"""
+        paths = generate_resolve_xml_with_bins(
+            vo_vid_matches,
+            str(tmp_path / "test.xml"),
+            frame_rate=24.0,
+            timeline_start_tc='10:00:00:00'
+        )
+
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        timecode = root.find('.//sequence/timecode')
+        assert timecode is not None
+        assert timecode.find('string').text == '10:00:00:00'
+        # 10 hours * 3600 seconds * 24 fps = 864000 frames
+        assert timecode.find('frame').text == '864000'
+
+    @pytest.mark.fast
+    def test_media_xml_part_default_timecode(self, tmp_path):
+        """Test _write_media_xml_part uses default 01:00:00:00"""
+        files_subset = {
+            '/videos/test.mp4': {
+                'file_id': 'file-1',
+                'uuid': 'uuid-1234',
+                'duration_frames': 900
+            }
+        }
+
+        output_path = str(tmp_path / "media_part.xml")
+        generated_paths = []
+
+        _write_media_xml_part(
+            files_subset,
+            part_idx=1,
+            output_path=output_path,
+            fps_int=30,
+            generated_paths=generated_paths,
+            logger=Mock()
+        )
+
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        # Find the sequence timecode (in the helper sequence)
+        seq_tc = root.find('.//sequence/timecode')
+        assert seq_tc is not None
+        assert seq_tc.find('string').text == '01:00:00:00'
+        assert seq_tc.find('frame').text == '108000'
+
+    @pytest.mark.fast
+    def test_media_xml_part_custom_timecode(self, tmp_path):
+        """Test _write_media_xml_part with non-default timecode"""
+        files_subset = {
+            '/videos/test.mp4': {
+                'file_id': 'file-1',
+                'uuid': 'uuid-1234',
+                'duration_frames': 900
+            }
+        }
+
+        output_path = str(tmp_path / "media_part.xml")
+        generated_paths = []
+
+        _write_media_xml_part(
+            files_subset,
+            part_idx=1,
+            output_path=output_path,
+            fps_int=25,
+            generated_paths=generated_paths,
+            logger=Mock(),
+            timeline_start_tc='00:00:00:00',
+            frame_rate=25.0
+        )
+
+        tree = ET.parse(output_path)
+        root = tree.getroot()
+
+        seq_tc = root.find('.//sequence/timecode')
+        assert seq_tc is not None
+        assert seq_tc.find('string').text == '00:00:00:00'
+        assert seq_tc.find('frame').text == '0'
+
+    @pytest.mark.fast
+    def test_all_three_locations_use_custom_tc(self, vo_vid_matches, tmp_path):
+        """Test that all 3 hardcoded locations use the custom timecode.
+
+        Verifies: project XML sequence, media part helper sequence,
+        and sequence-only XML all use the custom timecode.
+        """
+        # 1. Project XML (generate_resolve_xml_with_bins)
+        project_path = str(tmp_path / "project.xml")
+        paths = generate_resolve_xml_with_bins(
+            vo_vid_matches,
+            project_path,
+            frame_rate=30.0,
+            num_parts=2,
+            timeline_start_tc='02:00:00:00'
+        )
+
+        # Check project XML sequence timecode
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+        seq_tc = root.find('.//sequence/timecode')
+        assert seq_tc.find('string').text == '02:00:00:00'
+        assert seq_tc.find('frame').text == '216000'  # 2*3600*30
+
+        # Check media part XML (if generated)
+        if len(paths) > 1:
+            tree2 = ET.parse(paths[1])
+            root2 = tree2.getroot()
+            part_tc = root2.find('.//sequence/timecode')
+            if part_tc is not None:
+                assert part_tc.find('string').text == '02:00:00:00'
+                assert part_tc.find('frame').text == '216000'
+
+        # 2. Sequence XML (generate_davinci_sequence_xml)
+        seq_path = generate_davinci_sequence_xml(
+            vo_vid_matches,
+            str(tmp_path / "sequence.xml"),
+            frame_rate=30.0,
+            timeline_start_tc='02:00:00:00'
+        )
+        tree3 = ET.parse(seq_path)
+        root3 = tree3.getroot()
+        seq_tc3 = root3.find('.//timecode')
+        assert seq_tc3.find('string').text == '02:00:00:00'
+        assert seq_tc3.find('frame').text == '216000'
 
 
 class TestXMLSplitting:

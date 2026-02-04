@@ -14,7 +14,7 @@ import uuid as uuid_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .utils import escape_xml, format_path_url
+from .utils import escape_xml, format_path_url, parse_timecode_to_frames
 from .timeline import _validate_entity_images
 
 if TYPE_CHECKING:
@@ -123,7 +123,8 @@ def generate_resolve_xml_with_bins(
     entity_videos: Dict = None,
     config = None,
     num_parts: int = 2,
-    downloaded_segments: Optional[List] = None
+    downloaded_segments: Optional[List] = None,
+    timeline_start_tc: str = '01:00:00:00'
 ) -> List[str]:
     """
     Generate DaVinci Resolve compatible FCP7 XML with media bin AND timeline.
@@ -358,8 +359,8 @@ def generate_resolve_xml_with_bins(
         f'                        <timebase>{fps_int}</timebase>',
         '                        <ntsc>FALSE</ntsc>',
         '                    </rate>',
-        '                    <string>01:00:00:00</string>',
-        f'                    <frame>{fps_int * 3600}</frame>',
+        f'                    <string>{timeline_start_tc}</string>',
+        f'                    <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
         '                </timecode>',
         '                <media>',
         '                    <video>',
@@ -517,7 +518,9 @@ def generate_resolve_xml_with_bins(
                 f"{base_path}_media_part{part_idx}.xml",
                 fps_int,
                 generated_paths,
-                logger
+                logger,
+                timeline_start_tc=timeline_start_tc,
+                frame_rate=frame_rate
             )
 
         # Generate separate XMLs for conflicting files (one file per XML)
@@ -533,7 +536,9 @@ def generate_resolve_xml_with_bins(
                 fps_int,
                 generated_paths,
                 logger,
-                bin_name_override=f"Media - {folder_name}"
+                bin_name_override=f"Media - {folder_name}",
+                timeline_start_tc=timeline_start_tc,
+                frame_rate=frame_rate
             )
 
     return generated_paths
@@ -546,7 +551,9 @@ def _write_media_xml_part(
     fps_int: int,
     generated_paths: list,
     logger,
-    bin_name_override: str = None
+    bin_name_override: str = None,
+    timeline_start_tc: str = '01:00:00:00',
+    frame_rate: float = 30.0
 ):
     """Write a single media XML part file.
 
@@ -697,8 +704,8 @@ def _write_media_xml_part(
         f'                <timebase>{fps_int}</timebase>',
         '                <ntsc>FALSE</ntsc>',
         '            </rate>',
-        '            <string>01:00:00:00</string>',
-        f'            <frame>{fps_int * 3600}</frame>',
+        f'            <string>{timeline_start_tc}</string>',
+        f'            <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
         '            <displayformat>NDF</displayformat>',
         '        </timecode>',
         '        <media>',
@@ -727,7 +734,8 @@ def generate_davinci_sequence_xml(
     frame_rate: float = 30.0,
     downloaded_segments: Optional[List] = None,
     width: int = 1920,
-    height: int = 1080
+    height: int = 1080,
+    timeline_start_tc: str = '01:00:00:00'
 ) -> str:
     """
     Generate DaVinci Resolve compatible sequence XML (V1 track only).
@@ -772,8 +780,8 @@ def generate_davinci_sequence_xml(
         '        <in>-1</in>',
         '        <out>-1</out>',
         '        <timecode>',
-        '            <string>01:00:00:00</string>',
-        f'            <frame>{fps_int * 3600}</frame>',
+        f'            <string>{timeline_start_tc}</string>',
+        f'            <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
         '            <displayformat>NDF</displayformat>',
         '            <rate>',
         f'                <timebase>{fps_int}</timebase>',
