@@ -861,6 +861,10 @@ class BatchRetryConfig:
     # After this many batch retries, give up on remaining failures
     max_passes: int = 2
 
+    # US-51-010: Maximum retries per individual video across pipeline restarts.
+    # Videos exceeding this count are permanently skipped on checkpoint restore.
+    max_retries_per_video: int = 3
+
     # Respect circuit breaker state when processing retries
     # If True, wait for circuit breaker to recover before retrying
     # If False, retry immediately after delay_seconds regardless of circuit breaker

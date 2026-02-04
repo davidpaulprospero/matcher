@@ -1,197 +1,197 @@
 {
-    "sprintNumber": 51,
-    "focusArea": "pipeline",
-    "branchName": "ralph/sprint-51",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
+  "sprintNumber": 51,
+  "focusArea": "pipeline",
+  "branchName": "ralph/sprint-51",
+  "projectContext": {
+    "sourceDir": "src/",
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short"
+  },
+  "userStories": [
+    {
+      "id": "US-51-001",
+      "title": "Generate sprint stories for pipeline focus area",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
+        "Add stories US-51-002 through US-51-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-51-NNN to be unique across sprints",
+        "Mark this story (US-51-001) as passes: true when done"
+      ],
+      "notes": "Generated 11 stories (US-51-002 through US-51-012) covering: stall detection for Python API downloads, iterative_match serialization fix, bot-detection abort logic, DNS/network failure pattern hardening, per-download progress hooks, checkpoint backup rotation, stage restore validation, pipeline dry-run mode, download retry queue persistence, stage-level error aggregation, and pipeline stage timing histograms."
     },
-    "userStories": [
-        {
-            "id": "US-51-001",
-            "title": "Generate sprint stories for pipeline focus area",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
-                "Add stories US-51-002 through US-51-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-51-NNN to be unique across sprints",
-                "Mark this story (US-51-001) as passes: true when done"
-            ],
-            "notes": "Generated 11 stories (US-51-002 through US-51-012) covering: stall detection for Python API downloads, iterative_match serialization fix, bot-detection abort logic, DNS/network failure pattern hardening, per-download progress hooks, checkpoint backup rotation, stage restore validation, pipeline dry-run mode, download retry queue persistence, stage-level error aggregation, and pipeline stage timing histograms."
-        },
-        {
-            "id": "US-51-002",
-            "title": "Add stall detection wrapper around yt-dlp Python API downloads",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "ydl.download() call in download_segments.py is wrapped in a concurrent.futures timeout (configurable, default 300s)",
-                "When timeout fires, the download is cancelled and a DownloadStallError (or equivalent) is raised",
-                "The raised error feeds into existing retry/escalation logic so the video is queued for retry at next tier",
-                "socket_timeout in ydl_opts remains unchanged (it covers HTTP sockets only, not ffmpeg stalls)",
-                "Unit test verifies timeout fires when ydl.download() blocks beyond threshold",
-                "Unit test verifies escalation is triggered after stall timeout"
-            ],
-            "notes": "Pre-implemented by US-49-004. Verified all 6 acceptance criteria met: (1) ydl.download() wrapped in ThreadPoolExecutor at download_segments.py:720-740, configurable via segment_stall_timeout (default 120s) in download.py:1192 and config.yaml:1347. (2) TimeoutError raised on stall at line 737. (3) Error feeds into retry via except Exception at line 776, classified as 'timeout' by classify_error_category, added to retry queue. (4) socket_timeout unchanged \u00e2\u20ac\u201d separate config. (5) test_stall_timeout_triggers_on_hung_download passes. (6) test_stall_timeout_increments_failure_and_feeds_retry_queue and test_stall_timeout_error_does_not_trigger_bot_escalation both pass. All 6 tests in TestSegmentStallTimeout pass."
-        },
-        {
-            "id": "US-51-003",
-            "title": "Fix iterative_match else-branch match serialization for plain Match objects",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "The else branch in iterative_match.py match serialization (around line 450-461) correctly extracts video_file from Match objects that have a video_file attribute",
-                "For MatchResult objects that fall into the else branch (lacking primary_match), video_file extraction uses safe navigation through available attributes",
-                "Serialized matches with empty video_file are logged as warnings so the issue is visible",
-                "Unit test with a mock Match object (has video_file) serializes correctly via the else branch",
-                "Unit test with a mock MatchResult (no primary_match, no video_file) serializes with empty string and logs warning"
-            ],
-            "notes": "Fixed: else-branch now extracts video_file via getattr for plain Match objects, and logs warning with type name when video_file is empty (for MatchResult with primary_match=None). Added 4 tests in TestElseBranchMatchSerialization. Updated _serialize_match test helper to mirror production code."
-        },
-        {
-            "id": "US-51-004",
-            "title": "Add consecutive bot-detection counter with global tier floor",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "A shared consecutive bot-detection counter tracks 403/Sign-in errors across all video IDs in the download loop",
-                "When bot-detection counter exceeds a configurable threshold (default 5), a global tier floor is set so new downloads start at the highest available tier instead of Tier 1",
-                "Bot-detection errors no longer reset the network failure abort counter (the counter reset at lines ~858-860 is removed or gated)",
-                "When bot-detection counter exceeds a higher threshold (default 10), the download loop aborts early with a clear error message",
-                "Unit test verifies global tier floor activates after threshold consecutive bot-detection errors",
-                "Unit test verifies download loop aborts after abort-threshold bot-detection errors"
-            ],
-            "notes": "Pre-implemented by US-49-005 (tier floor) and US-49-008 (abort threshold). All 6 acceptance criteria met by existing code: consecutive_bot_detections counter at download_segments.py:525, tier floor at lines 797-808, abort at lines 811-842, network counter isolation at lines 846-871. Config: download.bot_detection_tier_floor_threshold (default 5) and download.bot_detection_abort_threshold (default 10) in src/config/sections/download.py and config.yaml. Tests: test_bot_detection_global_counter.py (5 tests) and test_download_segments_bot_abort.py (7 tests). Fixed stale file bug in test_success_resets_counter_and_clears_tier_floor (used tempfile instead of hardcoded /tmp path)."
-        },
-        {
-            "id": "US-51-005",
-            "title": "Harden _is_network_failure pattern matching for Python API error format",
-            "priority": "medium",
-            "passes": true,
-            "notes": "Tier: P2 bug fix. Source: src/stages/download_segments.py lines 31-73. The _NETWORK_FAILURE_PATTERNS tuple and _is_network_failure() function. Current patterns include 'Errno 11001' and 'getaddrinfo failed' but the Python API wraps these in 'ERROR: unable to download webpage: <urlopen error ...>' format which may not match simple substring checks. The _FFMPEG_NETWORK_EXIT_CODE constant handles the ffmpeg exit code. Verify the patterns also work with yt_dlp.utils.DownloadError exception message format. Add 'Connection refused' and 'Connection timed out' patterns.",
-            "acceptanceCriteria": [
-                "_is_network_failure() at download_segments.py recognizes Python API DownloadError wrapping of DNS failures (e.g., 'ERROR: unable to download webpage: <urlopen error [Errno 11001]>')",
-                "_is_network_failure() recognizes ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as a network failure",
-                "_is_network_failure() recognizes 'Connection refused' and 'Connection timed out' patterns",
-                "Unit test covers all new patterns with exact error strings from production logs",
-                "Unit test verifies bot-detection patterns ('Sign in to confirm', '403 Forbidden') are NOT classified as network failures"
-            ]
-        },
-        {
-            "id": "US-51-006",
-            "title": "Add per-download progress hooks for segment download observability",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "ydl_opts includes a 'progress_hooks' callback that logs download progress at INFO level for segments taking >30s",
-                "Progress hook logs bytes downloaded, estimated total, and download speed when status is 'downloading' and elapsed >30s",
-                "Progress hook logs final file size and total time when status is 'finished'",
-                "Progress data is accumulated into stage metrics (the StageMetrics dict saved to checkpoint)",
-                "Unit test verifies progress hook callback is invoked with expected status values",
-                "Progress hook does not log for fast downloads (<30s) to avoid log spam"
-            ],
-            "notes": "Implemented: Added _make_progress_hook() static method to DownloadVideoSegmentsStage (download_segments.py:925-978). Hook is injected into ydl_opts at line 669. Logs INFO for slow downloads (>30s) with bytes/total/speed, throttled every 15s. Logs finished status with file size and elapsed time. Accumulates progress_hooks_data into stats dict, which flows into StageMetrics via escalation_summary (lines 392-395). 20 tests in test_segment_progress_hook.py cover creation, status values, slow/fast logging, finished logging, metrics accumulation, and edge cases."
-        },
-        {
-            "id": "US-51-007",
-            "title": "Add checkpoint backup rotation to prevent corruption data loss",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Checkpoint save (in checkpoint.py _atomic_save) rotates up to N backup files (default 3): checkpoint.backup.json, checkpoint.backup.1.json, checkpoint.backup.2.json",
-                "Each save rotates existing backups (2->3 deleted, 1->2, current->1, new backup created)",
-                "Backup rotation count is configurable via infrastructure config section",
-                "When checkpoint.json is corrupted (fails JSON parse), restore automatically tries backup files in order",
-                "Unit test verifies backup rotation creates correct number of files",
-                "Unit test verifies restore from backup when primary checkpoint is corrupted"
-            ],
-            "notes": "Implemented in checkpoint.py: _rotate_backups() rotates N backup files before each save, _get_backup_path()/get_all_backup_paths() manage paths. load() tries rotated backups (backup.1, backup.2...) when main+primary backup are both corrupt. clear() removes all rotated backups. Config: pipeline.checkpoint_backup_count (default 3) in PipelineConfig. 17 tests in test_checkpoint_backup_rotation.py, all 209 existing checkpoint tests pass."
-        },
-        {
-            "id": "US-51-008",
-            "title": "Add stage restore validation with mismatch warnings",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Each stage's restore() method validates that checkpoint data matches expected schema/keys before restoring",
-                "When checkpoint data has missing required keys, restore() logs a WARNING with the missing keys and returns False",
-                "When checkpoint data has unexpected type mismatches (e.g., string where list expected), restore() logs WARNING and returns False",
-                "Pipeline orchestrator handles restore() returning False by re-running the stage instead of proceeding with bad state",
-                "Unit test verifies restore() returns False and logs warning when given checkpoint data with missing keys",
-                "Unit test verifies pipeline re-runs stage when restore returns False"
-            ],
-            "notes": "Implemented: Added schema/key validation to restore() in ANALYZE, VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH stages. Pipeline.py now re-runs stage instead of continuing when restore() returns False. 22 new tests in test_stage_restore_validation.py. All 380 related tests pass."
-        },
-        {
-            "id": "US-51-009",
-            "title": "Add pipeline dry-run mode for stage validation without execution",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Pipeline.run(dry_run=True) validates all stage inputs in sequence without executing any stage",
-                "Dry-run reports which stages would run, which would skip (checkpoint), and which have input validation errors",
-                "Dry-run output is logged at INFO level with a summary table of stage -> action (run/skip/error)",
-                "The --dry-run CLI flag is wired through cli/ to pipeline.run(dry_run=True)",
-                "Unit test verifies dry-run does not modify state or checkpoint",
-                "Unit test verifies dry-run correctly identifies stages that would fail validation"
-            ],
-            "notes": "Enhanced _run_dry_run in src/pipeline.py to: load checkpoint for skip detection, categorize stages as run/checkpoint/skip/error, validate inputs for runnable stages, produce structured summary table. Wired --dry-run CLI flag through main.py. 16 new tests in tests/test_pipeline_dry_run.py covering no-execution, no-state-modification, stage categorization, return values, summary logging, and CLI flag parsing."
-        },
-        {
-            "id": "US-51-010",
-            "title": "Add download retry queue persistence across pipeline restarts",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Videos that fail all escalation tiers in DOWNLOAD_SEGMENTS are saved to a retry_queue list in checkpoint data",
-                "On pipeline resume, the retry queue is loaded and those videos are retried before processing new segments",
-                "Retry queue entries include video_id, last_tier_attempted, failure_reason, and timestamp",
-                "Retry queue has a configurable max_retries_per_video (default 3) \u00e2\u20ac\u201d videos exceeding this are permanently skipped",
-                "Unit test verifies retry queue is persisted to checkpoint on stage completion",
-                "Unit test verifies retry queue is loaded and processed on resume"
-            ],
-            "notes": "Tier: P2 improvement. Source: src/stages/download_segments.py \u00e2\u20ac\u201d the download loop saves failed_segment_ids but these are not persisted to checkpoint. On resume, all segments are retried from scratch. The checkpoint data dict (saved around line 870+) should include a 'retry_queue' key with structured entries. The restore() method should load this queue. Existing pattern: checkpoint.py STAGE_FIELD_MAP maps 'DOWNLOAD_SEGMENTS' -> 'download_segments' field in CheckpointData."
-        },
-        {
-            "id": "US-51-011",
-            "title": "Add stage-level error aggregation with categorized failure summary",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Each pipeline stage collects errors into categorized buckets (network, auth, timeout, validation, unknown) during execution",
-                "Stage completion summary logs a table of error_category -> count -> sample_message",
-                "Error categories are defined in a shared enum/constants module usable across all stages",
-                "DOWNLOAD_SEGMENTS stage uses error categories to classify bot-detection, network, and timeout failures",
-                "Unit test verifies error aggregation collects and categorizes errors correctly",
-                "Unit test verifies completion summary includes all error categories with counts"
-            ],
-            "notes": "Tier: P3 improvement. Source: src/stages/download_segments.py \u00e2\u20ac\u201d errors are currently logged individually but not aggregated. The stage completion log (around line 870+) shows counts but not categorized breakdowns. Add an ErrorAggregator class (could live in src/stages/base.py or src/stages/utils.py) that stages can use. Error categories should align with existing _is_network_failure() and _is_bot_detection() patterns. This builds on the StageMetrics infrastructure from US-49-012."
-        },
-        {
-            "id": "US-51-012",
-            "title": "Add pipeline stage timing histograms to completion summary",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Pipeline completion summary includes per-stage duration (wall-clock seconds) in a formatted table",
-                "Stage timing data is persisted to checkpoint under stage_metrics for post-run analysis",
-                "Total pipeline duration and per-stage percentage of total are included in the summary",
-                "Stages that were skipped (checkpoint resume) show 'skipped' instead of 0s duration",
-                "Unit test verifies timing data is collected and formatted correctly",
-                "Unit test verifies skipped stages are marked as 'skipped' in the summary"
-            ],
-            "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 342-463 (run loop) \u00e2\u20ac\u201d stage timing is partially implemented via StageMetrics (US-49-012) but there is no end-of-pipeline summary that aggregates all stage timings into a readable table. The stage_metrics dict in CheckpointData (checkpoint.py:96) stores per-stage metrics. Add a _print_timing_summary() method to PipelineOrchestrator that reads from self.stage_metrics after the run loop completes. Format as: Stage | Duration | % of Total."
-        }
-    ]
+    {
+      "id": "US-51-002",
+      "title": "Add stall detection wrapper around yt-dlp Python API downloads",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "ydl.download() call in download_segments.py is wrapped in a concurrent.futures timeout (configurable, default 300s)",
+        "When timeout fires, the download is cancelled and a DownloadStallError (or equivalent) is raised",
+        "The raised error feeds into existing retry/escalation logic so the video is queued for retry at next tier",
+        "socket_timeout in ydl_opts remains unchanged (it covers HTTP sockets only, not ffmpeg stalls)",
+        "Unit test verifies timeout fires when ydl.download() blocks beyond threshold",
+        "Unit test verifies escalation is triggered after stall timeout"
+      ],
+      "notes": "Pre-implemented by US-49-004. Verified all 6 acceptance criteria met: (1) ydl.download() wrapped in ThreadPoolExecutor at download_segments.py:720-740, configurable via segment_stall_timeout (default 120s) in download.py:1192 and config.yaml:1347. (2) TimeoutError raised on stall at line 737. (3) Error feeds into retry via except Exception at line 776, classified as 'timeout' by classify_error_category, added to retry queue. (4) socket_timeout unchanged \u00e2\u20ac\u201d separate config. (5) test_stall_timeout_triggers_on_hung_download passes. (6) test_stall_timeout_increments_failure_and_feeds_retry_queue and test_stall_timeout_error_does_not_trigger_bot_escalation both pass. All 6 tests in TestSegmentStallTimeout pass."
+    },
+    {
+      "id": "US-51-003",
+      "title": "Fix iterative_match else-branch match serialization for plain Match objects",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "The else branch in iterative_match.py match serialization (around line 450-461) correctly extracts video_file from Match objects that have a video_file attribute",
+        "For MatchResult objects that fall into the else branch (lacking primary_match), video_file extraction uses safe navigation through available attributes",
+        "Serialized matches with empty video_file are logged as warnings so the issue is visible",
+        "Unit test with a mock Match object (has video_file) serializes correctly via the else branch",
+        "Unit test with a mock MatchResult (no primary_match, no video_file) serializes with empty string and logs warning"
+      ],
+      "notes": "Fixed: else-branch now extracts video_file via getattr for plain Match objects, and logs warning with type name when video_file is empty (for MatchResult with primary_match=None). Added 4 tests in TestElseBranchMatchSerialization. Updated _serialize_match test helper to mirror production code."
+    },
+    {
+      "id": "US-51-004",
+      "title": "Add consecutive bot-detection counter with global tier floor",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "A shared consecutive bot-detection counter tracks 403/Sign-in errors across all video IDs in the download loop",
+        "When bot-detection counter exceeds a configurable threshold (default 5), a global tier floor is set so new downloads start at the highest available tier instead of Tier 1",
+        "Bot-detection errors no longer reset the network failure abort counter (the counter reset at lines ~858-860 is removed or gated)",
+        "When bot-detection counter exceeds a higher threshold (default 10), the download loop aborts early with a clear error message",
+        "Unit test verifies global tier floor activates after threshold consecutive bot-detection errors",
+        "Unit test verifies download loop aborts after abort-threshold bot-detection errors"
+      ],
+      "notes": "Pre-implemented by US-49-005 (tier floor) and US-49-008 (abort threshold). All 6 acceptance criteria met by existing code: consecutive_bot_detections counter at download_segments.py:525, tier floor at lines 797-808, abort at lines 811-842, network counter isolation at lines 846-871. Config: download.bot_detection_tier_floor_threshold (default 5) and download.bot_detection_abort_threshold (default 10) in src/config/sections/download.py and config.yaml. Tests: test_bot_detection_global_counter.py (5 tests) and test_download_segments_bot_abort.py (7 tests). Fixed stale file bug in test_success_resets_counter_and_clears_tier_floor (used tempfile instead of hardcoded /tmp path)."
+    },
+    {
+      "id": "US-51-005",
+      "title": "Harden _is_network_failure pattern matching for Python API error format",
+      "priority": "medium",
+      "passes": true,
+      "notes": "Tier: P2 bug fix. Source: src/stages/download_segments.py lines 31-73. The _NETWORK_FAILURE_PATTERNS tuple and _is_network_failure() function. Current patterns include 'Errno 11001' and 'getaddrinfo failed' but the Python API wraps these in 'ERROR: unable to download webpage: <urlopen error ...>' format which may not match simple substring checks. The _FFMPEG_NETWORK_EXIT_CODE constant handles the ffmpeg exit code. Verify the patterns also work with yt_dlp.utils.DownloadError exception message format. Add 'Connection refused' and 'Connection timed out' patterns.",
+      "acceptanceCriteria": [
+        "_is_network_failure() at download_segments.py recognizes Python API DownloadError wrapping of DNS failures (e.g., 'ERROR: unable to download webpage: <urlopen error [Errno 11001]>')",
+        "_is_network_failure() recognizes ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) as a network failure",
+        "_is_network_failure() recognizes 'Connection refused' and 'Connection timed out' patterns",
+        "Unit test covers all new patterns with exact error strings from production logs",
+        "Unit test verifies bot-detection patterns ('Sign in to confirm', '403 Forbidden') are NOT classified as network failures"
+      ]
+    },
+    {
+      "id": "US-51-006",
+      "title": "Add per-download progress hooks for segment download observability",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "ydl_opts includes a 'progress_hooks' callback that logs download progress at INFO level for segments taking >30s",
+        "Progress hook logs bytes downloaded, estimated total, and download speed when status is 'downloading' and elapsed >30s",
+        "Progress hook logs final file size and total time when status is 'finished'",
+        "Progress data is accumulated into stage metrics (the StageMetrics dict saved to checkpoint)",
+        "Unit test verifies progress hook callback is invoked with expected status values",
+        "Progress hook does not log for fast downloads (<30s) to avoid log spam"
+      ],
+      "notes": "Implemented: Added _make_progress_hook() static method to DownloadVideoSegmentsStage (download_segments.py:925-978). Hook is injected into ydl_opts at line 669. Logs INFO for slow downloads (>30s) with bytes/total/speed, throttled every 15s. Logs finished status with file size and elapsed time. Accumulates progress_hooks_data into stats dict, which flows into StageMetrics via escalation_summary (lines 392-395). 20 tests in test_segment_progress_hook.py cover creation, status values, slow/fast logging, finished logging, metrics accumulation, and edge cases."
+    },
+    {
+      "id": "US-51-007",
+      "title": "Add checkpoint backup rotation to prevent corruption data loss",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Checkpoint save (in checkpoint.py _atomic_save) rotates up to N backup files (default 3): checkpoint.backup.json, checkpoint.backup.1.json, checkpoint.backup.2.json",
+        "Each save rotates existing backups (2->3 deleted, 1->2, current->1, new backup created)",
+        "Backup rotation count is configurable via infrastructure config section",
+        "When checkpoint.json is corrupted (fails JSON parse), restore automatically tries backup files in order",
+        "Unit test verifies backup rotation creates correct number of files",
+        "Unit test verifies restore from backup when primary checkpoint is corrupted"
+      ],
+      "notes": "Implemented in checkpoint.py: _rotate_backups() rotates N backup files before each save, _get_backup_path()/get_all_backup_paths() manage paths. load() tries rotated backups (backup.1, backup.2...) when main+primary backup are both corrupt. clear() removes all rotated backups. Config: pipeline.checkpoint_backup_count (default 3) in PipelineConfig. 17 tests in test_checkpoint_backup_rotation.py, all 209 existing checkpoint tests pass."
+    },
+    {
+      "id": "US-51-008",
+      "title": "Add stage restore validation with mismatch warnings",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Each stage's restore() method validates that checkpoint data matches expected schema/keys before restoring",
+        "When checkpoint data has missing required keys, restore() logs a WARNING with the missing keys and returns False",
+        "When checkpoint data has unexpected type mismatches (e.g., string where list expected), restore() logs WARNING and returns False",
+        "Pipeline orchestrator handles restore() returning False by re-running the stage instead of proceeding with bad state",
+        "Unit test verifies restore() returns False and logs warning when given checkpoint data with missing keys",
+        "Unit test verifies pipeline re-runs stage when restore returns False"
+      ],
+      "notes": "Implemented: Added schema/key validation to restore() in ANALYZE, VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH stages. Pipeline.py now re-runs stage instead of continuing when restore() returns False. 22 new tests in test_stage_restore_validation.py. All 380 related tests pass."
+    },
+    {
+      "id": "US-51-009",
+      "title": "Add pipeline dry-run mode for stage validation without execution",
+      "priority": "low",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Pipeline.run(dry_run=True) validates all stage inputs in sequence without executing any stage",
+        "Dry-run reports which stages would run, which would skip (checkpoint), and which have input validation errors",
+        "Dry-run output is logged at INFO level with a summary table of stage -> action (run/skip/error)",
+        "The --dry-run CLI flag is wired through cli/ to pipeline.run(dry_run=True)",
+        "Unit test verifies dry-run does not modify state or checkpoint",
+        "Unit test verifies dry-run correctly identifies stages that would fail validation"
+      ],
+      "notes": "Enhanced _run_dry_run in src/pipeline.py to: load checkpoint for skip detection, categorize stages as run/checkpoint/skip/error, validate inputs for runnable stages, produce structured summary table. Wired --dry-run CLI flag through main.py. 16 new tests in tests/test_pipeline_dry_run.py covering no-execution, no-state-modification, stage categorization, return values, summary logging, and CLI flag parsing."
+    },
+    {
+      "id": "US-51-010",
+      "title": "Add download retry queue persistence across pipeline restarts",
+      "priority": "low",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Videos that fail all escalation tiers in DOWNLOAD_SEGMENTS are saved to a retry_queue list in checkpoint data",
+        "On pipeline resume, the retry queue is loaded and those videos are retried before processing new segments",
+        "Retry queue entries include video_id, last_tier_attempted, failure_reason, and timestamp",
+        "Retry queue has a configurable max_retries_per_video (default 3) \u00e2\u20ac\u201d videos exceeding this are permanently skipped",
+        "Unit test verifies retry queue is persisted to checkpoint on stage completion",
+        "Unit test verifies retry queue is loaded and processed on resume"
+      ],
+      "notes": "US-51-010: Retry queue now persisted to checkpoint.json under download_segments.retry_queue. On resume, previously-failed videos are loaded and retried before processing new segments. Videos exceeding max_retries_per_video (default 3) are permanently skipped. Entries include video_id, last_tier_attempted, failure_reason, timestamp. Config: batch_retry.max_retries_per_video in config.yaml and BatchRetryConfig. 81 new+existing tests pass."
+    },
+    {
+      "id": "US-51-011",
+      "title": "Add stage-level error aggregation with categorized failure summary",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Each pipeline stage collects errors into categorized buckets (network, auth, timeout, validation, unknown) during execution",
+        "Stage completion summary logs a table of error_category -> count -> sample_message",
+        "Error categories are defined in a shared enum/constants module usable across all stages",
+        "DOWNLOAD_SEGMENTS stage uses error categories to classify bot-detection, network, and timeout failures",
+        "Unit test verifies error aggregation collects and categorizes errors correctly",
+        "Unit test verifies completion summary includes all error categories with counts"
+      ],
+      "notes": "Tier: P3 improvement. Source: src/stages/download_segments.py \u00e2\u20ac\u201d errors are currently logged individually but not aggregated. The stage completion log (around line 870+) shows counts but not categorized breakdowns. Add an ErrorAggregator class (could live in src/stages/base.py or src/stages/utils.py) that stages can use. Error categories should align with existing _is_network_failure() and _is_bot_detection() patterns. This builds on the StageMetrics infrastructure from US-49-012."
+    },
+    {
+      "id": "US-51-012",
+      "title": "Add pipeline stage timing histograms to completion summary",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Pipeline completion summary includes per-stage duration (wall-clock seconds) in a formatted table",
+        "Stage timing data is persisted to checkpoint under stage_metrics for post-run analysis",
+        "Total pipeline duration and per-stage percentage of total are included in the summary",
+        "Stages that were skipped (checkpoint resume) show 'skipped' instead of 0s duration",
+        "Unit test verifies timing data is collected and formatted correctly",
+        "Unit test verifies skipped stages are marked as 'skipped' in the summary"
+      ],
+      "notes": "Tier: P3 improvement. Source: src/pipeline.py lines 342-463 (run loop) \u00e2\u20ac\u201d stage timing is partially implemented via StageMetrics (US-49-012) but there is no end-of-pipeline summary that aggregates all stage timings into a readable table. The stage_metrics dict in CheckpointData (checkpoint.py:96) stores per-stage metrics. Add a _print_timing_summary() method to PipelineOrchestrator that reads from self.stage_metrics after the run loop completes. Format as: Stage | Duration | % of Total."
+    }
+  ]
 }

@@ -804,3 +804,189 @@ class TestRetryQueueCookiesPropagation:
 
         assert queue.items["vid1"].escalation_tier >= 3  # Cookie rotation tier
         assert queue.items["vid2"].escalation_tier >= 3
+
+
+# =============================================================================
+# US-51-010: Test retry queue checkpoint persistence across pipeline restarts
+# =============================================================================
+
+@pytest.mark.fast
+class TestRetryQueuePersistence:
+    """Tests for retry queue persistence to/from checkpoint data."""
+
+    def test_checkpoint_includes_timestamp(self, queue):
+        """to_checkpoint_dict() includes timestamp for each item."""
+        queue.add("vid1", "kw", "short", "403 Forbidden", escalation_tier=2)
+
+        checkpoint = queue.to_checkpoint_dict()
+        item = checkpoint['items'][0]
+
+        assert 'timestamp' in item
+        assert isinstance(item['timestamp'], float)
+        assert item['timestamp'] > 0
+
+    def test_checkpoint_includes_failure_reason(self, queue):
+        """to_checkpoint_dict() includes failure_reason for each item."""
+        queue.add("vid1", "kw", "short", "403 Forbidden")
+
+        checkpoint = queue.to_checkpoint_dict()
+        item = checkpoint['items'][0]
+
+        assert 'failure_reason' in item
+        assert item['failure_reason'] == "403 Forbidden"
+
+    def test_checkpoint_includes_last_tier_attempted(self, queue):
+        """to_checkpoint_dict() includes last_tier_attempted for each item."""
+        queue.add("vid1", "kw", "short", "403 Forbidden", escalation_tier=3)
+
+        checkpoint = queue.to_checkpoint_dict()
+        item = checkpoint['items'][0]
+
+        assert 'last_tier_attempted' in item
+        assert item['last_tier_attempted'] == 3
+
+    def test_checkpoint_roundtrip_preserves_all_fields(self, queue):
+        """Serializing then restoring preserves video_id, tier, failure_reason, timestamp."""
+        queue.add("vid1", "kw", "short", "403 Forbidden",
+                   error_category='bot_detection', escalation_tier=2)
+        original_timestamp = queue.items["vid1"].added_at
+
+        checkpoint = queue.to_checkpoint_dict()
+
+        # Create a fresh queue and restore
+        restored = RetryQueue(BatchRetryConfig(
+            enabled=True, delay_seconds=0.01, max_passes=2, jitter_factor=0.0
+        ))
+        restored.from_checkpoint_dict(checkpoint)
+
+        assert "vid1" in restored.items
+        item = restored.items["vid1"]
+        assert item.video_id == "vid1"
+        assert item.keyword == "kw"
+        assert item.tier == "short"
+        assert item.error_message == "403 Forbidden"
+        assert item.error_category == "bot_detection"
+        assert item.escalation_tier == 2
+        assert item.added_at == original_timestamp
+
+    def test_restore_skips_exceeded_max_retries(self):
+        """from_checkpoint_dict() permanently skips videos exceeding max_retries_per_video."""
+        config = BatchRetryConfig(
+            enabled=True, delay_seconds=0.01, max_passes=2,
+            max_retries_per_video=3, jitter_factor=0.0
+        )
+        queue = RetryQueue(config)
+
+        checkpoint = {
+            'items': [
+                {'video_id': 'vid_ok', 'keyword': 'kw', 'tier': 'short',
+                 'error_message': 'E', 'retry_count': 1},
+                {'video_id': 'vid_exceeded', 'keyword': 'kw', 'tier': 'short',
+                 'error_message': 'E', 'retry_count': 3},  # At limit
+                {'video_id': 'vid_way_exceeded', 'keyword': 'kw', 'tier': 'short',
+                 'error_message': 'E', 'retry_count': 10},  # Way over
+            ],
+            'current_pass': 0,
+            'completed_ids': [],
+            'failed_ids': [],
+            'total_added': 3,
+            'total_retried': 0,
+        }
+
+        queue.from_checkpoint_dict(checkpoint)
+
+        # vid_ok should be in queue (retry_count=1 < max=3)
+        assert 'vid_ok' in queue.items
+        # vid_exceeded and vid_way_exceeded should be permanently skipped
+        assert 'vid_exceeded' not in queue.items
+        assert 'vid_way_exceeded' not in queue.items
+        assert 'vid_exceeded' in queue._failed_ids
+        assert 'vid_way_exceeded' in queue._failed_ids
+
+    def test_finish_retry_pass_enforces_max_retries_per_video(self):
+        """finish_retry_pass() permanently skips videos exceeding max_retries_per_video."""
+        config = BatchRetryConfig(
+            enabled=True, delay_seconds=0.01, max_passes=5,
+            max_retries_per_video=2, jitter_factor=0.0
+        )
+        queue = RetryQueue(config)
+
+        queue.add("vid1", "kw", "short", "Error")
+        queue.items["vid1"].retry_count = 2  # At max
+        queue.add("vid2", "kw", "short", "Error")
+        queue.items["vid2"].retry_count = 1  # Under max
+        queue.current_pass = 1  # Under max_passes
+
+        queue.finish_retry_pass()
+
+        # vid1 should be permanently failed
+        assert "vid1" not in queue.items
+        assert "vid1" in queue._failed_ids
+        # vid2 should still be in queue
+        assert "vid2" in queue.items
+
+    def test_default_max_retries_per_video(self):
+        """Default max_retries_per_video is 3."""
+        config = BatchRetryConfig()
+        assert config.max_retries_per_video == 3
+
+    def test_checkpoint_persisted_to_stage_data(self):
+        """Verify retry queue dict structure matches checkpoint expectations."""
+        config = BatchRetryConfig(
+            enabled=True, delay_seconds=0.01, max_passes=2, jitter_factor=0.0
+        )
+        queue = RetryQueue(config)
+        queue.add("vid1_100_200", "segment", "segment", "403 Forbidden",
+                   error_category='bot_detection', escalation_tier=2)
+        queue.add("vid2_300_400", "segment", "segment", "timeout",
+                   error_category='timeout', escalation_tier=1)
+
+        checkpoint = queue.to_checkpoint_dict()
+
+        # Verify structure matches what download stage would save
+        assert 'items' in checkpoint
+        assert 'current_pass' in checkpoint
+        assert 'completed_ids' in checkpoint
+        assert 'failed_ids' in checkpoint
+        assert len(checkpoint['items']) == 2
+
+        # Verify each item has all required fields for AC
+        for item in checkpoint['items']:
+            assert 'video_id' in item
+            assert 'last_tier_attempted' in item
+            assert 'failure_reason' in item
+            assert 'timestamp' in item
+
+    def test_restore_then_add_respects_failed_ids(self):
+        """After restoring, videos in failed_ids cannot be re-added."""
+        config = BatchRetryConfig(
+            enabled=True, delay_seconds=0.01, max_passes=2,
+            max_retries_per_video=2, jitter_factor=0.0
+        )
+        queue = RetryQueue(config)
+
+        checkpoint = {
+            'items': [
+                {'video_id': 'vid_exceeded', 'keyword': 'kw', 'tier': 'short',
+                 'error_message': 'E', 'retry_count': 5},
+            ],
+            'current_pass': 0,
+            'completed_ids': ['vid_done'],
+            'failed_ids': ['vid_old_fail'],
+            'total_added': 3,
+            'total_retried': 1,
+        }
+
+        queue.from_checkpoint_dict(checkpoint)
+
+        # vid_exceeded should be in failed_ids (exceeded max_retries_per_video)
+        assert 'vid_exceeded' in queue._failed_ids
+        # vid_old_fail should be in failed_ids from checkpoint
+        assert 'vid_old_fail' in queue._failed_ids
+        # vid_done should be in completed_ids
+        assert 'vid_done' in queue._completed_ids
+
+        # Trying to add any of these should fail
+        assert queue.add("vid_exceeded", "kw", "short", "Error") is False
+        assert queue.add("vid_old_fail", "kw", "short", "Error") is False
+        assert queue.add("vid_done", "kw", "short", "Error") is False

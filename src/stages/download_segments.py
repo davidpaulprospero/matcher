@@ -310,6 +310,21 @@ class DownloadVideoSegmentsStage(Stage):
             self.downloader = VideoDownloader(config=config)
             output_dir = Path(config.downloaded_videos_dir)
 
+            # US-51-010: Restore retry queue from checkpoint on resume
+            restored_rq_data = getattr(state, '_restored_retry_queue', None)
+            if restored_rq_data and self.downloader.retry_queue:
+                self.downloader.retry_queue.from_checkpoint_dict(restored_rq_data)
+                pending_count = len(self.downloader.retry_queue.items)
+                failed_count = len(self.downloader.retry_queue._failed_ids)
+                if pending_count > 0:
+                    logger.info(
+                        f"Restored retry queue: {pending_count} videos to retry, "
+                        f"{failed_count} permanently skipped"
+                    )
+                    print(f"    Retry queue: {pending_count} previously-failed videos to retry first")
+                # Clean up temporary state attribute
+                delattr(state, '_restored_retry_queue')
+
             # Download segments with progress callback for checkpointing
             def checkpoint_progress(current: int, total: int, downloaded: list):
                 """Save progress checkpoint during download"""
@@ -319,9 +334,29 @@ class DownloadVideoSegmentsStage(Stage):
                     'segments_total': total,
                     'in_progress': current < total,
                 }
+                # US-51-010: Include retry queue state in intermediate checkpoints
+                if self.downloader and self.downloader.retry_queue:
+                    rq = self.downloader.retry_queue
+                    if rq.items or rq._failed_ids:
+                        checkpoint_data['retry_queue'] = rq.to_checkpoint_dict()
                 checkpoint.save_intermediate('DOWNLOAD_SEGMENTS', checkpoint_data)
 
             stage_start_time = time.time()
+
+            # US-51-010: Process restored retry queue BEFORE new segments
+            pre_retry_downloaded = []
+            if (restored_rq_data and self.downloader and self.downloader.retry_queue
+                    and self.downloader.retry_queue.has_pending()):
+                logger.info("Processing restored retry queue before new segments")
+                self._process_retry_queue(
+                    output_dir, buffer_seconds, pre_retry_downloaded,
+                    len(segments_to_download), checkpoint_progress
+                )
+                if pre_retry_downloaded:
+                    logger.info(
+                        f"Restored retry queue: {len(pre_retry_downloaded)} "
+                        f"videos recovered from previous session"
+                    )
 
             downloaded_segments, download_stats = self._download_segments(
                 segments_to_download,
@@ -329,6 +364,10 @@ class DownloadVideoSegmentsStage(Stage):
                 buffer_seconds,
                 checkpoint_progress
             )
+
+            # US-51-010: Merge pre-retry downloads into main list
+            if pre_retry_downloaded:
+                downloaded_segments.extend(pre_retry_downloaded)
 
             elapsed = time.time() - stage_start_time
 
@@ -393,6 +432,12 @@ class DownloadVideoSegmentsStage(Stage):
             progress_hooks_data = download_stats.get('progress_hooks_data', {})
             if progress_hooks_data:
                 escalation_summary['download_progress'] = progress_hooks_data
+
+            # US-51-010: Persist retry queue to checkpoint for resume
+            if self.downloader and self.downloader.retry_queue:
+                rq = self.downloader.retry_queue
+                if rq.items or rq._failed_ids:
+                    checkpoint_data['retry_queue'] = rq.to_checkpoint_dict()
 
             # Stage metrics for pipeline observability (US-49-009 + US-49-012)
             metrics = StageMetrics(
@@ -1332,6 +1377,9 @@ class DownloadVideoSegmentsStage(Stage):
         US-48-009: Validates restored segment files exist on disk and have
         non-zero size. Filters out deleted or empty files. Cross-references
         against state.matches to identify segments that still need downloading.
+
+        US-51-010: Restores retry queue from checkpoint so previously-failed
+        videos are retried before processing new segments on resume.
         """
         try:
             if config:
@@ -1375,6 +1423,22 @@ class DownloadVideoSegmentsStage(Stage):
                                 f"DOWNLOAD_SEGMENTS restore: {len(missing)} matched "
                                 f"video(s) have no restored segments on disk"
                             )
+
+            # US-51-010: Restore retry queue from checkpoint data
+            cp_data = getattr(checkpoint, 'data', None)
+            if cp_data:
+                ds_data = getattr(cp_data, 'download_segments', {}) or {}
+                retry_queue_data = ds_data.get('retry_queue')
+                if retry_queue_data:
+                    # Store on state for the run() method to pick up
+                    if not hasattr(state, '_restored_retry_queue'):
+                        state._restored_retry_queue = retry_queue_data
+                    logger.info(
+                        f"DOWNLOAD_SEGMENTS restore: found retry queue with "
+                        f"{len(retry_queue_data.get('items', []))} pending items, "
+                        f"{len(retry_queue_data.get('failed_ids', []))} permanently failed"
+                    )
+
             return True
         except Exception as e:
             logger.warning(f"Failed to restore DOWNLOAD_SEGMENTS: {e}")
