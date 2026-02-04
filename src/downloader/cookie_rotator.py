@@ -68,14 +68,19 @@ class CookieRotator:
         valid = len(self._cookie_files)
         invalid = len(self._invalid_cookies)
 
-        if self._cookie_files:
-            logger.info(
-                f"Cookie rotator initialized with {valid}/{total} valid cookies, "
-                f"strategy: {config.rotation_strategy}"
+        logger.info(
+            f"Cookie rotator: {valid}/{total} cookies valid ({invalid} invalid)"
+        )
+
+        if invalid > 0 and self._continue_on_partial and self._invalid_cookies:
+            reasons = "; ".join(
+                f"{Path(p).name}: {r}" for p, r in self._invalid_cookies.items()
             )
-            if invalid > 0:
-                logger.warning(f"{invalid} cookie file(s) failed validation")
-        else:
+            logger.warning(
+                f"{invalid} cookie file(s) failed validation: {reasons}"
+            )
+
+        if not self._cookie_files:
             logger.warning("Cookie rotator has no valid cookie files!")
 
         # Raise error if continue_on_partial=False and some cookies are invalid
@@ -441,15 +446,29 @@ class CookieRotator:
 
         Returns:
             Dict with rotation status info including:
-            - total_cookies: All configured cookie files (valid + invalid)
-            - valid_cookies: Cookie files that passed validation (exist + readable)
-            - available_cookies: Valid cookies not currently in cooldown
-            - invalid_cookies: Dict mapping invalid paths to failure reasons
+            - total: All configured cookie files (valid + invalid)
+            - valid: Cookie files that passed validation (exist + readable)
+            - invalid: Count of cookie files that failed validation
+            - cooldown: Count of valid cookies currently in cooldown
+            - exhausted: True if no cookies are available (all invalid or in cooldown)
+            - Plus legacy keys for backward compatibility
         """
+        total = len(self._cookie_files) + len(self._invalid_cookies)
+        valid = len(self._cookie_files)
+        invalid = len(self._invalid_cookies)
+        cooldown = valid - self.available_cookies
+        exhausted = self.available_cookies == 0
+
         return {
             "enabled": self.is_enabled,
-            "total_cookies": len(self._cookie_files) + len(self._invalid_cookies),
-            "valid_cookies": len(self._cookie_files),
+            "total": total,
+            "valid": valid,
+            "invalid": invalid,
+            "cooldown": cooldown,
+            "exhausted": exhausted,
+            # Legacy keys for backward compatibility
+            "total_cookies": total,
+            "valid_cookies": valid,
             "available_cookies": self.available_cookies,
             "current_cookie": self.get_current_cookie(),
             "rotation_count": self._rotation_count,

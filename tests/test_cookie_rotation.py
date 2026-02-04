@@ -222,6 +222,144 @@ class TestCookieValidation:
         assert status["available_cookies"] == 2  # None in cooldown yet
 
 
+class TestInitDiagnostics:
+    """Tests for initialization diagnostics (US-58-003)."""
+
+    @pytest.mark.fast
+    def test_get_status_returns_required_keys_mixed_cookies(self, tmp_path):
+        """Test get_status() returns correct counts after init with mixed valid/invalid cookie files."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        # Create 2 valid files
+        valid1 = tmp_path / "valid1.txt"
+        valid2 = tmp_path / "valid2.txt"
+        valid1.write_text("# Cookie 1\n")
+        valid2.write_text("# Cookie 2\n")
+
+        # 1 missing file
+        missing = str(tmp_path / "missing.txt")
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(valid1), str(valid2), missing]
+        )
+        rotator = CookieRotator(config)
+
+        status = rotator.get_status()
+
+        # Verify required keys exist
+        assert "total" in status
+        assert "valid" in status
+        assert "invalid" in status
+        assert "cooldown" in status
+        assert "exhausted" in status
+
+        # Verify correct counts
+        assert status["total"] == 3
+        assert status["valid"] == 2
+        assert status["invalid"] == 1
+        assert status["cooldown"] == 0
+        assert status["exhausted"] is False
+
+    @pytest.mark.fast
+    def test_get_status_cooldown_and_exhausted(self, tmp_path):
+        """Test get_status() reflects cooldown and exhausted state correctly."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        valid1 = tmp_path / "valid1.txt"
+        valid2 = tmp_path / "valid2.txt"
+        valid1.write_text("# Cookie 1\n")
+        valid2.write_text("# Cookie 2\n")
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(valid1), str(valid2)]
+        )
+        rotator = CookieRotator(config)
+
+        # Mark one cookie as failed (enters cooldown)
+        rotator.mark_failed(str(valid1))
+        status = rotator.get_status()
+        assert status["cooldown"] == 1
+        assert status["exhausted"] is False
+
+        # Mark all cookies as failed
+        rotator.mark_failed(str(valid2))
+        status = rotator.get_status()
+        assert status["cooldown"] == 2
+        assert status["exhausted"] is True
+
+    @pytest.mark.fast
+    def test_init_logs_summary_line(self, tmp_path, caplog):
+        """Test that __init__ logs summary line: 'Cookie rotator: X/N cookies valid (Y invalid)'."""
+        from src.downloader.cookie_rotator import CookieRotator
+        import logging
+
+        valid = tmp_path / "valid.txt"
+        valid.write_text("# Cookie\n")
+        missing = str(tmp_path / "missing.txt")
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(valid), missing]
+        )
+
+        with caplog.at_level(logging.INFO):
+            rotator = CookieRotator(config)
+
+        # Verify the exact summary log format
+        assert "Cookie rotator: 1/2 cookies valid (1 invalid)" in caplog.text
+
+    @pytest.mark.fast
+    def test_init_logs_summary_all_valid(self, tmp_path, caplog):
+        """Test summary log when all cookies are valid."""
+        from src.downloader.cookie_rotator import CookieRotator
+        import logging
+
+        valid1 = tmp_path / "valid1.txt"
+        valid2 = tmp_path / "valid2.txt"
+        valid1.write_text("# Cookie 1\n")
+        valid2.write_text("# Cookie 2\n")
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(valid1), str(valid2)]
+        )
+
+        with caplog.at_level(logging.INFO):
+            rotator = CookieRotator(config)
+
+        assert "Cookie rotator: 2/2 cookies valid (0 invalid)" in caplog.text
+
+    @pytest.mark.fast
+    def test_init_logs_invalid_reasons_when_continue_on_partial(self, tmp_path, caplog):
+        """Test that when continue_on_partial=True and some cookies fail,
+        the invalid count and reasons are included in the summary log."""
+        from src.downloader.cookie_rotator import CookieRotator
+        import logging
+
+        valid = tmp_path / "valid.txt"
+        valid.write_text("# Cookie\n")
+        missing = str(tmp_path / "missing.txt")
+
+        # Also create a directory to trigger 'not a file' reason
+        dir_path = tmp_path / "dir_cookie"
+        dir_path.mkdir()
+
+        config = MockCookieRotationConfig(
+            enabled=True,
+            cookie_files=[str(valid), missing, str(dir_path)]
+        )
+
+        with caplog.at_level(logging.WARNING):
+            rotator = CookieRotator(config, continue_on_partial=True)
+
+        # Should include count and reasons in warning
+        assert "2 cookie file(s) failed validation" in caplog.text
+        assert "file not found" in caplog.text
+        assert "not a file" in caplog.text
+
+
 class TestCustomErrorPatterns:
     """Tests for configurable error patterns (US-003)."""
 
