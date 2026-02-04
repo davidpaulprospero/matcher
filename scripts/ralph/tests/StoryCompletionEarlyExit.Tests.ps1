@@ -170,7 +170,7 @@ Describe 'Exit code override after early exit kill' -Tag 'Unit', 'EarlyExit' {
     }
 
     It 'sets exitCode to 0 in the override block' {
-        $overrideBlock = [regex]::Match($script:funcBody, 'storyCompletionDetected\s+-and\s+\$exitCode\s+-ne\s+0[\s\S]{0,300}?\$exitCode\s*=\s*0').Value
+        $overrideBlock = [regex]::Match($script:funcBody, 'storyCompletionDetected\s+-and\s+\$exitCode\s+-ne\s+0[\s\S]{0,1000}?\$exitCode\s*=\s*0').Value
         $overrideBlock | Should -Not -BeNullOrEmpty
     }
 
@@ -456,5 +456,138 @@ Describe 'Early exit does not fire without StoryId' -Tag 'Unit', 'EarlyExit', 'S
 
         $shouldCheck = $earlyExitEnabled -and $prdUpdated -and $StoryId -and -not $storyCompletionDetected
         $shouldCheck | Should -BeTrue
+    }
+}
+
+# =============================================================================
+# PHANTOM REVALIDATION TESTS - Exit code override re-reads prd.json
+# =============================================================================
+
+Describe 'Exit code override revalidates passes before overriding' -Tag 'Unit', 'EarlyExit', 'PhantomFix' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+        $funcPattern = 'function Invoke-ClaudeSubprocess\s*\{([\s\S]*?)^\}'
+        $script:funcBody = [regex]::Match($script:claudeSource, $funcPattern, 'Multiline').Groups[1].Value
+
+        # Extract the override block: from "storyCompletionDetected -and $exitCode -ne 0" to closing brace
+        $script:overrideBlock = [regex]::Match($script:funcBody, 'storyCompletionDetected\s+-and\s+\$exitCode\s+-ne\s+0[\s\S]*?(?=\s*\}\s*\n\s*finally)').Value
+    }
+
+    It 'reads PrdFile fresh before overriding exit code' {
+        $script:overrideBlock | Should -Match 'Get-Content\s+\$script:PrdFile\s+-Raw'
+    }
+
+    It 'filters freshPrd.userStories by StoryId' {
+        $script:overrideBlock | Should -Match 'freshPrd\.userStories.*Where-Object.*\$_\.id\s+-eq\s+\$StoryId'
+    }
+
+    It 'checks freshStory.passes equals true for stillPasses' {
+        $script:overrideBlock | Should -Match 'freshStory\.passes\s+-eq\s+\$true'
+    }
+
+    It 'initializes stillPasses to false (safe default)' {
+        $script:overrideBlock | Should -Match '\$stillPasses\s*=\s*\$false'
+    }
+
+    It 'only overrides exit code when stillPasses is true' {
+        $script:overrideBlock | Should -Match 'if\s*\(\$stillPasses\)[\s\S]*?\$exitCode\s*=\s*0'
+    }
+
+    It 'resets storyCompletionDetected to false when passes was reverted' {
+        $script:overrideBlock | Should -Match '\$storyCompletionDetected\s*=\s*\$false'
+    }
+
+    It 'logs yellow warning when NOT overriding due to reverted passes' {
+        $script:overrideBlock | Should -Match 'passes was reverted.*NOT overriding.*ForegroundColor Yellow'
+    }
+
+    It 'wraps PRD re-read in try/catch for file lock safety' {
+        $script:overrideBlock | Should -Match 'try\s*\{[\s\S]*?Get-Content\s+\$script:PrdFile[\s\S]*?catch'
+    }
+
+    It 'trusts original detection on read failure (catch sets stillPasses true)' {
+        $script:overrideBlock | Should -Match 'catch[\s\S]*?\$stillPasses\s*=\s*\$true'
+    }
+
+    It 'guards PRD read with StoryId and PrdFile and Test-Path' {
+        $script:overrideBlock | Should -Match '\$StoryId\s+-and\s+\$script:PrdFile\s+-and\s+\(Test-Path\s+\$script:PrdFile\)'
+    }
+
+    It 'falls back to trusting detection when no StoryId or PrdFile' {
+        # The else branch should set stillPasses = $true
+        $elseBlock = [regex]::Match($script:overrideBlock, 'else\s*\{\s*\$stillPasses\s*=\s*\$true\s*\}').Value
+        $elseBlock | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Phantom revalidation simulation' -Tag 'Unit', 'EarlyExit', 'PhantomFix', 'Simulation' {
+    It 'does NOT override when passes was reverted during grace period' {
+        # Simulate: storyCompletionDetected=true, but fresh PRD shows passes=false
+        $storyCompletionDetected = $true
+        $exitCode = 1
+        $StoryId = "US-57-007"
+
+        $prdJson = @{
+            userStories = @(
+                @{ id = "US-57-007"; passes = $false; title = "Reverted story" }
+            )
+        } | ConvertTo-Json -Depth 3
+
+        $freshPrd = $prdJson | ConvertFrom-Json
+        $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+        $stillPasses = $freshStory -and $freshStory.passes -eq $true
+
+        $stillPasses | Should -BeFalse
+        # Exit code should NOT be overridden
+        $exitCode | Should -Be 1
+    }
+
+    It 'overrides exit code when passes is still true' {
+        $storyCompletionDetected = $true
+        $exitCode = 1
+        $StoryId = "US-57-007"
+
+        $prdJson = @{
+            userStories = @(
+                @{ id = "US-57-007"; passes = $true; title = "Still passing" }
+            )
+        } | ConvertTo-Json -Depth 3
+
+        $freshPrd = $prdJson | ConvertFrom-Json
+        $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+        $stillPasses = $freshStory -and $freshStory.passes -eq $true
+
+        $stillPasses | Should -BeTrue
+        if ($stillPasses) { $exitCode = 0 }
+        $exitCode | Should -Be 0
+    }
+
+    It 'resets storyCompletionDetected when passes reverted' {
+        $storyCompletionDetected = $true
+        $StoryId = "US-57-007"
+
+        $prdJson = @{
+            userStories = @(
+                @{ id = "US-57-007"; passes = $false }
+            )
+        } | ConvertTo-Json -Depth 3
+
+        $freshPrd = $prdJson | ConvertFrom-Json
+        $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+        $stillPasses = $freshStory -and $freshStory.passes -eq $true
+
+        if (-not $stillPasses) { $storyCompletionDetected = $false }
+        $storyCompletionDetected | Should -BeFalse
+    }
+
+    It 'trusts detection when PRD file read fails' {
+        $stillPasses = $false
+        try {
+            # Simulate file read failure
+            throw "file locked"
+        } catch {
+            $stillPasses = $true
+        }
+        $stillPasses | Should -BeTrue
     }
 }

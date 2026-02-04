@@ -609,9 +609,30 @@ function Invoke-ClaudeSubprocess {
         }
 
         # Early exit override: taskkill produces exit code 1, but story actually succeeded
+        # Re-validate passes in prd.json before overriding — Claude may have reverted
+        # passes:true→false during the grace period (e.g., test failure rollback)
         if ($storyCompletionDetected -and $exitCode -ne 0) {
-            Write-Host "  [INFO] Overriding exit code $exitCode -> 0 (story completed, killed after grace period)" -ForegroundColor Cyan
-            $exitCode = 0
+            $stillPasses = $false
+            if ($StoryId -and $script:PrdFile -and (Test-Path $script:PrdFile)) {
+                try {
+                    $freshPrd = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
+                    $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+                    $stillPasses = $freshStory -and $freshStory.passes -eq $true
+                } catch {
+                    # If we can't read, trust the original detection
+                    $stillPasses = $true
+                }
+            } else {
+                $stillPasses = $true
+            }
+
+            if ($stillPasses) {
+                Write-Host "  [INFO] Overriding exit code $exitCode -> 0 (story completed, killed after grace period)" -ForegroundColor Cyan
+                $exitCode = 0
+            } else {
+                Write-Host "  [INFO] Story passes was reverted during grace period - NOT overriding exit code $exitCode" -ForegroundColor Yellow
+                $storyCompletionDetected = $false
+            }
         }
     }
     finally {
