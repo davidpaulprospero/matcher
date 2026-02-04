@@ -241,6 +241,8 @@ class TestSaveTimelineAsEdl:
     def mock_voiceover_segment(self):
         """Create a mock voiceover segment."""
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 5.0
         segment.start_time = 0.0
         segment.end_time = 5.0
         segment.text = "This is a test voiceover segment for testing purposes."
@@ -303,6 +305,8 @@ class TestSaveTimelineAsEdl:
         from src.otio.export import save_timeline_as_edl
 
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 5.0
         segment.start_time = 0.0
         segment.end_time = 5.0
         segment.text = "A" * 100  # Very long text
@@ -347,6 +351,8 @@ class TestSaveTimelineAsEdl:
 
         # High confidence
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 2.0
         segment.start_time = 0.0
         segment.end_time = 2.0
         segment.text = "High confidence"
@@ -396,6 +402,8 @@ class TestSaveTimelineAsEdl:
         matches = []
         for i in range(5):
             segment = Mock()
+            segment.start = i * 5.0
+            segment.end = (i + 1) * 5.0
             segment.start_time = i * 5.0
             segment.end_time = (i + 1) * 5.0
             segment.text = f"Segment {i+1}"
@@ -432,6 +440,8 @@ class TestSaveTimelineAsEdl:
         from src.otio.export import save_timeline_as_edl
 
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 10.0
         segment.start_time = 0.0
         segment.end_time = 10.0  # 10 second segment = 300 frames at 30fps
         segment.text = "Ten second segment"
@@ -459,6 +469,8 @@ class TestEdlTimecodeConversion:
         from src.otio.export import save_timeline_as_edl
 
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 1.0
         segment.start_time = 0.0
         segment.end_time = 1.0
         segment.text = "First segment"
@@ -485,6 +497,8 @@ class TestEdlTimecodeConversion:
 
         # Create a segment that would be at 01:01:30:00 (90 seconds in)
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 90.0
         segment.start_time = 0.0
         segment.end_time = 90.0  # 90 second segment
         segment.text = "Long segment"
@@ -510,6 +524,8 @@ class TestEdlColorMapping:
         """Factory to create match with specific confidence."""
         def _create(confidence):
             segment = Mock()
+            segment.start = 0.0
+            segment.end = 1.0
             segment.start_time = 0.0
             segment.end_time = 1.0
             segment.text = "Test"
@@ -548,6 +564,107 @@ class TestEdlColorMapping:
         content = Path(output_path).with_suffix('.edl').read_text()
         assert "|C:" in content
 
+    @pytest.mark.fast
+    def test_all_confidence_levels_map_to_valid_edl_colors(self, tmp_path, create_match_with_confidence):
+        """Test EDL with all confidence levels (0.0 to 1.0) maps to valid EDL colors."""
+        from src.otio.export import save_timeline_as_edl, EDL_COLOR_MAP
+        from src.otio.utils import get_confidence_color
+
+        # Valid DaVinci Resolve EDL color names
+        valid_edl_colors = {
+            "Mint", "Cyan", "Yellow", "Orange", "Red",
+            "Pink", "Blue", "Purple", "White"
+        }
+
+        # Test confidence values spanning every tier
+        test_confidences = [0.0, 0.1, 0.19, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+        matches = []
+        for i, conf in enumerate(test_confidences):
+            segment = Mock()
+            segment.start = i * 1.0
+            segment.end = (i + 1) * 1.0
+            segment.start_time = i * 1.0
+            segment.end_time = (i + 1) * 1.0
+            segment.text = f"Conf {conf}"
+
+            match = Mock()
+            match.confidence = conf
+            match.voiceover_segment = segment
+
+            result = Mock()
+            result.primary_match = match
+            matches.append(result)
+
+        output_path = str(tmp_path / "all_colors.edl")
+        save_timeline_as_edl(matches, output_path)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # Verify each confidence level produces a valid color in the EDL
+        for conf in test_confidences:
+            color_name = get_confidence_color(conf)
+            edl_color = EDL_COLOR_MAP.get(color_name, "White")
+            assert edl_color in valid_edl_colors, (
+                f"Confidence {conf} -> {color_name} -> {edl_color} is not a valid EDL color"
+            )
+            assert f"ResolveColor{edl_color}" in content, (
+                f"Expected ResolveColor{edl_color} in EDL for confidence {conf}"
+            )
+
+    @pytest.mark.fast
+    def test_edl_color_map_is_module_constant(self):
+        """Test EDL_COLOR_MAP is a module-level constant covering all confidence colors."""
+        from src.otio.export import EDL_COLOR_MAP
+
+        # Must cover all colors from get_confidence_color
+        required_colors = {"GREEN", "CYAN", "YELLOW", "ORANGE", "RED", "PINK", "BLUE", "PURPLE"}
+        for color in required_colors:
+            assert color in EDL_COLOR_MAP, f"EDL_COLOR_MAP missing color: {color}"
+
+    @pytest.mark.fast
+    def test_unknown_color_falls_back_to_white(self, tmp_path):
+        """Test that an unknown/unmapped color falls back to 'White'."""
+        from src.otio.export import EDL_COLOR_MAP
+
+        # An unknown color should get 'White' fallback
+        result = EDL_COLOR_MAP.get("MAGENTA", "White")
+        assert result == "White"
+
+        result = EDL_COLOR_MAP.get("UNKNOWN_COLOR", "White")
+        assert result == "White"
+
+    @pytest.mark.fast
+    def test_entity_markers_use_pink_from_edl_color_map(self, tmp_path):
+        """Test entity markers map PINK correctly through EDL_COLOR_MAP."""
+        from src.otio.export import save_timeline_as_edl, EDL_COLOR_MAP
+
+        segment = Mock()
+        segment.start = 0.0
+        segment.end = 1.0
+        segment.start_time = 0.0
+        segment.end_time = 1.0
+        segment.text = "Test"
+
+        match = Mock()
+        match.confidence = 0.9
+        match.voiceover_segment = segment
+
+        result = Mock()
+        result.primary_match = match
+
+        entities = [{'name': 'Test Entity', 'position_sec': 5.0}]
+
+        output_path = str(tmp_path / "entity_color.edl")
+        save_timeline_as_edl([result], output_path, entities=entities)
+
+        content = Path(output_path).with_suffix('.edl').read_text()
+
+        # Entity markers should use PINK mapped through EDL_COLOR_MAP
+        expected_color = EDL_COLOR_MAP["PINK"]
+        assert f"ResolveColor{expected_color}" in content
+        assert "Entity: Test Entity" in content
+
 
 class TestDropFrameTimecode:
     """Tests for drop-frame timecode support in EDL export."""
@@ -556,6 +673,8 @@ class TestDropFrameTimecode:
     def mock_match_result(self):
         """Create a mock match result for testing."""
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 5.0
         segment.start_time = 0.0
         segment.end_time = 5.0
         segment.text = "Test segment"
@@ -828,6 +947,8 @@ class TestEdlWithReelNames:
     def mock_match_with_video(self):
         """Create mock match result with video segment."""
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 5.0
         segment.start_time = 0.0
         segment.end_time = 5.0
         segment.text = "Test segment"
@@ -903,6 +1024,8 @@ class TestEdlWithReelNames:
 
         # Create match with very long path
         segment = Mock()
+        segment.start = 0.0
+        segment.end = 5.0
         segment.start_time = 0.0
         segment.end_time = 5.0
         segment.text = "Test"
@@ -942,6 +1065,8 @@ class TestEdlWithReelNames:
         matches_list = []
         for i, video_folder in enumerate(["beach", "mountain", "city"]):
             segment = Mock()
+            segment.start = i * 5.0
+            segment.end = (i + 1) * 5.0
             segment.start_time = i * 5.0
             segment.end_time = (i + 1) * 5.0
             segment.text = f"Segment {i}"
