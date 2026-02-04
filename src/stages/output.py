@@ -386,7 +386,9 @@ class OutputStage(Stage):
                     output_path=str(output_dir / "timeline"),
                     frame_rate=getattr(config.output, 'frame_rate', 30.0),
                     source_srt=state.voiceover_path or '',
-                    timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00")
+                    timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
+                    entity_images=state.entity_images or None,
+                    entity_videos=state.entity_videos or None
                 )
                 outputs['segment_map'] = segment_map_path
                 print(f"  + Segment map: {Path(segment_map_path).name}")

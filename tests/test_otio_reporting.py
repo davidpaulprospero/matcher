@@ -18,7 +18,7 @@ from datetime import datetime
 import opentimelineio as otio
 
 # Import module under test
-from src.otio.reporting import generate_segment_map, print_timeline_statistics
+from src.otio.reporting import generate_segment_map, print_timeline_statistics, _calculate_track_coverage
 
 # Import data structures
 from src.utils import Match, MatchResult, SRTSegment
@@ -605,7 +605,7 @@ class TestTrackCoverageReporting:
 
     @pytest.mark.fast
     def test_track_coverage_contains_required_fields(self, mock_matches, tmp_path):
-        """Test that each track has clip_count, gap_count, and coverage_percent."""
+        """Test that each track has clip_count, gap_count, and coverage_percent (or unavailable status)."""
         output_path = tmp_path / "timeline.otio"
 
         json_path = generate_segment_map(
@@ -618,10 +618,13 @@ class TestTrackCoverageReporting:
             data = json.load(f)
 
         for track_id, stats in data['track_coverage'].items():
+            assert 'description' in stats, f"{track_id} missing description"
+            if stats.get('status') == 'unavailable':
+                # V9/V10 without entity data show unavailable
+                continue
             assert 'clip_count' in stats, f"{track_id} missing clip_count"
             assert 'gap_count' in stats, f"{track_id} missing gap_count"
             assert 'coverage_percent' in stats, f"{track_id} missing coverage_percent"
-            assert 'description' in stats, f"{track_id} missing description"
 
     @pytest.mark.fast
     def test_v1_coverage_calculation(self, mock_matches, tmp_path):
@@ -843,6 +846,190 @@ class TestEdgeCases:
         assert data['total_segments'] == 1
         assert data['total_frames'] == 60  # 2 seconds * 30fps
         assert len(data['segments']) == 1
+
+
+# =============================================================================
+# TEST: V9/V10 Entity Track Coverage (US-56-010)
+# =============================================================================
+
+class TestEntityTrackCoverage:
+    """Test V9/V10 track coverage reflects actual entity data."""
+
+    @pytest.mark.fast
+    def test_v9_coverage_with_entity_images(self):
+        """Test V9 shows actual clip counts when entity_images provided with 5 entities."""
+        # Create 3 segments
+        matches = []
+        for i in range(3):
+            vo_seg = SRTSegment(
+                index=i, start_time=float(i * 2), end_time=float(i * 2 + 2),
+                text=f"Segment {i}", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=float(i * 10), end_time=float(i * 10 + 2),
+                text=f"Video {i}", source_file=f"/videos/clip{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg, video_segment=vid_seg,
+                video_scene=None, confidence=0.9, reasoning='Match'
+            )
+            matches.append(MatchResult(
+                primary_match=match, alternatives=[],
+                secondary_matches=[], strategy_matches=[]
+            ))
+
+        # Create 5 entity image results covering segments 0 and 1
+        entity_images = {}
+        for j in range(5):
+            entity = Mock()
+            entity.entity_name = f"Entity {j}"
+            entity.images = [f"/images/entity{j}_img1.jpg", f"/images/entity{j}_img2.jpg"]
+            # First 3 entities cover segment 0, last 2 cover segment 1
+            entity.segment_indices = [0] if j < 3 else [1]
+            entity_images[f"Entity {j}"] = entity
+
+        stats = _calculate_track_coverage(matches, 30.0, entity_images=entity_images)
+
+        # V9 should have clips for segments 0 and 1, gap for segment 2
+        assert stats["V9"]["clip_count"] == 2
+        assert stats["V9"]["gap_count"] == 1
+        assert stats["V9"]["clip_count"] > 0  # Acceptance criterion
+        assert stats["V9"]["coverage_percent"] > 0
+
+    @pytest.mark.fast
+    def test_v10_coverage_with_entity_videos(self):
+        """Test V10 shows actual clip counts when entity_videos provided."""
+        matches = []
+        for i in range(2):
+            vo_seg = SRTSegment(
+                index=i, start_time=float(i * 3), end_time=float(i * 3 + 3),
+                text=f"Segment {i}", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=float(i * 10), end_time=float(i * 10 + 3),
+                text=f"Video {i}", source_file=f"/videos/clip{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg, video_segment=vid_seg,
+                video_scene=None, confidence=0.9, reasoning='Match'
+            )
+            matches.append(MatchResult(
+                primary_match=match, alternatives=[],
+                secondary_matches=[], strategy_matches=[]
+            ))
+
+        entity_videos = {
+            "Entity A": Mock(videos=["/videos/stock1.mp4"], segment_indices=[0, 1]),
+        }
+
+        stats = _calculate_track_coverage(matches, 30.0, entity_videos=entity_videos)
+
+        assert stats["V10"]["clip_count"] == 2
+        assert stats["V10"]["gap_count"] == 0
+        assert stats["V10"]["coverage_percent"] == 100.0
+
+    @pytest.mark.fast
+    def test_v9_v10_unavailable_without_entity_data(self):
+        """Test V9/V10 report unavailable status when entity data not provided."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=13.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Match'
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        # Call without entity data (default None)
+        stats = _calculate_track_coverage(matches, 30.0)
+
+        # V9 and V10 should be unavailable, not 100% gap
+        assert stats["V9"]["status"] == "unavailable"
+        assert stats["V10"]["status"] == "unavailable"
+        assert "clip_count" not in stats["V9"]
+        assert "gap_count" not in stats["V9"]
+        assert "clip_count" not in stats["V10"]
+        assert "gap_count" not in stats["V10"]
+
+    @pytest.mark.fast
+    def test_v9_entity_images_no_images_for_segment(self):
+        """Test V9 gap when entity exists but has no images for a segment."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=12.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Match'
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        # Entity covers segment 0 but has empty images list
+        entity_images = {
+            "Entity A": Mock(images=[], segment_indices=[0]),
+        }
+
+        stats = _calculate_track_coverage(matches, 30.0, entity_images=entity_images)
+
+        assert stats["V9"]["clip_count"] == 0
+        assert stats["V9"]["gap_count"] == 1
+
+    @pytest.mark.fast
+    def test_generate_segment_map_with_entity_data(self, tmp_path):
+        """Test that generate_segment_map passes entity data to coverage calc."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=12.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Match'
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        entity_images = {
+            "Entity A": Mock(images=["/img/a.jpg"], segment_indices=[0]),
+        }
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(
+            matches=matches,
+            output_path=str(output_path),
+            frame_rate=30.0,
+            entity_images=entity_images
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # V9 should show clip (not gap) since entity data provided
+        assert data['track_coverage']['V9']['clip_count'] == 1
+        assert data['track_coverage']['V9']['gap_count'] == 0
+
+        # V10 should be unavailable since no entity_videos provided
+        assert data['track_coverage']['V10']['status'] == 'unavailable'
 
 
 if __name__ == "__main__":

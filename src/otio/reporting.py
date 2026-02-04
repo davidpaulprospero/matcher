@@ -11,7 +11,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import opentimelineio as otio
 
@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 def _calculate_track_coverage(
     matches: List['MatchResult'],
-    frame_rate: float
+    frame_rate: float,
+    entity_images: Optional[Dict[str, Any]] = None,
+    entity_videos: Optional[Dict[str, Any]] = None
 ) -> dict:
     """
     Calculate track coverage statistics from match results.
@@ -33,6 +35,8 @@ def _calculate_track_coverage(
     Args:
         matches: List of MatchResult from matching stage
         frame_rate: Timeline frame rate for duration calculations
+        entity_images: Optional dict of entity_name -> EntityImageResult for V9 stats
+        entity_videos: Optional dict of entity_name -> EntityVideoResult for V10 stats
 
     Returns:
         Dict mapping track names (V1-V10) to coverage statistics
@@ -45,7 +49,7 @@ def _calculate_track_coverage(
     total_duration = 0.0
     for match_result in matches:
         vo_seg = match_result.primary_match.voiceover_segment
-        total_duration += vo_seg.end - vo_seg.start
+        total_duration += vo_seg.end_time - vo_seg.start_time
 
     # Initialize track statistics
     track_stats = {}
@@ -75,7 +79,7 @@ def _calculate_track_coverage(
     # Count clips and gaps per track
     for match_idx, match_result in enumerate(matches):
         vo_seg = match_result.primary_match.voiceover_segment
-        segment_duration = vo_seg.end - vo_seg.start
+        segment_duration = vo_seg.end_time - vo_seg.start_time
 
         # V1 - Primary track
         if match_result.has_gap:
@@ -133,15 +137,57 @@ def _calculate_track_coverage(
             track_stats["V8"]["gap_count"] += 1
             track_stats["V8"]["gap_duration_sec"] += segment_duration
 
-        # V9-V10 are typically filled by entity matching stage, not in MatchResult
-        # They'll show as gaps unless explicitly tracked
-        track_stats["V9"]["gap_count"] += 1
-        track_stats["V9"]["gap_duration_sec"] += segment_duration
-        track_stats["V10"]["gap_count"] += 1
-        track_stats["V10"]["gap_duration_sec"] += segment_duration
+        # V9 - Entity Images: check if this segment has entity image coverage
+        if entity_images is not None:
+            v9_has_clip = False
+            for entity_result in entity_images.values():
+                seg_indices = getattr(entity_result, 'segment_indices', [])
+                images = getattr(entity_result, 'images', [])
+                if match_idx in seg_indices and images:
+                    v9_has_clip = True
+                    break
+            if v9_has_clip:
+                track_stats["V9"]["clip_count"] += 1
+                track_stats["V9"]["clip_duration_sec"] += segment_duration
+            else:
+                track_stats["V9"]["gap_count"] += 1
+                track_stats["V9"]["gap_duration_sec"] += segment_duration
+
+        # V10 - Stock Videos: check if this segment has entity video coverage
+        if entity_videos is not None:
+            v10_has_clip = False
+            for entity_result in entity_videos.values():
+                seg_indices = getattr(entity_result, 'segment_indices', [])
+                videos = getattr(entity_result, 'videos', [])
+                if match_idx in seg_indices and videos:
+                    v10_has_clip = True
+                    break
+            if v10_has_clip:
+                track_stats["V10"]["clip_count"] += 1
+                track_stats["V10"]["clip_duration_sec"] += segment_duration
+            else:
+                track_stats["V10"]["gap_count"] += 1
+                track_stats["V10"]["gap_duration_sec"] += segment_duration
+
+    # When entity data is not provided, mark V9/V10 as unavailable
+    if entity_images is None:
+        track_stats["V9"] = {
+            "description": "Entity Images",
+            "status": "unavailable",
+            "note": "Entity image data not provided to coverage calculation"
+        }
+    if entity_videos is None:
+        track_stats["V10"] = {
+            "description": "Stock Videos",
+            "status": "unavailable",
+            "note": "Entity video data not provided to coverage calculation"
+        }
 
     # Calculate coverage percentages
     for track_id, stats in track_stats.items():
+        # Skip unavailable tracks (no numeric fields to calculate)
+        if stats.get("status") == "unavailable":
+            continue
         if total_duration > 0:
             stats["coverage_percent"] = round(
                 (stats["clip_duration_sec"] / total_duration) * 100, 1
@@ -157,7 +203,9 @@ def generate_segment_map(
     output_path: str,
     frame_rate: float = 30.0,
     source_srt: str = "",
-    timeline_start_tc: str = "01:00:00:00"
+    timeline_start_tc: str = "01:00:00:00",
+    entity_images: Optional[Dict[str, Any]] = None,
+    entity_videos: Optional[Dict[str, Any]] = None
 ) -> str:
     """
     Generate a segment map JSON file for post-edit analysis.
@@ -172,6 +220,8 @@ def generate_segment_map(
         frame_rate: Timeline frame rate
         source_srt: Path to source SRT file (for reference)
         timeline_start_tc: Timeline start timecode (default 01:00:00:00)
+        entity_images: Optional dict of entity_name -> EntityImageResult for V9 stats
+        entity_videos: Optional dict of entity_name -> EntityVideoResult for V10 stats
 
     Returns:
         Path to the generated segment map JSON file
@@ -193,9 +243,9 @@ def generate_segment_map(
 
         # Calculate segment position using ABSOLUTE voiceover timestamps
         # This prevents drift from accumulating rounding errors
-        start_frame = round(vo_seg.start * frame_rate)
-        end_frame = round(vo_seg.end * frame_rate)
-        target_duration = vo_seg.end - vo_seg.start
+        start_frame = round(vo_seg.start_time * frame_rate)
+        end_frame = round(vo_seg.end_time * frame_rate)
+        target_duration = vo_seg.end_time - vo_seg.start_time
 
         # Extract clip filename
         clip_file = Path(vid_seg.source_file).name
@@ -245,7 +295,11 @@ def generate_segment_map(
     total_frames = segments[-1]["end_frame"] if segments else 0
 
     # Calculate track coverage statistics
-    track_coverage = _calculate_track_coverage(matches, frame_rate)
+    track_coverage = _calculate_track_coverage(
+        matches, frame_rate,
+        entity_images=entity_images,
+        entity_videos=entity_videos
+    )
 
     # Build output structure
     segment_map = {

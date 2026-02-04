@@ -153,8 +153,8 @@
                 "Add test with mock entity_images dict containing 5 entities, verify V9 clip_count > 0",
                 "Add test without entity data, verify V9/V10 coverage is reported as unavailable"
             ],
-            "passes": false,
-            "notes": "Tier: bug fix (low risk). Source files: src/otio/reporting.py:136-141 (V9/V10 always increment gap_count). Lines 136-141 unconditionally add gaps for every segment to V9 and V10, making track_coverage always report 0% coverage for entity tracks. This is misleading in the segment map JSON and statistics output. The entity data is available in the pipeline state but not passed to _calculate_track_coverage. Need to thread entity_images/entity_videos through from the caller."
+            "passes": true,
+            "notes": "Fixed _calculate_track_coverage to accept optional entity_images/entity_videos params. V9/V10 now check actual entity data (segment_indices + images/videos lists) instead of unconditionally counting gaps. When entity data is None, V9/V10 report status='unavailable' instead of misleading 0% coverage. Threaded entity data from output.py caller through generate_segment_map. Also fixed .start/.end -> .start_time/.end_time attribute names. 5 new tests added, all 30 reporting tests pass."
         },
         {
             "id": "US-56-011",
