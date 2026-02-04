@@ -189,6 +189,7 @@ class TestBotCounterResetOnSuccess:
     def test_success_resets_counter_and_clears_tier_floor(self):
         """A successful download should reset consecutive_bot_detections to 0
         and clear the tier floor so subsequent downloads don't start elevated."""
+        import tempfile, shutil
         floor_threshold = 3
         stage = DownloadVideoSegmentsStage()
         stage.downloader = _make_mock_downloader(
@@ -201,45 +202,50 @@ class TestBotCounterResetOnSuccess:
         segments = _make_segments(7)
         esc_mgr = stage.downloader.escalation_manager
 
-        call_count = [0]
+        # Use a real temp dir to avoid stale cached files from previous runs
+        tmp_dir = Path(tempfile.mkdtemp(prefix="test_counter_reset_"))
+        try:
+            call_count = [0]
 
-        def _side_effect(urls):
-            call_count[0] += 1
-            idx = call_count[0]
-            if idx <= 3:
-                raise Exception("ERROR: [youtube] vid: HTTP Error 403: Forbidden")
-            elif idx == 4:
-                # Simulate success by creating the output file
-                output_path = Path("/tmp/test_counter_reset") / f"vid_3_5_25.mp4"
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(b'fake video data')
-                return None
-            else:
-                raise Exception("ERROR: [youtube] vid: HTTP Error 403: Forbidden")
+            def _side_effect(urls):
+                call_count[0] += 1
+                idx = call_count[0]
+                if idx <= 3:
+                    raise Exception("ERROR: [youtube] vid: HTTP Error 403: Forbidden")
+                elif idx == 4:
+                    # Simulate success: write the file that the download loop
+                    # expects for vid_3 (start=10-5=5, end=20+5=25)
+                    output_path = tmp_dir / "vid_3_5_25.mp4"
+                    output_path.write_bytes(b'fake video data')
+                    return None
+                else:
+                    raise Exception("ERROR: [youtube] vid: HTTP Error 403: Forbidden")
 
-        with patch('yt_dlp.YoutubeDL') as mock_yt_dlp_cls:
-            mock_ydl = MagicMock()
-            mock_ydl.download.side_effect = _side_effect
-            mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
+            with patch('yt_dlp.YoutubeDL') as mock_yt_dlp_cls:
+                mock_ydl = MagicMock()
+                mock_ydl.download.side_effect = _side_effect
+                mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+                mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
-                segments=segments,
-                output_dir=Path("/tmp/test_counter_reset"),
-                buffer_seconds=5.0,
-                progress_callback=None,
-            )
+                downloaded, stats = stage._download_segments(
+                    segments=segments,
+                    output_dir=tmp_dir,
+                    buffer_seconds=5.0,
+                    progress_callback=None,
+                )
 
-        # All 7 segments should have been attempted (no abort at threshold 50)
-        assert stats['attempted'] == 7
+            # All 7 segments should have been attempted (no abort at threshold 50)
+            assert stats['attempted'] == 7
 
-        # clear_tier_floor should have been called once on the success (idx=4)
-        esc_mgr.clear_tier_floor.assert_called_once()
+            # clear_tier_floor should have been called once on the success (idx=4)
+            esc_mgr.clear_tier_floor.assert_called_once()
 
-        # set_tier_floor should have been called TWICE:
-        #   1st time: after errors 1-3 (first batch hits threshold)
-        #   2nd time: after errors 5-7 (second batch hits threshold after reset)
-        assert esc_mgr.set_tier_floor.call_count == 2
+            # set_tier_floor should have been called TWICE:
+            #   1st time: after errors 1-3 (first batch hits threshold)
+            #   2nd time: after errors 5-7 (second batch hits threshold after reset)
+            assert esc_mgr.set_tier_floor.call_count == 2
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
