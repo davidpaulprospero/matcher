@@ -458,3 +458,125 @@ class TestIsNetworkFailureHardened:
         """classify_error_category returns 'network' for Connection timed out."""
         error = "ERROR: [youtube] vid1: Unable to download: Connection timed out"
         assert classify_error_category(error) == 'network'
+
+
+# =============================================================================
+# US-52-004: Python API exception format tests for _is_network_failure()
+# =============================================================================
+
+class TestIsNetworkFailurePythonApiExceptionFormat:
+    """US-52-004: Verify _is_network_failure() detects network failures when
+    errors are wrapped in Python API yt_dlp.utils.DownloadError format.
+
+    The Python API wraps errors differently than subprocess stderr:
+    - subprocess: raw stderr line like "ERROR: unable to download ..."
+    - Python API: DownloadError('ERROR: [youtube] ID: <original exception>')
+    - str(DownloadError) produces the inner message string
+
+    These tests use exact patterns from production logs.
+    """
+
+    # --- Errno 11001: Windows DNS resolution failure ---
+
+    def test_errno_11001_in_download_error_wrapper(self):
+        """DownloadError wrapping Errno 11001 DNS failure (Python API format)."""
+        error = "ERROR: [youtube] dQw4w9WgXcQ: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert _is_network_failure(error) is True
+
+    def test_errno_11001_bare_socket_gaierror(self):
+        """Bare socket.gaierror with Errno 11001 (as str(exception))."""
+        error = "[Errno 11001] getaddrinfo failed"
+        assert _is_network_failure(error) is True
+
+    def test_errno_11001_in_yt_dlp_download_error_str(self):
+        """str(yt_dlp.utils.DownloadError) with Errno 11001 from production."""
+        error = "ERROR: [youtube] abc123: Unable to download API page: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert _is_network_failure(error) is True
+
+    def test_errno_11001_nested_in_connection_error(self):
+        """Errno 11001 nested in requests ConnectionError -> DownloadError."""
+        error = (
+            "ERROR: [youtube] vid1: Unable to download webpage: "
+            "<urllib3.exceptions.NewConnectionError: Failed to establish a new connection: "
+            "[Errno 11001] getaddrinfo failed>"
+        )
+        assert _is_network_failure(error) is True
+
+    # --- ffmpeg exit code 4294967158 (0xFFFFFEC6 = -314 signed) ---
+
+    def test_ffmpeg_exit_code_in_python_api_postprocessing(self):
+        """ffmpeg exit code 4294967158 in Python API PostProcessingError."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158"
+        assert _is_network_failure(error) is True
+
+    def test_ffmpeg_exit_code_with_context_stderr(self):
+        """ffmpeg exit code with stderr context (network interruption mid-transcode)."""
+        error = (
+            "ERROR: Postprocessing: ffmpeg exited with code 4294967158 "
+            "(stderr: Connection to tcp://r3---sn-abc.googlevideo.com:443 failed: Connection refused)"
+        )
+        assert _is_network_failure(error) is True
+
+    def test_ffmpeg_exit_code_in_download_error_wrapper(self):
+        """ffmpeg exit code wrapped in DownloadError from Python API."""
+        error = "ERROR: [youtube] vid1: ffmpeg exited with code 4294967158"
+        assert _is_network_failure(error) is True
+
+    # --- 'Failed to resolve' hostname pattern ---
+
+    def test_failed_to_resolve_hostname_curl(self):
+        """curl/curl_cffi DNS failure: 'Failed to resolve host'."""
+        error = "Failed to resolve host 'www.youtube.com'"
+        assert _is_network_failure(error) is True
+
+    def test_failed_to_resolve_in_download_error(self):
+        """'Failed to resolve' wrapped in yt-dlp DownloadError."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: Failed to resolve host name"
+        assert _is_network_failure(error) is True
+
+    def test_failed_to_resolve_curl_cffi_format(self):
+        """curl_cffi specific DNS failure from impersonation layer."""
+        error = (
+            "ERROR: [youtube] vid1: Unable to download webpage: "
+            "curl_cffi.requests.errors.ConnectionError: Failed to resolve 'www.youtube.com'"
+        )
+        assert _is_network_failure(error) is True
+
+    def test_failed_to_resolve_with_proxy_context(self):
+        """Failed to resolve through proxy configuration."""
+        error = "ERROR: [youtube] vid1: Failed to resolve proxy 'socks5://10.0.0.1:1080'"
+        assert _is_network_failure(error) is True
+
+    # --- classify_error_category integration for Python API format ---
+
+    def test_classify_errno_11001_python_api_as_network(self):
+        """classify_error_category returns 'network' for Python API Errno 11001."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: <urlopen error [Errno 11001] getaddrinfo failed>"
+        assert classify_error_category(error) == 'network'
+
+    def test_classify_ffmpeg_exit_code_as_network(self):
+        """classify_error_category returns 'network' for ffmpeg exit code 4294967158."""
+        error = "ERROR: Postprocessing: ffmpeg exited with code 4294967158"
+        assert classify_error_category(error) == 'network'
+
+    def test_classify_failed_to_resolve_as_network(self):
+        """classify_error_category returns 'network' for 'Failed to resolve'."""
+        error = "ERROR: [youtube] abc123: Failed to resolve host 'www.youtube.com'"
+        assert classify_error_category(error) == 'network'
+
+    # --- Negative cases: Python API errors that are NOT network failures ---
+
+    def test_python_api_403_not_network(self):
+        """Python API DownloadError with 403 is NOT a network failure."""
+        error = "ERROR: [youtube] abc123: HTTP Error 403: Forbidden"
+        assert _is_network_failure(error) is False
+
+    def test_python_api_video_removed_not_network(self):
+        """Python API DownloadError for removed video is NOT a network failure."""
+        error = "ERROR: [youtube] abc123: Video unavailable. This video has been removed by the uploader."
+        assert _is_network_failure(error) is False
+
+    def test_python_api_age_gate_not_network(self):
+        """Python API DownloadError for age-gated video is NOT a network failure."""
+        error = "ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users."
+        assert _is_network_failure(error) is False

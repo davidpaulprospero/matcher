@@ -40,6 +40,7 @@ _NETWORK_FAILURE_PATTERNS = (
     'Network is unreachable',
     'No address associated with hostname',
     'Temporary failure in name resolution',
+    'Failed to resolve',     # curl/curl_cffi DNS failure message
     'URLError',              # Python urllib wrapper (e.g. URLError: <urlopen error ...>)
     'ConnectionResetError',  # Python API: connection dropped mid-transfer
     'Connection refused',    # Server rejecting connections (systemic when widespread)
