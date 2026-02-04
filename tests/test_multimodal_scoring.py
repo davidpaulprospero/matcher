@@ -16,6 +16,7 @@ from src.matching.scoring import (
     calculate_keyword_overlap_score,
     calculate_entity_match_score,
     calculate_visual_description_score,
+    get_multimodal_tracker,
     DEFAULT_MULTIMODAL_WEIGHTS,
 )
 
@@ -742,3 +743,141 @@ class TestFormulaVerification:
         )
 
         assert abs(result - contrib_sum) < 0.001
+
+
+class TestScoringComponentLogging:
+    """US-53-009: Tests for scoring component breakdown logging."""
+
+    @pytest.mark.fast
+    def test_nan_component_triggers_warning_log(self, caplog):
+        """NaN component score triggers WARNING log before clamping."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger='src.matching.scoring'):
+            result, reason, components = compute_multimodal_score(
+                embedding_similarity=0.8,
+                keyword_overlap_score=float('nan'),
+                entity_match_score=0.5,
+                visual_description_score=0.3,
+                multimodal_enabled=True
+            )
+
+        # Verify WARNING was logged for NaN component
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        nan_warnings = [m for m in warning_messages if 'NaN' in m and 'keyword_overlap' in m]
+        assert len(nan_warnings) == 1, f"Expected 1 NaN warning for keyword_overlap, got: {warning_messages}"
+
+        # NaN should have been clamped to 0.0
+        assert components['keyword_overlap'] == 0.0
+        # Result should still be valid
+        assert 0.0 <= result <= 1.0
+
+    @pytest.mark.fast
+    def test_inf_component_triggers_warning_log(self, caplog):
+        """Inf component score triggers WARNING log before clamping."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger='src.matching.scoring'):
+            result, reason, components = compute_multimodal_score(
+                embedding_similarity=0.8,
+                keyword_overlap_score=0.5,
+                entity_match_score=float('inf'),
+                visual_description_score=0.3,
+                multimodal_enabled=True
+            )
+
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        inf_warnings = [m for m in warning_messages if 'Inf' in m and 'entity_match' in m]
+        assert len(inf_warnings) == 1, f"Expected 1 Inf warning for entity_match, got: {warning_messages}"
+
+        # Inf should have been clamped to 1.0
+        assert components['entity_match'] == 1.0
+
+    @pytest.mark.fast
+    def test_embedding_only_fallback_logged_at_info(self, caplog):
+        """Embedding-only fallback triggers INFO log."""
+        import logging
+
+        with caplog.at_level(logging.INFO, logger='src.matching.scoring'):
+            result, reason, components = compute_multimodal_score(
+                embedding_similarity=0.8,
+                keyword_overlap_score=0.0,
+                entity_match_score=0.0,
+                visual_description_score=0.0,
+                multimodal_enabled=True
+            )
+
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        fallback_msgs = [m for m in info_messages if 'embedding-only' in m]
+        assert len(fallback_msgs) == 1, f"Expected embedding-only fallback log, got: {info_messages}"
+
+    @pytest.mark.fast
+    def test_component_breakdown_logged_at_debug(self, caplog):
+        """Component breakdown is logged at DEBUG level."""
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger='src.matching.scoring'):
+            compute_multimodal_score(
+                embedding_similarity=0.8,
+                keyword_overlap_score=0.6,
+                entity_match_score=0.5,
+                visual_description_score=0.4,
+                multimodal_enabled=True
+            )
+
+        debug_messages = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        breakdown_msgs = [m for m in debug_messages if 'component breakdown' in m]
+        assert len(breakdown_msgs) == 1, f"Expected component breakdown log, got: {debug_messages}"
+        # Verify the log contains all component names
+        msg = breakdown_msgs[0]
+        assert 'embedding_similarity' in msg
+        assert 'keyword_overlap' in msg
+        assert 'entity_match' in msg
+        assert 'visual_similarity' in msg
+
+    @pytest.mark.fast
+    def test_multimodal_tracker_counts(self):
+        """MultimodalScoringTracker tracks multimodal vs embedding-only counts."""
+        tracker = get_multimodal_tracker()
+        tracker.reset()
+
+        # Full multimodal match
+        compute_multimodal_score(
+            embedding_similarity=0.8,
+            keyword_overlap_score=0.6,
+            entity_match_score=0.5,
+            visual_description_score=0.4,
+            multimodal_enabled=True
+        )
+        assert tracker.multimodal_active_count == 1
+        assert tracker.embedding_only_count == 0
+
+        # Embedding-only match
+        compute_multimodal_score(
+            embedding_similarity=0.8,
+            keyword_overlap_score=0.0,
+            entity_match_score=0.0,
+            visual_description_score=0.0,
+            multimodal_enabled=True
+        )
+        assert tracker.multimodal_active_count == 1
+        assert tracker.embedding_only_count == 1
+
+    @pytest.mark.fast
+    def test_multimodal_tracker_summary_log(self, caplog):
+        """Tracker summary log shows correct counts."""
+        import logging
+
+        tracker = get_multimodal_tracker()
+        tracker.reset()
+        tracker.multimodal_active_count = 8
+        tracker.embedding_only_count = 2
+
+        with caplog.at_level(logging.INFO, logger='src.matching.scoring'):
+            tracker.log_summary()
+
+        info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        summary_msgs = [m for m in info_messages if 'summary' in m.lower()]
+        assert len(summary_msgs) == 1
+        assert '8/10' in summary_msgs[0]
+        assert '2/10' in summary_msgs[0]

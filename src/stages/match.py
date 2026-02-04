@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
 from ..logger import get_global_logger
+from ..matching.scoring import get_multimodal_tracker
 from ..utils import is_embeddings_empty
 
 if TYPE_CHECKING:
@@ -110,6 +111,10 @@ class MatchStage(Stage):
             force_rematch = getattr(config.matching, 'force_rematch', False)
             delta_enabled = getattr(config.matching, 'delta_matching_enabled', True)
 
+            # US-53-009: Reset multimodal scoring tracker before matching run
+            multimodal_tracker = get_multimodal_tracker()
+            multimodal_tracker.reset()
+
             # Run matching
             matches = self._run_matching(
                 vo_segments, video_segments, all_video_paths,
@@ -150,6 +155,9 @@ class MatchStage(Stage):
             # Compute and log diversity metrics (US-53-005)
             diversity_report = compute_diversity_metrics(matches)
             log_diversity_metrics(diversity_report)
+
+            # US-53-009: Log multimodal scoring summary
+            multimodal_tracker.log_summary()
 
             # Update logger stats for match-only mode
             run_logger = get_global_logger()
