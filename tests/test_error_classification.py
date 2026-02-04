@@ -735,3 +735,266 @@ class TestNetworkFailurePythonApiPatterns:
         """HTTP 429 rate limit is NOT a network failure."""
         error = "HTTP Error 429: Too Many Requests"
         assert is_network_failure(error) is False
+
+
+# =============================================================================
+# US-55-011: Error severity classification, multipliers, and edge cases
+# =============================================================================
+
+from src.downloader.error_classification import (
+    classify_error_severity,
+    ERROR_SEVERITY_PATTERNS,
+    SEVERITY_MULTIPLIERS,
+)
+
+
+@pytest.mark.fast
+class TestErrorSeverityClassification:
+    """US-55-011: Verify classify_error_severity() returns correct severity
+    levels for quota-exceeded, bot-detection, rate-limit, and login patterns.
+    """
+
+    # --- High severity: quota exceeded and bot detection ---
+
+    @pytest.mark.fast
+    def test_quota_exceeded_is_high(self):
+        """'quota exceeded' error classified as high severity."""
+        assert classify_error_severity("ERROR: quota exceeded for today") == 'high'
+
+    @pytest.mark.fast
+    def test_daily_quota_is_high(self):
+        """'daily quota' error classified as high severity."""
+        assert classify_error_severity("daily quota limit reached") == 'high'
+
+    @pytest.mark.fast
+    def test_bot_detection_is_high(self):
+        """'bot detection' error classified as high severity."""
+        assert classify_error_severity("bot detection triggered, please wait") == 'high'
+
+    @pytest.mark.fast
+    def test_automated_is_high(self):
+        """'automated' activity error classified as high severity."""
+        assert classify_error_severity("detected automated traffic from your network") == 'high'
+
+    @pytest.mark.fast
+    def test_suspicious_activity_is_high(self):
+        """'suspicious activity' error classified as high severity."""
+        assert classify_error_severity("suspicious activity detected on your account") == 'high'
+
+    @pytest.mark.fast
+    def test_ip_blocked_is_high(self):
+        """'ip blocked' error classified as high severity."""
+        assert classify_error_severity("Your ip blocked due to abuse") == 'high'
+
+    @pytest.mark.fast
+    def test_ip_has_been_blocked_is_high(self):
+        """'ip has been blocked' error classified as high severity."""
+        assert classify_error_severity("Your IP has been blocked") == 'high'
+
+    @pytest.mark.fast
+    def test_permanently_banned_is_high(self):
+        """'permanently banned' error classified as high severity."""
+        assert classify_error_severity("Account permanently banned") == 'high'
+
+    @pytest.mark.fast
+    def test_account_suspended_is_high(self):
+        """'account suspended' error classified as high severity."""
+        assert classify_error_severity("Your account suspended for violations") == 'high'
+
+    # --- Medium severity: rate limits and 429 ---
+
+    @pytest.mark.fast
+    def test_too_many_requests_is_medium(self):
+        """'too many requests' error classified as medium severity."""
+        assert classify_error_severity("HTTP Error 429: Too Many Requests") == 'medium'
+
+    @pytest.mark.fast
+    def test_429_status_code_is_medium(self):
+        """'429' status code in error classified as medium severity."""
+        assert classify_error_severity("Server returned 429") == 'medium'
+
+    @pytest.mark.fast
+    def test_rate_limit_is_medium(self):
+        """'rate limit' error classified as medium severity."""
+        assert classify_error_severity("rate limit exceeded, retry later") == 'medium'
+
+    @pytest.mark.fast
+    def test_please_try_again_later_is_medium(self):
+        """'please try again later' error classified as medium severity."""
+        assert classify_error_severity("please try again later") == 'medium'
+
+    @pytest.mark.fast
+    def test_temporarily_unavailable_is_medium(self):
+        """'temporarily unavailable' error classified as medium severity."""
+        assert classify_error_severity("Service temporarily unavailable") == 'medium'
+
+    # --- Low severity: age-gate and login ---
+
+    @pytest.mark.fast
+    def test_sign_in_is_low(self):
+        """'sign in' error classified as low severity."""
+        assert classify_error_severity("Please sign in to continue") == 'low'
+
+    @pytest.mark.fast
+    def test_login_required_is_low(self):
+        """'login required' error classified as low severity."""
+        assert classify_error_severity("login required to access this content") == 'low'
+
+    @pytest.mark.fast
+    def test_confirm_your_age_is_low(self):
+        """'confirm your age' error classified as low severity."""
+        assert classify_error_severity("Please confirm your age to proceed") == 'low'
+
+    @pytest.mark.fast
+    def test_slow_down_is_low(self):
+        """'slow down' error classified as low severity."""
+        assert classify_error_severity("Please slow down your requests") == 'low'
+
+    # --- Default: no pattern match defaults to medium ---
+
+    @pytest.mark.fast
+    def test_unrecognized_error_defaults_to_medium(self):
+        """Unrecognized error pattern defaults to medium severity."""
+        assert classify_error_severity("Some unknown error occurred") == 'medium'
+
+    # --- Case insensitivity ---
+
+    @pytest.mark.fast
+    def test_case_insensitive_matching(self):
+        """Severity classification is case-insensitive."""
+        assert classify_error_severity("QUOTA EXCEEDED") == 'high'
+        assert classify_error_severity("Rate Limit Hit") == 'medium'
+        assert classify_error_severity("LOGIN REQUIRED") == 'low'
+
+
+@pytest.mark.fast
+class TestSeverityMultipliers:
+    """US-55-011: Verify SEVERITY_MULTIPLIERS maps correctly."""
+
+    @pytest.mark.fast
+    def test_low_multiplier_is_1_5(self):
+        """Low severity maps to 1.5x multiplier."""
+        assert SEVERITY_MULTIPLIERS['low'] == 1.5
+
+    @pytest.mark.fast
+    def test_medium_multiplier_is_2_0(self):
+        """Medium severity maps to 2.0x multiplier."""
+        assert SEVERITY_MULTIPLIERS['medium'] == 2.0
+
+    @pytest.mark.fast
+    def test_high_multiplier_is_3_0(self):
+        """High severity maps to 3.0x multiplier."""
+        assert SEVERITY_MULTIPLIERS['high'] == 3.0
+
+    @pytest.mark.fast
+    def test_all_severity_levels_have_multipliers(self):
+        """Every severity level in ERROR_SEVERITY_PATTERNS has a multiplier."""
+        for level in ERROR_SEVERITY_PATTERNS:
+            assert level in SEVERITY_MULTIPLIERS, f"Missing multiplier for '{level}'"
+
+    @pytest.mark.fast
+    def test_multipliers_are_increasing(self):
+        """Multipliers increase with severity: low < medium < high."""
+        assert SEVERITY_MULTIPLIERS['low'] < SEVERITY_MULTIPLIERS['medium']
+        assert SEVERITY_MULTIPLIERS['medium'] < SEVERITY_MULTIPLIERS['high']
+
+
+@pytest.mark.fast
+class TestClassifyErrorCategoryFallthrough:
+    """US-55-011: Verify classify_error_category() falls through to
+    'video_specific' for errors that don't match network, bot_detection,
+    or timeout patterns.
+    """
+
+    @pytest.mark.fast
+    def test_video_removed_is_video_specific(self):
+        """Removed video error falls through to video_specific."""
+        error = "ERROR: [youtube] abc123: Video unavailable. This video has been removed."
+        assert classify_error_category_direct(error) == 'video_specific'
+
+    @pytest.mark.fast
+    def test_private_video_is_video_specific(self):
+        """Private video error falls through to video_specific."""
+        error = "ERROR: [youtube] abc123: This is a private video. Please check the URL."
+        assert classify_error_category_direct(error) == 'video_specific'
+
+    @pytest.mark.fast
+    def test_generic_download_error_is_video_specific(self):
+        """Generic download error falls through to video_specific."""
+        error = "ERROR: Unable to extract video data"
+        assert classify_error_category_direct(error) == 'video_specific'
+
+    @pytest.mark.fast
+    def test_video_deleted_is_video_specific(self):
+        """Deleted video error falls through to video_specific."""
+        error = "ERROR: [youtube] abc123: This video has been removed by the uploader"
+        assert classify_error_category_direct(error) == 'video_specific'
+
+    @pytest.mark.fast
+    def test_unable_to_extract_is_video_specific(self):
+        """Unable to extract video data falls through to video_specific."""
+        error = "ERROR: [youtube] abc123: Unable to extract video data. YouTube said: video not available"
+        assert classify_error_category_direct(error) == 'video_specific'
+
+
+@pytest.mark.fast
+class TestClassificationEdgeCases:
+    """US-55-011: Verify empty string and None-like inputs to all
+    classification functions ensure no unhandled exceptions.
+    """
+
+    # --- is_network_failure edge cases ---
+
+    @pytest.mark.fast
+    def test_is_network_failure_empty_string(self):
+        """is_network_failure handles empty string without exception."""
+        assert is_network_failure('') is False
+
+    @pytest.mark.fast
+    def test_is_network_failure_whitespace_only(self):
+        """is_network_failure handles whitespace-only string without exception."""
+        assert is_network_failure('   ') is False
+
+    @pytest.mark.fast
+    def test_is_network_failure_single_char(self):
+        """is_network_failure handles single character without exception."""
+        assert is_network_failure('x') is False
+
+    # --- classify_error_category edge cases ---
+
+    @pytest.mark.fast
+    def test_classify_error_category_empty_string(self):
+        """classify_error_category handles empty string, returns video_specific."""
+        assert classify_error_category_direct('') == 'video_specific'
+
+    @pytest.mark.fast
+    def test_classify_error_category_whitespace_only(self):
+        """classify_error_category handles whitespace-only string."""
+        assert classify_error_category_direct('   ') == 'video_specific'
+
+    @pytest.mark.fast
+    def test_classify_error_category_single_char(self):
+        """classify_error_category handles single character."""
+        assert classify_error_category_direct('x') == 'video_specific'
+
+    # --- classify_error_severity edge cases ---
+
+    @pytest.mark.fast
+    def test_classify_error_severity_empty_string(self):
+        """classify_error_severity handles empty string, returns medium default."""
+        assert classify_error_severity('') == 'medium'
+
+    @pytest.mark.fast
+    def test_classify_error_severity_whitespace_only(self):
+        """classify_error_severity handles whitespace-only string."""
+        assert classify_error_severity('   ') == 'medium'
+
+    @pytest.mark.fast
+    def test_classify_error_severity_single_char(self):
+        """classify_error_severity handles single character."""
+        assert classify_error_severity('x') == 'medium'
+
+    @pytest.mark.fast
+    def test_classify_error_severity_numbers_only(self):
+        """classify_error_severity handles numeric-only string."""
+        assert classify_error_severity('12345') == 'medium'
