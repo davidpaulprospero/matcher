@@ -860,6 +860,20 @@ class CaptionStage(Stage):
                             'retry_budget': retry_budget.to_dict(),
                         }, warnings)
 
+                # US-59-008: Build video-to-channel map for list-subs deduplication
+                if hasattr(state, 'video_search_results') and state.video_search_results:
+                    video_channel_map = {}
+                    for result in state.video_search_results:
+                        vid = getattr(result, 'video_id', None)
+                        ch = getattr(result, 'channel', None)
+                        if vid and ch:
+                            video_channel_map[vid] = ch
+                    if video_channel_map:
+                        self._fetcher.set_video_channel_map(video_channel_map)
+                        logger.debug(
+                            f"US-59-008: Set video-channel map with {len(video_channel_map)} entries"
+                        )
+
                 # US-001: Use batch fetch for parallel processing
                 # US-005 Sprint 8: With checkpoint support for abort recovery
                 # US-33-009: With circuit breaker for consecutive failure protection

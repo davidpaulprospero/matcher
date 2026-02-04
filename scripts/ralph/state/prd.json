@@ -104,7 +104,7 @@
                             "id":  "US-59-007",
                             "title":  "Add auto-generated caption fallback in _fetch_subtitle",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "When _fetch_subtitle() fails to find manual captions (auto_generated=False), it retries with auto_generated=True before raising CaptionUnavailableError",
                                                        "The auto-generated fallback only triggers when the error is caption unavailability (not rate limits, timeouts, or network errors)",
@@ -112,13 +112,13 @@
                                                        "CaptionResult.is_auto_generated is set to True when auto-generated fallback is used, preserving quality metadata",
                                                        "Unit test verifies that a video with only auto-generated captions returns a CaptionResult with is_auto_generated=True after manual caption attempt fails"
                                                    ],
-                            "notes":  "Tier: enhancement. _fetch_subtitle() at src/caption_fetcher.py:4005 receives auto_generated as a parameter but the caller chain doesn\u0027t implement a manual-then-auto fallback. The method tries all formats with the given auto_generated value, then gives up. The --write-auto-subs flag is already used at line 4081 when auto_generated=True. fetch_captions_auto_language() at line 2780 handles language fallback but not manual-to-auto fallback. determine_caption_quality() at line 71 already scores auto-generated lower. Key files: src/caption_fetcher.py (lines 4005-4056 _fetch_subtitle, line 4081 sub_flag, line 2780 fetch_captions_auto_language)."
+                            "notes":  "Implemented auto-generated caption fallback in _fetch_subtitle. Extracted format loop into _fetch_subtitle_formats helper. Added _is_auto_fallback_allowed config check. Added allow_auto_generated field to CaptionFirstConfig and config.yaml. 11 unit tests in test_caption_auto_fallback.py. Fixed 2 pre-existing test mocks using wrong error messages."
                         },
                         {
                             "id":  "US-59-008",
                             "title":  "Deduplicate list-subs calls for same-channel videos in batch fetch",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "fetch_captions_batch() extracts channel ID from video_search_results metadata when available",
                                                        "A channel_caption_availability dict caches the list-subs result (available languages) per channel_id",
@@ -126,7 +126,7 @@
                                                        "The channel cache is per-batch (not persisted) and only used as a heuristic — individual videos can still override if the channel cache shows \u0027unavailable\u0027 but video-specific data hasn\u0027t been checked",
                                                        "Unit test verifies that 5 videos from the same channel result in at most 2 list-subs calls (first video + one retry after unavailable)"
                                                    ],
-                            "notes":  "Tier: optimization. fetch_captions_batch() at src/caption_fetcher.py:3230 processes videos in parallel via ThreadPoolExecutor. Channel-based prioritization already exists (US-009 Sprint 7) at lines 3360-3372 tracking channel_success_rates. Video metadata from video_search_results includes channel_id in most cases. The channel pattern tracking in CaptionMetrics (channel_patterns dict at ~line 6710) could be extended. Key files: src/caption_fetcher.py (lines 3230-3922 fetch_captions_batch, lines 3360-3372 channel prioritization, lines 6710+ CaptionMetrics.channel_patterns)."
+                            "notes":  "Implemented channel-based list-subs deduplication. Added _list_languages_with_channel_cache() method that wraps list_available_languages() with per-channel caching. Cache is thread-safe (uses Lock), per-batch (initialized/cleaned in fetch_captions_batch), and allows one retry per channel. caption_stage.py builds video-channel map from video_search_results. 11 unit tests in test_channel_listsubs_dedup.py. Files: src/caption_fetcher.py, src/stages/caption_stage.py, tests/test_channel_listsubs_dedup.py."
                         },
                         {
                             "id":  "US-59-009",
