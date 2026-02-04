@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, Mock, patch, call
 
 import pytest
 
-from src.stages.download_segments import DownloadVideoSegmentsStage
+from src.stages.download_segments import DownloadVideoSegmentsStage, SegmentDownloadStats
 from src.state import PipelineState
 
 
@@ -1512,22 +1512,22 @@ class TestDownloadProgressReporting:
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
-        assert stats['cached'] == 1
-        assert stats['succeeded'] == 1
-        assert stats['failed'] == 1
-        assert stats['attempted'] == 3
-        assert stats['total'] == 3
+        assert stats.cached == 1
+        assert stats.succeeded == 1
+        assert stats.failed == 1
+        assert stats.attempted == 3
+        assert stats.total == 3
 
     @pytest.mark.fast
     def test_summary_includes_all_categories(self, stage, capsys):
         """_print_summary outputs all counter categories and time."""
-        stats = {
-            'succeeded': 5,
-            'failed': 2,
-            'cached': 3,
-            'attempted': 10,
-            'total': 10,
-        }
+        stats = SegmentDownloadStats(
+            succeeded=5,
+            failed=2,
+            cached=3,
+            attempted=10,
+            total=10,
+        )
 
         stage._print_summary(stats, elapsed=125.3)
         captured = capsys.readouterr().out
@@ -1542,13 +1542,13 @@ class TestDownloadProgressReporting:
     @pytest.mark.fast
     def test_print_progress_displays_running_rate(self, stage, capsys):
         """_print_progress shows running success rate."""
-        stats = {
-            'succeeded': 2,
-            'failed': 1,
-            'cached': 1,
-            'attempted': 4,
-            'total': 6,
-        }
+        stats = SegmentDownloadStats(
+            succeeded=2,
+            failed=1,
+            cached=1,
+            attempted=4,
+            total=6,
+        )
 
         stage._print_progress(4, 6, stats)
         captured = capsys.readouterr().out
@@ -1578,10 +1578,10 @@ class TestDownloadProgressReporting:
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
-        assert stats['cached'] == 3
-        assert stats['succeeded'] == 0
-        assert stats['failed'] == 0
-        assert stats['attempted'] == 3
+        assert stats.cached == 3
+        assert stats.succeeded == 0
+        assert stats.failed == 0
+        assert stats.attempted == 3
 
 
 # ============================================================================
@@ -2074,8 +2074,8 @@ class TestStageMetricsCollection:
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
-        assert stats['failed'] == 3
-        assert stats['succeeded'] == 0
+        assert stats.failed == 3
+        assert stats.succeeded == 0
 
     @pytest.mark.fast
     def test_segment_durations_tracked_per_segment(self, stage, tmp_path):
@@ -2110,8 +2110,8 @@ class TestStageMetricsCollection:
             )
 
         # Should have 2 duration entries (one per successful download)
-        assert len(stats['segment_durations']) == 2
-        assert all(d >= 0 for d in stats['segment_durations'])
+        assert len(stats.segment_durations) == 2
+        assert all(d >= 0 for d in stats.segment_durations)
 
     @pytest.mark.fast
     def test_total_bytes_tracked_from_file_sizes(self, stage, tmp_path):
@@ -2139,7 +2139,7 @@ class TestStageMetricsCollection:
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
-        assert stats['total_bytes'] == 2048
+        assert stats.total_bytes == 2048
 
     @pytest.mark.fast
     def test_total_bytes_includes_cached_files(self, stage, tmp_path):
@@ -2159,22 +2159,22 @@ class TestStageMetricsCollection:
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
-        assert stats['total_bytes'] == 4096
-        assert stats['cached'] == 1
+        assert stats.total_bytes == 4096
+        assert stats.cached == 1
 
     @pytest.mark.fast
     def test_summary_includes_avg_median_duration(self, stage, capsys):
         """_print_summary outputs avg and median segment time when durations exist."""
-        stats = {
-            'succeeded': 3,
-            'failed': 0,
-            'cached': 0,
-            'attempted': 3,
-            'total': 3,
-            'segment_durations': [2.0, 4.0, 6.0],
-            'total_bytes': 0,
-            'retry_count': 0,
-        }
+        stats = SegmentDownloadStats(
+            succeeded=3,
+            failed=0,
+            cached=0,
+            attempted=3,
+            total=3,
+            segment_durations=[2.0, 4.0, 6.0],
+            total_bytes=0,
+            retry_count=0,
+        )
 
         stage._print_summary(stats, elapsed=12.0)
         captured = capsys.readouterr().out
@@ -2185,16 +2185,16 @@ class TestStageMetricsCollection:
     @pytest.mark.fast
     def test_summary_includes_total_size(self, stage, capsys):
         """_print_summary outputs total downloaded size."""
-        stats = {
-            'succeeded': 2,
-            'failed': 0,
-            'cached': 0,
-            'attempted': 2,
-            'total': 2,
-            'segment_durations': [1.0, 2.0],
-            'total_bytes': 15 * 1024 * 1024,  # 15 MB
-            'retry_count': 0,
-        }
+        stats = SegmentDownloadStats(
+            succeeded=2,
+            failed=0,
+            cached=0,
+            attempted=2,
+            total=2,
+            segment_durations=[1.0, 2.0],
+            total_bytes=15 * 1024 * 1024,  # 15 MB
+            retry_count=0,
+        )
 
         stage._print_summary(stats, elapsed=3.0)
         captured = capsys.readouterr().out
@@ -2204,16 +2204,16 @@ class TestStageMetricsCollection:
     @pytest.mark.fast
     def test_summary_shows_retry_count(self, stage, capsys):
         """_print_summary shows retry count when retries occurred."""
-        stats = {
-            'succeeded': 3,
-            'failed': 1,
-            'cached': 0,
-            'attempted': 4,
-            'total': 4,
-            'segment_durations': [1.0],
-            'total_bytes': 0,
-            'retry_count': 2,
-        }
+        stats = SegmentDownloadStats(
+            succeeded=3,
+            failed=1,
+            cached=0,
+            attempted=4,
+            total=4,
+            segment_durations=[1.0],
+            total_bytes=0,
+            retry_count=2,
+        )
 
         stage._print_summary(stats, elapsed=5.0)
         captured = capsys.readouterr().out
@@ -2294,11 +2294,11 @@ class TestRetryCountInCheckpointData:
 
         stage.downloader = mock_downloader
 
-        stats = {
-            'succeeded': 0, 'failed': 2, 'cached': 0,
-            'attempted': 2, 'total': 2, 'retry_count': 0,
-            'segment_durations': [], 'total_bytes': 0,
-        }
+        stats = SegmentDownloadStats(
+            succeeded=0, failed=2, cached=0,
+            attempted=2, total=2, retry_count=0,
+            segment_durations=[], total_bytes=0,
+        )
 
         # Mock yt_dlp — both retries will fail (file not created)
         with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
@@ -2312,7 +2312,7 @@ class TestRetryCountInCheckpointData:
             )
 
         # 2 items were retried
-        assert stats['retry_count'] == 2
+        assert stats.retry_count == 2
 
     @pytest.mark.fast
     def test_retry_count_in_checkpoint_data_key(
@@ -2702,7 +2702,7 @@ class TestSegmentStallTimeout:
         # The stalled download should have been caught and counted as failure
         # (the TimeoutError is caught by the existing except Exception handler)
         assert len(downloaded) == 0
-        assert stats['failed'] == 1
+        assert stats.failed == 1
 
     @pytest.mark.fast
     def test_successful_download_within_timeout_not_interrupted(self, stage, tmp_path):
@@ -2751,7 +2751,7 @@ class TestSegmentStallTimeout:
         # Successful download should be in the result
         assert len(downloaded) == 1
         assert downloaded[0].source == 'segment_download'
-        assert stats['succeeded'] == 1
+        assert stats.succeeded == 1
 
     @pytest.mark.fast
     def test_stall_timeout_disabled_when_zero(self, stage, tmp_path):
@@ -2886,11 +2886,11 @@ class TestSegmentStallTimeout:
             )
 
         # AC6a: Failure counter is incremented
-        assert stats['failed'] == 1, f"Expected 1 failure, got {stats['failed']}"
+        assert stats.failed == 1, f"Expected 1 failure, got {stats.failed}"
 
         # AC6b: Error classified as 'timeout' category
-        assert stats['error_categories'].get('timeout', 0) == 1, \
-            f"Expected 'timeout' category, got {stats['error_categories']}"
+        assert stats.error_categories.get('timeout', 0) == 1, \
+            f"Expected 'timeout' category, got {stats.error_categories}"
 
         # AC6c: Failed download added to retry queue
         mock_retry_queue.add.assert_called_once()
@@ -2950,9 +2950,9 @@ class TestSegmentStallTimeout:
 
         # Stall timeout should NOT have recorded a failure in escalation manager
         # (stalls are not bot-detection errors)
-        assert stats['failed'] == 1
-        assert stats['error_categories'].get('timeout', 0) == 1
-        assert stats['error_categories'].get('bot_detection', 0) == 0
+        assert stats.failed == 1
+        assert stats.error_categories.get('timeout', 0) == 1
+        assert stats.error_categories.get('bot_detection', 0) == 0
 
 
 # ============================================================================
@@ -3139,7 +3139,7 @@ class TestBotDetectionTierFloor:
         # seg2=network(counter=2), seg3=network(counter=3) → ABORT
         # Should NOT try segments 4 and 5
         assert mock_ydl_class.call_count == 4
-        assert stats['failed'] == 4
+        assert stats.failed == 4
 
     @pytest.mark.fast
     def test_non_bot_non_network_errors_still_reset_counter(self, stage, tmp_path):
@@ -3179,4 +3179,4 @@ class TestBotDetectionTierFloor:
         # All 5 segments attempted before abort at seg4 (3rd consecutive)
         # Wait: counter=1 at seg0, reset to 0 at seg1, then seg2=1, seg3=2, seg4=3 → ABORT
         assert mock_ydl_class.call_count == 5
-        assert stats['failed'] == 5
+        assert stats.failed == 5

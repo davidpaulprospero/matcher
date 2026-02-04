@@ -118,8 +118,8 @@ class TestStallTimeoutTriggers:
         event.set()
 
         # Should have failed (timeout)
-        assert stats['failed'] == 1
-        assert stats['succeeded'] == 0
+        assert stats.failed == 1
+        assert stats.succeeded == 0
         assert len(downloaded) == 0
 
     @pytest.mark.fast
@@ -183,7 +183,7 @@ class TestStallTimeoutTriggers:
 
         event.set()
 
-        assert stats['failed'] == 1
+        assert stats.failed == 1
         # Timeout at ~1s, thread finishes at ~2s, total < 4s
         assert elapsed < 4, f"Expected < 4s, got {elapsed:.2f}s"
 
@@ -224,8 +224,8 @@ class TestSuccessfulDownloadNotInterrupted:
                 progress_callback=None,
             )
 
-        assert stats['succeeded'] == 1
-        assert stats['failed'] == 0
+        assert stats.succeeded == 1
+        assert stats.failed == 0
         assert len(downloaded) == 1
 
     @pytest.mark.fast
@@ -258,8 +258,8 @@ class TestSuccessfulDownloadNotInterrupted:
                 progress_callback=None,
             )
 
-        assert stats['succeeded'] == 1
-        assert stats['failed'] == 0
+        assert stats.succeeded == 1
+        assert stats.failed == 0
         assert len(downloaded) == 1
 
 
@@ -376,11 +376,11 @@ class TestStallTimeoutRetryIntegration:
             )
 
         # All 3 should be attempted (not aborted as network failures)
-        assert stats['attempted'] == 3, (
-            f"Expected 3 attempted, got {stats['attempted']} — "
+        assert stats.attempted == 3, (
+            f"Expected 3 attempted, got {stats.attempted} — "
             f"stall timeouts may be incorrectly counted as network failures"
         )
-        assert stats['failed'] == 3
+        assert stats.failed == 3
 
     @pytest.mark.fast
     def test_stall_timeout_recorded_in_error_categories(self):
@@ -404,10 +404,10 @@ class TestStallTimeoutRetryIntegration:
 
         event.set()
 
-        assert 'timeout' in stats['error_categories'], (
-            f"Expected 'timeout' in error_categories, got {stats['error_categories']}"
+        assert 'timeout' in stats.error_categories, (
+            f"Expected 'timeout' in error_categories, got {stats.error_categories}"
         )
-        assert stats['error_categories']['timeout'] == 1
+        assert stats.error_categories['timeout'] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +448,7 @@ class TestStallTimeoutDisabled:
 
         # ThreadPoolExecutor should NOT have been used
         mock_executor.assert_not_called()
-        assert stats['succeeded'] == 1
+        assert stats.succeeded == 1
 
 
 # ---------------------------------------------------------------------------

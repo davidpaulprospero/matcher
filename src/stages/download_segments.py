@@ -16,6 +16,7 @@ import logging
 import shutil
 import statistics
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -37,6 +38,59 @@ from ..downloader.error_classification import (
     NETWORK_FAILURE_THRESHOLD,
     BOT_DETECTION_ABORT_THRESHOLD,
 )
+
+
+@dataclass
+class SegmentDownloadStats:
+    """Typed container for segment download statistics.
+
+    Replaces the previously untyped ``stats`` dict in ``_download_segments()``,
+    providing IDE autocompletion, typo-safe attribute access, and explicit
+    defaults for every field.
+    """
+
+    succeeded: int = 0
+    failed: int = 0
+    cached: int = 0
+    attempted: int = 0
+    total: int = 0
+    retry_count: int = 0
+    segment_durations: List[float] = field(default_factory=list)
+    total_bytes: int = 0
+    error_categories: Dict[str, int] = field(default_factory=dict)
+    error_aggregator: ErrorAggregator = field(default_factory=ErrorAggregator)
+    progress_hooks_data: Dict[str, int] = field(default_factory=lambda: {
+        'total_downloaded_bytes': 0,
+        'segments_with_progress': 0,
+        'segments_finished': 0,
+    })
+
+    # -- convenience mutators --------------------------------------------------
+
+    def increment_success(self, duration: float = 0.0, file_bytes: int = 0) -> None:
+        """Record a successful segment download."""
+        self.succeeded += 1
+        self.attempted += 1
+        if duration:
+            self.segment_durations.append(duration)
+        if file_bytes:
+            self.total_bytes += file_bytes
+
+    def increment_failure(self, category: str | None = None, error_msg: str | None = None) -> None:
+        """Record a failed segment download, optionally categorised."""
+        self.failed += 1
+        self.attempted += 1
+        if category:
+            self.error_categories[category] = self.error_categories.get(category, 0) + 1
+        if error_msg and category:
+            self.error_aggregator.record(error_msg, category)
+
+    def increment_cached(self, file_bytes: int = 0) -> None:
+        """Record a segment served from cache."""
+        self.cached += 1
+        self.attempted += 1
+        if file_bytes:
+            self.total_bytes += file_bytes
 
 
 def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -> None:
@@ -304,7 +358,7 @@ class DownloadVideoSegmentsStage(Stage):
             checkpoint_data = {
                 'segment_count': len(downloaded_segments),
                 'total_matches': len(state.matches),
-                'retry_count': download_stats.get('retry_count', 0),
+                'retry_count': download_stats.retry_count,
             }
 
             # US-50-008: Include circuit breaker metrics in checkpoint
@@ -342,17 +396,15 @@ class DownloadVideoSegmentsStage(Stage):
                         logger.debug(f"Could not collect escalation summary: {esc_err}")
 
             # US-50-009: Add bot_detection_count and network_failure_count from error categories
-            error_cats = download_stats.get('error_categories', {})
-            escalation_summary['bot_detection_count'] = error_cats.get('bot_detection', 0)
-            escalation_summary['network_failure_count'] = error_cats.get('network', 0)
+            escalation_summary['bot_detection_count'] = download_stats.error_categories.get('bot_detection', 0)
+            escalation_summary['network_failure_count'] = download_stats.error_categories.get('network', 0)
 
             # US-50-009: Log structured escalation summary at stage completion
             self._log_escalation_summary(escalation_summary)
 
             # US-51-006: Include progress hook data in escalation_summary for checkpoint
-            progress_hooks_data = download_stats.get('progress_hooks_data', {})
-            if progress_hooks_data:
-                escalation_summary['download_progress'] = progress_hooks_data
+            if download_stats.progress_hooks_data:
+                escalation_summary['download_progress'] = download_stats.progress_hooks_data
 
             # US-51-010: Persist retry queue to checkpoint for resume
             if self.downloader and self.downloader.retry_queue:
@@ -362,10 +414,10 @@ class DownloadVideoSegmentsStage(Stage):
 
             # Stage metrics for pipeline observability (US-49-009 + US-49-012)
             metrics = StageMetrics(
-                items_processed=download_stats['succeeded'] + download_stats['cached'],
-                items_failed=download_stats['failed'],
+                items_processed=download_stats.succeeded + download_stats.cached,
+                items_failed=download_stats.failed,
                 duration_seconds=elapsed,
-                error_categories=download_stats.get('error_categories', {}),
+                error_categories=download_stats.error_categories,
                 escalation_summary=escalation_summary,
             )
 
@@ -487,7 +539,7 @@ class DownloadVideoSegmentsStage(Stage):
         (cookie rotation). Escalation state is tracked per video_id.
 
         Returns:
-            Tuple of (downloaded_segments list, stats dict).
+            Tuple of (downloaded_segments list, SegmentDownloadStats).
         """
         from ..state import DownloadedVideo
         import yt_dlp
@@ -497,19 +549,8 @@ class DownloadVideoSegmentsStage(Stage):
         consecutive_network_failures = 0
         consecutive_bot_detections = 0  # US-49-005: stage-level bot-detection counter
 
-        # Progress counters
-        stats = {
-            'succeeded': 0,
-            'failed': 0,
-            'cached': 0,
-            'attempted': 0,
-            'total': total,
-            'retry_count': 0,
-            'segment_durations': [],   # Per-segment download durations (seconds)
-            'total_bytes': 0,          # Total bytes downloaded (from output file sizes)
-            'error_categories': {},    # US-49-009: Per-category error counts
-            'error_aggregator': ErrorAggregator(),  # US-51-011: Categorized error aggregation
-        }
+        # Progress counters — US-52-010: typed dataclass replaces raw dict
+        stats = SegmentDownloadStats(total=total)
 
         # Get escalation manager, circuit breaker, and cookie rotator from downloader
         escalation_mgr = None
@@ -555,12 +596,11 @@ class DownloadVideoSegmentsStage(Stage):
                     url=f"https://www.youtube.com/watch?v={video_id}",
                     source='segment_cache'
                 ))
-                stats['cached'] += 1
-                stats['attempted'] += 1
                 try:
-                    stats['total_bytes'] += output_file.stat().st_size
+                    _cached_bytes = output_file.stat().st_size
                 except OSError:
-                    pass
+                    _cached_bytes = 0
+                stats.increment_cached(file_bytes=_cached_bytes)
                 consecutive_network_failures = 0  # Cached file counts as success
                 # US-49-005: Reset bot-detection counter on success
                 if consecutive_bot_detections > 0:
@@ -581,8 +621,7 @@ class DownloadVideoSegmentsStage(Stage):
                     at_max_tier = kw_state.current_tier >= EscalationTier.VPN_ROTATION
 
                 if at_max_tier:
-                    stats['failed'] += 1
-                    stats['attempted'] += 1
+                    stats.increment_failure()
                     logger.info(
                         f"Circuit breaker open + max tier reached for {video_id} "
                         f"— skipping to retry queue"
@@ -670,13 +709,11 @@ class DownloadVideoSegmentsStage(Stage):
                         url=url,
                         source='segment_download'
                     ))
-                    stats['succeeded'] += 1
-                    stats['attempted'] += 1
-                    stats['segment_durations'].append(seg_duration)
                     try:
-                        stats['total_bytes'] += output_file.stat().st_size
+                        _dl_bytes = output_file.stat().st_size
                     except OSError:
-                        pass
+                        _dl_bytes = 0
+                    stats.increment_success(duration=seg_duration, file_bytes=_dl_bytes)
                     consecutive_network_failures = 0  # Reset on success
                     # US-49-005: Reset bot-detection counter on success
                     if consecutive_bot_detections > 0:
@@ -688,21 +725,17 @@ class DownloadVideoSegmentsStage(Stage):
                     if escalation_mgr:
                         escalation_mgr.record_success(video_id)
                 else:
-                    stats['failed'] += 1
-                    stats['attempted'] += 1
-                    stats['segment_durations'].append(seg_duration)
+                    stats.failed += 1
+                    stats.attempted += 1
+                    stats.segment_durations.append(seg_duration)
                     self._print_progress(idx, total, stats)
                     logger.warning(f"Download succeeded but file not found: {output_file}")
 
             except Exception as e:
                 error_msg = str(e)
-                stats['failed'] += 1
-                stats['attempted'] += 1
                 # US-49-009: Track error by category for end-of-stage summary
                 _err_cat = classify_error_category(error_msg)
-                stats['error_categories'][_err_cat] = stats['error_categories'].get(_err_cat, 0) + 1
-                # US-51-011: Feed error aggregator with category and message
-                stats['error_aggregator'].record(error_msg, _err_cat)
+                stats.increment_failure(category=_err_cat, error_msg=error_msg)
                 logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
                 # US-48-005: Record failure with escalation manager for tier progression
@@ -737,8 +770,8 @@ class DownloadVideoSegmentsStage(Stage):
                     ):
                         remaining = total - idx
                         # US-52-007: Log bot-detection abort as stage-level failure category
-                        stats['error_categories']['bot_detection_abort'] = 1
-                        stats['error_aggregator'].record(
+                        stats.error_categories['bot_detection_abort'] = 1
+                        stats.error_aggregator.record(
                             f"Bot-detection abort: {consecutive_bot_detections} "
                             f"consecutive bot errors exceeded threshold "
                             f"({_bot_abort_threshold})",
@@ -842,26 +875,22 @@ class DownloadVideoSegmentsStage(Stage):
         return downloaded, stats
 
     @staticmethod
-    def _make_progress_hook(video_id: str, stats: Dict[str, Any]) -> callable:
+    def _make_progress_hook(video_id: str, stats: SegmentDownloadStats) -> callable:
         """Create a yt-dlp progress_hooks callback for per-download observability.
 
         US-51-006: Logs download progress at INFO level for segments taking >30s,
         and logs final file size/time on completion. Accumulates totals into
-        stats['progress_hooks_data'] for stage metrics.
+        stats.progress_hooks_data for stage metrics.
 
         Args:
             video_id: YouTube video ID being downloaded.
-            stats: The stage stats dict; progress data is accumulated under
-                   stats['progress_hooks_data'].
+            stats: The stage stats dataclass; progress data is accumulated
+                   under stats.progress_hooks_data.
 
         Returns:
             A callable suitable for ydl_opts['progress_hooks'].
         """
-        hook_data = stats.setdefault('progress_hooks_data', {
-            'total_downloaded_bytes': 0,
-            'segments_with_progress': 0,
-            'segments_finished': 0,
-        })
+        hook_data = stats.progress_hooks_data
         _last_log_elapsed = [0.0]  # mutable container for closure
 
         def _hook(d: Dict[str, Any]) -> None:
@@ -1003,22 +1032,22 @@ class DownloadVideoSegmentsStage(Stage):
         return ydl_opts, escalation_result
 
     @staticmethod
-    def _print_progress(current: int, total: int, stats: Dict[str, int]) -> None:
+    def _print_progress(current: int, total: int, stats: SegmentDownloadStats) -> None:
         """Print running progress line after each download attempt."""
-        ok = stats['succeeded'] + stats['cached']
-        attempted = stats['attempted']
+        ok = stats.succeeded + stats.cached
+        attempted = stats.attempted
         rate = (ok / attempted * 100) if attempted > 0 else 0.0
         print(
             f"  [{current}/{total}] "
-            f"ok={ok} fail={stats['failed']} cached={stats['cached']} "
+            f"ok={ok} fail={stats.failed} cached={stats.cached} "
             f"({rate:.0f}% success)"
         )
 
     @staticmethod
-    def _print_summary(stats: Dict[str, Any], elapsed: float) -> None:
+    def _print_summary(stats: SegmentDownloadStats, elapsed: float) -> None:
         """Print end-of-stage summary."""
-        ok = stats['succeeded'] + stats['cached']
-        attempted = stats['attempted']
+        ok = stats.succeeded + stats.cached
+        attempted = stats.attempted
         rate = (ok / attempted * 100) if attempted > 0 else 0.0
 
         if elapsed < 60:
@@ -1031,15 +1060,15 @@ class DownloadVideoSegmentsStage(Stage):
             time_str = f"{h}h {m}m"
 
         print(f"\n  --- Download Summary ---")
-        print(f"    Attempted: {attempted}/{stats['total']}")
-        print(f"    Succeeded: {stats['succeeded']}")
-        print(f"    Cached:    {stats['cached']}")
-        print(f"    Failed:    {stats['failed']}")
+        print(f"    Attempted: {attempted}/{stats.total}")
+        print(f"    Succeeded: {stats.succeeded}")
+        print(f"    Cached:    {stats.cached}")
+        print(f"    Failed:    {stats.failed}")
         print(f"    Success rate: {rate:.0f}%")
         print(f"    Total time: {time_str}")
 
         # Per-segment duration stats
-        durations = stats.get('segment_durations', [])
+        durations = stats.segment_durations
         if durations:
             avg_dur = statistics.mean(durations)
             median_dur = statistics.median(durations)
@@ -1047,51 +1076,46 @@ class DownloadVideoSegmentsStage(Stage):
             print(f"    Median segment time: {median_dur:.1f}s")
 
         # Total bytes downloaded
-        total_bytes = stats.get('total_bytes', 0)
-        if total_bytes > 0:
-            if total_bytes < 1024 * 1024:
-                size_str = f"{total_bytes / 1024:.1f} KB"
-            elif total_bytes < 1024 * 1024 * 1024:
-                size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
+        if stats.total_bytes > 0:
+            if stats.total_bytes < 1024 * 1024:
+                size_str = f"{stats.total_bytes / 1024:.1f} KB"
+            elif stats.total_bytes < 1024 * 1024 * 1024:
+                size_str = f"{stats.total_bytes / (1024 * 1024):.1f} MB"
             else:
-                size_str = f"{total_bytes / (1024 * 1024 * 1024):.2f} GB"
+                size_str = f"{stats.total_bytes / (1024 * 1024 * 1024):.2f} GB"
             print(f"    Total size: {size_str}")
 
         # Retry count
-        retry_count = stats.get('retry_count', 0)
-        if retry_count > 0:
-            print(f"    Retried: {retry_count}")
+        if stats.retry_count > 0:
+            print(f"    Retried: {stats.retry_count}")
 
     @staticmethod
-    def _log_error_summary(stats: Dict[str, Any]) -> None:
+    def _log_error_summary(stats: SegmentDownloadStats) -> None:
         """US-49-009 + US-51-011: Log structured error summary with per-category breakdown.
 
         Logs at INFO level with category counts and sample messages, and at
         WARNING level with actionable guidance when >50% of failures are
         bot-detection.
         """
-        error_cats = stats.get('error_categories', {})
-        failed = stats.get('failed', 0)
-        if not failed:
+        if not stats.failed:
             return  # No errors to summarize
 
-        summary_parts = [f"{cat}={count}" for cat, count in sorted(error_cats.items())]
+        summary_parts = [f"{cat}={count}" for cat, count in sorted(stats.error_categories.items())]
         logger.info(
-            f"Download error summary: total={stats.get('total', 0)} "
-            f"succeeded={stats.get('succeeded', 0)} failed={failed} "
-            f"cached={stats.get('cached', 0)} skipped="
-            f"{stats.get('total', 0) - stats.get('attempted', 0)} | "
+            f"Download error summary: total={stats.total} "
+            f"succeeded={stats.succeeded} failed={stats.failed} "
+            f"cached={stats.cached} skipped="
+            f"{stats.total - stats.attempted} | "
             f"errors by category: {', '.join(summary_parts) if summary_parts else 'uncategorized'}"
         )
 
         # US-51-011: Log categorized table with sample messages via ErrorAggregator
-        aggregator = stats.get('error_aggregator')
-        if aggregator and aggregator.total_errors > 0:
-            aggregator.log_summary(stage_name='DOWNLOAD_SEGMENTS')
+        if stats.error_aggregator.total_errors > 0:
+            stats.error_aggregator.log_summary(stage_name='DOWNLOAD_SEGMENTS')
 
         # Actionable guidance when >50% of failures are bot-detection
-        bot_count = error_cats.get('bot_detection', 0)
-        if bot_count > 0 and (bot_count / failed) > 0.5:
+        bot_count = stats.error_categories.get('bot_detection', 0)
+        if bot_count > 0 and (bot_count / stats.failed) > 0.5:
             logger.warning(
                 "Most failures are bot-detection. "
                 "Check cookie configuration (cookies_from_browser or cookies_path in config.yaml)."
@@ -1141,7 +1165,7 @@ class DownloadVideoSegmentsStage(Stage):
         downloaded: List['DownloadedVideo'],
         total: int,
         progress_callback,
-        stats: Optional[Dict[str, Any]] = None
+        stats: Optional[SegmentDownloadStats] = None
     ) -> None:
         """Process any failed downloads in the retry queue.
 
@@ -1258,7 +1282,7 @@ class DownloadVideoSegmentsStage(Stage):
 
         # Update stats with retry count
         if stats is not None:
-            stats['retry_count'] = retry_attempts
+            stats.retry_count = retry_attempts
 
     def _update_matches_with_local_paths(
         self,
