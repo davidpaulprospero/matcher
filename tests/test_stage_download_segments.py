@@ -3790,3 +3790,403 @@ class TestDownloadStallDetection:
         assert stats.succeeded == 1
         assert stats.failed == 0
         assert len(downloaded) == 1
+
+
+# ============================================================================
+# Retry Queue Checkpoint Persistence (US-55-012)
+# ============================================================================
+
+class TestRetryQueueCheckpointPersistence:
+    """Test retry queue checkpoint round-trip: save tier state -> checkpoint -> restore -> resume.
+
+    US-55-012: Verifies that failed segments are saved to checkpoint with their
+    current escalation tier and error category, and that on resume from checkpoint
+    the retry queue is correctly restored so segments don't restart at Tier 1.
+    """
+
+    # ---- AC1: Failed segments saved with escalation tier and error category ----
+
+    @pytest.mark.fast
+    def test_failed_segments_saved_with_tier_and_category(self):
+        """Failed segments in retry queue serialize escalation_tier and error_category to checkpoint."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        rq = RetryQueue(BatchRetryConfig(enabled=True))
+        rq.add(
+            video_id='vid_403',
+            keyword='segment',
+            tier='segment',
+            error_message='HTTP Error 403: Forbidden',
+            error_category='bot_detection',
+            escalation_tier=3,
+        )
+        rq.add(
+            video_id='vid_timeout',
+            keyword='segment',
+            tier='segment',
+            error_message='Connection timed out',
+            error_category='timeout',
+            escalation_tier=2,
+        )
+
+        cp_dict = rq.to_checkpoint_dict()
+
+        # Verify items include escalation_tier and error_category
+        items_by_id = {item['video_id']: item for item in cp_dict['items']}
+
+        assert items_by_id['vid_403']['escalation_tier'] == 3
+        assert items_by_id['vid_403']['error_category'] == 'bot_detection'
+        assert items_by_id['vid_403']['last_tier_attempted'] == 3  # alias
+
+        assert items_by_id['vid_timeout']['escalation_tier'] == 2
+        assert items_by_id['vid_timeout']['error_category'] == 'timeout'
+        assert items_by_id['vid_timeout']['last_tier_attempted'] == 2
+
+    @pytest.mark.fast
+    def test_checkpoint_includes_failed_ids(self):
+        """Permanently failed video IDs are included in checkpoint."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        rq = RetryQueue(BatchRetryConfig(enabled=True, max_retries_per_video=1))
+        rq.add(
+            video_id='perm_fail',
+            keyword='segment',
+            tier='segment',
+            error_message='Video unavailable',
+        )
+        # mark_failed increments retry_count; finish_retry_pass moves to _failed_ids
+        rq.mark_failed('perm_fail')
+        rq.finish_retry_pass()  # checks retry_count >= max_retries_per_video
+
+        cp_dict = rq.to_checkpoint_dict()
+
+        assert 'perm_fail' in cp_dict['failed_ids']
+
+    # ---- AC2: Restore from checkpoint preserves escalation tier ----
+
+    @pytest.mark.fast
+    def test_restore_preserves_escalation_tier(self):
+        """On resume, retry queue items are restored with correct escalation_tier (not reset to 1)."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        # Save a queue with tier 3 items
+        original_rq = RetryQueue(BatchRetryConfig(enabled=True))
+        original_rq.add(
+            video_id='vid_tier3',
+            keyword='segment',
+            tier='segment',
+            error_message='HTTP Error 403: Forbidden',
+            error_category='bot_detection',
+            escalation_tier=3,
+        )
+        cp_dict = original_rq.to_checkpoint_dict()
+
+        # Restore into a fresh queue
+        restored_rq = RetryQueue(BatchRetryConfig(enabled=True))
+        restored_rq.from_checkpoint_dict(cp_dict)
+
+        # Verify tier is preserved
+        restored_item = restored_rq.items.get('vid_tier3')
+        assert restored_item is not None
+        assert restored_item.escalation_tier == 3
+        assert restored_item.error_category == 'bot_detection'
+        assert restored_item.error_message == 'HTTP Error 403: Forbidden'
+
+    @pytest.mark.fast
+    def test_restore_preserves_error_category(self):
+        """On resume, retry queue items retain their error_category."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        original_rq = RetryQueue(BatchRetryConfig(enabled=True))
+        original_rq.add(
+            video_id='vid_net',
+            keyword='segment',
+            tier='segment',
+            error_message='Network unreachable',
+            error_category='network',
+            escalation_tier=1,
+        )
+        original_rq.add(
+            video_id='vid_bot',
+            keyword='segment',
+            tier='segment',
+            error_message='Bot detected',
+            error_category='bot_detection',
+            escalation_tier=2,
+        )
+        cp_dict = original_rq.to_checkpoint_dict()
+
+        restored_rq = RetryQueue(BatchRetryConfig(enabled=True))
+        restored_rq.from_checkpoint_dict(cp_dict)
+
+        assert restored_rq.items['vid_net'].error_category == 'network'
+        assert restored_rq.items['vid_net'].escalation_tier == 1
+        assert restored_rq.items['vid_bot'].error_category == 'bot_detection'
+        assert restored_rq.items['vid_bot'].escalation_tier == 2
+
+    @pytest.mark.fast
+    def test_restore_preserves_failed_ids_and_completed_ids(self):
+        """Round-trip preserves completed_ids and failed_ids sets."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        rq = RetryQueue(BatchRetryConfig(enabled=True, max_retries_per_video=1))
+        rq.add(video_id='a', keyword='s', tier='s', error_message='err')
+        rq.add(video_id='b', keyword='s', tier='s', error_message='err')
+        rq.add(video_id='c', keyword='s', tier='s', error_message='err')
+        rq.mark_success('a')
+        # mark_failed increments retry_count; finish_retry_pass moves to _failed_ids
+        rq.mark_failed('b')
+        rq.finish_retry_pass()
+
+        cp_dict = rq.to_checkpoint_dict()
+
+        restored_rq = RetryQueue(BatchRetryConfig(enabled=True, max_retries_per_video=1))
+        restored_rq.from_checkpoint_dict(cp_dict)
+
+        assert 'a' in restored_rq._completed_ids
+        assert 'b' in restored_rq._failed_ids
+        # 'c' was not marked failed and had retry_count=0, so still pending
+        assert 'c' in restored_rq.items
+
+    # ---- AC3: Empty video_file in checkpoint handled gracefully ----
+
+    @pytest.mark.fast
+    def test_restore_with_empty_video_file_no_crash(self, stage, mock_checkpoint, mock_config, tmp_path):
+        """Segments with video_file='' in checkpoint are handled gracefully during restore."""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+
+        # Create a valid segment file on disk
+        (tmp_path / "abc123_5_20.mp4").write_bytes(b'\x00\x00\x01')
+
+        state = PipelineState()
+        state.downloaded_segments = []
+
+        # Add matches with one empty video_file
+        match_ok = Mock()
+        match_ok.primary_match = None
+        match_ok.video_file = "abc123"
+
+        match_empty = Mock()
+        match_empty.primary_match = None
+        match_empty.video_file = ""  # Empty video_file
+
+        state.matches = [match_ok, match_empty]
+
+        # Should not crash
+        result = stage.restore(state, mock_checkpoint, mock_config)
+
+        assert result is True
+        # Valid segments should still be restored
+        assert len(state.downloaded_segments) >= 1
+
+    @pytest.mark.fast
+    def test_restore_with_no_matching_files_on_disk(self, stage, mock_checkpoint, mock_config, tmp_path):
+        """Restore works when no segment files exist on disk (fresh start or files deleted)."""
+        mock_config.downloaded_videos_dir = str(tmp_path)
+        # Empty directory — no segment files
+
+        state = PipelineState()
+        state.downloaded_segments = []
+
+        result = stage.restore(state, mock_checkpoint, mock_config)
+
+        assert result is True
+        assert state.downloaded_segments == []
+
+    @pytest.mark.fast
+    def test_restore_retry_queue_from_checkpoint_data(self, stage, mock_checkpoint, tmp_path):
+        """restore() reads retry_queue from checkpoint.data and stores on state._restored_retry_queue."""
+        mock_config = MagicMock()
+        mock_config.downloaded_videos_dir = str(tmp_path)
+
+        # Simulate checkpoint.data with DOWNLOAD_SEGMENTS containing retry_queue
+        retry_queue_data = {
+            'items': [
+                {
+                    'video_id': 'restored_vid',
+                    'keyword': 'segment',
+                    'tier': 'segment',
+                    'error_message': 'HTTP 403',
+                    'retry_count': 1,
+                    'error_category': 'bot_detection',
+                    'escalation_tier': 3,
+                    'timestamp': 1700000000.0,
+                }
+            ],
+            'current_pass': 1,
+            'completed_ids': [],
+            'failed_ids': ['dead_vid'],
+            'total_added': 2,
+            'total_retried': 1,
+        }
+
+        # checkpoint.data.download_segments.retry_queue
+        cp_data = MagicMock()
+        ds_data = MagicMock()
+        ds_data.get.side_effect = lambda key, default=None: (
+            retry_queue_data if key == 'retry_queue' else default
+        )
+        cp_data.download_segments = ds_data
+        mock_checkpoint.data = cp_data
+
+        state = PipelineState()
+        state.downloaded_segments = []
+
+        result = stage.restore(state, mock_checkpoint, mock_config)
+
+        assert result is True
+        assert hasattr(state, '_restored_retry_queue')
+        assert state._restored_retry_queue == retry_queue_data
+
+    # ---- AC4: Checkpoint progress callback invoked with correct counts ----
+
+    @pytest.mark.fast
+    def test_checkpoint_progress_callback_counts(self, stage, tmp_path):
+        """Checkpoint progress callback receives correct (downloaded, total, retry_queue_size) counts."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        mock_downloader = MagicMock()
+        mock_downloader.retry_queue = RetryQueue(BatchRetryConfig(enabled=True))
+        mock_downloader.impersonation_manager = None
+        mock_downloader.circuit_breaker = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+        mock_downloader.download_config.bot_detection_tier_floor_threshold = 5
+        mock_downloader.download_config.bot_detection_abort_threshold = 0
+
+        stage.downloader = mock_downloader
+
+        # Two segments; first succeeds, second fails
+        seg1_file = tmp_path / "ok_vid_0_15.mp4"
+        segments = [
+            {'video_id': 'ok_vid', 'start': 0.0, 'end': 10.0},
+            {'video_id': 'fail_vid', 'start': 5.0, 'end': 15.0},
+        ]
+
+        captured_progress = []
+
+        def capture_progress(current, total, downloaded):
+            captured_progress.append({
+                'current': current,
+                'total': total,
+                'downloaded_count': len(downloaded),
+            })
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            call_count = [0]
+
+            def download_side_effect(urls):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    # First segment succeeds
+                    seg1_file.write_bytes(b'\x00' * 64)
+                else:
+                    # Second segment fails
+                    raise Exception("HTTP Error 403: Forbidden")
+
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = download_side_effect
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=capture_progress
+            )
+
+        # Progress callback should have been called at least once per segment
+        assert len(captured_progress) >= 2
+
+        # First call: 1 segment processed out of 2
+        assert captured_progress[0]['current'] == 1
+        assert captured_progress[0]['total'] == 2
+
+        # Last call: 2 segments processed out of 2
+        last = captured_progress[-1]
+        assert last['current'] == 2
+        assert last['total'] == 2
+
+    @pytest.mark.fast
+    def test_checkpoint_progress_includes_retry_queue_state(self):
+        """The checkpoint_progress closure includes retry_queue data when items exist."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        mock_checkpoint = MagicMock()
+        rq = RetryQueue(BatchRetryConfig(enabled=True))
+        rq.add(
+            video_id='queued_vid',
+            keyword='segment',
+            tier='segment',
+            error_message='403',
+            escalation_tier=2,
+        )
+
+        # Simulate the checkpoint_progress callback as defined in run()
+        class FakeDownloader:
+            retry_queue = rq
+
+        downloader = FakeDownloader()
+
+        def checkpoint_progress(current, total, downloaded):
+            checkpoint_data = {
+                'segment_count': len(downloaded),
+                'segments_completed': current,
+                'segments_total': total,
+                'in_progress': current < total,
+            }
+            if downloader and downloader.retry_queue:
+                rq_ref = downloader.retry_queue
+                if rq_ref.items or rq_ref._failed_ids:
+                    checkpoint_data['retry_queue'] = rq_ref.to_checkpoint_dict()
+            mock_checkpoint.save_intermediate('DOWNLOAD_SEGMENTS', checkpoint_data)
+
+        checkpoint_progress(1, 3, ['seg1'])
+
+        saved_data = mock_checkpoint.save_intermediate.call_args[0][1]
+        assert 'retry_queue' in saved_data
+        assert any(
+            item['video_id'] == 'queued_vid'
+            for item in saved_data['retry_queue']['items']
+        )
+        assert saved_data['retry_queue']['items'][0]['escalation_tier'] == 2
+
+    @pytest.mark.fast
+    def test_full_round_trip_save_restore_resume(self):
+        """Full round-trip: add items -> checkpoint -> restore -> verify tier preserved."""
+        from src.downloader import RetryQueue, BatchRetryConfig
+
+        # 1. Create queue with mixed tiers
+        rq = RetryQueue(BatchRetryConfig(enabled=True))
+        rq.add(
+            video_id='tier1_vid', keyword='s', tier='s',
+            error_message='err', escalation_tier=1, error_category='video_specific',
+        )
+        rq.add(
+            video_id='tier3_vid', keyword='s', tier='s',
+            error_message='403 Forbidden', escalation_tier=3, error_category='bot_detection',
+        )
+        rq.add(
+            video_id='tier4_vid', keyword='s', tier='s',
+            error_message='VPN needed', escalation_tier=4, error_category='network',
+        )
+        rq._failed_ids.add('dead_vid_not_in_queue')  # external permanent fail
+
+        # 2. Serialize to checkpoint
+        cp = rq.to_checkpoint_dict()
+
+        # 3. Restore into fresh queue
+        restored = RetryQueue(BatchRetryConfig(enabled=True))
+        restored.from_checkpoint_dict(cp)
+
+        # 4. Verify all tiers preserved
+        assert restored.items['tier1_vid'].escalation_tier == 1
+        assert restored.items['tier3_vid'].escalation_tier == 3
+        assert restored.items['tier4_vid'].escalation_tier == 4
+
+        # Verify categories preserved
+        assert restored.items['tier1_vid'].error_category == 'video_specific'
+        assert restored.items['tier3_vid'].error_category == 'bot_detection'
+        assert restored.items['tier4_vid'].error_category == 'network'
+
+        # Verify failed_ids preserved
+        assert 'dead_vid_not_in_queue' in restored._failed_ids
