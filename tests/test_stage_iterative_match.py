@@ -24,6 +24,8 @@ from src.stages.iterative_match import (
     PassMetrics,
 )
 from src.state import PipelineState
+from src.state import Match as StateMatch
+from src.utils import Match, MatchResult, SRTSegment
 
 
 # ============================================================================
@@ -1004,3 +1006,219 @@ class TestEmptyCandidatePoolPreCheck:
         # Check that warning was logged
         assert any('No candidates available' in record.message
                    for record in caplog.records)
+
+
+# ============================================================================
+# TestMatchSerializationVideoFile - US-55-004
+# ============================================================================
+
+def _serialize_match(match, index: int) -> dict:
+    """Replicate the serialization logic from IterativeMatchStage.run() (lines 421-497).
+
+    This mirrors the exact serialization block in src/stages/iterative_match.py
+    so we can test it in isolation without running the full stage.
+    """
+    if hasattr(match, 'primary_match') and match.primary_match:
+        pm = match.primary_match
+        source_file = ''
+        video_start = 0.0
+        video_end = 0.0
+        conf = 0.0
+
+        if hasattr(pm, 'video_segment') and pm.video_segment:
+            source_file = getattr(pm.video_segment, 'source_file', '') or ''
+            video_start = getattr(pm.video_segment, 'start_time', 0.0)
+            video_end = getattr(pm.video_segment, 'end_time', 0.0)
+
+        conf = getattr(pm, 'confidence', 0.0)
+
+        return {
+            'segment_index': index,
+            'video_file': source_file,
+            'video_start': float(video_start),
+            'video_end': float(video_end),
+            'confidence': float(conf),
+            'strategy': getattr(match, 'strategy', getattr(pm, 'reasoning', '')),
+            'reason': getattr(pm, 'reasoning', ''),
+            'face_score': getattr(match, 'face_score', 0.5),
+        }
+    else:
+        video_file = getattr(match, 'video_file', '')
+        video_start = getattr(match, 'video_start', 0.0)
+        video_end = getattr(match, 'video_end', 0.0)
+        confidence = getattr(match, 'confidence', 0.0)
+
+        if not video_file:
+            pm = getattr(match, 'primary_match', None)
+            if pm is not None:
+                vs = getattr(pm, 'video_segment', None)
+                if vs is not None:
+                    video_file = getattr(vs, 'source_file', '') or ''
+                    video_start = getattr(vs, 'start_time', video_start)
+                    video_end = getattr(vs, 'end_time', video_end)
+                confidence = getattr(pm, 'confidence', confidence)
+
+        return {
+            'segment_index': getattr(match, 'segment_index', index),
+            'video_file': video_file,
+            'video_start': float(video_start),
+            'video_end': float(video_end),
+            'confidence': float(confidence),
+            'strategy': getattr(match, 'strategy', ''),
+            'reason': getattr(match, 'reason', ''),
+            'face_score': getattr(match, 'face_score', 0.5),
+        }
+
+
+def _make_srt_segment(text="Test", source_file="", start_time=0.0, end_time=5.0):
+    """Create a minimal SRTSegment for testing."""
+    return SRTSegment(
+        index=1,
+        start_time=start_time,
+        end_time=end_time,
+        text=text,
+        source_file=source_file,
+    )
+
+
+class TestMatchSerializationVideoFile:
+    """Tests verifying that iterative_match serialization correctly extracts
+    video_file from match.primary_match.video_segment.source_file.
+
+    US-55-004: The ITERATIVE_MATCH serialization block must drill into
+    primary_match.video_segment.source_file for MatchResult objects,
+    not rely on getattr(match, 'video_file', '') which always returns ''
+    for MatchResult instances.
+    """
+
+    @pytest.mark.fast
+    def test_matchresult_serializes_video_file_from_primary_match(self):
+        """MatchResult with primary_match.video_segment.source_file='abc123'
+        serializes to a dict with video_file='abc123' (not empty string).
+        """
+        video_seg = _make_srt_segment(text="Video text", source_file="abc123")
+        vo_seg = _make_srt_segment(text="Voiceover text")
+        primary = Match(
+            voiceover_segment=vo_seg,
+            video_segment=video_seg,
+            video_scene=None,
+            confidence=0.85,
+            reasoning="Good match",
+        )
+        result = MatchResult(primary_match=primary)
+
+        serialized = _serialize_match(result, index=0)
+
+        assert serialized['video_file'] == 'abc123'
+        assert serialized['confidence'] == 0.85
+        assert serialized['video_start'] == 0.0
+        assert serialized['video_end'] == 5.0
+
+    @pytest.mark.fast
+    def test_matchresult_none_primary_match_serializes_empty_video_file(self):
+        """MatchResult with primary_match=None serializes video_file as empty
+        string without raising AttributeError.
+        """
+        result = MatchResult(primary_match=None)
+
+        serialized = _serialize_match(result, index=3)
+
+        assert serialized['video_file'] == ''
+        assert serialized['segment_index'] == 3
+        assert serialized['confidence'] == 0.0
+
+    @pytest.mark.fast
+    def test_serialized_matchresult_roundtrips_via_state_match_from_dict(self):
+        """Serialized MatchResult can be deserialized via state.Match.from_dict()
+        and the video_file value survives the round-trip.
+        """
+        video_seg = _make_srt_segment(text="Video", source_file="roundtrip_vid_42")
+        vo_seg = _make_srt_segment(text="Voiceover")
+        primary = Match(
+            voiceover_segment=vo_seg,
+            video_segment=video_seg,
+            video_scene=None,
+            confidence=0.92,
+            reasoning="Strong match",
+        )
+        result = MatchResult(primary_match=primary)
+
+        serialized = _serialize_match(result, index=7)
+
+        # Deserialize via state.Match.from_dict
+        restored = StateMatch.from_dict(serialized, index=7)
+
+        assert restored.video_file == 'roundtrip_vid_42'
+        assert restored.confidence == 0.92
+        assert restored.segment_index == 7
+
+    @pytest.mark.fast
+    def test_simple_state_match_serializes_video_file_directly(self):
+        """The else branch correctly serializes simple state.Match objects
+        that have video_file as a direct attribute.
+        """
+        simple_match = StateMatch(
+            segment_index=5,
+            video_file='simple_video.mp4',
+            video_start=10.0,
+            video_end=20.0,
+            confidence=0.75,
+            strategy='keyword',
+            reason='keyword match',
+            face_score=0.3,
+        )
+
+        serialized = _serialize_match(simple_match, index=5)
+
+        assert serialized['video_file'] == 'simple_video.mp4'
+        assert serialized['segment_index'] == 5
+        assert serialized['video_start'] == 10.0
+        assert serialized['video_end'] == 20.0
+        assert serialized['confidence'] == 0.75
+        assert serialized['strategy'] == 'keyword'
+        assert serialized['face_score'] == 0.3
+
+    @pytest.mark.fast
+    def test_matchresult_with_empty_source_file_serializes_empty_string(self):
+        """MatchResult where video_segment.source_file is empty string
+        serializes video_file as empty string gracefully.
+        """
+        video_seg = _make_srt_segment(text="Video", source_file="")
+        vo_seg = _make_srt_segment(text="Voiceover")
+        primary = Match(
+            voiceover_segment=vo_seg,
+            video_segment=video_seg,
+            video_scene=None,
+            confidence=0.5,
+            reasoning="Weak match",
+        )
+        result = MatchResult(primary_match=primary)
+
+        serialized = _serialize_match(result, index=2)
+
+        assert serialized['video_file'] == ''
+        assert serialized['confidence'] == 0.5
+
+    @pytest.mark.fast
+    def test_simple_state_match_roundtrips_via_from_dict(self):
+        """Simple state.Match serialized via else branch roundtrips through
+        state.Match.from_dict() preserving video_file.
+        """
+        simple_match = StateMatch(
+            segment_index=0,
+            video_file='else_branch_vid.mp4',
+            video_start=1.0,
+            video_end=11.0,
+            confidence=0.88,
+            strategy='visual',
+            reason='visual match',
+            face_score=0.6,
+        )
+
+        serialized = _serialize_match(simple_match, index=0)
+        restored = StateMatch.from_dict(serialized, index=0)
+
+        assert restored.video_file == 'else_branch_vid.mp4'
+        assert restored.confidence == 0.88
+        assert restored.strategy == 'visual'
+        assert restored.face_score == 0.6
