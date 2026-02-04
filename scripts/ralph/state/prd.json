@@ -105,7 +105,7 @@
             "id": "US-55-007",
             "title": "Add tests for EscalationManager circuit breaker wiring and tier floor propagation",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test class TestCircuitBreakerWiring in tests/test_escalation_manager.py verifying that after set_circuit_breaker() is called, get_escalation_args() returns max-tier args when circuit breaker is open",
                 "Add test that set_tier_floor() causes all subsequent get_escalation_args() calls for NEW keywords to start at the floor tier instead of Tier 1",
@@ -113,13 +113,13 @@
                 "Add test that when circuit_breaker is None (default, never wired), get_escalation_args() returns normal tier-based args without shortcutting",
                 "All new tests must be marked @pytest.mark.fast and pass independently"
             ],
-            "notes": "Tier: T2 (P2 bug coverage). Source files: src/downloader/escalation_manager.py:271 (set_tier_floor), src/downloader/escalation_manager.py:291-300 (set_circuit_breaker), src/downloader/escalation_manager.py:330 (shortcut to max tier logic). Issue 6 reports set_circuit_breaker() is never called from core.py so _circuit_breaker is always None and the shortcut logic never fires. Existing tests in tests/test_escalation_manager.py (75 markers) may partially cover this — new tests should specifically verify the circuit breaker integration path."
+            "notes": "Added TestCircuitBreakerWiring class with 5 tests: (1) CB open shortcuts to FULL_BYPASS, (2) tier floor new keywords start at floor, (3) existing keywords below floor elevated, (4) no CB means no shortcut, (5) closed CB means no shortcut. All @pytest.mark.fast."
         },
         {
             "id": "US-55-008",
             "title": "Add tests for MatchResult serialization round-trip in utils.py",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test class TestMatchResultRoundTrip in tests/test_utils.py (or create if needed) verifying MatchResult.to_dict() and from_dict() preserve all fields: primary_match, alternatives, secondary_matches, strategy_matches, has_gap, confidence_variance, matched_keywords",
                 "Add test that a MatchResult with empty alternatives/secondary_matches/strategy_matches serializes and deserializes correctly with empty lists",
@@ -127,13 +127,13 @@
                 "Add test that AlternativeMatch and StrategyMatch objects within alternatives/strategy_matches survive round-trip with correct diversity_score/strategy values",
                 "All new tests must be marked @pytest.mark.fast and pass independently"
             ],
-            "notes": "Tier: T2 (hardening). Source files: src/utils.py:506-518 (MatchResult dataclass), src/utils.py Match/AlternativeMatch/StrategyMatch/SRTSegment dataclasses. The match_result_factory fixture in tests/conftest.py creates MatchResult instances for testing. This story ensures the data structures used across MATCH, ITERATIVE_MATCH, and OUTPUT stages serialize consistently. Complements US-55-004 which focuses on the iterative_match serialization path specifically."
+            "notes": "COMPLETED. Added to_dict()/from_dict() methods to MatchResult, AlternativeMatch, Match, and StrategyMatch in src/utils.py. Added TestMatchResultRoundTrip class with 7 tests in tests/test_utils_simple.py: full round-trip preserving all fields, empty collections round-trip, nested video_segment.source_file preservation, AlternativeMatch diversity_score round-trip, StrategyMatch strategy field round-trip (all 4 strategies), JSON serializability, and voiceover segment preservation. All @pytest.mark.fast, all 87 tests in file pass."
         },
         {
             "id": "US-55-009",
             "title": "Add download_segments stall detection timeout test coverage",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add test class TestDownloadStallDetection in tests/test_stage_download_segments.py verifying that the ydl.download() call is wrapped in a timeout mechanism that raises after a configurable duration",
                 "Add test that when ydl.download() exceeds the stall timeout, the error is classified as 'timeout' by classify_error_category() and feeds into the retry/escalation logic",
@@ -141,7 +141,7 @@
                 "Add test that a download that completes within the timeout is not interrupted",
                 "All new tests must be marked @pytest.mark.fast and pass independently"
             ],
-            "notes": "Tier: T2 (P1 bug coverage). Source files: src/stages/download_segments.py:457 (socket_timeout setting), src/stages/download_segments.py:492 (ydl.download() call). Issue 1 describes that socket_timeout only covers HTTP socket timeouts, not ffmpeg post-processing or stream stalls. The subprocess-based stall detector in src/downloader/core.py handles this for CLI calls but download_segments bypasses it. Tests should mock ydl.download() to simulate a hanging call and verify timeout behavior."
+            "notes": "COMPLETED. Added TestDownloadStallDetection class with 8 tests in tests/test_stage_download_segments.py: stall timeout wraps ydl.download(), timeout classified as 'timeout' by classify_error_category(), timeout feeds into retry queue, timeout recorded in error_categories stats, socket_timeout set to configured value (default 30), socket_timeout distinct from stall timeout (not in ydl_opts), fast download not interrupted, moderate duration download not interrupted. All @pytest.mark.fast, all 8 pass."
         },
         {
             "id": "US-55-010",

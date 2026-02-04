@@ -1542,3 +1542,106 @@ class TestCreateWithMullvad:
             # Verify budget and strategy were passed
             assert manager._budget is mock_budget
             assert manager._strategy is mock_strategy
+
+
+# ---------------------------------------------------------------------------
+# US-55-007: Circuit breaker wiring and tier floor propagation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.fast
+class TestCircuitBreakerWiring:
+    """Test circuit breaker integration path and tier floor propagation.
+
+    Verifies that set_circuit_breaker() and set_tier_floor() correctly
+    influence get_escalation_args() behavior.
+    """
+
+    def test_circuit_breaker_open_shortcuts_to_full_bypass(self, imp_manager, ext_config):
+        """After set_circuit_breaker(), open CB causes get_escalation_args to return max-tier args."""
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+        manager = EscalationManager(imp_manager, ext_config)
+        cb = CircuitBreaker(CircuitBreakerConfig(enabled=True))
+
+        # Wire circuit breaker
+        manager.set_circuit_breaker(cb)
+
+        # Trip the circuit breaker (make it open)
+        for _ in range(cb.config.consecutive_failures_threshold):
+            cb.record_failure()
+        assert cb.is_open, "Circuit breaker should be open after threshold failures"
+
+        # get_escalation_args should shortcut to FULL_BYPASS for a keyword at Tier 1
+        result = manager.get_escalation_args("test_keyword")
+        assert result.tier == EscalationTier.FULL_BYPASS
+        assert result.rotate_cookies is True
+        # Should also have extractor args (Tier 2+)
+        assert any("--extractor-args" in arg for arg in result.args)
+
+    def test_tier_floor_new_keywords_start_at_floor(self, imp_manager, ext_config):
+        """set_tier_floor() causes new keywords to start at floor tier instead of Tier 1."""
+        manager = EscalationManager(imp_manager, ext_config)
+
+        # Set tier floor to EXTRACTOR_ARGS (Tier 2)
+        manager.set_tier_floor(EscalationTier.EXTRACTOR_ARGS)
+
+        # A brand new keyword should start at Tier 2
+        result = manager.get_escalation_args("new_keyword_1")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+        # Should have extractor args since it's Tier 2
+        assert any("--extractor-args" in arg for arg in result.args)
+
+        # Another new keyword also starts at floor
+        result2 = manager.get_escalation_args("new_keyword_2")
+        assert result2.tier == EscalationTier.EXTRACTOR_ARGS
+
+    def test_existing_keywords_below_floor_elevated(self, imp_manager, ext_config):
+        """Existing keywords below tier floor are elevated to floor on next get_escalation_args."""
+        manager = EscalationManager(imp_manager, ext_config)
+
+        # Create a keyword at Tier 1 (default)
+        result1 = manager.get_escalation_args("existing_keyword")
+        assert result1.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # Now set tier floor to EXTRACTOR_ARGS (Tier 2)
+        manager.set_tier_floor(EscalationTier.EXTRACTOR_ARGS)
+
+        # Existing keyword should now be elevated to floor tier
+        result2 = manager.get_escalation_args("existing_keyword")
+        assert result2.tier == EscalationTier.EXTRACTOR_ARGS
+        assert any("--extractor-args" in arg for arg in result2.args)
+
+    def test_no_circuit_breaker_no_shortcut(self, imp_manager, ext_config):
+        """When circuit_breaker is None (default), get_escalation_args returns normal tier-based args."""
+        manager = EscalationManager(imp_manager, ext_config)
+
+        # No circuit breaker set - _circuit_breaker is None
+        assert manager._circuit_breaker is None
+
+        # Should get normal Tier 1 args
+        result = manager.get_escalation_args("keyword_a")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+        assert result.rotate_cookies is False
+
+        # Escalate to Tier 2 via failures
+        manager.record_failure("keyword_a")
+        manager.record_failure("keyword_a")
+        result2 = manager.get_escalation_args("keyword_a")
+        assert result2.tier == EscalationTier.EXTRACTOR_ARGS
+        # No shortcut happened - normal progression
+        assert result2.rotate_cookies is False
+
+    def test_circuit_breaker_closed_no_shortcut(self, imp_manager, ext_config):
+        """When circuit breaker is wired but closed, no shortcut occurs."""
+        from src.downloader.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+        manager = EscalationManager(imp_manager, ext_config)
+        cb = CircuitBreaker(CircuitBreakerConfig(enabled=True))
+
+        manager.set_circuit_breaker(cb)
+        assert not cb.is_open, "Circuit breaker should be closed by default"
+
+        # Should get normal Tier 1 args (no shortcut)
+        result = manager.get_escalation_args("keyword_b")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+        assert result.rotate_cookies is False

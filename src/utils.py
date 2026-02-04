@@ -473,6 +473,20 @@ class Match:
             'clip_reuse_count': int(self.clip_reuse_count)
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "Match":
+        return cls(
+            voiceover_segment=SRTSegment.from_dict(data['voiceover_segment']),
+            video_segment=SRTSegment.from_dict(data['video_segment']),
+            video_scene=SceneInfo.from_dict(data['video_scene']) if data.get('video_scene') else None,
+            confidence=float(data.get('confidence', 0.0)),
+            reasoning=data.get('reasoning', ''),
+            is_keyword_match=bool(data.get('is_keyword_match', False)),
+            is_visual_match=bool(data.get('is_visual_match', False)),
+            embedding_similarity=float(data.get('embedding_similarity', 0.0)),
+            clip_reuse_count=int(data.get('clip_reuse_count', 0))
+        )
+
 
 @dataclass
 class AlternativeMatch:
@@ -482,6 +496,25 @@ class AlternativeMatch:
     confidence: float
     reasoning: str
     diversity_score: float = 0.0  # Source diversity score (0.0-1.0) for V4-V6 tracks
+
+    def to_dict(self) -> dict:
+        return {
+            'video_segment': self.video_segment.to_dict(),
+            'video_scene': self.video_scene.to_dict() if self.video_scene else None,
+            'confidence': float(self.confidence),
+            'reasoning': self.reasoning,
+            'diversity_score': float(self.diversity_score)
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AlternativeMatch":
+        return cls(
+            video_segment=SRTSegment.from_dict(data['video_segment']),
+            video_scene=SceneInfo.from_dict(data['video_scene']) if data.get('video_scene') else None,
+            confidence=float(data.get('confidence', 0.0)),
+            reasoning=data.get('reasoning', ''),
+            diversity_score=float(data.get('diversity_score', 0.0))
+        )
 
 
 @dataclass
@@ -497,10 +530,20 @@ class StrategyMatch:
         return {
             'video_segment': self.video_segment.to_dict(),
             'video_scene': self.video_scene.to_dict() if self.video_scene else None,
-            'confidence': self.confidence,
+            'confidence': float(self.confidence),
             'reasoning': self.reasoning,
             'strategy': self.strategy
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StrategyMatch":
+        return cls(
+            video_segment=SRTSegment.from_dict(data['video_segment']),
+            video_scene=SceneInfo.from_dict(data['video_scene']) if data.get('video_scene') else None,
+            confidence=float(data.get('confidence', 0.0)),
+            reasoning=data.get('reasoning', ''),
+            strategy=data.get('strategy', '')
+        )
 
 
 @dataclass
@@ -515,6 +558,33 @@ class MatchResult:
     confidence_variance: float = 0.0  # Std dev of top-N candidate similarities (high variance = uncertain match)
     matched_keywords: List[str] = field(default_factory=list)  # Common keywords between voiceover and video transcript
     confidence_breakdown: List[Dict[str, Any]] = field(default_factory=list)  # Audit trail: [{component, adjustment, reason}]
+
+    def to_dict(self) -> dict:
+        return {
+            'primary_match': self.primary_match.to_dict(),
+            'alternatives': [a.to_dict() for a in self.alternatives],
+            'secondary_matches': [a.to_dict() for a in self.secondary_matches],
+            'strategy_matches': [s.to_dict() for s in self.strategy_matches],
+            'has_gap': self.has_gap,
+            'gap_reason': self.gap_reason,
+            'confidence_variance': float(self.confidence_variance),
+            'matched_keywords': list(self.matched_keywords),
+            'confidence_breakdown': list(self.confidence_breakdown)
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MatchResult":
+        return cls(
+            primary_match=Match.from_dict(data['primary_match']),
+            alternatives=[AlternativeMatch.from_dict(a) for a in data.get('alternatives', [])],
+            secondary_matches=[AlternativeMatch.from_dict(a) for a in data.get('secondary_matches', [])],
+            strategy_matches=[StrategyMatch.from_dict(s) for s in data.get('strategy_matches', [])],
+            has_gap=bool(data.get('has_gap', False)),
+            gap_reason=data.get('gap_reason', ''),
+            confidence_variance=float(data.get('confidence_variance', 0.0)),
+            matched_keywords=list(data.get('matched_keywords', [])),
+            confidence_breakdown=list(data.get('confidence_breakdown', []))
+        )
 
 
 @dataclass
