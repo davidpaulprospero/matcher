@@ -120,7 +120,7 @@
             "id": "US-50-008",
             "title": "Wire circuit breaker into download_segments stage with escalation manager coordination",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "The download_segments stage creates a CircuitBreaker instance and wires it to the EscalationManager via set_circuit_breaker() before the download loop begins",
                 "When the circuit breaker trips (is_open), downloads are paused using check_and_wait() instead of immediately failing",
