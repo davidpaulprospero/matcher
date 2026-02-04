@@ -2,6 +2,7 @@
 Tests for per-download progress hooks in DownloadVideoSegmentsStage.
 
 US-51-006: Add per-download progress hooks for segment download observability.
+US-61-009: Add yt-dlp progress parsing for real-time download progress callback.
 
 Verifies:
 - Progress hook callback is invoked with expected status values
@@ -9,6 +10,7 @@ Verifies:
 - Progress hook does NOT log for fast downloads (<30s)
 - Progress hook logs file size and time on 'finished' status
 - Progress data is accumulated into stats dict for stage metrics
+- yt-dlp progress lines are correctly parsed for percent/bytes/speed
 """
 
 import logging
@@ -17,6 +19,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.stages.download_segments import DownloadVideoSegmentsStage, SegmentDownloadStats
+from src.downloader.types import (
+    SegmentDownloadProgress,
+    parse_ytdlp_progress,
+    _convert_size_to_bytes,
+    _parse_eta_to_seconds,
+)
 
 
 pytestmark = [pytest.mark.fast, pytest.mark.unit]
@@ -330,3 +338,188 @@ class TestProgressHookInYdlOpts:
         stats = SegmentDownloadStats()
         hook = DownloadVideoSegmentsStage._make_progress_hook('test', stats)
         assert callable(hook)
+
+
+# ============================================================================
+# US-61-009: yt-dlp Progress Parsing Tests
+# ============================================================================
+
+class TestParseYtdlpProgress:
+    """Tests for yt-dlp progress line parsing (US-61-009)."""
+
+    def test_parse_basic_progress_line(self):
+        """Test parsing a standard yt-dlp progress line."""
+        line = "[download]  50.0% of 10.00MiB at  5.00MiB/s ETA 00:01"
+        result = parse_ytdlp_progress(line, "abc123")
+
+        assert result is not None
+        assert result.video_id == "abc123"
+        assert result.percent == 50.0
+        assert result.speed == 5.0 * 1024 * 1024  # 5 MiB/s in bytes
+        assert result.eta_seconds == 1.0
+
+    def test_parse_progress_with_kib(self):
+        """Test parsing progress with KiB units."""
+        line = "[download]  25.5% of 512.00KiB at  128.00KiB/s ETA 00:03"
+        result = parse_ytdlp_progress(line, "video1")
+
+        assert result is not None
+        assert result.percent == 25.5
+        assert result.bytes_downloaded == int(512 * 1024 * 0.255)
+        assert result.speed == 128.0 * 1024
+
+    def test_parse_progress_with_gib(self):
+        """Test parsing progress with GiB units."""
+        line = "[download]  10.0% of 1.50GiB at  10.00MiB/s ETA 02:18:00"
+        result = parse_ytdlp_progress(line, "large_video")
+
+        assert result is not None
+        assert result.percent == 10.0
+        assert result.eta_seconds == 2 * 3600 + 18 * 60  # 2h 18m
+
+    def test_parse_progress_without_eta(self):
+        """Test parsing progress line without ETA."""
+        line = "[download]  75.0% of 20.00MiB at  2.50MiB/s"
+        result = parse_ytdlp_progress(line, "video2")
+
+        assert result is not None
+        assert result.percent == 75.0
+        assert result.eta_seconds is None
+
+    def test_parse_progress_with_approximate_size(self):
+        """Test parsing progress with ~ approximate size indicator."""
+        line = "[download]  30.0% of ~15.00MiB at  3.00MiB/s ETA 00:05"
+        result = parse_ytdlp_progress(line, "video3")
+
+        assert result is not None
+        assert result.percent == 30.0
+
+    def test_parse_non_progress_line_returns_none(self):
+        """Test that non-progress lines return None."""
+        lines = [
+            "[youtube] Extracting URL: https://youtube.com/watch?v=abc123",
+            "[info] Downloading 1 format(s)",
+            "ERROR: Video unavailable",
+            "",
+            "Some random text",
+        ]
+        for line in lines:
+            assert parse_ytdlp_progress(line, "video") is None
+
+    def test_parse_progress_preserves_video_id(self):
+        """Test that the video_id is correctly set in the result."""
+        line = "[download]  99.9% of 5.00MiB at  1.00MiB/s ETA 00:00"
+        result = parse_ytdlp_progress(line, "my-special-video-id")
+
+        assert result is not None
+        assert result.video_id == "my-special-video-id"
+
+
+class TestConvertSizeToBytes:
+    """Tests for size conversion utility (US-61-009)."""
+
+    def test_convert_bytes(self):
+        """Test converting raw bytes."""
+        assert _convert_size_to_bytes(100.0, "B") == 100
+
+    def test_convert_kib(self):
+        """Test converting KiB to bytes."""
+        assert _convert_size_to_bytes(1.0, "KiB") == 1024
+        assert _convert_size_to_bytes(1.0, "KB") == 1024
+
+    def test_convert_mib(self):
+        """Test converting MiB to bytes."""
+        assert _convert_size_to_bytes(1.0, "MiB") == 1024 * 1024
+        assert _convert_size_to_bytes(1.0, "MB") == 1024 * 1024
+
+    def test_convert_gib(self):
+        """Test converting GiB to bytes."""
+        assert _convert_size_to_bytes(1.0, "GiB") == 1024 * 1024 * 1024
+        assert _convert_size_to_bytes(1.0, "GB") == 1024 * 1024 * 1024
+
+
+class TestParseEtaToSeconds:
+    """Tests for ETA string parsing (US-61-009)."""
+
+    def test_parse_mm_ss(self):
+        """Test parsing MM:SS format."""
+        assert _parse_eta_to_seconds("01:30") == 90
+
+    def test_parse_hh_mm_ss(self):
+        """Test parsing HH:MM:SS format."""
+        assert _parse_eta_to_seconds("01:30:45") == 5445
+
+    def test_parse_empty_string(self):
+        """Test parsing empty string returns None."""
+        assert _parse_eta_to_seconds("") is None
+
+    def test_parse_none(self):
+        """Test parsing None returns None."""
+        assert _parse_eta_to_seconds(None) is None
+
+
+class TestSegmentDownloadProgressDataclass:
+    """Tests for SegmentDownloadProgress dataclass (US-61-009)."""
+
+    def test_create_with_all_fields(self):
+        """Test creating a progress object with all fields."""
+        progress = SegmentDownloadProgress(
+            video_id="test123",
+            percent=45.5,
+            bytes_downloaded=1024000,
+            speed=512000.0,
+            eta_seconds=10.0
+        )
+        assert progress.video_id == "test123"
+        assert progress.percent == 45.5
+        assert progress.bytes_downloaded == 1024000
+        assert progress.speed == 512000.0
+        assert progress.eta_seconds == 10.0
+
+    def test_create_with_optional_eta_none(self):
+        """Test creating a progress object without ETA."""
+        progress = SegmentDownloadProgress(
+            video_id="test456",
+            percent=80.0,
+            bytes_downloaded=2048000,
+            speed=1024000.0
+        )
+        assert progress.eta_seconds is None
+
+
+class TestProgressCallbackIntegration:
+    """Integration tests for progress callback (US-61-009)."""
+
+    def test_progress_callback_receives_values(self):
+        """Test that progress callback receives expected values during simulated download."""
+        # Simulate yt-dlp progress output
+        progress_lines = [
+            "[download]  10.0% of 100.00MiB at  10.00MiB/s ETA 00:09",
+            "[download]  50.0% of 100.00MiB at  10.00MiB/s ETA 00:05",
+            "[download] 100.0% of 100.00MiB at  10.00MiB/s ETA 00:00",
+        ]
+
+        received_progress = []
+
+        def progress_callback(progress: SegmentDownloadProgress):
+            received_progress.append(progress)
+
+        # Parse each line and call callback
+        video_id = "integration_test_video"
+        for line in progress_lines:
+            progress = parse_ytdlp_progress(line, video_id)
+            if progress:
+                progress_callback(progress)
+
+        # Verify we received all progress updates
+        assert len(received_progress) == 3
+
+        # Verify first progress (10%)
+        assert received_progress[0].percent == 10.0
+        assert received_progress[0].video_id == video_id
+
+        # Verify middle progress (50%)
+        assert received_progress[1].percent == 50.0
+
+        # Verify final progress (100%)
+        assert received_progress[2].percent == 100.0

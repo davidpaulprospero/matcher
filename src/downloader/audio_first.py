@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from ..state import AudioDownload
-from .types import MergedSegment, DownloadedSegment
+from .types import MergedSegment, DownloadedSegment, SegmentDownloadProgress, parse_ytdlp_progress
 from .cookie_rotator import CookieRotator
 from .impersonation import ImpersonationManager
 from .escalation_manager import EscalationManager, EscalationResult, is_escalation_trigger
@@ -432,7 +432,8 @@ class AudioFirstPipeline:
         self,
         merged_segments: List[MergedSegment],
         output_dir: Path,
-        progress_callback: Optional[Callable[[int, int, List['DownloadedSegment']], None]] = None
+        progress_callback: Optional[Callable[[int, int, List['DownloadedSegment']], None]] = None,
+        segment_progress_callback: Optional[Callable[[SegmentDownloadProgress], None]] = None
     ) -> List[DownloadedSegment]:
         """
         Download video segments using --download-sections.
@@ -446,6 +447,8 @@ class AudioFirstPipeline:
             merged_segments: List of merged segments with buffer applied
             output_dir: Base output directory
             progress_callback: Optional callback(current, total, segments) for progress/checkpointing
+            segment_progress_callback: Optional callback for real-time download progress
+                (percent, bytes, speed) per video segment. Called with SegmentDownloadProgress.
 
         Returns:
             List of DownloadedSegment records with timing info
@@ -599,7 +602,8 @@ class AudioFirstPipeline:
                     )
 
                     stdout, stderr, timeout_type = self._wait_for_process_with_progress(
-                        process, stall_timeout, max_timeout, video_id
+                        process, stall_timeout, max_timeout, video_id,
+                        segment_progress_callback=segment_progress_callback
                     )
                     seg_dl_elapsed = time.time() - seg_dl_start
 
@@ -1017,7 +1021,8 @@ class AudioFirstPipeline:
         process: subprocess.Popen,
         stall_timeout: int,
         max_timeout: int,
-        video_id: str
+        video_id: str,
+        segment_progress_callback: Optional[Callable[[SegmentDownloadProgress], None]] = None
     ) -> Tuple[str, str, Optional[str]]:
         """Wait for process with progress-aware stall detection.
 
@@ -1034,6 +1039,7 @@ class AudioFirstPipeline:
             stall_timeout: Seconds of no output before declaring stall
             max_timeout: Absolute maximum seconds to wait
             video_id: For logging context
+            segment_progress_callback: Optional callback for real-time progress updates
 
         Returns:
             Tuple of (stdout, stderr, timeout_type) where timeout_type is
@@ -1056,6 +1062,14 @@ class AudioFirstPipeline:
                     with lock:
                         stderr_lines.append(line)
                         last_activity = time.time()
+                    # Parse and report progress if callback provided
+                    if segment_progress_callback:
+                        try:
+                            progress = parse_ytdlp_progress(line, video_id)
+                            if progress:
+                                segment_progress_callback(progress)
+                        except Exception:
+                            pass  # Don't let callback errors break download
             except (OSError, ValueError, UnicodeDecodeError):
                 pass
             finally:

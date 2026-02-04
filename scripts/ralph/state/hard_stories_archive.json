@@ -1,6 +1,6 @@
 ﻿{
     "statistics":  {
-                       "totalHardStories":  2,
+                       "totalHardStories":  3,
                        "abandoned":  0,
                        "successfullyDecomposed":  0,
                        "stillHardAfterDecomposition":  0
@@ -76,6 +76,42 @@
                         "focusArea":  "transcription",
                         "sprintNumbers":  [
                                               60
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Add cookie rotation on caption 403 errors",
+                        "firstFailedAt":  "2026-02-05T07:36:22.6493317+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T07:36:22.6493317+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T07:27:37.9560037+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T07:31:59.8779787+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T07:36:22.6458309+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-61-008",
+                        "focusArea":  "download",
+                        "sprintNumbers":  [
+                                              61
                                           ],
                         "failureCount":  1
                     }

@@ -182,3 +182,98 @@ class DownloadedSegment:
     def get_offset(self, match_time: float) -> float:
         """Get offset within this file for a match timestamp."""
         return match_time - self.original_start
+
+
+@dataclass
+class SegmentDownloadProgress:
+    """Real-time download progress for a video segment.
+
+    Parsed from yt-dlp progress output during segment download.
+    Provides percent complete, bytes downloaded, and download speed.
+
+    Attributes:
+        video_id: YouTube video ID being downloaded.
+        percent: Download progress as percentage (0.0 to 100.0).
+        bytes_downloaded: Total bytes downloaded so far.
+        speed: Download speed in bytes per second (may be 0 if unknown).
+        eta_seconds: Estimated seconds remaining (may be None if unknown).
+    """
+    video_id: str
+    percent: float
+    bytes_downloaded: int
+    speed: float
+    eta_seconds: Optional[float] = None
+
+
+import re
+
+# Pre-compiled regex for yt-dlp progress parsing
+# Matches lines like: [download]  50.0% of 10.00MiB at  5.00MiB/s ETA 00:01
+_YTDLP_PROGRESS_PATTERN = re.compile(
+    r'\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\d+\.?\d*)(Ki?B|Mi?B|Gi?B|B)\s+'
+    r'at\s+(\d+\.?\d*)(Ki?B|Mi?B|Gi?B|B)/s(?:\s+ETA\s+(\d+:\d+(?::\d+)?))?',
+    re.IGNORECASE
+)
+
+
+def _convert_size_to_bytes(value: float, unit: str) -> int:
+    """Convert size value with unit to bytes."""
+    unit_lower = unit.lower()
+    if unit_lower in ('kib', 'kb'):
+        return int(value * 1024)
+    elif unit_lower in ('mib', 'mb'):
+        return int(value * 1024 * 1024)
+    elif unit_lower in ('gib', 'gb'):
+        return int(value * 1024 * 1024 * 1024)
+    return int(value)
+
+
+def _parse_eta_to_seconds(eta_str: str) -> Optional[float]:
+    """Parse ETA string (HH:MM:SS or MM:SS) to seconds."""
+    if not eta_str:
+        return None
+    parts = eta_str.split(':')
+    try:
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except ValueError:
+        pass
+    return None
+
+
+def parse_ytdlp_progress(line: str, video_id: str) -> Optional[SegmentDownloadProgress]:
+    """Parse a yt-dlp progress line into SegmentDownloadProgress.
+
+    Args:
+        line: A line from yt-dlp stderr output.
+        video_id: The video ID being downloaded.
+
+    Returns:
+        SegmentDownloadProgress if line is a progress line, None otherwise.
+    """
+    match = _YTDLP_PROGRESS_PATTERN.search(line)
+    if not match:
+        return None
+
+    percent = float(match.group(1))
+    size_value = float(match.group(2))
+    size_unit = match.group(3)
+    speed_value = float(match.group(4))
+    speed_unit = match.group(5)
+    eta_str = match.group(6)
+
+    # Calculate bytes downloaded from percent and total size
+    total_bytes = _convert_size_to_bytes(size_value, size_unit)
+    bytes_downloaded = int(total_bytes * percent / 100.0) if percent > 0 else 0
+    speed = _convert_size_to_bytes(speed_value, speed_unit)
+    eta_seconds = _parse_eta_to_seconds(eta_str) if eta_str else None
+
+    return SegmentDownloadProgress(
+        video_id=video_id,
+        percent=percent,
+        bytes_downloaded=bytes_downloaded,
+        speed=float(speed),
+        eta_seconds=eta_seconds
+    )

@@ -468,3 +468,63 @@ class RateLimitBudget:
             f"Budget reset on IP change: rotations {old_rotations}→0, "
             f"backoff {old_backoff:.1f}s→0s (VPN rotations: {self.vpn_switches_used})"
         )
+
+    def budget_summary(self) -> str:
+        """Get a formatted budget summary string for logging.
+
+        Returns a human-readable summary showing:
+        - Rotations used vs max with percentage
+        - VPN switches used vs max with percentage
+        - Backoff time spent vs max with percentage
+        - Keywords that triggered rate limit events
+
+        Returns:
+            Formatted summary string suitable for logging.
+        """
+        parts = []
+
+        # Rotations (cookie rotations) - only show if any were used
+        if self.rotations_used > 0:
+            if self.max_rotations > 0:
+                rotation_pct = (self.rotations_used / self.max_rotations) * 100
+                parts.append(
+                    f"rotations {self.rotations_used}/{self.max_rotations} ({rotation_pct:.0f}%)"
+                )
+            else:
+                parts.append(f"rotations {self.rotations_used}/unlimited")
+
+        # VPN switches - only show if any were used
+        if self.vpn_switches_used > 0:
+            if self.max_vpn_switches > 0:
+                vpn_pct = (self.vpn_switches_used / self.max_vpn_switches) * 100
+                parts.append(
+                    f"VPN switches {self.vpn_switches_used}/{self.max_vpn_switches} ({vpn_pct:.0f}%)"
+                )
+            else:
+                parts.append(f"VPN switches {self.vpn_switches_used}/unlimited")
+
+        # Backoff time - only show if any time was spent
+        if self.backoff_time_spent > 0:
+            if self.max_backoff_time > 0:
+                backoff_pct = (self.backoff_time_spent / self.max_backoff_time) * 100
+                parts.append(
+                    f"backoff {self.backoff_time_spent:.0f}s/{self.max_backoff_time:.0f}s ({backoff_pct:.0f}%)"
+                )
+            else:
+                parts.append(f"backoff {self.backoff_time_spent:.0f}s/unlimited")
+
+        # Build summary string
+        if parts:
+            summary = f"Budget used: {', '.join(parts)}"
+        else:
+            summary = "Budget used: none"
+
+        # Add keywords that triggered rate limit events
+        if self.keywords_rate_limited:
+            # Show up to 5 keywords to keep log readable
+            keywords_display = self.keywords_rate_limited[:5]
+            if len(self.keywords_rate_limited) > 5:
+                keywords_display.append(f"... +{len(self.keywords_rate_limited) - 5} more")
+            summary += f" | Rate-limited keywords: {', '.join(keywords_display)}"
+
+        return summary

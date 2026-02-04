@@ -3333,6 +3333,14 @@ class CaptionFetcher:
                         logger.info(f"Caption {operation}: Cookie rotated after rate limit, retrying immediately")
                         wait_time = 1.0  # Shorter wait after cookie rotation
 
+                # US-61-008: Cookie rotation on 403 errors (not just RATE_LIMIT)
+                # 403s are categorized as NETWORK but should trigger cookie rotation
+                error_str = str(e) if hasattr(e, '__str__') else e.reason if hasattr(e, 'reason') else ''
+                if '403' in error_str or 'forbidden' in error_str.lower():
+                    if self._handle_cookie_rotation(error_str):
+                        logger.info(f"Caption fetch rotating cookie after 403")
+                        wait_time = 1.0  # Shorter wait after cookie rotation
+
                 logger.warning(
                     f"Caption {operation} failed for video {video_id}: "
                     f"{category.name} error, retry {attempts_for_category}/{budget}. "
