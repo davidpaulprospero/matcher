@@ -97,8 +97,8 @@
                 "create_timeline() calls validate_media_paths() at the top and logs a summary before proceeding",
                 "Add test with mock match results containing mixed valid/invalid paths, verify summary accuracy"
             ],
-            "passes": false,
-            "notes": "Tier: enhancement (medium risk). Source files: src/otio/timeline.py:44-134 (individual validation functions _is_audio_only, _is_non_media, _has_problematic_path, _is_missing_file called per-clip at lines 830-832, 931, 1029, 1139). Currently each clip is validated inline during track building — failures create gaps mid-timeline with no upfront summary. The pre-flight scan should use the same validation functions but collect all issues first, then log a table: 'Media Validation: 95 valid, 3 audio-only (S012,S045,S099), 1 missing (S023)'."
+            "passes": true,
+            "notes": "Implemented validate_media_paths() in src/otio/timeline.py. Scans all match types (primary, alternatives, secondary, strategy) using existing _is_audio_only, _has_problematic_path, _is_non_media, _is_missing_file. Returns summary dict with counts by category and affected segment labels (S000, S001-alt0, etc.). create_timeline() calls it at the top before path normalization and logs a human-readable summary via _log_media_validation_summary(). 13 tests in tests/test_preflight_media_validation.py cover all categories, mixed issues, alt/sec/strat matches, downloaded_segments resolution, empty inputs."
         },
         {
             "id": "US-56-007",
