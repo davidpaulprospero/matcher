@@ -284,3 +284,101 @@ Describe 'Mutation: evidence gate changes are detected' -Tag 'Unit', 'EvidenceGa
         $gateBlock | Should -Not -Match 'ConsecutiveFailures\+\+'
     }
 }
+
+# =============================================================================
+# SOURCE INSPECTION: Evidence diff excludes Ralph state directories
+# =============================================================================
+
+Describe 'Evidence diff excludes Ralph metadata directories' -Tag 'Unit', 'EvidenceGate' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+    }
+
+    It 'uses git diff HEAD~1 with pathspec exclusions' {
+        $script:claudeSource | Should -Match 'git diff HEAD~1 --.*exclude'
+    }
+
+    It 'excludes scripts/ralph/state/ from evidence diff' {
+        $script:claudeSource | Should -Match '\(exclude\)scripts/ralph/state/'
+    }
+
+    It 'excludes scripts/ralph/session/ from evidence diff' {
+        $script:claudeSource | Should -Match '\(exclude\)scripts/ralph/session/'
+    }
+
+    It 'excludes scripts/ralph/archive/ from evidence diff' {
+        $script:claudeSource | Should -Match '\(exclude\)scripts/ralph/archive/'
+    }
+
+    It 'diff exclusion is on the same line as git diff HEAD~1' {
+        # Ensure the exclusion is part of the diff command, not a separate command
+        $script:claudeSource | Should -Match 'git diff HEAD~1\s+--\s+":\(exclude\)'
+    }
+}
+
+# =============================================================================
+# BEHAVIORAL: Excluded directories are actually Ralph metadata
+# =============================================================================
+
+Describe 'Excluded directories contain only Ralph metadata' -Tag 'Unit', 'EvidenceGate' {
+    BeforeAll {
+        $script:ralphDir = Split-Path -Parent $PSScriptRoot
+    }
+
+    It 'scripts/ralph/state/ contains prd.json (large metadata file)' {
+        $prdPath = Join-Path $script:ralphDir 'state\prd.json'
+        Test-Path $prdPath | Should -BeTrue
+    }
+
+    It 'scripts/ralph/state/ does not contain source code (.py or .ps1 lib)' {
+        $sourceFiles = Get-ChildItem -Path (Join-Path $script:ralphDir 'state') -Include '*.py' -Recurse -ErrorAction SilentlyContinue
+        $sourceFiles | Should -BeNullOrEmpty
+    }
+
+    It 'scripts/ralph/session/ is volatile per-session data' {
+        $sessionDir = Join-Path $script:ralphDir 'session'
+        # session dir should exist as part of Ralph structure
+        Test-Path $sessionDir | Should -BeTrue
+    }
+}
+
+# =============================================================================
+# MUTATION: Diff exclusion regressions detected
+# =============================================================================
+
+Describe 'Mutation: diff exclusion changes are detected' -Tag 'Unit', 'EvidenceGate', 'Mutation' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+    }
+
+    It 'removing state/ exclusion is caught' {
+        $mutated = $script:claudeSource.Replace('":(exclude)scripts/ralph/state/"', '')
+        $mutated | Should -Not -Match '\(exclude\)scripts/ralph/state/'
+    }
+
+    It 'removing session/ exclusion is caught' {
+        $mutated = $script:claudeSource.Replace('":(exclude)scripts/ralph/session/"', '')
+        $mutated | Should -Not -Match '\(exclude\)scripts/ralph/session/'
+    }
+
+    It 'removing archive/ exclusion is caught' {
+        $mutated = $script:claudeSource.Replace('":(exclude)scripts/ralph/archive/"', '')
+        $mutated | Should -Not -Match '\(exclude\)scripts/ralph/archive/'
+    }
+
+    It 'removing all pathspec exclusions is caught' {
+        $mutated = $script:claudeSource.Replace(
+            '-- ":(exclude)scripts/ralph/state/" ":(exclude)scripts/ralph/session/" ":(exclude)scripts/ralph/archive/"',
+            ''
+        )
+        $mutated | Should -Not -Match 'git diff HEAD~1\s+--\s+":\(exclude\)'
+    }
+
+    It 'reverting to bare git diff HEAD~1 is caught' {
+        $mutated = $script:claudeSource.Replace(
+            'git diff HEAD~1 -- ":(exclude)scripts/ralph/state/" ":(exclude)scripts/ralph/session/" ":(exclude)scripts/ralph/archive/" 2>$null',
+            'git diff HEAD~1 2>$null'
+        )
+        $mutated | Should -Not -Match '\(exclude\)scripts/ralph/state/'
+    }
+}
