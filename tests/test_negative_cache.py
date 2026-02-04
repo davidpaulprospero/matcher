@@ -1,11 +1,17 @@
 """
-Tests for US-59-003: Integrate negative cache (store_unavailable) into caption fetcher.
+Tests for US-59-003 and US-60-004: Negative cache integration and configurable TTL.
 
-Verifies that:
+US-59-003 verifies:
 1. When fetch_captions determines no captions exist, store_unavailable is called
 2. A second fetch attempt for the same video hits the negative cache (zero yt-dlp calls)
 3. Negative cache entries respect staleness policy
 4. Integration works with both single-video and batch fetch paths
+
+US-60-004 verifies:
+1. store_unavailable() persists negative results correctly
+2. negative_cache_ttl_hours parameter configures TTL (default 1 hour)
+3. is_caption_unavailable() respects TTL and returns False for expired entries
+4. Negative cache check short-circuits fetches for known captionless videos
 """
 
 import pytest
@@ -38,6 +44,7 @@ class TestNegativeCacheIntegration:
         config.cache_captions = enabled
         config.cache_validation = validation_mode
         config.cache_validation_tolerance = 0.2
+        config.negative_cache_ttl_hours = 1.0  # US-60-004
         cache = CaptionCache(config)
         cache.enabled = enabled
         cache.validation_mode = validation_mode
@@ -238,3 +245,233 @@ class TestNegativeCacheIntegration:
 
         # Should NOT be treated as unavailable
         assert not cache.is_caption_unavailable("good_vid_001", "en")
+
+
+@pytest.mark.fast
+class TestNegativeCacheTTLConfig:
+    """Tests for US-60-004: Configurable negative cache TTL."""
+
+    def test_default_negative_ttl_is_one_hour(self):
+        """Default negative_cache_ttl_hours is 1.0 (1 hour).
+
+        AC: Add configurable negative_cache_ttl_hours parameter to CaptionFirstConfig (default 1 hour).
+        """
+        from src.config.sections.download import CaptionFirstConfig
+        config = CaptionFirstConfig()
+        assert config.negative_cache_ttl_hours == 1.0
+
+    def test_custom_negative_ttl_is_respected(self):
+        """Custom negative_cache_ttl_hours is used by CaptionCache."""
+        from src.config.sections.download import CaptionFirstConfig
+        config = CaptionFirstConfig(
+            cache_dir=tempfile.mkdtemp(),
+            negative_cache_ttl_hours=2.5
+        )
+        cache = CaptionCache(config)
+
+        assert cache.negative_cache_ttl_hours == 2.5
+
+    def test_zero_negative_ttl_uses_max_age_days(self):
+        """When negative_cache_ttl_hours=0, is_negative_entry_stale uses max_age_days."""
+        from src.config.sections.download import CaptionFirstConfig
+        config = CaptionFirstConfig(
+            cache_dir=tempfile.mkdtemp(),
+            negative_cache_ttl_hours=0,
+            max_cache_age_days=30
+        )
+        cache = CaptionCache(config)
+
+        cache.store_unavailable("dQw4w9WgXcQ", "en")
+
+        # Should not be stale immediately (uses 30 day TTL)
+        assert cache.is_caption_unavailable("dQw4w9WgXcQ", "en") is True
+
+
+@pytest.mark.fast
+class TestNegativeCacheTTLExpiration:
+    """Tests for US-60-004: is_caption_unavailable() respecting TTL."""
+
+    def _make_cache_with_ttl(self, ttl_hours, validation_mode='strict'):
+        """Create a CaptionCache with specific TTL and validation mode."""
+        from src.config.sections.download import CaptionFirstConfig
+        config = CaptionFirstConfig(
+            cache_dir=tempfile.mkdtemp(),
+            negative_cache_ttl_hours=ttl_hours,
+            cache_validation=validation_mode,
+            max_cache_age_days=30
+        )
+        return CaptionCache(config)
+
+    def test_fresh_negative_entry_returns_true(self):
+        """Fresh negative entry returns True for is_caption_unavailable().
+
+        AC: Ensure is_caption_unavailable() respects the TTL and returns False for expired entries.
+        """
+        cache = self._make_cache_with_ttl(ttl_hours=1.0)
+
+        cache.store_unavailable("dQw4w9WgXcQ", "en")
+
+        # Fresh entry should return True
+        assert cache.is_caption_unavailable("dQw4w9WgXcQ", "en") is True
+
+    def test_expired_negative_entry_returns_false_in_strict_mode(self):
+        """Expired negative entry returns False in strict validation mode.
+
+        AC: Ensure is_caption_unavailable() respects the TTL and returns False for expired entries.
+        """
+        # Use 1 second TTL for testing
+        cache = self._make_cache_with_ttl(ttl_hours=1 / 3600, validation_mode='strict')
+
+        cache.store_unavailable("dQw4w9WgXcQ", "en")
+
+        # Immediately should be available
+        assert cache.is_caption_unavailable("dQw4w9WgXcQ", "en") is True
+
+        # Wait for TTL to expire
+        time.sleep(1.5)
+
+        # Expired entry should return False in strict mode
+        assert cache.is_caption_unavailable("dQw4w9WgXcQ", "en") is False
+
+    def test_expired_negative_entry_warns_but_returns_true_in_warn_mode(self):
+        """Expired negative entry logs warning but returns True in warn mode."""
+        # Use 1 second TTL for testing
+        cache = self._make_cache_with_ttl(ttl_hours=1 / 3600, validation_mode='warn')
+
+        cache.store_unavailable("warntest0001", "en")
+
+        # Wait for TTL to expire
+        time.sleep(1.5)
+
+        # Warn mode still returns True but logs warning
+        # The warning is logged via src.caption_fetcher logger
+        with patch('src.caption_fetcher.logger') as mock_logger:
+            result = cache.is_caption_unavailable("warntest0001", "en")
+            assert result is True
+            assert mock_logger.warning.called
+
+    def test_skip_mode_ignores_ttl(self):
+        """Skip validation mode ignores TTL for negative entries."""
+        # Use 1 second TTL for testing
+        cache = self._make_cache_with_ttl(ttl_hours=1 / 3600, validation_mode='skip')
+
+        cache.store_unavailable("skiptest0001", "en")
+
+        # Wait for TTL to expire
+        time.sleep(1.5)
+
+        # Skip mode should still return True (ignores staleness)
+        assert cache.is_caption_unavailable("skiptest0001", "en") is True
+
+    def test_is_negative_entry_stale_method(self):
+        """is_negative_entry_stale() correctly identifies expired entries.
+
+        AC: Ensure is_caption_unavailable() respects the TTL and returns False for expired entries.
+        """
+        # Use 1 second TTL for testing
+        cache = self._make_cache_with_ttl(ttl_hours=1 / 3600)
+
+        cache.store_unavailable("staletest001", "en")
+
+        # Get the entry
+        key = cache._make_cache_key("staletest001", "en")
+        entry = cache.get(key)
+
+        # Fresh entry should not be stale
+        assert cache.is_negative_entry_stale(entry) is False
+
+        # Wait for TTL to expire
+        time.sleep(1.5)
+
+        # Entry should now be stale
+        assert cache.is_negative_entry_stale(entry) is True
+
+
+@pytest.mark.fast
+class TestNegativeCacheTTLIntegration:
+    """Tests for US-60-004: Integration of negative cache TTL with fetch_captions."""
+
+    def test_negative_cache_hit_prevents_fetch_attempt(self):
+        """Negative cache hit prevents subprocess calls in fetch_captions().
+
+        AC: Integrate negative cache check at start of fetch_captions() to
+        short-circuit fetches for known captionless videos.
+        AC: Add test verifying negative cache hit prevents fetch attempts.
+        """
+        from src.config.sections.download import CaptionFirstConfig
+
+        config = CaptionFirstConfig(
+            cache_dir=tempfile.mkdtemp(),
+            negative_cache_ttl_hours=1.0
+        )
+        cache = CaptionCache(config)
+
+        # Pre-populate negative cache
+        cache.store_unavailable("dQw4w9WgXcQ", "en")
+
+        # Create fetcher with the cache
+        fetcher = CaptionFetcher(caption_cache=cache)
+
+        # Track subprocess calls
+        subprocess_call_count = 0
+
+        def mock_subprocess_run(*args, **kwargs):
+            nonlocal subprocess_call_count
+            subprocess_call_count += 1
+            raise Exception("Should not be called")
+
+        with patch('subprocess.run', side_effect=mock_subprocess_run):
+            # fetch_captions should raise CaptionUnavailableError without subprocess
+            with pytest.raises(CaptionUnavailableError) as exc_info:
+                fetcher.fetch_captions("dQw4w9WgXcQ", "en")
+
+            # Verify no subprocess calls were made
+            assert subprocess_call_count == 0
+
+            # Verify error mentions negative cache
+            assert "Negative cache" in str(exc_info.value) or "unavailable" in str(exc_info.value).lower()
+
+    def test_expired_negative_cache_triggers_refetch(self):
+        """Expired negative cache allows fetch attempt.
+
+        AC: Add test verifying negative cache hit prevents fetch attempts
+        and respects TTL expiration.
+        """
+        from src.config.sections.download import CaptionFirstConfig
+
+        # Use 1 second TTL for testing
+        config = CaptionFirstConfig(
+            cache_dir=tempfile.mkdtemp(),
+            negative_cache_ttl_hours=1 / 3600,  # 1 second
+            cache_validation="strict"
+        )
+        cache = CaptionCache(config)
+
+        # Pre-populate negative cache
+        cache.store_unavailable("refetchtest", "en")
+
+        # Create fetcher with the cache
+        fetcher = CaptionFetcher(caption_cache=cache)
+
+        # Track subprocess calls
+        subprocess_call_count = 0
+
+        def mock_subprocess_run(*args, **kwargs):
+            nonlocal subprocess_call_count
+            subprocess_call_count += 1
+            result = Mock()
+            result.stdout = "[info] Available subtitles for refetchtest:\n"
+            result.stderr = ""
+            result.returncode = 0
+            return result
+
+        # Wait for TTL to expire
+        time.sleep(1.5)
+
+        with patch('subprocess.run', side_effect=mock_subprocess_run):
+            # fetch_captions should attempt fetch since cache is expired
+            with pytest.raises(CaptionUnavailableError):
+                fetcher.fetch_captions("refetchtest", "en")
+
+            # Verify subprocess was called (cache expired, so re-fetch attempted)
+            assert subprocess_call_count >= 1

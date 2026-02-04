@@ -886,3 +886,336 @@ class TestCleanupStaleEntries:
         removed = cache.cleanup_stale_entries(max_age_days=7)
         assert removed == 1
         assert not cache_file.exists()
+
+
+class TestWarmupFromProject:
+    """Tests for warmup_from_project method (US-60-008)"""
+
+    @pytest.mark.fast
+    def test_warmup_imports_entries(self, tmp_path):
+        """Test that warmup imports transcript entries from project cache"""
+        # Create global cache directory
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        # Create project directory with .cache/transcriptions
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        # Create a cache entry in project cache
+        project_cache_file = project_cache_dir / "abc123.json"
+        data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Project transcript",
+                "source_file": "/videos/project_video.mp4"
+            }
+        ]
+        with open(project_cache_file, 'w') as f:
+            json.dump(data, f)
+
+        # Create global cache and warmup from project
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should have imported 1 entry
+        assert imported == 1
+
+        # Should be able to look up the imported entry
+        result = cache.get("/videos/project_video.mp4")
+        assert result is not None
+        assert result[0]['text'] == "Project transcript"
+
+    @pytest.mark.fast
+    def test_warmup_avoids_duplicates(self, tmp_path):
+        """Test that warmup skips entries already in global cache"""
+        # Create global cache directory
+        global_cache_dir = tmp_path / "global_cache"
+        global_transcriptions = global_cache_dir / "transcriptions"
+        global_transcriptions.mkdir(parents=True)
+
+        # Create existing entry in global cache
+        existing_file = global_transcriptions / "existing.json"
+        existing_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Global version",
+                "source_file": "/videos/same_video.mp4"
+            }
+        ]
+        with open(existing_file, 'w') as f:
+            json.dump(existing_data, f)
+
+        # Create project directory with same source file
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        project_cache_file = project_cache_dir / "project_entry.json"
+        project_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Project version",
+                "source_file": "/videos/same_video.mp4"  # Same source file
+            }
+        ]
+        with open(project_cache_file, 'w') as f:
+            json.dump(project_data, f)
+
+        # Create global cache and warmup from project
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should skip the duplicate
+        assert imported == 0
+
+        # Should still have original global version
+        result = cache.get("/videos/same_video.mp4")
+        assert result is not None
+        assert result[0]['text'] == "Global version"
+
+    @pytest.mark.fast
+    def test_warmup_handles_nonexistent_project(self, tmp_path):
+        """Test that warmup handles nonexistent project directory"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project("/nonexistent/project")
+
+        # Should return 0 and not crash
+        assert imported == 0
+
+    @pytest.mark.fast
+    def test_warmup_handles_empty_project_cache(self, tmp_path):
+        """Test that warmup handles project with no cache files"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        # Create project with empty .cache/transcriptions
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        assert imported == 0
+
+    @pytest.mark.fast
+    def test_warmup_imports_multiple_entries(self, tmp_path):
+        """Test that warmup imports multiple entries"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        # Create project with multiple cache entries
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        for i in range(3):
+            cache_file = project_cache_dir / f"entry{i}.json"
+            data = [
+                {
+                    "index": 1,
+                    "start_time": 0.0,
+                    "end_time": 3.0,
+                    "text": f"Entry {i}",
+                    "source_file": f"/videos/video{i}.mp4"
+                }
+            ]
+            with open(cache_file, 'w') as f:
+                json.dump(data, f)
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should import all 3 entries
+        assert imported == 3
+
+        # Verify all entries are accessible
+        for i in range(3):
+            result = cache.get(f"/videos/video{i}.mp4")
+            assert result is not None
+            assert result[0]['text'] == f"Entry {i}"
+
+    @pytest.mark.fast
+    def test_warmup_handles_corrupt_project_cache(self, tmp_path):
+        """Test that warmup skips corrupt cache files"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        # Create valid cache file
+        valid_file = project_cache_dir / "valid.json"
+        valid_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Valid entry",
+                "source_file": "/videos/valid.mp4"
+            }
+        ]
+        with open(valid_file, 'w') as f:
+            json.dump(valid_data, f)
+
+        # Create corrupt cache file
+        corrupt_file = project_cache_dir / "corrupt.json"
+        with open(corrupt_file, 'w') as f:
+            f.write("{invalid json content")
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should import only the valid entry
+        assert imported == 1
+
+    @pytest.mark.fast
+    def test_warmup_updates_source_map(self, tmp_path):
+        """Test that warmup updates internal source map"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        cache_file = project_cache_dir / "entry.json"
+        data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Test",
+                "source_file": "/videos/test.mp4"
+            }
+        ]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+
+        cache = TranscriptCache(str(global_cache_dir))
+
+        # Source map initially empty
+        initial_size = len(cache._source_map)
+
+        imported = cache.warmup_from_project(str(project_dir))
+        assert imported == 1
+
+        # Source map should be updated
+        assert len(cache._source_map) > initial_size
+
+    @pytest.mark.fast
+    def test_warmup_checks_alt_project_cache(self, tmp_path):
+        """Test that warmup checks alternate cache directory (transcripts vs transcriptions)"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        # Create project with alt cache dir name
+        project_dir = tmp_path / "test_project"
+        alt_cache_dir = project_dir / ".cache" / "transcripts"  # Old name
+        alt_cache_dir.mkdir(parents=True)
+
+        cache_file = alt_cache_dir / "entry.json"
+        data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Alt dir entry",
+                "source_file": "/videos/alt.mp4"
+            }
+        ]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should import from alt directory
+        assert imported == 1
+
+    @pytest.mark.fast
+    def test_warmup_skips_entries_without_source_file(self, tmp_path):
+        """Test that warmup skips entries without source_file"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_cache_dir.mkdir()
+
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        # Cache entry without source_file
+        cache_file = project_cache_dir / "no_source.json"
+        data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "No source file"
+                # Missing source_file
+            }
+        ]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should skip entries without source_file
+        assert imported == 0
+
+    @pytest.mark.fast
+    def test_warmup_skips_existing_dest_file(self, tmp_path):
+        """Test that warmup skips if destination file already exists"""
+        global_cache_dir = tmp_path / "global_cache"
+        global_transcriptions = global_cache_dir / "transcriptions"
+        global_transcriptions.mkdir(parents=True)
+
+        # Create file in global cache with same filename
+        existing_file = global_transcriptions / "same_filename.json"
+        existing_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Global version",
+                "source_file": "/different/path/video.mp4"
+            }
+        ]
+        with open(existing_file, 'w') as f:
+            json.dump(existing_data, f)
+
+        # Create project with same filename but different source
+        project_dir = tmp_path / "test_project"
+        project_cache_dir = project_dir / ".cache" / "transcriptions"
+        project_cache_dir.mkdir(parents=True)
+
+        project_file = project_cache_dir / "same_filename.json"
+        project_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Project version",
+                "source_file": "/project/path/other_video.mp4"
+            }
+        ]
+        with open(project_file, 'w') as f:
+            json.dump(project_data, f)
+
+        cache = TranscriptCache(str(global_cache_dir))
+        imported = cache.warmup_from_project(str(project_dir))
+
+        # Should skip because dest file already exists
+        assert imported == 0

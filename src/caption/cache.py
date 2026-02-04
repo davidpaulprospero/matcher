@@ -78,12 +78,16 @@ class CaptionCache(BaseCache):
             # Cache validation settings (US-008 Sprint 6)
             self.validation_mode = getattr(config, 'cache_validation', 'warn')
             self.validation_tolerance = getattr(config, 'cache_validation_tolerance', 0.2)
+            # Negative cache TTL (US-60-004)
+            # Separate TTL for "unavailable" entries (default 1 hour)
+            self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
             self.enabled = True
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
+            self.negative_cache_ttl_hours = 1.0
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -544,6 +548,27 @@ class CaptionCache(BaseCache):
         logger.info(f"Cached unavailable captions: {key}")
         return True
 
+    def is_negative_entry_stale(self, entry: CacheEntry) -> bool:
+        """Check if a negative cache entry is stale based on negative_cache_ttl_hours (US-60-004).
+
+        Uses a separate, shorter TTL for negative entries since caption availability
+        can change (e.g., creator enables captions after upload).
+
+        Args:
+            entry: Cache entry to check.
+
+        Returns:
+            True if the entry is older than negative_cache_ttl_hours, False otherwise.
+            Returns False if negative_cache_ttl_hours is 0 (uses max_age_days instead).
+        """
+        if self.negative_cache_ttl_hours <= 0:
+            # Fall back to regular staleness check (max_age_days)
+            return self.is_stale(entry)
+
+        age_seconds = time.time() - entry.cached_at
+        max_age_seconds = self.negative_cache_ttl_hours * 3600
+        return age_seconds > max_age_seconds
+
     def is_caption_unavailable(
         self,
         video_id: str,
@@ -551,6 +576,11 @@ class CaptionCache(BaseCache):
         check_staleness: bool = True
     ) -> bool:
         """Check if captions are known to be unavailable for a video.
+
+        TTL handling (US-60-004):
+        Uses negative_cache_ttl_hours (default 1 hour) instead of max_age_days
+        for negative entries. This allows captions to be re-checked more frequently
+        since availability may change.
 
         Staleness handling (when check_staleness=True):
         - 'strict': Returns False for stale entries (triggers re-check)
@@ -582,20 +612,21 @@ class CaptionCache(BaseCache):
             if not cached.unavailable:
                 return False
 
-            # Check staleness for unavailable entries (bug fix: was missing)
-            if check_staleness and self.validation_mode != 'skip' and self.is_stale(entry):
-                age_days = self.get_entry_age_days(entry)
+            # US-60-004: Check staleness for negative entries using negative_cache_ttl_hours
+            if check_staleness and self.validation_mode != 'skip' and self.is_negative_entry_stale(entry):
+                age_hours = (time.time() - entry.cached_at) / 3600
+                ttl_hours = self.negative_cache_ttl_hours if self.negative_cache_ttl_hours > 0 else (self.max_age_days * 24)
                 if self.validation_mode == 'strict':
                     logger.info(
-                        f"Caption unavailable cache stale (strict mode): {key} "
-                        f"(age: {age_days:.1f} days, max: {self.max_age_days} days)"
+                        f"Caption unavailable cache expired (strict mode): {key} "
+                        f"(age: {age_hours:.1f}h, max: {ttl_hours:.1f}h)"
                     )
                     # Treat as not unavailable - will trigger re-check
                     return False
                 else:  # 'warn' mode
                     logger.warning(
-                        f"Caption unavailable cache stale: {key} "
-                        f"(age: {age_days:.1f} days, max: {self.max_age_days} days) - "
+                        f"Caption unavailable cache expired: {key} "
+                        f"(age: {age_hours:.1f}h, max: {ttl_hours:.1f}h) - "
                         f"consider running --cleanup-caption-cache"
                     )
                     # In warn mode, still return True but log the warning
@@ -1023,3 +1054,157 @@ class CaptionCache(BaseCache):
         })
 
         return base_stats
+
+
+class ListSubsCache(BaseCache):
+    """Cache for yt-dlp --list-subs output (US-59-012).
+
+    Caches the result of list_available_languages() to avoid redundant
+    subprocess calls when resuming pipeline runs. Each video's available
+    languages are cached with a configurable TTL (default 1 hour) since
+    subtitle availability can change.
+
+    Features:
+    - Persistent JSON storage in .cache/ directory
+    - Configurable TTL (default 1 hour)
+    - Compatible with CaptionCache location for unified caching
+
+    Usage:
+        cache = ListSubsCache(cache_dir=".cache/list_subs_cache")
+
+        # Check cache before making subprocess call
+        cached = cache.get_languages("dQw4w9WgXcQ")
+        if cached:
+            return cached  # List of AvailableLanguage objects
+
+        # After fetching, store in cache
+        languages = fetcher.list_available_languages("dQw4w9WgXcQ")
+        cache.store("dQw4w9WgXcQ", languages)
+    """
+
+    def __init__(
+        self,
+        cache_dir: Optional[Path] = None,
+        ttl_hours: float = 1.0,
+        enabled: bool = True
+    ):
+        """Initialize the list-subs cache.
+
+        Args:
+            cache_dir: Cache directory. Defaults to ~/.matcher_caption_cache/list_subs.
+            ttl_hours: TTL in hours for cache entries. Default 1 hour.
+            enabled: Whether caching is enabled.
+        """
+        if cache_dir is None:
+            cache_dir = Path(os.path.expanduser('~/.matcher_caption_cache/list_subs'))
+
+        # Convert ttl_hours to seconds for BaseCache
+        ttl_seconds = int(ttl_hours * 3600)
+
+        super().__init__(
+            cache_dir=cache_dir,
+            index_name="list_subs_cache.json",
+            ttl_seconds=ttl_seconds,
+            auto_save=True
+        )
+
+        self.ttl_hours = ttl_hours
+        self.enabled = enabled
+
+        logger.debug(f"ListSubsCache initialized: dir={cache_dir}, "
+                    f"ttl={ttl_hours}h, enabled={enabled}")
+
+    def _serialize_entry(self, entry: CacheEntry) -> Dict[str, Any]:
+        """Serialize CachedLanguageList to dict."""
+        return {
+            'data': entry.data,
+            'cached_at': entry.cached_at,
+            'metadata': entry.metadata
+        }
+
+    def _deserialize_entry(self, data: Dict[str, Any]) -> CacheEntry:
+        """Deserialize dict to CachedLanguageList entry."""
+        return CacheEntry(
+            data=data.get('data', {}),
+            cached_at=data.get('cached_at', 0.0),
+            key='',
+            metadata=data.get('metadata', {})
+        )
+
+    def get_languages(self, video_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Get cached available languages for a video.
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            List of language dicts with 'code', 'name', 'is_auto_generated',
+            or None if not cached or expired.
+        """
+        if not self.enabled:
+            return None
+
+        entry = self.get(video_id)
+        if entry is None:
+            logger.debug(f"ListSubsCache miss: {video_id}")
+            return None
+
+        try:
+            cached_data = entry.data
+            if isinstance(cached_data, dict):
+                # Full CachedLanguageList format
+                languages = cached_data.get('languages', [])
+            else:
+                # Direct list format (backward compat)
+                languages = cached_data
+
+            logger.debug(f"ListSubsCache hit: {video_id} ({len(languages)} languages)")
+            return languages
+        except Exception as e:
+            logger.warning(f"Failed to deserialize list-subs cache {video_id}: {e}")
+            self.delete(video_id)
+            return None
+
+    def store(
+        self,
+        video_id: str,
+        languages: List[Any]  # List of AvailableLanguage or dicts
+    ) -> bool:
+        """Store available languages in cache.
+
+        Args:
+            video_id: YouTube video ID.
+            languages: List of AvailableLanguage objects or dicts.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        if not self.enabled:
+            return False
+
+        # Convert AvailableLanguage objects to dicts if needed
+        language_dicts = []
+        for lang in languages:
+            if hasattr(lang, 'code'):
+                # AvailableLanguage object
+                language_dicts.append({
+                    'code': lang.code,
+                    'name': lang.name,
+                    'is_auto_generated': lang.is_auto_generated
+                })
+            elif isinstance(lang, dict):
+                language_dicts.append(lang)
+            else:
+                logger.warning(f"Unknown language type: {type(lang)}")
+                continue
+
+        cached_data = {
+            'video_id': video_id,
+            'languages': language_dicts,
+            'cached_at': time.time(),
+            'ttl_hours': self.ttl_hours,
+        }
+
+        self.set(video_id, cached_data)
+        logger.debug(f"Cached list-subs: {video_id} ({len(language_dicts)} languages)")
+        return True

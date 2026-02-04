@@ -340,3 +340,95 @@ class TranscriptCache:
             "source_map_size": len(self._source_map),
             "video_id_map_size": len(self._video_id_map)
         }
+
+    def warmup_from_project(self, project_dir: str) -> int:
+        """
+        Import transcript cache entries from a project directory into global cache.
+
+        Scans the project's .cache/transcriptions folder and imports entries
+        that don't already exist in the global cache, enabling cross-project
+        transcript reuse.
+
+        Args:
+            project_dir: Path to project directory containing .cache/transcriptions
+
+        Returns:
+            Number of entries imported (excluding duplicates)
+        """
+        project_path = Path(project_dir)
+        project_cache_dir = project_path / ".cache" / "transcriptions"
+        alt_project_cache_dir = project_path / ".cache" / "transcripts"
+
+        imported_count = 0
+        skipped_duplicates = 0
+
+        # Collect existing source files to avoid duplicates
+        existing_sources = set(self._source_map.keys())
+
+        for source_cache_dir in [project_cache_dir, alt_project_cache_dir]:
+            if not source_cache_dir.exists():
+                continue
+
+            cache_files = list(source_cache_dir.glob("*.json"))
+            logger.debug(f"Scanning {len(cache_files)} cache files in {source_cache_dir}")
+
+            for cache_file in cache_files:
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+
+                    # Extract source_file from the data
+                    source_file = None
+
+                    if isinstance(data, list) and len(data) > 0:
+                        source_file = data[0].get('source_file', '')
+                    elif isinstance(data, dict):
+                        source_file = data.get('source_file', data.get('video', data.get('video_path', '')))
+                        if not source_file and 'segments' in data:
+                            segs = data['segments']
+                            if segs and len(segs) > 0:
+                                source_file = segs[0].get('source_file', '')
+
+                    if not source_file:
+                        continue
+
+                    # Check for duplicates using normalized path and filename
+                    normalized = normalize_path(source_file)
+                    filename = Path(source_file).name.lower()
+
+                    if normalized in existing_sources or filename in existing_sources:
+                        skipped_duplicates += 1
+                        continue
+
+                    # Copy to global cache
+                    dest_file = self.cache_dir / cache_file.name
+                    if dest_file.exists():
+                        skipped_duplicates += 1
+                        continue
+
+                    # Write to global cache
+                    with open(dest_file, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+
+                    # Update source map
+                    self._source_map[normalized] = dest_file
+                    self._source_map[filename] = dest_file
+                    existing_sources.add(normalized)
+                    existing_sources.add(filename)
+
+                    # Extract video ID for segment matching
+                    video_id = extract_video_id(filename)
+                    if video_id and video_id not in self._video_id_map:
+                        self._video_id_map[video_id] = dest_file
+
+                    imported_count += 1
+
+                except Exception as e:
+                    logger.debug(f"Could not import {cache_file}: {e}")
+                    continue
+
+        if imported_count > 0 or skipped_duplicates > 0:
+            logger.info(f"Transcript cache warmup: imported {imported_count} entries, "
+                       f"skipped {skipped_duplicates} duplicates from {project_dir}")
+
+        return imported_count

@@ -1,6 +1,6 @@
 ﻿{
     "statistics":  {
-                       "totalHardStories":  1,
+                       "totalHardStories":  2,
                        "abandoned":  0,
                        "successfullyDecomposed":  0,
                        "stillHardAfterDecomposition":  0
@@ -40,6 +40,42 @@
                         "focusArea":  "quality",
                         "sprintNumbers":  [
                                               43
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Consolidate yt-dlp invocations for caption fetching",
+                        "firstFailedAt":  "2026-02-05T06:06:00.4158036+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T06:06:00.4158036+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T05:59:31.2093642+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T06:03:33.7490849+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T06:06:00.4098030+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-60-005",
+                        "focusArea":  "transcription",
+                        "sprintNumbers":  [
+                                              60
                                           ],
                         "failureCount":  1
                     }

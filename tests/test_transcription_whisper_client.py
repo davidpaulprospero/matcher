@@ -10,7 +10,10 @@ from unittest.mock import Mock, MagicMock, patch, call
 from pathlib import Path
 import threading
 
-from src.transcription.whisper_client import WhisperClient, cleanup_model
+from src.transcription.whisper_client import (
+    WhisperClient, cleanup_model, get_available_gpu_memory,
+    _select_model_for_memory, MODEL_MEMORY_REQUIREMENTS, MODEL_DOWNGRADE_ORDER
+)
 
 
 @pytest.fixture(autouse=True)
@@ -858,3 +861,254 @@ class TestMemoryLogging:
 
             # Restore module
             importlib.reload(whisper_client)
+
+
+class TestGPUMemoryPreCheck:
+    """Tests for GPU memory pre-check and automatic model downgrade (US-60-007)"""
+
+    @pytest.mark.fast
+    def test_get_available_gpu_memory_returns_float(self):
+        """Test get_available_gpu_memory returns float even when CUDA unavailable"""
+        result = get_available_gpu_memory()
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    def test_get_available_gpu_memory_with_cuda(self):
+        """Test get_available_gpu_memory with mocked CUDA"""
+        import builtins
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 500 * 1024 * 1024  # 500MB used
+        mock_torch.cuda.memory_reserved.return_value = 600 * 1024 * 1024  # 600MB reserved
+
+        gpu_props = Mock()
+        gpu_props.total_memory = 8 * 1024**3  # 8GB total
+        mock_torch.cuda.get_device_properties.return_value = gpu_props
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            from src.transcription import whisper_client
+            import importlib
+            importlib.reload(whisper_client)
+
+            result = whisper_client.get_available_gpu_memory()
+
+            # 8192MB total - 600MB reserved = ~7592MB available
+            assert result == pytest.approx(8192 - 600, abs=10.0)
+
+            importlib.reload(whisper_client)
+
+    @pytest.mark.fast
+    def test_model_memory_requirements_defined(self):
+        """Test that model memory requirements are defined for all common models"""
+        expected_models = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]
+        for model in expected_models:
+            assert model in MODEL_MEMORY_REQUIREMENTS
+            assert MODEL_MEMORY_REQUIREMENTS[model] > 0
+
+    @pytest.mark.fast
+    def test_model_downgrade_order_complete(self):
+        """Test that model downgrade order includes all common models"""
+        expected_models = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]
+        for model in expected_models:
+            assert model in MODEL_DOWNGRADE_ORDER
+
+    @pytest.mark.fast
+    def test_select_model_for_memory_sufficient(self):
+        """Test _select_model_for_memory returns requested model when memory sufficient"""
+        # Request 'base' with 3000MB available (plenty of memory)
+        result = _select_model_for_memory("base", available_memory_mb=3000, min_memory_mb=2000)
+        assert result == "base"
+
+    @pytest.mark.fast
+    def test_select_model_for_memory_downgrade_medium_to_small(self):
+        """Test automatic downgrade from medium to small when memory insufficient"""
+        # Request 'medium' (needs ~2000MB) but only 1500MB available
+        with patch('src.transcription.whisper_client.logger') as mock_logger:
+            result = _select_model_for_memory("medium", available_memory_mb=1500, min_memory_mb=2000)
+
+        assert result == "small"  # Should downgrade to small (needs ~1000MB)
+        # Should have logged a warning about downgrade
+        mock_logger.warning.assert_called()
+
+    @pytest.mark.fast
+    def test_select_model_for_memory_downgrade_large_to_base(self):
+        """Test automatic downgrade from large to base when memory very limited"""
+        # Request 'large' (needs ~3000MB) but only 800MB available
+        with patch('src.transcription.whisper_client.logger') as mock_logger:
+            result = _select_model_for_memory("large", available_memory_mb=800, min_memory_mb=2000)
+
+        assert result == "base"  # Should downgrade to base (needs ~500MB)
+        mock_logger.warning.assert_called()
+
+    @pytest.mark.fast
+    def test_select_model_for_memory_fallback_to_tiny(self):
+        """Test fallback to tiny model when memory very low"""
+        # Only 300MB available, even base won't fit
+        with patch('src.transcription.whisper_client.logger') as mock_logger:
+            result = _select_model_for_memory("medium", available_memory_mb=300, min_memory_mb=2000)
+
+        assert result == "tiny"
+        mock_logger.warning.assert_called()
+
+    @pytest.mark.fast
+    def test_select_model_for_memory_unknown_model(self):
+        """Test handling of unknown model name"""
+        # Unknown model should use default (assumed small enough)
+        result = _select_model_for_memory("custom-model", available_memory_mb=3000, min_memory_mb=2000)
+        # Unknown model with sufficient memory should work
+        assert result == "custom-model"
+
+    @pytest.mark.fast
+    def test_whisper_client_init_with_memory_params(self):
+        """Test WhisperClient accepts memory configuration parameters"""
+        client = WhisperClient(
+            model_name="medium",
+            minimum_gpu_memory_mb=4000,
+            auto_downgrade_model=True
+        )
+        assert client.model_name == "medium"
+        assert client.minimum_gpu_memory_mb == 4000
+        assert client.auto_downgrade_model is True
+
+    @pytest.mark.fast
+    def test_whisper_client_init_defaults(self):
+        """Test WhisperClient default memory configuration"""
+        client = WhisperClient()
+        assert client.minimum_gpu_memory_mb == 2000
+        assert client.auto_downgrade_model is True
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_get_model_performs_memory_check_and_downgrade(self, mock_logger):
+        """Test get_model checks GPU memory and downgrades model automatically (US-60-007)"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model = Mock()
+        MockWhisperModel = Mock(return_value=mock_model)
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 7000 * 1024 * 1024  # 7GB used
+        mock_torch.cuda.memory_reserved.return_value = 7500 * 1024 * 1024  # 7.5GB reserved
+
+        gpu_props = Mock()
+        gpu_props.total_memory = 8 * 1024**3  # 8GB total
+        mock_torch.cuda.get_device_properties.return_value = gpu_props
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            # Request large model but only ~692MB available (8192 - 7500)
+            client = WhisperClient(
+                model_name="large",
+                minimum_gpu_memory_mb=2000,
+                auto_downgrade_model=True
+            )
+            model = client.get_model()
+
+            # Should have created model with downgraded size
+            assert MockWhisperModel.call_count == 1
+            call_args = MockWhisperModel.call_args
+            # Model should be downgraded to base (500MB) since only ~692MB available
+            assert call_args[0][0] == "base"
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_get_model_no_downgrade_when_disabled(self, mock_logger):
+        """Test get_model doesn't downgrade when auto_downgrade_model=False"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model = Mock()
+        MockWhisperModel = Mock(return_value=mock_model)
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 100 * 1024 * 1024
+        mock_torch.cuda.memory_reserved.return_value = 200 * 1024 * 1024
+
+        gpu_props = Mock()
+        gpu_props.total_memory = 8 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = gpu_props
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            # Request large model with downgrade disabled
+            client = WhisperClient(
+                model_name="large",
+                auto_downgrade_model=False  # Disable downgrade
+            )
+            model = client.get_model()
+
+            # Should use requested model despite any memory concerns
+            call_args = MockWhisperModel.call_args
+            assert call_args[0][0] == "large"
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_get_model_warns_when_below_threshold(self, mock_logger):
+        """Test get_model logs warning when GPU memory below threshold (US-60-007)"""
+        import src.transcription.whisper_client as wc
+        import builtins
+
+        mock_model = Mock()
+        MockWhisperModel = Mock(return_value=mock_model)
+
+        mock_torch = Mock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 7000 * 1024 * 1024  # 7GB used
+        mock_torch.cuda.memory_reserved.return_value = 7000 * 1024 * 1024
+
+        gpu_props = Mock()
+        gpu_props.total_memory = 8 * 1024**3  # 8GB total = 1192MB available
+        mock_torch.cuda.get_device_properties.return_value = gpu_props
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                return mock_torch
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            client = WhisperClient(
+                model_name="base",
+                minimum_gpu_memory_mb=2000  # Higher than available 1192MB
+            )
+            client.get_model()
+
+            # Should have logged warning about low memory
+            warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+            assert any('below threshold' in c for c in warning_calls)
