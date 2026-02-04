@@ -73,6 +73,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def create_gap_match(vo_segment: 'SRTSegment', reason: str) -> Match:
+    """Factory function to create a gap match with consistent attributes.
+
+    Gap matches represent segments where no suitable video match was found.
+    The video_segment is set to the voiceover_segment itself (self-reference pattern),
+    confidence is 0.0, and match_type is set to 'gap' for downstream identification.
+
+    Args:
+        vo_segment: The voiceover segment that could not be matched.
+        reason: Human-readable explanation of why no match was found.
+
+    Returns:
+        A Match instance marked as a gap match.
+    """
+    return Match(
+        voiceover_segment=vo_segment,
+        video_segment=vo_segment,
+        video_scene=None,
+        confidence=0.0,
+        reasoning=reason,
+        match_type='gap',
+    )
+
+
 def _record_breakdown(breakdown: list, component: str, before: float, after: float, reason: str):
     """Record a scoring adjustment in the confidence breakdown list."""
     if reason:
@@ -603,14 +627,10 @@ class TieredMatcher:
         # Guard: return gap if no candidates
         if not candidates:
             logger.warning(f"  match_segment: no candidates for '{vo_segment.text[:30]}...'")
-            gap_match = Match(
-                voiceover_segment=vo_segment,
-                video_segment=vo_segment,
-                video_scene=None,
-                confidence=0.0,
-                reasoning="No video candidates available"
+            return MatchResult(
+                primary_match=create_gap_match(vo_segment, "No video candidates available"),
+                has_gap=True, gap_reason="No candidates"
             )
-            return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="No candidates")
 
         # Apply all candidate filters (US-33-006: delegated to CandidateFilter)
         filter_start_time = time.time()
@@ -636,14 +656,10 @@ class TieredMatcher:
 
         if not valid_candidates:
             logger.warning(f"  match_segment: no valid candidates after filtering")
-            gap_match = Match(
-                voiceover_segment=vo_segment,
-                video_segment=vo_segment,
-                video_scene=None,
-                confidence=0.0,
-                reasoning="No valid candidates after filtering"
+            return MatchResult(
+                primary_match=create_gap_match(vo_segment, "No valid candidates after filtering"),
+                has_gap=True, gap_reason="All candidates filtered"
             )
-            return MatchResult(primary_match=gap_match, has_gap=True, gap_reason="All candidates filtered")
 
         # Check for high-confidence embedding match
         top_similarity = valid_candidates[0][1] if valid_candidates else 0
