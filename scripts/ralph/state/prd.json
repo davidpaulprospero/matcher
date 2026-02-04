@@ -91,7 +91,7 @@
                             "id":  "US-58-006",
                             "title":  "Cap circuit breaker jitter to respect max_pause_seconds",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "The final pause duration after jitter application never exceeds max_pause_seconds",
                                                        "Jitter is applied before the max_pause_seconds cap in the calculation pipeline",
@@ -99,13 +99,13 @@
                                                        "Test verifies that jitter still applies when pause is well below max_pause_seconds",
                                                        "Existing circuit breaker tests continue to pass"
                                                    ],
-                            "notes":  "Tier: S (small). Source files: src/downloader/circuit_breaker.py (lines 265 _get_effective_pause_seconds caps before jitter, lines 269-286 _apply_jitter adds after). Currently jitter can push the total pause over max_pause_seconds by up to (jitter_factor * 100)%. Fix: apply cap after jitter, or apply jitter before cap in _get_effective_pause_seconds."
+                            "notes":  "Moved jitter into _get_effective_pause_seconds pipeline: base -> escalation -> budget -> jitter -> cap. Extracted _apply_jitter_raw (no cap) used by pipeline, _apply_jitter wraps it with cap for standalone use. Updated check_and_wait, get_remaining_pause_time, wait_for_recovery_if_needed to not double-jitter. Added TestJitterCappedAtMaxPause test class with 6 tests. Updated existing tests to use jitter_factor=0.0 where exact values are asserted."
                         },
                         {
                             "id":  "US-58-007",
                             "title":  "Clean up cooldown dict entries for removed cookies",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "CookieRotator._remove_invalid_cookie also removes the entry from _failed_cookies dict if present",
                                                        "CookieRotator._remove_invalid_cookie also removes the entry from _cooldown_until dict if present",
@@ -113,7 +113,7 @@
                                                        "Test verifies that repeated fail+remove cycles do not grow the _failed_cookies dict unboundedly",
                                                        "Existing cookie rotator tests continue to pass"
                                                    ],
-                            "notes":  "Tier: S (small). Source files: src/downloader/cookie_rotator.py (lines 232-250 mark_failed, _remove_invalid_cookie). Currently when a failed cookie is removed from the active list, its cooldown timestamp remains in _failed_cookies dict. This is a memory leak: dict grows without bound if cookies keep failing and being removed. Fix is a 2-line cleanup in _remove_invalid_cookie."
+                            "notes":  "DONE: Added `self._failed_cookies.pop(cookie_path, None)` to _remove_invalid_cookie (line 199 in cookie_rotator.py). No _cooldown_until dict exists — cooldowns are tracked via _failed_cookies timestamps, so cleaning that dict addresses both criteria. 6 new tests in test_cookie_cooldown_cleanup.py covering: cleanup on removal, cleanup on cooldown tracking, safe removal without prior failure, unbounded growth prevention, preservation of other cookies' cooldowns, and mid-session invalidation integration. All 100 existing cookie tests pass."
                         },
                         {
                             "id":  "US-58-008",

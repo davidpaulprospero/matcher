@@ -261,13 +261,14 @@ class CircuitBreaker:
         """Get the effective pause duration, possibly extended by escalation and budget state.
 
         Composes _base_pause, _escalation_adjusted_pause, _budget_adjusted_pause,
-        and _cap_pause_duration into a single pause calculation pipeline.
+        _apply_jitter, and _cap_pause_duration into a single pause calculation pipeline.
 
         Extensions applied (multiplicative):
         - EscalationManager: 2x when >50% of active keywords are at Tier 3
         - RateLimitBudget: 1.5x when nearly exhausted (>80%), 2.5x when fully exhausted
 
-        The final result is capped at max_pause_seconds.
+        Jitter is applied before the final cap to ensure the result never
+        exceeds max_pause_seconds regardless of jitter factor.
 
         Returns:
             Effective pause duration in seconds.
@@ -275,11 +276,12 @@ class CircuitBreaker:
         pause = self._base_pause()
         pause = self._escalation_adjusted_pause(pause)
         pause = self._budget_adjusted_pause(pause)
+        pause = self._apply_jitter_raw(pause)
         pause = self._cap_pause_duration(pause)
         return pause
 
-    def _apply_jitter(self, delay: float) -> float:
-        """Apply random jitter to a delay value.
+    def _apply_jitter_raw(self, delay: float) -> float:
+        """Apply random jitter to a delay value without capping.
 
         Jitter helps prevent thundering herd when multiple downloads
         resume simultaneously after circuit breaker recovery.
@@ -290,13 +292,14 @@ class CircuitBreaker:
         - Minimum: 60 * (1 - 0.2) = 48s
         - Maximum: 60 * (1 + 0.2) = 72s
 
-        The result is capped at max_pause_seconds to prevent runaway delays.
+        This method does NOT cap the result. Use _apply_jitter for a version
+        that caps at max_pause_seconds, or call _cap_pause_duration separately.
 
         Args:
             delay: Base delay in seconds.
 
         Returns:
-            Jittered delay, capped at max_pause_seconds.
+            Jittered delay (uncapped).
         """
         jitter_factor = getattr(self.config, 'jitter_factor', 0.2)
 
@@ -315,9 +318,23 @@ class CircuitBreaker:
             jittered_delay = delay
             self._last_jitter_applied = 0.0
 
-        # Cap at max_pause_seconds using shared capping logic
-        jittered_delay = self._cap_pause_duration(jittered_delay)
+        return jittered_delay
 
+    def _apply_jitter(self, delay: float) -> float:
+        """Apply random jitter to a delay value, capped at max_pause_seconds.
+
+        Convenience wrapper around _apply_jitter_raw that also applies the
+        max_pause_seconds cap. Used by call sites that need standalone jitter
+        with capping (e.g., remaining time calculations).
+
+        Args:
+            delay: Base delay in seconds.
+
+        Returns:
+            Jittered delay, capped at max_pause_seconds.
+        """
+        jittered_delay = self._apply_jitter_raw(delay)
+        jittered_delay = self._cap_pause_duration(jittered_delay)
         return jittered_delay
 
     def _is_escalation_at_tier3(self) -> bool:
@@ -369,18 +386,15 @@ class CircuitBreaker:
         remaining = effective_pause - elapsed
 
         if remaining > 0:
-            # Apply jitter to the remaining wait time to prevent thundering herd
-            jittered_remaining = self._apply_jitter(remaining)
-
-            # Still in pause period - wait for remaining time
+            # Jitter is already applied within _get_effective_pause_seconds pipeline
             jitter_pct = abs(self._last_jitter_applied) * 100
             logger.info(
-                f"Circuit breaker OPEN: pausing {jittered_remaining:.1f}s "
+                f"Circuit breaker OPEN: pausing {remaining:.1f}s "
                 f"(jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, "
                 f"{self.state.consecutive_failures} consecutive failures)"
             )
-            time.sleep(jittered_remaining)
-            self.state.total_paused_seconds += jittered_remaining
+            time.sleep(remaining)
+            self.state.total_paused_seconds += remaining
 
         # Transition to half-open (closed but ready to trip quickly)
         logger.info("Circuit breaker: pause complete, allowing search (half-open)")
@@ -486,11 +500,14 @@ class CircuitBreaker:
     def get_remaining_pause_time(self, apply_jitter: bool = False) -> float:
         """Get remaining time until circuit breaker recovers.
 
-        Uses effective pause duration which may be extended by escalation state.
+        Uses effective pause duration which includes jitter and is capped
+        at max_pause_seconds. The apply_jitter parameter is kept for backward
+        compatibility but jitter is now always applied as part of the
+        effective pause calculation pipeline.
 
         Args:
-            apply_jitter: If True, apply jitter to the remaining time.
-                         Default False for backwards compatibility.
+            apply_jitter: Deprecated. Jitter is now always applied within
+                         _get_effective_pause_seconds. Kept for backward compat.
 
         Returns:
             Remaining pause time in seconds, or 0.0 if not tripped.
@@ -506,9 +523,6 @@ class CircuitBreaker:
         remaining = effective_pause - elapsed
         remaining = max(0.0, remaining)
 
-        if apply_jitter and remaining > 0:
-            remaining = self._apply_jitter(remaining)
-
         return remaining
 
     def wait_for_recovery_if_needed(self, context: str = "") -> float:
@@ -519,7 +533,7 @@ class CircuitBreaker:
         - Returns the actual wait time for metrics tracking
         - Accepts a context string for more specific logging
         - Does not transition state (caller still needs check_and_wait for state transition)
-        - Applies jitter to prevent thundering herd when multiple retries resume
+        - Jitter is applied within the effective pause calculation pipeline
 
         Args:
             context: Optional context string for logging (e.g., "download retry")
@@ -537,27 +551,26 @@ class CircuitBreaker:
         if remaining <= 0:
             return 0.0
 
-        # Apply jitter to prevent thundering herd
-        jittered_remaining = self._apply_jitter(remaining)
+        # Jitter is already applied within _get_effective_pause_seconds pipeline
         jitter_pct = abs(self._last_jitter_applied) * 100
 
         # Log the wait with context
         ctx_str = f" ({context})" if context else ""
         logger.info(
-            f"Circuit breaker OPEN{ctx_str}: waiting {jittered_remaining:.1f}s for recovery "
+            f"Circuit breaker OPEN{ctx_str}: waiting {remaining:.1f}s for recovery "
             f"(jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, "
             f"{self.state.consecutive_failures} consecutive failures)"
         )
 
-        time.sleep(jittered_remaining)
-        self.state.total_paused_seconds += jittered_remaining
+        time.sleep(remaining)
+        self.state.total_paused_seconds += remaining
 
         # Transition to half-open state
         logger.info(f"Circuit breaker: pause complete{ctx_str}, resuming")
         self.state.is_open = False
         self.state.opened_at = None
 
-        return jittered_remaining
+        return remaining
 
     def get_stats(self) -> dict:
         """Get circuit breaker statistics for reporting.

@@ -208,8 +208,8 @@ class TestCircuitBreakerRecoveryWaitJitter:
             assert remaining > 0
 
     @pytest.mark.fast
-    def test_get_remaining_pause_time_no_jitter_default(self):
-        """get_remaining_pause_time() without parameter should not apply jitter."""
+    def test_get_remaining_pause_time_includes_jitter(self):
+        """get_remaining_pause_time() includes jitter from the pipeline."""
         config = CircuitBreakerConfig(
             consecutive_failures_threshold=2,
             pause_seconds=10.0,
@@ -222,10 +222,10 @@ class TestCircuitBreakerRecoveryWaitJitter:
         breaker.record_failure()
         assert breaker.is_open
 
-        remaining1 = breaker.get_remaining_pause_time()
-        remaining2 = breaker.get_remaining_pause_time()
-        # Without jitter, should be deterministic (allowing for tiny time differences)
-        assert abs(remaining1 - remaining2) < 0.1
+        # Jitter is now always applied within _get_effective_pause_seconds,
+        # so successive calls may return different values
+        remaining = breaker.get_remaining_pause_time()
+        assert remaining > 0
 
 
 # ============================================================================
@@ -447,7 +447,7 @@ class TestJitterIntegration:
 
     @pytest.mark.fast
     def test_jitter_with_escalation_extension(self):
-        """Jitter should be applied after escalation extension."""
+        """Jitter should be applied after escalation extension but before cap."""
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             jitter_factor=0.2,
@@ -461,21 +461,17 @@ class TestJitterIntegration:
         mock_manager.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6']
         breaker.set_escalation_manager(mock_manager)
 
-        # Get effective pause (should be 60 * 2 = 120 due to escalation)
+        # Get effective pause (should be 60 * 2 = 120 due to escalation, then jittered)
         # Mock the EscalationTier import inside _get_effective_pause_seconds
         with patch.dict('sys.modules', {'src.downloader.types': MagicMock()}):
-            effective = breaker._get_effective_pause_seconds()
-            assert effective == 120.0  # 2x escalation
-
-        # Apply jitter on top of that
-        with patch.object(random, 'uniform', return_value=0.1):
-            jittered = breaker._apply_jitter(120.0)
-            # 120 * 1.1 = 132
-            assert abs(jittered - 132.0) < 0.01
+            with patch.object(random, 'uniform', return_value=0.1):
+                effective = breaker._get_effective_pause_seconds()
+                # 60 * 2 (escalation) * 1.1 (jitter) = 132, capped at 300
+                assert abs(effective - 132.0) < 0.01
 
     @pytest.mark.fast
     def test_jitter_with_budget_extension(self):
-        """Jitter should be applied after budget extension."""
+        """Jitter should be applied after budget extension but before cap."""
         config = CircuitBreakerConfig(
             pause_seconds=60.0,
             jitter_factor=0.2,
@@ -489,12 +485,120 @@ class TestJitterIntegration:
         mock_budget.is_nearly_exhausted.return_value = True
         breaker.set_budget(mock_budget)
 
-        # Get effective pause (should be 60 * 1.5 = 90)
-        effective = breaker._get_effective_pause_seconds()
-        assert effective == 90.0
-
-        # Apply jitter on top of that
+        # Get effective pause (should be 60 * 1.5 = 90, then jittered)
         with patch.object(random, 'uniform', return_value=-0.1):
-            jittered = breaker._apply_jitter(90.0)
-            # 90 * 0.9 = 81
-            assert abs(jittered - 81.0) < 0.01
+            effective = breaker._get_effective_pause_seconds()
+            # 60 * 1.5 (budget) * 0.9 (jitter) = 81, capped at 300
+            assert abs(effective - 81.0) < 0.01
+
+
+# ============================================================================
+# US-58-006: Jitter capped at max_pause_seconds Tests
+# ============================================================================
+
+
+class TestJitterCappedAtMaxPause:
+    """Test that jitter in the pipeline never exceeds max_pause_seconds (US-58-006)."""
+
+    @pytest.mark.fast
+    def test_jitter_near_max_capped(self):
+        """With jitter_factor=0.5 and pause near max, result is capped at max_pause_seconds."""
+        config = CircuitBreakerConfig(
+            pause_seconds=290.0,
+            jitter_factor=0.5,
+            max_pause_seconds=300.0
+        )
+        breaker = CircuitBreaker(config)
+
+        # With +50% jitter, 290 would become 435, but must cap at 300
+        with patch.object(random, 'uniform', return_value=0.5):
+            effective = breaker._get_effective_pause_seconds()
+            assert effective <= 300.0, (
+                f"Effective pause {effective} exceeded max_pause_seconds 300.0"
+            )
+            # Should be exactly 300 since 290 * 1.5 = 435 > 300
+            assert effective == 300.0
+
+    @pytest.mark.fast
+    def test_jitter_at_max_capped(self):
+        """With pause exactly at max and positive jitter, result stays at max."""
+        config = CircuitBreakerConfig(
+            pause_seconds=300.0,
+            jitter_factor=0.5,
+            max_pause_seconds=300.0
+        )
+        breaker = CircuitBreaker(config)
+
+        # 300 * 1.5 = 450, must cap at 300
+        with patch.object(random, 'uniform', return_value=0.5):
+            effective = breaker._get_effective_pause_seconds()
+            assert effective <= 300.0
+
+    @pytest.mark.fast
+    def test_jitter_well_below_max_still_applies(self):
+        """When pause is well below max, jitter should still apply normally."""
+        config = CircuitBreakerConfig(
+            pause_seconds=60.0,
+            jitter_factor=0.5,
+            max_pause_seconds=300.0
+        )
+        breaker = CircuitBreaker(config)
+
+        # With +50% jitter, 60 would become 90, well below 300 cap
+        with patch.object(random, 'uniform', return_value=0.5):
+            effective = breaker._get_effective_pause_seconds()
+            # 60 * 1.5 = 90
+            assert abs(effective - 90.0) < 0.01
+            assert effective <= 300.0
+
+    @pytest.mark.fast
+    def test_jitter_below_max_negative_still_applies(self):
+        """Negative jitter should still reduce pause when below max."""
+        config = CircuitBreakerConfig(
+            pause_seconds=60.0,
+            jitter_factor=0.5,
+            max_pause_seconds=300.0
+        )
+        breaker = CircuitBreaker(config)
+
+        # With -50% jitter, 60 would become 30
+        with patch.object(random, 'uniform', return_value=-0.5):
+            effective = breaker._get_effective_pause_seconds()
+            # 60 * 0.5 = 30
+            assert abs(effective - 30.0) < 0.01
+
+    @pytest.mark.fast
+    def test_pipeline_order_jitter_before_cap(self):
+        """Verify jitter is applied before cap in the pipeline (not after)."""
+        config = CircuitBreakerConfig(
+            pause_seconds=250.0,
+            jitter_factor=0.5,
+            max_pause_seconds=300.0
+        )
+        breaker = CircuitBreaker(config)
+
+        # With +50% jitter, 250 * 1.5 = 375 -> capped to 300
+        # If cap were applied BEFORE jitter: 250 (no cap) * 1.5 = 375 (uncapped!)
+        # So this test verifies the correct order: jitter then cap
+        with patch.object(random, 'uniform', return_value=0.5):
+            effective = breaker._get_effective_pause_seconds()
+            assert effective <= 300.0, (
+                "Jitter pushed pause above max_pause_seconds - "
+                "cap must be applied AFTER jitter"
+            )
+
+    @pytest.mark.fast
+    def test_many_iterations_never_exceed_max(self):
+        """Run many iterations to verify max_pause_seconds is never exceeded."""
+        config = CircuitBreakerConfig(
+            pause_seconds=280.0,
+            jitter_factor=0.5,
+            max_pause_seconds=300.0
+        )
+        breaker = CircuitBreaker(config)
+
+        for _ in range(100):
+            effective = breaker._get_effective_pause_seconds()
+            assert effective <= 300.0, (
+                f"Effective pause {effective} exceeded max_pause_seconds 300.0"
+            )

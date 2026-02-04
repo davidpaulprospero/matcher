@@ -68,7 +68,7 @@ class TestCircuitBreakerGetRemainingPauseTime:
     @pytest.mark.fast
     def test_returns_remaining_time_when_tripped(self):
         """Should return remaining time when circuit is tripped."""
-        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=10.0))
+        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=10.0, jitter_factor=0.0))
         cb.state.is_open = True
         cb.state.opened_at = time.time() - 3.0  # Opened 3 seconds ago
 
@@ -126,7 +126,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
     @pytest.mark.fast
     def test_waits_and_returns_time_when_tripped(self):
         """Should wait and return time when circuit is tripped."""
-        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
+        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1, jitter_factor=0.0))
         cb.state.is_open = True
         cb.state.opened_at = time.time()
 
@@ -141,7 +141,7 @@ class TestCircuitBreakerWaitForRecoveryIfNeeded:
     @pytest.mark.fast
     def test_updates_total_paused_seconds(self):
         """Should accumulate paused time in state.total_paused_seconds."""
-        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1))
+        cb = CircuitBreaker(CircuitBreakerConfig(pause_seconds=0.1, jitter_factor=0.0))
         cb.state.is_open = True
         cb.state.opened_at = time.time()
         initial_paused = cb.state.total_paused_seconds

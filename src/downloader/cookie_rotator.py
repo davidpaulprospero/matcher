@@ -195,6 +195,8 @@ class CookieRotator:
         if cookie_path in self._cookie_files:
             self._cookie_files.remove(cookie_path)
             self._invalid_cookies[cookie_path] = reason
+            # Clean up cooldown tracking for removed cookie (prevents unbounded dict growth)
+            self._failed_cookies.pop(cookie_path, None)
             logger.warning(f"Cookie file invalidated mid-session: {cookie_path} ({reason})")
             # Adjust current index if needed
             if self._current_index >= len(self._cookie_files):
