@@ -35,7 +35,8 @@ NETWORK_FAILURE_PATTERNS = (
 )
 
 # ffmpeg exit code 0xFFFFFEC6 = 4294967158 unsigned = -314 signed (network error)
-FFMPEG_NETWORK_EXIT_CODE = '4294967158'
+# Some systems report the unsigned value, others report the signed value.
+FFMPEG_NETWORK_EXIT_CODES = ('4294967158', '-314')
 
 # Default threshold for consecutive network failures before aborting
 NETWORK_FAILURE_THRESHOLD = 3
@@ -104,9 +105,10 @@ def is_network_failure(error_msg: str) -> bool:
     for pattern in NETWORK_FAILURE_PATTERNS:
         if pattern.lower() in error_lower:
             return True
-    # Check for ffmpeg network exit code
-    if FFMPEG_NETWORK_EXIT_CODE in error_msg:
-        return True
+    # Check for ffmpeg network exit codes (unsigned 4294967158 or signed -314)
+    for code in FFMPEG_NETWORK_EXIT_CODES:
+        if code in error_msg:
+            return True
     return False
 
 
