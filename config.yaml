@@ -1291,10 +1291,11 @@ download:
   #   4. State is persisted in checkpoint for resume scenarios
   speed_tracking:
     enabled: true              # Enable speed monitoring
-    window_size: 5             # Number of downloads to track (sliding window)
+    window_size: 10            # Number of downloads to track for running average (US-61-004)
     min_speed_mbps: 1.0        # Below this, timeout gets extended (MB/s)
     max_timeout_multiplier: 2.0  # Maximum timeout extension (2x)
     enable_adaptive_timeout: true  # Auto-extend timeouts on slow networks
+    safety_factor: 1.5         # Multiplier for adaptive timeout calculation (US-61-004)
     # Rate limit signal detection (US-002)
     # When downloads slow to near-stalled speeds, signals potential rate limiting
     # before hard errors occur. Triggers preemptive backoff via circuit breaker.

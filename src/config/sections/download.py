@@ -784,9 +784,10 @@ class SpeedTrackingConfig:
     # Enable/disable speed tracking
     enabled: bool = True
 
-    # Number of downloads to track in sliding window
+    # Number of downloads to track in sliding window (running average)
     # Smaller = more responsive, larger = more stable
-    window_size: int = 5
+    # Default 10 provides good balance between responsiveness and stability
+    window_size: int = 10
 
     # Minimum expected speed in MB/s
     # Below this, timeouts start getting extended
@@ -799,6 +800,12 @@ class SpeedTrackingConfig:
     # Enable adaptive timeout (use speed data to extend timeouts)
     # If False, speeds are tracked but timeouts are not adjusted
     enable_adaptive_timeout: bool = True
+
+    # Safety factor for adaptive timeout calculation (US-61-004)
+    # When calculating timeout from estimated_size / avg_speed, multiply by this factor
+    # Higher values provide more buffer for network variability
+    # Default 1.5 gives 50% buffer over theoretical minimum
+    safety_factor: float = 1.5
 
     # Rate limit signal threshold in MB/s
     # When speed drops below this for consecutive samples, signals potential rate limiting

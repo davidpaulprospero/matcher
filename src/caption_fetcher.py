@@ -4479,6 +4479,8 @@ class CaptionFetcher:
         if available_langs is not None:  # None means list-subs failed, skip check
             if not available_langs:
                 # No captions at all for this video
+                # US-61-002: Log the fast-fail path at DEBUG level
+                logger.debug(f"Caption fast-fail: no subtitles for {video_id}")
                 # US-59-009: Track preflight savings (skipped N format attempts)
                 metrics_ref = getattr(self, '_active_metrics', None)
                 if metrics_ref:

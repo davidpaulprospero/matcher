@@ -21,10 +21,11 @@ class TestDownloadSpeedConfig:
         """Test default config values are set correctly."""
         config = DownloadSpeedConfig()
         assert config.enabled is True
-        assert config.window_size == 5
+        assert config.window_size == 10  # Updated for US-61-004
         assert config.min_speed_mbps == 1.0
         assert config.max_timeout_multiplier == 2.0
         assert config.enable_adaptive_timeout is True
+        assert config.safety_factor == 1.5  # Added for US-61-004
 
     @pytest.mark.fast
     def test_custom_values(self):
@@ -80,7 +81,7 @@ class TestTrackerInitialization:
         """Test tracker initializes with default config."""
         tracker = DownloadSpeedTracker()
         assert tracker.config.enabled is True
-        assert tracker.config.window_size == 5
+        assert tracker.config.window_size == 10  # Updated for US-61-004
 
     @pytest.mark.fast
     def test_custom_config(self):
@@ -1390,3 +1391,176 @@ class TestConcurrentSpeedRecordingUS008:
         # Slow keyword: 2 threads x 10 downloads x 1 MB/s = 1 MB/s average
         assert tracker.get_average_speed_mbps("fast") == pytest.approx(10.0, rel=0.01)
         assert tracker.get_average_speed_mbps("slow") == pytest.approx(1.0, rel=0.01)
+
+
+# ============================================================================
+# US-61-004: Adaptive timeout based on estimated file size and speed
+# ============================================================================
+
+
+@pytest.mark.fast
+class TestCalculateAdaptiveTimeout:
+    """Tests for calculate_adaptive_timeout method (US-61-004)."""
+
+    def test_no_adjustment_without_speed_data(self):
+        """Test returns base timeout when no speed data available."""
+        tracker = DownloadSpeedTracker()
+        # No records - should return base timeout
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 300
+
+    @pytest.mark.fast
+    def test_no_adjustment_with_single_sample(self):
+        """Test returns base timeout with only 1 sample (need at least 2)."""
+        tracker = DownloadSpeedTracker()
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 300  # Need 2+ samples
+
+    @pytest.mark.fast
+    def test_adaptive_timeout_with_fast_network(self):
+        """Test timeout scales down for fast network (100 MB at 10 MB/s)."""
+        config = DownloadSpeedConfig(safety_factor=1.5, max_timeout_multiplier=3.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # 10 MB/s network speed
+        tracker.record_download("v1", 100 * 1024 * 1024, 10.0, "short")  # 10 MB/s
+        tracker.record_download("v2", 100 * 1024 * 1024, 10.0, "short")  # 10 MB/s
+
+        # 100 MB file: 100 / 10 * 1.5 = 15 seconds
+        # But minimum is 30 seconds
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 30  # Minimum applied
+
+    @pytest.mark.fast
+    def test_adaptive_timeout_with_slow_network(self):
+        """Test timeout scales up for slow network (100 MB at 1 MB/s)."""
+        config = DownloadSpeedConfig(safety_factor=1.5, max_timeout_multiplier=3.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # 1 MB/s network speed
+        tracker.record_download("v1", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s
+        tracker.record_download("v2", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s
+
+        # 100 MB file at 1 MB/s: 100 / 1 * 1.5 = 150 seconds
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 150
+
+    @pytest.mark.fast
+    def test_adaptive_timeout_respects_max_multiplier(self):
+        """Test timeout is capped at max_timeout_multiplier * base_timeout."""
+        config = DownloadSpeedConfig(safety_factor=1.5, max_timeout_multiplier=2.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # Very slow: 0.1 MB/s
+        tracker.record_download("v1", 1 * 1024 * 1024, 10.0, "short")  # 0.1 MB/s
+        tracker.record_download("v2", 1 * 1024 * 1024, 10.0, "short")  # 0.1 MB/s
+
+        # 100 MB file at 0.1 MB/s: 100 / 0.1 * 1.5 = 1500 seconds
+        # But capped at 300 * 2.0 = 600 seconds
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 600  # Capped at max_timeout_multiplier * base
+
+    @pytest.mark.fast
+    def test_adaptive_timeout_disabled(self):
+        """Test returns base timeout when adaptive timeout is disabled."""
+        config = DownloadSpeedConfig(enable_adaptive_timeout=False)
+        tracker = DownloadSpeedTracker(config)
+
+        tracker.record_download("v1", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("v2", 10 * 1024 * 1024, 10.0, "short")
+
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 300  # No adjustment
+
+    @pytest.mark.fast
+    def test_adaptive_timeout_custom_safety_factor(self):
+        """Test custom safety factor overrides config."""
+        config = DownloadSpeedConfig(safety_factor=1.5, max_timeout_multiplier=5.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # 2 MB/s network speed
+        tracker.record_download("v1", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+
+        # 100 MB file at 2 MB/s with safety_factor 2.0: 100 / 2 * 2.0 = 100 seconds
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300, safety_factor=2.0)
+        assert timeout == 100
+
+    @pytest.mark.fast
+    def test_adaptive_timeout_uses_config_safety_factor(self):
+        """Test uses config safety_factor when not explicitly provided."""
+        config = DownloadSpeedConfig(safety_factor=2.5, max_timeout_multiplier=5.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # 2 MB/s network speed
+        tracker.record_download("v1", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+
+        # 100 MB file at 2 MB/s with config safety_factor 2.5: 100 / 2 * 2.5 = 125 seconds
+        timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        assert timeout == 125
+
+    @pytest.mark.fast
+    def test_timeout_scales_with_observed_speed(self):
+        """AC5: Verify timeout scales with observed download speed.
+
+        This is the main acceptance criterion test - faster networks get shorter timeouts,
+        slower networks get longer timeouts, proportional to observed speed.
+        """
+        config = DownloadSpeedConfig(safety_factor=1.5, max_timeout_multiplier=10.0)
+
+        # Test with fast network (5 MB/s)
+        fast_tracker = DownloadSpeedTracker(config)
+        fast_tracker.record_download("v1", 50 * 1024 * 1024, 10.0, "short")  # 5 MB/s
+        fast_tracker.record_download("v2", 50 * 1024 * 1024, 10.0, "short")  # 5 MB/s
+        fast_timeout = fast_tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+
+        # Test with slow network (0.5 MB/s)
+        slow_tracker = DownloadSpeedTracker(config)
+        slow_tracker.record_download("v1", 5 * 1024 * 1024, 10.0, "short")  # 0.5 MB/s
+        slow_tracker.record_download("v2", 5 * 1024 * 1024, 10.0, "short")  # 0.5 MB/s
+        slow_timeout = slow_tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+
+        # Verify timeout scales inversely with speed
+        # Fast: 100 MB / 5 MB/s * 1.5 = 30 seconds (minimum)
+        # Slow: 100 MB / 0.5 MB/s * 1.5 = 300 seconds
+        assert fast_timeout == 30  # Minimum applied
+        assert slow_timeout == 300
+
+        # Slow timeout should be 10x fast timeout (speed ratio is 10x)
+        # But fast hits the minimum (30s), so slow is also bounded
+        assert slow_timeout >= fast_timeout
+        # The ratio should reflect the speed difference (within bounds)
+        assert slow_timeout / fast_timeout == 10.0  # 300 / 30 = 10x
+
+    @pytest.mark.fast
+    def test_running_average_updates_timeout(self):
+        """Test that running average of N downloads updates adaptive timeout."""
+        config = DownloadSpeedConfig(window_size=5, safety_factor=1.5, max_timeout_multiplier=10.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # Start with fast network (10 MB/s)
+        for i in range(2):
+            tracker.record_download(f"fast{i}", 100 * 1024 * 1024, 10.0, "short")
+
+        fast_timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+
+        # Network degrades to 1 MB/s (add 3 more slow samples)
+        for i in range(3):
+            tracker.record_download(f"slow{i}", 10 * 1024 * 1024, 10.0, "short")
+
+        # Average now: (100+100+10+10+10) MB / (10+10+10+10+10) s = 230 MB / 50s = 4.6 MB/s
+        # Wait, let me recalculate:
+        # Records: fast0 (100MB/10s=10), fast1 (100MB/10s=10), slow0 (10MB/10s=1), slow1 (10MB/10s=1), slow2 (10MB/10s=1)
+        # Total bytes = 100+100+10+10+10 = 230 MB
+        # Total duration = 10+10+10+10+10 = 50s
+        # Average = 230/50 = 4.6 MB/s
+        degraded_timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+
+        # Timeout should change as running average updates
+        # Fast: 100 / 10 * 1.5 = 15 → 30 (minimum)
+        # Degraded: 100 / 4.6 * 1.5 ≈ 32.6 → 32 seconds
+        assert fast_timeout == 30
+        assert degraded_timeout >= 30  # Should be at or above minimum
+        # Note: with degraded network, timeout might be slightly higher

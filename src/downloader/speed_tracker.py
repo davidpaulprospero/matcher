@@ -21,18 +21,20 @@ class DownloadSpeedConfig:
 
     Attributes:
         enabled: Enable speed tracking (default: True)
-        window_size: Number of downloads to track in sliding window (default: 5)
+        window_size: Number of downloads to track in sliding window (default: 10)
         min_speed_mbps: Minimum expected speed in MB/s (default: 1.0)
         max_timeout_multiplier: Maximum timeout extension (default: 2.0)
         enable_adaptive_timeout: Use speed data to extend timeouts (default: True)
+        safety_factor: Multiplier for adaptive timeout calculation (default: 1.5)
         rate_limit_signal_threshold: Speed in MB/s below which rate limiting is suspected
         consecutive_slow_samples: Number of slow samples before emitting rate limit signal
     """
     enabled: bool = True
-    window_size: int = 5
+    window_size: int = 10  # Default 10 for running average
     min_speed_mbps: float = 1.0  # MB/s below which timeout gets extended
     max_timeout_multiplier: float = 2.0  # Maximum timeout extension (2x)
     enable_adaptive_timeout: bool = True
+    safety_factor: float = 1.5  # Multiplier for estimated_size / avg_speed timeout calc
     rate_limit_signal_threshold: float = 0.1  # MB/s (100 KB/s) - near-stalled threshold
     consecutive_slow_samples: int = 3  # Samples below threshold before signal
 
@@ -213,6 +215,68 @@ class DownloadSpeedTracker:
             )
 
         return adjusted_timeout
+
+    def calculate_adaptive_timeout(
+        self,
+        estimated_size_bytes: int,
+        base_timeout: int,
+        safety_factor: Optional[float] = None
+    ) -> int:
+        """Calculate adaptive timeout based on estimated file size and observed speed.
+
+        Uses the formula: estimated_size / avg_speed * safety_factor
+        This provides a more accurate timeout based on actual network conditions.
+
+        Args:
+            estimated_size_bytes: Estimated file size in bytes
+            base_timeout: Fallback timeout when no speed data available
+            safety_factor: Multiplier for the calculated timeout (default from config: 1.5)
+                          Higher values give more buffer for variable network conditions
+
+        Returns:
+            Calculated timeout in seconds, or base_timeout if insufficient data
+
+        Example:
+            # With avg speed of 2 MB/s, 100 MB file, safety_factor 1.5:
+            # timeout = (100 MB / 2 MB/s) * 1.5 = 75 seconds
+            timeout = tracker.calculate_adaptive_timeout(100 * 1024 * 1024, 300)
+        """
+        if not self.config.enable_adaptive_timeout:
+            return base_timeout
+
+        if len(self._records) < 2:
+            # Not enough data to calculate - need at least 2 samples
+            return base_timeout
+
+        avg_speed = self.get_average_speed_mbps()
+
+        if avg_speed <= 0:
+            return base_timeout
+
+        # Use config safety_factor if not provided
+        if safety_factor is None:
+            safety_factor = self.config.safety_factor
+
+        # Convert estimated size to MB
+        estimated_size_mb = estimated_size_bytes / (1024 * 1024)
+
+        # Calculate timeout: size_MB / speed_MB_per_s * safety_factor
+        calculated_timeout = int((estimated_size_mb / avg_speed) * safety_factor)
+
+        # Apply minimum of base_timeout for small files
+        calculated_timeout = max(calculated_timeout, 30)  # At least 30 seconds
+
+        # Apply maximum of max_timeout_multiplier * base_timeout
+        max_timeout = int(base_timeout * self.config.max_timeout_multiplier)
+        calculated_timeout = min(calculated_timeout, max_timeout)
+
+        if calculated_timeout != base_timeout:
+            logger.debug(
+                f"Adaptive timeout: {estimated_size_mb:.1f} MB at {avg_speed:.2f} MB/s "
+                f"→ {calculated_timeout}s (safety_factor={safety_factor})"
+            )
+
+        return calculated_timeout
 
     def detect_rate_limit_signals(self) -> RateLimitSignal:
         """Detect potential rate limiting based on speed anomalies.

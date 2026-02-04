@@ -548,6 +548,15 @@ class AudioFirstPipeline:
             timeout = max(DEFAULT_SEGMENT_TIMEOUT, int(total_seg_duration * 3))
             timeout = min(timeout, base_timeout)  # Cap at configured max
 
+            # Apply adaptive timeout based on observed download speed (US-61-004)
+            # Estimate segment size: ~5 Mbps (0.625 MB/s) for 1080p video is typical
+            # For total_seg_duration seconds, estimated size = duration * 0.625 MB
+            if self.speed_tracker and self.speed_tracker.get_average_speed_mbps() > 0:
+                estimated_size_bytes = int(total_seg_duration * 0.625 * 1024 * 1024)
+                timeout = self.speed_tracker.calculate_adaptive_timeout(
+                    estimated_size_bytes, timeout
+                )
+
             # Retry configuration
             max_retries = getattr(self.download_config, 'max_retries', DEFAULT_MAX_RETRIES)
             retry_delay = getattr(self.download_config, 'retry_delay', DEFAULT_RETRY_DELAY)
