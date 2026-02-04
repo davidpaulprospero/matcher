@@ -872,8 +872,22 @@ function Resolve-ClaudeResult {
             -PhaseCommitMs $Ctx.PhaseTimings.commit_ms
 
         if ($Ctx.StoryObj) {
-            Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $true -ClaudeOutput $Ctx.ClaudeOutput -DiffOutput $diffOutput
-            Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $true }
+            $evidenceResult = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $true -ClaudeOutput $Ctx.ClaudeOutput -DiffOutput $diffOutput
+
+            # Evidence threshold gate: reject stories with insufficient criteria verification
+            $evidenceConfig = $script:Config.stallDetection.storyCompletionEarlyExit
+            $evidenceMinPct = if ($evidenceConfig -and $null -ne $evidenceConfig.evidenceThresholdPercent) { $evidenceConfig.evidenceThresholdPercent } else { 90 }
+            if ($evidenceResult -and $evidenceResult.criteriaTotal -gt 0 -and $evidenceResult.percentage -lt $evidenceMinPct) {
+                Write-Host "  Evidence below threshold ($($evidenceResult.percentage)% < $($evidenceMinPct)%) - rejecting story" -ForegroundColor Red
+                [Console]::Out.Flush()
+                Update-StoryStatus -StoryId $Ctx.StoryId -Passes $false -Notes "Evidence gate: $($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal) criteria verified ($($evidenceResult.percentage)%). Minimum: $($evidenceMinPct)%."
+                $success = $false
+                $iterationStatus = "evidence_rejected"
+                $script:State.ConsecutiveFailures++
+                Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $false; reason = "evidence_below_threshold"; evidence = "$($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal)" }
+            } else {
+                Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $true }
+            }
 
             # Independent code review
             if ($Ctx.IsStoryWork -and $diffOutput) {
@@ -900,22 +914,24 @@ function Resolve-ClaudeResult {
                 }
             }
 
-            # Update baseline after successful story
-            if ($Ctx.TestResults) {
+            # Update baseline after successful story (skip if evidence-rejected)
+            if ($success -and $Ctx.TestResults) {
                 Update-TestBaseline -TestResults $Ctx.TestResults
             }
 
             # Token budget check
             Get-SprintTokenBudget | Out-Null
 
-            # Save story progress
-            try {
-                Save-StoryProgress -StoryId $Ctx.StoryId -Milestone "completed" -Data @{
-                    iteration = $script:State.IterationCount
-                    retryCount = $script:State.CurrentRetryCount
-                    tokensUsed = $Ctx.TokensUsed
-                }
-            } catch {}
+            # Save story progress (skip if evidence-rejected)
+            if ($success) {
+                try {
+                    Save-StoryProgress -StoryId $Ctx.StoryId -Milestone "completed" -Data @{
+                        iteration = $script:State.IterationCount
+                        retryCount = $script:State.CurrentRetryCount
+                        tokensUsed = $Ctx.TokensUsed
+                    }
+                } catch {}
+            }
 
             # Update learning database
             try {
