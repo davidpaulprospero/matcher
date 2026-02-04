@@ -2804,6 +2804,89 @@ class CaptionFetcher:
 
         return []
 
+    def _list_languages_with_channel_cache(
+        self,
+        video_id: str,
+    ) -> List['AvailableLanguage']:
+        """List available languages with channel-based deduplication (US-59-008).
+
+        When _channel_caption_cache is set (during batch fetch), caches list-subs
+        results per channel_id. If a channel's first video returned no captions,
+        subsequent videos from that channel are marked unavailable without making
+        a yt-dlp call. However, one retry is allowed per channel to handle the
+        case where the first result was a transient error.
+
+        The cache is per-batch (not persisted) and only used as a heuristic.
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            List of AvailableLanguage objects.
+
+        Raises:
+            CaptionUnavailableError: If channel cache indicates no captions.
+            CaptionFetchError: If fetch fails due to network/temporary error.
+        """
+        # If no channel cache active, just call directly
+        if not hasattr(self, '_channel_caption_cache') or self._channel_caption_cache is None:
+            return self.list_available_languages(video_id)
+
+        # Look up channel for this video
+        channel_id = self._get_channel_id_from_video(video_id)
+        if not channel_id:
+            # No channel info - can't deduplicate, call directly
+            return self.list_available_languages(video_id)
+
+        cache = self._channel_caption_cache
+        cache_lock = self._channel_cache_lock
+
+        with cache_lock:
+            if channel_id in cache:
+                cached_entry = cache[channel_id]
+                cached_languages = cached_entry['languages']
+                call_count = cached_entry['call_count']
+
+                if cached_languages:
+                    # Channel has captions - return cached result
+                    logger.debug(
+                        f"Channel cache hit for {video_id} (channel {channel_id}): "
+                        f"{len(cached_languages)} languages cached"
+                    )
+                    return list(cached_languages)
+                else:
+                    # Channel had no captions on first check
+                    if call_count >= 2:
+                        # Already retried once - skip this video
+                        logger.debug(
+                            f"Channel cache skip for {video_id} (channel {channel_id}): "
+                            f"no captions after {call_count} list-subs calls"
+                        )
+                        raise CaptionUnavailableError(
+                            video_id,
+                            f"No captions available (channel {channel_id} cache: "
+                            f"{call_count} list-subs calls, all empty)"
+                        )
+                    # Allow one retry - fall through to make the call
+                    logger.debug(
+                        f"Channel cache retry for {video_id} (channel {channel_id}): "
+                        f"retrying list-subs (attempt {call_count + 1})"
+                    )
+
+        # Make the actual list-subs call
+        available = self.list_available_languages(video_id)
+
+        # Update cache
+        with cache_lock:
+            existing = cache.get(channel_id)
+            new_count = (existing['call_count'] + 1) if existing else 1
+            cache[channel_id] = {
+                'languages': list(available),
+                'call_count': new_count,
+            }
+
+        return available
+
     def fetch_captions_auto_language(
         self,
         video_id: str,
@@ -2813,6 +2896,9 @@ class CaptionFetcher:
 
         Combines list_available_languages and fetch_captions with intelligent
         language selection based on config and availability.
+
+        US-59-008: When _channel_caption_cache is set (during batch fetch),
+        deduplicates list-subs calls for videos from the same channel.
 
         Args:
             video_id: YouTube video ID.
@@ -2825,8 +2911,8 @@ class CaptionFetcher:
             CaptionUnavailableError: If no captions available in any language.
             CaptionFetchError: If fetch fails due to network/temporary error.
         """
-        # List available languages
-        available = self.list_available_languages(video_id)
+        # US-59-008: Use channel cache if available (batch mode)
+        available = self._list_languages_with_channel_cache(video_id)
 
         if not available:
             raise CaptionUnavailableError(
@@ -3380,6 +3466,19 @@ class CaptionFetcher:
                 sample_size=error_pattern_sample_size
             )
 
+        # US-59-008: Initialize channel caption cache for list-subs deduplication
+        # This cache is per-batch and cleaned up in the finally block below.
+        # Maps channel_id -> {'languages': List[AvailableLanguage], 'call_count': int}
+        self._channel_caption_cache = {}
+        self._channel_cache_lock = threading.Lock()
+
+        # US-59-008: Extract channel IDs from video_search_results metadata if available
+        # and set_video_channel_map hasn't been called yet
+        if not hasattr(self, '_video_channel_map') or not self._video_channel_map:
+            # Build channel map from video_ids if we have metadata
+            # (caller should have called set_video_channel_map before batch fetch)
+            pass
+
         # Filter out skipped video IDs
         skip_set = skip_video_ids or set()
         videos_to_fetch = [vid for vid in video_ids if vid not in skip_set]
@@ -3862,6 +3961,26 @@ class CaptionFetcher:
                     # Also record this with pattern detector
                     if pattern_detector and not pattern_handled:
                         pattern_detector.record_error(video_id, str(e))
+
+        # US-59-008: Log channel cache stats and clean up
+        if hasattr(self, '_channel_caption_cache') and self._channel_caption_cache:
+            total_channels = len(self._channel_caption_cache)
+            total_calls = sum(
+                entry['call_count'] for entry in self._channel_caption_cache.values()
+            )
+            channels_with_captions = sum(
+                1 for entry in self._channel_caption_cache.values()
+                if entry['languages']
+            )
+            logger.info(
+                f"Channel caption cache: {total_channels} channels, "
+                f"{total_calls} list-subs calls, "
+                f"{channels_with_captions} with captions"
+            )
+
+        # US-59-008: Clean up per-batch channel cache
+        self._channel_caption_cache = None
+        self._channel_cache_lock = None
 
         logger.info(
             f"Batch caption fetch complete: {len(results)} processed, "
