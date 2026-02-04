@@ -1,6 +1,72 @@
 # scripts/ralph/lib/display.ps1
 # Display and UI: banners, reasoning output, user input prompts, choice logging
 
+# ============================================================================
+# CONSOLE MODE: QUICK EDIT DISABLE
+# ============================================================================
+
+function Disable-QuickEditMode {
+    <#
+    .SYNOPSIS
+        Disable Windows Console Quick Edit Mode to prevent accidental output freezing.
+    .DESCRIPTION
+        When Quick Edit Mode is enabled (default on Windows), clicking inside the
+        console window enters "Mark" (text selection) mode. This blocks ALL Write-Host
+        calls, freezing the entire PowerShell monitoring loop since it is single-threaded.
+
+        The Claude subprocess continues running independently, but the Ralph monitoring
+        loop (stall detection, heartbeat, activity logging) freezes until any key is pressed.
+
+        This was diagnosed from session 2026-02-04_131652 iteration 9 (US-51-002) where
+        a 26-minute gap in all logs occurred because the console was in Mark mode.
+    .RETURNS
+        $true if Quick Edit was successfully disabled, $false if it failed (non-fatal)
+    #>
+
+    # Only applies to Windows
+    if ($env:OS -ne 'Windows_NT') { return $false }
+
+    try {
+        # Add Win32 console API types if not already loaded
+        if (-not ([System.Management.Automation.PSTypeName]'Win32.ConsoleMode').Type) {
+            Add-Type -Name 'ConsoleMode' -Namespace 'Win32' -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern IntPtr GetStdHandle(int nStdHandle);
+
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+[DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+'@
+        }
+
+        $STD_INPUT_HANDLE = -10
+        $ENABLE_QUICK_EDIT = 0x0040
+
+        $hStdin = [Win32.ConsoleMode]::GetStdHandle($STD_INPUT_HANDLE)
+        $mode = [uint32]0
+        $gotMode = [Win32.ConsoleMode]::GetConsoleMode($hStdin, [ref]$mode)
+
+        if (-not $gotMode) { return $false }
+
+        # Clear the Quick Edit bit
+        $newMode = $mode -band (-bnot $ENABLE_QUICK_EDIT)
+        if ($newMode -eq $mode) {
+            # Quick Edit was already disabled
+            return $true
+        }
+
+        $setOk = [Win32.ConsoleMode]::SetConsoleMode($hStdin, $newMode)
+        return $setOk
+    }
+    catch {
+        # Non-fatal — log and continue
+        Write-Host "  Warning: Could not disable Quick Edit Mode: $_" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Write-RalphBanner {
     param(
         [switch]$Queue,

@@ -114,6 +114,15 @@ if (-not (Test-Path $script:ArchiveDir)) {
 . "$script:LibPath\prompts.ps1"
 . "$script:LibPath\claude.ps1"
 . "$script:LibPath\display.ps1"
+
+# Disable Quick Edit Mode to prevent console Mark mode from freezing the monitoring loop.
+# When Quick Edit is enabled (Windows default), clicking the console window blocks all output,
+# which freezes stall detection, heartbeat, and activity monitoring.
+$quickEditDisabled = Disable-QuickEditMode
+if ($quickEditDisabled) {
+    Write-Host "  Console Quick Edit Mode disabled (prevents accidental output freeze)" -ForegroundColor DarkGray
+}
+
 . "$script:LibPath\loops.ps1"
 . "$script:LibPath\heartbeat.ps1"
 . "$script:LibPath\interview.ps1"
