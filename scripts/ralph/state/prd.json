@@ -83,8 +83,8 @@
                                                        "In get_next_target(), optionally skip targets with success_rate \u003c threshold (default 0.2)",
                                                        "Add test verifying low-success targets are deprioritized in rotation"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 (enhancement). Files: src/downloader/impersonation.py (ImpersonationStats class at line ~25, ImpersonationManager). Currently targets rotate round-robin without considering which targets actually work - some targets may consistently fail while others succeed."
+                            "passes":  true,
+                            "notes":  "Complete. Added success_count/failure_count dicts to ImpersonationStats with record_success/record_failure/get_success_rate methods. get_next_target() now skips targets below min_success_rate threshold (default 0.2) via enable_success_filtering flag. Added TestSuccessRateFiltering class with 10 tests including test_low_success_targets_deprioritized. All 44 tests pass."
                         },
                         {
                             "id":  "US-61-006",
@@ -97,8 +97,8 @@
                                                        "Add de_escalation_enabled config option (default: true)",
                                                        "Add test verifying 5 consecutive successes at Tier 3 drops to Tier 2"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 (enhancement). Files: src/downloader/escalation_manager.py (EscalationState at line ~27, record_success method), src/downloader/types.py (EscalationState/EscalationTier). Currently escalation is sticky per-session - once at Tier 3, stays there even if YouTube stops blocking."
+                            "passes":  true,
+                            "notes":  "Complete. Added consecutive_successes to EscalationState in types.py. Updated record_success() to track successes and de-escalate when threshold reached. Added de_escalation_enabled/de_escalation_threshold to ExtractorArgsConfig. EscalationManager.record_success() now reads config and logs de-escalation. Added TestDeEscalation class with 5 tests including test_five_consecutive_successes_at_tier_3_drops_to_tier_2. All 124 tests pass."
                         },
                         {
                             "id":  "US-61-007",

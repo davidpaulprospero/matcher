@@ -541,3 +541,85 @@ class TestEdgeCasesAndDefaults:
         error = Exception("Generic error")
         category = categorize_caption_error(error, "429 Too Many Requests")
         assert category == CaptionErrorCategory.RATE_LIMIT
+
+
+class TestErrorCategoryCounterIncrement:
+    """Test that error categorization properly increments CaptionMetrics counters (US-61-007)."""
+
+    def test_record_error_category_increments_counter(self):
+        """record_error_category() increments the correct counter in error_category_counts."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Record a RATE_LIMIT error
+        metrics.record_error_category(CaptionErrorCategory.RATE_LIMIT, "vid1")
+        assert metrics.error_category_counts.get('RATE_LIMIT') == 1
+
+        # Record another RATE_LIMIT error
+        metrics.record_error_category(CaptionErrorCategory.RATE_LIMIT, "vid2")
+        assert metrics.error_category_counts.get('RATE_LIMIT') == 2
+
+        # Record a NETWORK error
+        metrics.record_error_category(CaptionErrorCategory.NETWORK, "vid3")
+        assert metrics.error_category_counts.get('NETWORK') == 1
+
+        # Verify totals
+        assert len(metrics.error_category_counts) == 2
+        assert sum(metrics.error_category_counts.values()) == 3
+
+    def test_categorize_and_record_integration(self):
+        """categorize_caption_error() result can be recorded in metrics."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+
+        # Test various error types
+        error_scenarios = [
+            (CaptionFetchError("vid1", "HTTP Error 429"), 'RATE_LIMIT'),
+            (CaptionUnavailableError("vid2", "no captions"), 'UNAVAILABLE'),
+            (TimeoutError("Connection timed out"), 'TIMEOUT'),
+            (CaptionFetchError("vid4", "Connection refused"), 'NETWORK'),
+        ]
+
+        for error, expected_category_name in error_scenarios:
+            reason = str(getattr(error, 'reason', str(error)))
+            category = categorize_caption_error(error, reason)
+            metrics.record_error_category(category, f"test_{expected_category_name}")
+            assert metrics.error_category_counts.get(expected_category_name) == 1
+
+    def test_error_counts_exposed_in_performance_summary(self):
+        """error_counts is exposed in get_performance_summary() for dashboard integration."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.record_error_category(CaptionErrorCategory.RATE_LIMIT, "vid1")
+        metrics.record_error_category(CaptionErrorCategory.UNAVAILABLE, "vid2")
+        metrics.record_error_category(CaptionErrorCategory.UNAVAILABLE, "vid3")
+
+        summary = metrics.get_performance_summary()
+
+        assert 'error_counts' in summary
+        assert summary['error_counts'] == {'RATE_LIMIT': 1, 'UNAVAILABLE': 2}
+
+    def test_error_category_summary_statistics(self):
+        """get_error_category_summary() provides correct statistics."""
+        from src.caption.metrics import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        # Record: 5 RATE_LIMIT, 3 UNAVAILABLE, 2 NETWORK
+        for _ in range(5):
+            metrics.record_error_category(CaptionErrorCategory.RATE_LIMIT, "vid")
+        for _ in range(3):
+            metrics.record_error_category(CaptionErrorCategory.UNAVAILABLE, "vid")
+        for _ in range(2):
+            metrics.record_error_category(CaptionErrorCategory.NETWORK, "vid")
+
+        summary = metrics.get_error_category_summary()
+
+        assert summary['total'] == 10
+        assert summary['top_category'] == 'RATE_LIMIT'
+        assert summary['counts'] == {'RATE_LIMIT': 5, 'UNAVAILABLE': 3, 'NETWORK': 2}
+        assert summary['category_rates']['RATE_LIMIT'] == 50.0
+        assert summary['category_rates']['UNAVAILABLE'] == 30.0
+        assert summary['category_rates']['NETWORK'] == 20.0

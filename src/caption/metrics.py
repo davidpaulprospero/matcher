@@ -365,6 +365,7 @@ class CaptionMetrics:
                 'avg_seconds_per_call': round(avg_seconds, 2),
                 'calls_saved_by_preflight': self.calls_saved_by_preflight,
                 'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,
+                'error_counts': dict(self.error_category_counts),  # US-61-007
             }
 
     def record_fetch_success(
