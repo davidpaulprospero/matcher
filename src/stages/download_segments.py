@@ -295,6 +295,15 @@ class DownloadVideoSegmentsStage(Stage):
                 'retry_count': download_stats.get('retry_count', 0),
             }
 
+            # US-50-008: Include circuit breaker metrics in checkpoint
+            if self.downloader:
+                _cb = getattr(self.downloader, 'circuit_breaker', None)
+                if _cb:
+                    checkpoint_data['circuit_breaker'] = {
+                        'total_trips': _cb.state.total_trips,
+                        'total_paused_seconds': round(_cb.state.total_paused_seconds, 1),
+                    }
+
             # US-49-012: Collect escalation summary from escalation manager
             escalation_summary = {}
             if self.downloader:
@@ -529,9 +538,9 @@ class DownloadVideoSegmentsStage(Stage):
                 self._print_progress(idx, total, stats)
                 continue
 
-            # US-49-007: Check circuit breaker before download attempt.
-            # If circuit is open and escalation is already at max tier,
-            # skip the video and add to retry queue for later.
+            # US-50-008: Check circuit breaker before download attempt.
+            # If open, pause using check_and_wait() to wait for recovery.
+            # If open AND escalation is already at max tier, skip to retry queue.
             if circuit_breaker and circuit_breaker.is_open:
                 at_max_tier = False
                 if escalation_mgr:
@@ -557,6 +566,9 @@ class DownloadVideoSegmentsStage(Stage):
                         )
                     self._print_progress(idx, total, stats)
                     continue
+                else:
+                    # Not at max tier — pause and wait for circuit recovery
+                    circuit_breaker.check_and_wait()
 
             try:
                 # Download segment using yt-dlp with downloader's infrastructure
