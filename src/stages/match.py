@@ -132,7 +132,11 @@ class MatchStage(Stage):
             print(f"  Average confidence: {avg_conf:.1%}")
 
             # Calculate and log quality metrics
-            from ..matching.metrics import calculate_match_quality_metrics, log_quality_summary, log_confidence_histogram
+            from ..matching.metrics import (
+                calculate_match_quality_metrics, log_quality_summary,
+                log_confidence_histogram, compute_diversity_metrics,
+                log_diversity_metrics,
+            )
             quality_metrics = calculate_match_quality_metrics(
                 matches=matches,
                 total_segments=len(state.voiceover_segments)
@@ -142,6 +146,10 @@ class MatchStage(Stage):
             # Log confidence distribution histogram
             if confidences:
                 log_confidence_histogram(confidences)
+
+            # Compute and log diversity metrics (US-53-005)
+            diversity_report = compute_diversity_metrics(matches)
+            log_diversity_metrics(diversity_report)
 
             # Update logger stats for match-only mode
             run_logger = get_global_logger()
@@ -204,6 +212,7 @@ class MatchStage(Stage):
                 'avg_confidence': avg_conf,
                 'matches': serialized_matches,  # Essential match data for validation
                 'quality_metrics': quality_metrics.to_dict(),  # Quality metrics for analysis
+                'diversity_metrics': diversity_report.to_dict(),  # US-53-005: Source diversity per track
             }
 
             return StageResult.ok(checkpoint_data, warnings)
