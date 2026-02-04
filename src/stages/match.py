@@ -485,7 +485,7 @@ class MatchStage(Stage):
         """Run the actual matching algorithm"""
         from ..matching import match_all_segments
         from ..utils import CacheManager
-        from ..embeddings import compute_embeddings, get_embedding_provider
+        from ..embeddings import compute_embeddings, get_embedding_provider, EmbeddingCache
 
         cache_dir = config.cache.cache_dir if hasattr(config.cache, 'cache_dir') else ".cache"
         provider = get_embedding_provider(config)
@@ -515,6 +515,22 @@ class MatchStage(Stage):
             provider=provider,
             cache=cache,
             cache_key="video_segments"
+        )
+
+        # Log embedding cache hit/miss rate
+        embedding_cache = EmbeddingCache(cache_dir)
+        vo_cached, vo_uncached, _ = embedding_cache.get_cached_embeddings(
+            [t.strip() if t else "[silence]" for t in vo_texts], "voiceover"
+        )
+        vid_cached, vid_uncached, _ = embedding_cache.get_cached_embeddings(
+            [t.strip() if t else "[silence]" for t in vid_texts], "video_segments"
+        )
+        vo_total = len(vo_texts) if vo_texts else 1
+        vid_total = len(vid_texts) if vid_texts else 1
+        logger.info(
+            f"Embedding cache stats — "
+            f"voiceover: {len(vo_cached)}/{vo_total} hits ({len(vo_cached)*100//vo_total}%%), "
+            f"video: {len(vid_cached)}/{vid_total} hits ({len(vid_cached)*100//vid_total}%%)"
         )
 
         if video_embeddings is None or len(video_embeddings) == 0:
