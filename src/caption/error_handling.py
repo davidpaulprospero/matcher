@@ -13,7 +13,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from .enums import CaptionErrorCategory
-from .exceptions import CaptionUnavailableError
+from .exceptions import CaptionFormatUnavailableError, CaptionUnavailableError
 from .models import ErrorPatternResult
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,10 @@ def categorize_caption_error(error: Exception, reason: str = "") -> CaptionError
         >>> categorize_caption_error(e, e.reason)
         CaptionErrorCategory.RATE_LIMIT
     """
-    # First check for specific exception types
+    # First check for specific exception types (most specific first)
+    if isinstance(error, CaptionFormatUnavailableError):
+        return CaptionErrorCategory.FORMAT_UNAVAILABLE
+
     if isinstance(error, CaptionUnavailableError):
         return CaptionErrorCategory.UNAVAILABLE
 
@@ -80,6 +83,13 @@ def categorize_caption_error(error: Exception, reason: str = "") -> CaptionError
     ]
     if any(p in combined for p in parse_patterns):
         return CaptionErrorCategory.PARSE
+
+    # Format-specific unavailable (US-59-004) — check before general unavailable
+    format_unavailable_patterns = [
+        "requested format is not available",
+    ]
+    if any(p in combined for p in format_unavailable_patterns):
+        return CaptionErrorCategory.FORMAT_UNAVAILABLE
 
     # Unavailable patterns
     unavailable_patterns = [

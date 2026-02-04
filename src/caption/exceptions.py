@@ -48,6 +48,21 @@ class CaptionFetchError(CaptionError):
         super().__init__(message)
 
 
+class CaptionFormatUnavailableError(CaptionFetchError):
+    """Raised when a specific caption format is not available (US-59-004).
+
+    This is a subclass of CaptionFetchError that indicates the requested
+    format (e.g., json3) is not available, but other formats may exist.
+    Unlike CaptionUnavailableError (video has NO captions at all), this
+    error means the video may have captions in a different format.
+
+    The format loop should continue trying other formats when this is raised.
+    """
+    def __init__(self, video_id: str, fmt: str, reason: str = ""):
+        self.format = fmt
+        super().__init__(video_id, reason or f"Requested format '{fmt}' is not available")
+
+
 class CaptionParseWarning(CaptionError):
     """Non-fatal warning for caption parsing issues (US-005).
 
