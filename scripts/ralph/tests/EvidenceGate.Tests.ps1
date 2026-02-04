@@ -382,3 +382,94 @@ Describe 'Mutation: diff exclusion changes are detected' -Tag 'Unit', 'EvidenceG
         $mutated | Should -Not -Match '\(exclude\)scripts/ralph/state/'
     }
 }
+
+# =============================================================================
+# PIPELINE LEAK: Log-StoryVerification return value suppressed in non-success paths
+# =============================================================================
+
+Describe 'Log-StoryVerification pipeline output suppressed in claude.ps1' -Tag 'Unit', 'EvidenceGate' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+        # Extract Resolve-ClaudeResult function body
+        $funcPattern = 'function Resolve-ClaudeResult\s*\{([\s\S]*?)(?=\nfunction\s)'
+        $script:resolveBody = [regex]::Match($script:claudeSource, $funcPattern).Value
+    }
+
+    It 'timeout path suppresses Log-StoryVerification with $null assignment' {
+        # The timeout block should use $null = Log-StoryVerification
+        # Find the timeout section (before the elseif ExitCode -eq 0)
+        $timeoutBlock = [regex]::Match($script:resolveBody, 'TIMEOUT[\s\S]*?(?=elseif.*ExitCode\s+-eq\s+0)').Value
+        $timeoutBlock | Should -Match '\$null\s*=\s*Log-StoryVerification'
+    }
+
+    It 'failure path suppresses Log-StoryVerification with $null assignment' {
+        # The failure block comes after the success block (else clause)
+        $failureBlock = [regex]::Match($script:resolveBody, 'FAILURE[\s\S]*?Update learning database').Value
+        $failureBlock | Should -Match '\$null\s*=\s*Log-StoryVerification'
+    }
+
+    It 'success path captures Log-StoryVerification in $evidenceResult' {
+        # The success block should assign to $evidenceResult
+        $successBlock = [regex]::Match($script:resolveBody, 'SUCCESS[\s\S]*?(?=else\s*\{[\s\S]{0,50}FAILURE)').Value
+        $successBlock | Should -Match '\$evidenceResult\s*=\s*Log-StoryVerification'
+    }
+
+    It 'no bare Log-StoryVerification calls exist (all captured or suppressed)' {
+        # Every Log-StoryVerification in Resolve-ClaudeResult must be preceded by $null= or $var=
+        $calls = [regex]::Matches($script:resolveBody, '(?m)^.*Log-StoryVerification.*$')
+        foreach ($call in $calls) {
+            $line = $call.Value.Trim()
+            $line | Should -Match '(\$null|\$\w+)\s*=\s*Log-StoryVerification' -Because "all Log-StoryVerification calls must suppress or capture return value to prevent pipeline leaks"
+        }
+    }
+}
+
+# =============================================================================
+# MUTATION: Pipeline leak suppression regressions detected
+# =============================================================================
+
+Describe 'Mutation: pipeline leak suppression changes are detected' -Tag 'Unit', 'EvidenceGate', 'Mutation' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+    }
+
+    It 'removing $null from timeout path is caught' {
+        $mutated = $script:claudeSource.Replace(
+            '$null = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false',
+            'Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false'
+        )
+        # Extract Resolve-ClaudeResult from mutated source
+        $funcPattern = 'function Resolve-ClaudeResult\s*\{([\s\S]*?)(?=\nfunction\s)'
+        $resolveBody = [regex]::Match($mutated, $funcPattern).Value
+        # Check bare calls exist (not suppressed)
+        $calls = [regex]::Matches($resolveBody, '(?m)^.*Log-StoryVerification.*$')
+        $hasBare = $false
+        foreach ($call in $calls) {
+            if ($call.Value.Trim() -notmatch '(\$null|\$\w+)\s*=\s*Log-StoryVerification') {
+                $hasBare = $true
+            }
+        }
+        $hasBare | Should -BeTrue -Because "removing `$null suppression creates bare pipeline-leaking calls"
+    }
+
+    It 'changing $null to bare call on failure path is caught' {
+        # Simulate removing just one $null (the second occurrence)
+        $first = $script:claudeSource.IndexOf('$null = Log-StoryVerification')
+        $second = $script:claudeSource.IndexOf('$null = Log-StoryVerification', $first + 1)
+        if ($second -gt 0) {
+            $mutated = $script:claudeSource.Remove($second, '$null = '.Length).Insert($second, '')
+            $funcPattern = 'function Resolve-ClaudeResult\s*\{([\s\S]*?)(?=\nfunction\s)'
+            $resolveBody = [regex]::Match($mutated, $funcPattern).Value
+            $calls = [regex]::Matches($resolveBody, '(?m)^.*Log-StoryVerification.*$')
+            $hasBare = $false
+            foreach ($call in $calls) {
+                if ($call.Value.Trim() -notmatch '(\$null|\$\w+)\s*=\s*Log-StoryVerification') {
+                    $hasBare = $true
+                }
+            }
+            $hasBare | Should -BeTrue -Because "removing `$null from failure path creates pipeline leak"
+        } else {
+            Set-ItResult -Skipped -Because "could not find second `$null = Log-StoryVerification"
+        }
+    }
+}

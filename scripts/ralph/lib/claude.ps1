@@ -817,7 +817,7 @@ function Resolve-ClaudeResult {
             -PhaseImplementMs $Ctx.PhaseTimings.implement_ms -PhaseTestMs $Ctx.PhaseTimings.test_ms `
             -PhaseCommitMs $Ctx.PhaseTimings.commit_ms
 
-        if ($Ctx.StoryObj) { Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
+        if ($Ctx.StoryObj) { $null = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
         $script:State.ConsecutiveFailures++
     }
     elseif ($SubResult.ExitCode -eq 0) {
@@ -971,7 +971,7 @@ function Resolve-ClaudeResult {
             -PhaseImplementMs $Ctx.PhaseTimings.implement_ms -PhaseTestMs $Ctx.PhaseTimings.test_ms `
             -PhaseCommitMs $Ctx.PhaseTimings.commit_ms
 
-        if ($Ctx.StoryObj) { Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
+        if ($Ctx.StoryObj) { $null = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
 
         # Update learning database on failure
         if ($Ctx.StoryId) {
