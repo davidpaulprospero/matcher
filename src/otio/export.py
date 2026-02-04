@@ -19,6 +19,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# DaVinci Resolve EDL color mapping
+# Maps internal confidence color names to DaVinci Resolve EDL color names.
+# Covers all colors returned by get_confidence_color() plus entity markers.
+EDL_COLOR_MAP = {
+    "GREEN": "Mint",
+    "CYAN": "Cyan",
+    "YELLOW": "Yellow",
+    "ORANGE": "Orange",
+    "RED": "Red",
+    "PINK": "Pink",
+    "BLUE": "Blue",
+    "PURPLE": "Purple",
+}
+
 
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     """Save timeline to OTIO file"""
@@ -332,16 +346,6 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         """Convert frame count to timecode string."""
         return _frames_to_tc(frames, fps=frame_rate, start_frame_offset=start_frame_offset, separator=tc_separator)
 
-    # DaVinci Resolve EDL color mapping
-    color_to_edl = {
-        "GREEN": "Mint",
-        "CYAN": "Cyan",
-        "YELLOW": "Yellow",
-        "ORANGE": "Orange",
-        "RED": "Red",
-        "PINK": "Pink"
-    }
-
     edl_lines = []
     edl_lines.append("TITLE: Matched Footage Markers")
     # FCM (Frame Count Mode) line: DROP FRAME or NON-DROP FRAME
@@ -365,7 +369,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
 
         # Get confidence color
         clip_color = get_confidence_color(match.confidence)
-        edl_color = color_to_edl.get(clip_color, "Blue")
+        edl_color = EDL_COLOR_MAP.get(clip_color, "White")
 
         # Marker name (truncate voiceover text to 40 chars)
         marker_name = vo_seg.text[:40].strip()
@@ -383,7 +387,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         # EDL marker entry format (matches DaVinci export exactly)
         edl_lines.append(f"{marker_num:03d}  {reel_name_padded} V     C        {marker_tc} {marker_tc} {marker_tc} {marker_tc}")
         edl_lines.append(f"* FROM CLIP NAME: {marker_name}")
-        edl_lines.append(f"|C:ResolveColorBlue |M:{marker_name} |D:1")
+        edl_lines.append(f"|C:ResolveColor{edl_color} |M:{marker_name} |D:1")
         edl_lines.append("")
 
         marker_num += 1
@@ -399,7 +403,8 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
 
             edl_lines.append(f"{marker_num:03d}  BL       V     C        {entity_tc} {entity_tc} {entity_tc} {entity_tc}")
             edl_lines.append(f"* FROM CLIP NAME: Entity: {entity_name}")
-            edl_lines.append(f"|C:ResolveColorPink |M:Entity: {entity_name} |D:1")
+            entity_edl_color = EDL_COLOR_MAP.get("PINK", "White")
+            edl_lines.append(f"|C:ResolveColor{entity_edl_color} |M:Entity: {entity_name} |D:1")
             edl_lines.append("")
 
             marker_num += 1
