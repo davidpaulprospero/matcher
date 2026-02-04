@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ImpersonationStats:
-    """Tracks impersonation rotation metrics."""
+    """Tracks impersonation rotation metrics including success/failure rates."""
     calls_made: int = 0
     unique_targets_used: Dict[str, int] = field(default_factory=dict)
+    success_count: Dict[str, int] = field(default_factory=dict)
+    failure_count: Dict[str, int] = field(default_factory=dict)
 
     @property
     def unique_count(self) -> int:
@@ -35,10 +37,34 @@ class ImpersonationStats:
         self.calls_made += 1
         self.unique_targets_used[target] = self.unique_targets_used.get(target, 0) + 1
 
+    def record_success(self, target: str) -> None:
+        """Record a successful operation with the given target."""
+        self.success_count[target] = self.success_count.get(target, 0) + 1
+
+    def record_failure(self, target: str) -> None:
+        """Record a failed operation with the given target."""
+        self.failure_count[target] = self.failure_count.get(target, 0) + 1
+
+    def get_success_rate(self, target: str) -> float:
+        """Calculate success rate for a target.
+
+        Returns:
+            Success rate as a float between 0.0 and 1.0.
+            Returns 1.0 if no data exists (optimistic default for new targets).
+        """
+        successes = self.success_count.get(target, 0)
+        failures = self.failure_count.get(target, 0)
+        total = successes + failures
+        if total == 0:
+            return 1.0  # Optimistic default for untested targets
+        return successes / total
+
     def to_dict(self) -> dict:
         return {
             'calls_made': self.calls_made,
             'unique_targets_used': dict(self.unique_targets_used),
+            'success_count': dict(self.success_count),
+            'failure_count': dict(self.failure_count),
         }
 
 
@@ -61,10 +87,14 @@ class ImpersonationManager:
         preferred_targets: Optional[List[str]] = None,
         detect_at_startup: bool = True,
         detection_timeout: int = 10,
+        min_success_rate: float = 0.2,
+        enable_success_filtering: bool = True,
     ):
         self._targets: List[str] = []
         self._preferred_targets = preferred_targets or []
         self._detection_timeout = detection_timeout
+        self._min_success_rate = min_success_rate
+        self._enable_success_filtering = enable_success_filtering
         self._index: int = 0
         self._lock = threading.Lock()
         self._stats = ImpersonationStats()
@@ -194,11 +224,19 @@ class ImpersonationManager:
 
         return targets
 
-    def get_next_target(self) -> Optional[str]:
+    def get_next_target(self, skip_low_success: Optional[bool] = None) -> Optional[str]:
         """Get the next impersonation target via round-robin rotation.
 
         Thread-safe: uses a lock to ensure consistent rotation across
         concurrent calls from multiple download threads.
+
+        When success rate filtering is enabled, targets with success rates
+        below the threshold are skipped. A target must have at least one
+        recorded success or failure to be filtered (new targets are not skipped).
+
+        Args:
+            skip_low_success: Override the default success filtering behavior.
+                If None, uses the instance default (enable_success_filtering).
 
         Returns:
             The next target string, or None if no targets available.
@@ -206,7 +244,39 @@ class ImpersonationManager:
         if not self._targets:
             return None
 
+        use_filtering = skip_low_success if skip_low_success is not None else self._enable_success_filtering
+
         with self._lock:
+            # Try to find a target that meets success rate threshold
+            targets_checked = 0
+            while targets_checked < len(self._targets):
+                target = self._targets[self._index]
+                self._index = (self._index + 1) % len(self._targets)
+                targets_checked += 1
+
+                if use_filtering:
+                    # Check if target has enough data to evaluate
+                    successes = self._stats.success_count.get(target, 0)
+                    failures = self._stats.failure_count.get(target, 0)
+                    total = successes + failures
+
+                    # Only filter if we have data; new targets pass through
+                    if total > 0:
+                        success_rate = self._stats.get_success_rate(target)
+                        if success_rate < self._min_success_rate:
+                            logger.debug(
+                                f"Skipping target {target} with low success rate: "
+                                f"{success_rate:.1%} (threshold: {self._min_success_rate:.1%})"
+                            )
+                            continue
+
+                self._stats.record_use(target)
+                return target
+
+            # All targets have low success rate - fall back to round-robin without filtering
+            logger.warning(
+                "All impersonation targets have low success rates, using next in rotation"
+            )
             target = self._targets[self._index]
             self._index = (self._index + 1) % len(self._targets)
             self._stats.record_use(target)
@@ -226,6 +296,43 @@ class ImpersonationManager:
             return ['--impersonate', target]
         return []
 
+    def record_success(self, target: str) -> None:
+        """Record a successful operation with the given impersonation target.
+
+        Thread-safe: updates the stats under lock.
+
+        Args:
+            target: The impersonation target string that was used.
+        """
+        with self._lock:
+            self._stats.record_success(target)
+
+    def record_failure(self, target: str) -> None:
+        """Record a failed operation with the given impersonation target.
+
+        Thread-safe: updates the stats under lock.
+
+        Args:
+            target: The impersonation target string that was used.
+        """
+        with self._lock:
+            self._stats.record_failure(target)
+
+    def get_success_rate(self, target: str) -> float:
+        """Get the success rate for a specific target.
+
+        Thread-safe: reads stats under lock.
+
+        Args:
+            target: The impersonation target string.
+
+        Returns:
+            Success rate as a float between 0.0 and 1.0.
+            Returns 1.0 if no data exists for this target.
+        """
+        with self._lock:
+            return self._stats.get_success_rate(target)
+
     def get_status(self) -> dict:
         """Get current manager status for debugging/metrics.
 
@@ -234,10 +341,18 @@ class ImpersonationManager:
         """
         with self._lock:
             current_index = self._index
+            # Calculate success rates for all targets
+            success_rates = {
+                target: self._stats.get_success_rate(target)
+                for target in self._targets
+            }
 
         return {
             'target_count': len(self._targets),
             'targets': list(self._targets),
             'current_index': current_index,
             'stats': self._stats.to_dict(),
+            'success_rates': success_rates,
+            'min_success_rate_threshold': self._min_success_rate,
+            'success_filtering_enabled': self._enable_success_filtering,
         }
