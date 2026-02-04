@@ -4688,11 +4688,23 @@ class TestCaptionFormatPreference:
         fetcher._preferred_formats = ["json3", "vtt"]
         video_id = "dQw4w9WgXcQ"
 
-        call_count = [0]
+        format_call_count = [0]
 
         def mock_run_side_effect(*args, **kwargs):
-            call_count[0] += 1
             cmd = args[0]
+            # US-59-002: Pre-flight list-subs call — return 'en' as available
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt, json3\n"
+                )
+                result.stderr = ""
+                return result
+
+            format_call_count[0] += 1
             fmt_idx = cmd.index('--sub-format')
             fmt = cmd[fmt_idx + 1]
 
@@ -4718,8 +4730,8 @@ class TestCaptionFormatPreference:
 
             result = fetcher.fetch_captions(video_id)
 
-        # Should have tried both formats
-        assert call_count[0] == 2
+        # Should have tried both formats (not counting pre-flight list-subs)
+        assert format_call_count[0] == 2
         assert result.format_source == "vtt"
 
 

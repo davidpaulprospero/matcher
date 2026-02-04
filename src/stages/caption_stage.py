@@ -243,10 +243,14 @@ class CaptionStage(Stage):
                     extractor_args_config=extractor_args_config,
                 )
 
+            # US-002 Sprint 7: Initialize caption cache early so it can be passed to fetcher
+            caption_cache = CaptionCache(caption_config)
+
             self._fetcher = CaptionFetcher(
                 config=config,
                 impersonation_manager=impersonation_mgr,
                 escalation_manager=escalation_mgr,
+                caption_cache=caption_cache,
             )
             self._fetcher._timeout = timeout
 
@@ -358,9 +362,6 @@ class CaptionStage(Stage):
                             )
                 except Exception as e:
                     logger.debug(f"Could not restore retry budget from checkpoint: {e}")
-
-            # US-002 Sprint 7: Initialize caption cache for adaptive format ordering
-            caption_cache = CaptionCache(caption_config)
 
             # US-002 Sprint 7: Apply adaptive format ordering from historical success rates
             # This reorders preferred_formats based on what worked best in previous runs
