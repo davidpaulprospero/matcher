@@ -242,6 +242,7 @@ class MatchStage(Stage):
                     return False
 
                 state.matches = restored_matches
+                state._raw_match_dicts = matches_data
                 logger.info(f"Restored MATCH: {len(restored_matches)} matches from checkpoint")
             else:
                 logger.info(f"Restored MATCH metadata from checkpoint (no matches data)")

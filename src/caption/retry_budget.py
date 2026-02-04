@@ -150,6 +150,14 @@ class CaptionRetryBudget:
     # Counts how many times the circuit breaker tripped during this budget's lifetime
     circuit_breaker_trips: int = 0
 
+    # Per-format attempt tracking (US-59-010)
+    # Maps format_name (e.g., 'json3', 'vtt', 'srt') -> {'attempts': N, 'failures': N, 'successes': N}
+    format_attempts: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+    # Per-format consecutive failure threshold for format exhaustion (US-59-010)
+    # When a format accumulates this many failures across different videos, it's considered broken
+    max_format_failures: int = 10
+
     # Graceful degradation tracking (US-42-011)
     # Expected skips calculated when budget is insufficient but continuing anyway
     _expected_skips: Optional[int] = field(default=None, repr=False, compare=False)
@@ -205,11 +213,13 @@ class CaptionRetryBudget:
         )
         return budget
 
-    def record_attempt(self, video_id: str = "") -> None:
+    def record_attempt(self, video_id: str = "", format: Optional[str] = None) -> None:
         """Record a fetch attempt.
 
         Args:
             video_id: Optional video ID for logging context.
+            format: Optional subtitle format name (e.g., 'json3', 'vtt', 'srt')
+                for per-format tracking (US-59-010).
         """
         with self._lock:
             self.attempts += 1
@@ -224,32 +234,47 @@ class CaptionRetryBudget:
                         f"CaptionRetryBudget: video {video_id} has consumed {video_attempts} attempts "
                         f"(>3 indicates possible retry loop)"
                     )
+            # Track per-format attempts (US-59-010)
+            if format:
+                if format not in self.format_attempts:
+                    self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
+                self.format_attempts[format]["attempts"] += 1
         logger.debug(f"CaptionRetryBudget: attempt recorded for {video_id or 'unknown'} "
-                     f"(total: {attempts_count})")
+                     f"(total: {attempts_count})"
+                     f"{f' [format={format}]' if format else ''}")
         # Check if we crossed a consumption threshold (US-37-005)
         self._check_and_log_threshold(video_id)
 
-    def record_success(self, video_id: str = "") -> None:
+    def record_success(self, video_id: str = "", format: Optional[str] = None) -> None:
         """Record a successful fetch.
 
         Args:
             video_id: Optional video ID for logging context.
+            format: Optional subtitle format name for per-format tracking (US-59-010).
         """
         with self._lock:
             self.successes += 1
+            # Track per-format successes (US-59-010)
+            if format:
+                if format not in self.format_attempts:
+                    self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
+                self.format_attempts[format]["successes"] += 1
         logger.debug(f"CaptionRetryBudget: success for {video_id or 'unknown'} "
-                     f"(total: {self.successes})")
+                     f"(total: {self.successes})"
+                     f"{f' [format={format}]' if format else ''}")
 
     def record_failure(
         self,
         video_id: str = "",
-        error_category: Optional[CaptionErrorCategory] = None
+        error_category: Optional[CaptionErrorCategory] = None,
+        format: Optional[str] = None
     ) -> None:
         """Record a failed fetch.
 
         Args:
             video_id: Optional video ID for logging context.
             error_category: Optional error category for tracking (US-37-006).
+            format: Optional subtitle format name for per-format tracking (US-59-010).
         """
         with self._lock:
             self.failures += 1
@@ -257,9 +282,15 @@ class CaptionRetryBudget:
             # Track error category if provided (US-37-006)
             if error_category is not None:
                 self.error_counts[error_category] = self.error_counts.get(error_category, 0) + 1
+            # Track per-format failures (US-59-010)
+            if format:
+                if format not in self.format_attempts:
+                    self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
+                self.format_attempts[format]["failures"] += 1
         logger.debug(f"CaptionRetryBudget: failure for {video_id or 'unknown'} "
                      f"(total: {failures_count})"
-                     f"{f' [{error_category.name}]' if error_category else ''}")
+                     f"{f' [{error_category.name}]' if error_category else ''}"
+                     f"{f' [format={format}]' if format else ''}")
         # Check if we crossed a consumption threshold (US-37-005)
         self._check_and_log_threshold(video_id)
 
@@ -338,12 +369,49 @@ class CaptionRetryBudget:
             f"original_max={self.original_max_attempts}, {scaling_status}, {errors_str}"
         )
 
-    def budget_exhausted(self) -> bool:
+    def is_format_exhausted(self, format: str) -> bool:
+        """Check if a specific subtitle format is exhausted (US-59-010).
+
+        A format is considered exhausted when it has accumulated more than
+        max_format_failures failures across different videos, indicating
+        a systematic issue with that format (e.g., yt-dlp bug, YouTube API change).
+
+        Args:
+            format: Subtitle format name (e.g., 'json3', 'vtt', 'srt').
+
+        Returns:
+            True if the format has exceeded the failure threshold.
+        """
+        with self._lock:
+            if self.max_format_failures <= 0:
+                return False  # Disabled
+            stats = self.format_attempts.get(format)
+            if not stats:
+                return False
+            return stats["failures"] >= self.max_format_failures
+
+    def get_format_stats(self) -> Dict[str, Dict[str, int]]:
+        """Get per-format attempt statistics (US-59-010).
+
+        Returns:
+            Dict mapping format name to {'attempts': N, 'failures': N, 'successes': N}.
+        """
+        with self._lock:
+            # Return a copy to avoid mutation
+            return {fmt: dict(stats) for fmt, stats in self.format_attempts.items()}
+
+    def budget_exhausted(self, format: Optional[str] = None) -> bool:
         """Check if the retry budget is exhausted.
 
         Returns True when:
         - max_attempts > 0 and attempts >= max_attempts, OR
-        - max_backoff_time > 0 and backoff_time_spent >= max_backoff_time
+        - max_backoff_time > 0 and backoff_time_spent >= max_backoff_time, OR
+        - format is specified and that format is exhausted (US-59-010)
+
+        Args:
+            format: Optional subtitle format to check per-format exhaustion.
+                If provided and the format is exhausted, returns True even if
+                global budget is not exhausted.
 
         Returns:
             True if budget is exhausted and remaining videos should be skipped.
@@ -385,6 +453,16 @@ class CaptionRetryBudget:
                         f"CaptionRetryBudget: {self.circuit_breaker_trips} circuit breaker trip(s) "
                         f"contributed to budget exhaustion (indicates transient failures)"
                     )
+                return True
+
+            # US-59-010: Check per-format exhaustion
+            if format and self.is_format_exhausted(format):
+                fmt_stats = self.format_attempts.get(format, {})
+                logger.info(
+                    f"CaptionRetryBudget: FORMAT EXHAUSTED '{format}' "
+                    f"(failures: {fmt_stats.get('failures', 0)}/{self.max_format_failures})"
+                    f"{progress_suffix}"
+                )
                 return True
 
             return False
@@ -815,6 +893,7 @@ class CaptionRetryBudget:
                 "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
                 "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
                 "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
+                "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
             }
 
             # Only include high_attempt_videos if there are any (US-41-005)
@@ -918,6 +997,8 @@ class CaptionRetryBudget:
                 "batch_size": self.batch_size,  # US-38-009
                 "attempts_per_video_id": dict(self.attempts_per_video_id),  # US-41-005
                 "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
+                "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
+                "max_format_failures": self.max_format_failures,  # US-59-010
             }
 
     @classmethod
@@ -970,6 +1051,16 @@ class CaptionRetryBudget:
 
         # Restore circuit breaker trip count (US-41-006)
         budget.circuit_breaker_trips = data.get("circuit_breaker_trips", 0)
+
+        # Restore per-format attempt tracking (US-59-010)
+        format_attempts_data = data.get("format_attempts", {})
+        for fmt, stats in format_attempts_data.items():
+            budget.format_attempts[fmt] = {
+                "attempts": stats.get("attempts", 0),
+                "failures": stats.get("failures", 0),
+                "successes": stats.get("successes", 0),
+            }
+        budget.max_format_failures = data.get("max_format_failures", 10)
 
         # US-42-008: Log checkpoint restore summary including batch_size
         logger.info(
@@ -1090,6 +1181,7 @@ class CaptionRetryBudget:
             self.error_counts.clear()  # US-37-006
             self.attempts_per_video_id.clear()  # US-41-005
             self.circuit_breaker_trips = 0  # US-41-006
+            self.format_attempts.clear()  # US-59-010
             if not preserve_vpn_count:
                 self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
             # US-37-009: Reset early termination state
@@ -1230,6 +1322,7 @@ class CaptionRetryBudget:
                 self.error_counts.clear()
                 self.attempts_per_video_id.clear()
                 self.circuit_breaker_trips = 0
+                self.format_attempts.clear()  # US-59-010
                 self.early_terminated = False
                 self.early_termination_reason = None
                 # US-42-007: Log with specific format for easy grep-ability

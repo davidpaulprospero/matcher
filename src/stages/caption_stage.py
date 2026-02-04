@@ -963,6 +963,33 @@ class CaptionStage(Stage):
                 1 for r in caption_results.values()
                 if r.get('unavailable') or r.get('error')
             )
+
+            # US-59-011: Calculate batch-wide caption availability summary
+            # Count videos with captions vs without (including skipped/error/unavailable)
+            total_videos_in_batch = len(caption_results)
+            videos_with_captions = success_count + skip_count  # Successful + cached
+            videos_without_captions = fail_count + sum(
+                1 for r in caption_results.values()
+                if r.get('skipped') and r.get('reason') != 'queued_upcoming'
+            )
+            # Log batch summary
+            logger.info(
+                f"US-59-011: Caption batch summary: {videos_with_captions}/{total_videos_in_batch} "
+                f"videos have captions, {videos_without_captions} fell back to unavailable/skipped"
+            )
+
+            # US-59-011: Set state flag when >50% of videos have no captions
+            if total_videos_in_batch > 0:
+                no_caption_ratio = videos_without_captions / total_videos_in_batch
+                if no_caption_ratio > 0.5:
+                    state.caption_batch_low_yield = True
+                    logger.warning(
+                        f"US-59-011: Low caption yield detected: {videos_without_captions}/{total_videos_in_batch} "
+                        f"({no_caption_ratio:.0%}) videos have no captions - downstream stages will need transcription"
+                    )
+                    print(f"  ! Low caption yield: {no_caption_ratio:.0%} of videos have no captions")
+                else:
+                    state.caption_batch_low_yield = False
             # US-002: Count skipped live streams
             skipped_live_count = sum(
                 1 for r in caption_results.values()
@@ -1124,6 +1151,8 @@ class CaptionStage(Stage):
                 'auto_count': auto_count,
                 # US-011: Full metrics for cross-session aggregation
                 'caption_metrics': metrics.to_dict(),
+                # US-59-011: Caption batch low yield flag for downstream stages
+                'caption_batch_low_yield': getattr(state, 'caption_batch_low_yield', False),
             }
 
             # US-37-007: Save retry budget state for resume support
@@ -1221,6 +1250,14 @@ class CaptionStage(Stage):
                         f"Restored retry budget: {rb_summary['attempts']} attempts, "
                         f"{rb_summary['failures']} failures, "
                         f"{rb_summary['videos_skipped']} skipped"
+                    )
+
+                # US-59-011: Restore caption_batch_low_yield flag from checkpoint
+                caption_batch_low_yield = data.get('caption_batch_low_yield', False)
+                state.caption_batch_low_yield = caption_batch_low_yield
+                if caption_batch_low_yield:
+                    logger.info(
+                        "Restored caption_batch_low_yield=True: many videos will need transcription"
                     )
             else:
                 # Stage data exists but no caption results - valid empty case

@@ -103,7 +103,7 @@ def _preload_cached_data_for_match_only(pipeline, config):
     cache_dir = Path(config.cache.cache_dir)
 
     # 1. Load audio files from disk if not in state
-    if not state.downloaded_audio and not state.downloaded_videos:
+    if not getattr(state, 'downloaded_audio', None) and not getattr(state, 'downloaded_videos', None):
         from src.state import AudioDownload
         root_dir = getattr(config.download, 'root_dir', None)
         if root_dir:
@@ -129,7 +129,7 @@ def _preload_cached_data_for_match_only(pipeline, config):
 
     # 2. Load transcripts from cache
     transcripts_dir = cache_dir / 'transcriptions'
-    if transcripts_dir.exists() and not state.transcripts:
+    if transcripts_dir.exists() and not getattr(state, 'transcripts', None):
         import json
         transcripts = {}
         for json_file in transcripts_dir.glob('*.json'):

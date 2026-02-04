@@ -72,6 +72,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Confidence assigned to gap matches where no suitable video was found.
+# Downstream stages use this to identify unmatched segments for gap-filling.
+DEFAULT_GAP_CONFIDENCE = 0.0
+
 
 def create_gap_match(vo_segment: 'SRTSegment', reason: str) -> Match:
     """Factory function to create a gap match with consistent attributes.
@@ -91,7 +95,7 @@ def create_gap_match(vo_segment: 'SRTSegment', reason: str) -> Match:
         voiceover_segment=vo_segment,
         video_segment=vo_segment,
         video_scene=None,
-        confidence=0.0,
+        confidence=DEFAULT_GAP_CONFIDENCE,
         reasoning=reason,
         match_type='gap',
     )

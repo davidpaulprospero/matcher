@@ -94,6 +94,49 @@ def _extract_match_core(match: Any, index: int) -> Dict[str, Any]:
     }
 
 
+def _extract_multi_track_data(match: Any) -> Dict[str, Any]:
+    """Extract multi-track data (V2-V8) from a MatchResult.
+
+    Returns serialized alternatives, secondary_matches, strategy_matches,
+    has_gap, and gap_reason. Returns empty lists for non-MatchResult objects
+    (backward compatible).
+    """
+    result = {
+        'alternatives': [],
+        'secondary_matches': [],
+        'strategy_matches': [],
+        'has_gap': False,
+        'gap_reason': '',
+    }
+
+    # Only MatchResult has these fields
+    if not hasattr(match, 'alternatives'):
+        return result
+
+    for alt in getattr(match, 'alternatives', []) or []:
+        try:
+            result['alternatives'].append(alt.to_dict())
+        except Exception as e:
+            logger.warning(f"Failed to serialize alternative: {e}")
+
+    for sec in getattr(match, 'secondary_matches', []) or []:
+        try:
+            result['secondary_matches'].append(sec.to_dict())
+        except Exception as e:
+            logger.warning(f"Failed to serialize secondary match: {e}")
+
+    for strat in getattr(match, 'strategy_matches', []) or []:
+        try:
+            result['strategy_matches'].append(strat.to_dict())
+        except Exception as e:
+            logger.warning(f"Failed to serialize strategy match: {e}")
+
+    result['has_gap'] = bool(getattr(match, 'has_gap', False))
+    result['gap_reason'] = getattr(match, 'gap_reason', '') or ''
+
+    return result
+
+
 def serialize_match_for_match_stage(match: Any, index: int) -> Dict[str, Any]:
     """Serialize a match for MATCH stage checkpoint format.
 
@@ -101,7 +144,7 @@ def serialize_match_for_match_stage(match: Any, index: int) -> Dict[str, Any]:
                  confidence_variance, matched_keywords, confidence_breakdown
     """
     core = _extract_match_core(match, index)
-    return {
+    result = {
         'segment_index': index,
         'source_file': core['source_file'],
         'start_time': core['video_start'],
@@ -110,6 +153,8 @@ def serialize_match_for_match_stage(match: Any, index: int) -> Dict[str, Any]:
         'matched_keywords': core['matched_keywords'],
         'confidence_breakdown': core['confidence_breakdown'],
     }
+    result.update(_extract_multi_track_data(match))
+    return result
 
 
 def serialize_match_for_iterative_stage(match: Any, index: int) -> Dict[str, Any]:
@@ -119,7 +164,7 @@ def serialize_match_for_iterative_stage(match: Any, index: int) -> Dict[str, Any
                  confidence, strategy, reason, face_score
     """
     core = _extract_match_core(match, index)
-    return {
+    result = {
         'segment_index': core['segment_index'],
         'video_file': core['source_file'],
         'video_start': core['video_start'],
@@ -129,6 +174,8 @@ def serialize_match_for_iterative_stage(match: Any, index: int) -> Dict[str, Any
         'reason': core['reason'],
         'face_score': core['face_score'],
     }
+    result.update(_extract_multi_track_data(match))
+    return result
 
 
 def is_empty_source(match: Any, index: int) -> bool:
