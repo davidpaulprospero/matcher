@@ -412,7 +412,8 @@ class OutputStage(Stage):
                         matches=state.matches,
                         output_path=str(output_dir / "timeline"),
                         frame_rate=getattr(config.output, 'frame_rate', 30.0),
-                        downloaded_segments=downloaded_segments
+                        downloaded_segments=downloaded_segments,
+                        timeline_start_tc=getattr(config.output, 'timeline_start_tc', '01:00:00:00')
                     )
                     outputs['sequence_xml'] = sequence_xml_path
                     print(f"  + XML (DaVinci): {Path(sequence_xml_path).name}")
@@ -657,7 +658,8 @@ class OutputStage(Stage):
             entity_videos=state.entity_videos or None,
             config=config,
             num_parts=num_parts,
-            downloaded_segments=downloaded_segments
+            downloaded_segments=downloaded_segments,
+            timeline_start_tc=getattr(config.output, 'timeline_start_tc', '01:00:00:00')
         )
         print(f"  + XML (fallback): {Path(xml_paths[0]).name}")
         return xml_paths
