@@ -458,6 +458,8 @@ function Invoke-ClaudeSubprocess {
         $storyCompletionDetected = $false
         $storyCompletionTime = $null
         $storyCompletionGraceSec = if ($earlyExitConfig -and $earlyExitConfig.gracePeriodSeconds) { $earlyExitConfig.gracePeriodSeconds } else { 15 }
+        $earlyExitRecheckIntervalSec = 30  # Periodic re-check interval to catch missed file writes
+        $lastEarlyExitRecheck = 0
 
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
@@ -509,14 +511,20 @@ function Invoke-ClaudeSubprocess {
                 }
 
                 # Early exit: check if story was marked done in prd.json
-                if ($earlyExitEnabled -and $prdUpdated -and $StoryId -and -not $storyCompletionDetected) {
+                # Trigger on: (a) prd.json file write detected, or (b) periodic re-check interval
+                # The periodic re-check catches cases where passes:true was written in the same
+                # polling interval as a prior write, causing $prdUpdated to miss it
+                $periodicRecheck = $earlyExitEnabled -and $StoryId -and -not $storyCompletionDetected -and ($totalElapsed - $lastEarlyExitRecheck) -ge $earlyExitRecheckIntervalSec
+                if ($earlyExitEnabled -and ($prdUpdated -or $periodicRecheck) -and $StoryId -and -not $storyCompletionDetected) {
+                    if ($periodicRecheck) { $lastEarlyExitRecheck = $totalElapsed }
                     try {
                         $prdJson = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
                         $story = $prdJson.userStories | Where-Object { $_.id -eq $StoryId }
                         if ($story -and $story.passes -eq $true) {
                             $storyCompletionDetected = $true
                             $storyCompletionTime = Get-Date
-                            Write-Host "  [$mins min] Story $StoryId marked DONE - grace period ${storyCompletionGraceSec}s for commit..." -ForegroundColor Green
+                            $detectMethod = if ($prdUpdated) { "file change" } else { "periodic recheck" }
+                            Write-Host "  [$mins min] Story $StoryId marked DONE ($detectMethod) - grace period ${storyCompletionGraceSec}s for commit..." -ForegroundColor Green
                         }
                     } catch {
                         # PRD read failed (file locked, etc.) - skip this check

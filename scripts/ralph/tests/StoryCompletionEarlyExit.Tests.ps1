@@ -86,7 +86,7 @@ Describe 'Early exit PRD check logic' -Tag 'Unit', 'EarlyExit' {
     }
 
     It 'checks earlyExitEnabled before reading PRD' {
-        $script:funcBody | Should -Match '\$earlyExitEnabled\s+-and\s+\$prdUpdated\s+-and\s+\$StoryId'
+        $script:funcBody | Should -Match '\$earlyExitEnabled\s+-and\s+\(\$prdUpdated\s+-or\s+\$periodicRecheck\)\s+-and\s+\$StoryId'
     }
 
     It 'only checks when not already detected' {
@@ -310,10 +310,10 @@ Describe 'Mutation testing - early exit guard conditions' -Tag 'Unit', 'EarlyExi
         $script:funcBody = [regex]::Match($script:claudeSource, $funcPattern, 'Multiline').Groups[1].Value
     }
 
-    It 'PRD check requires all three: earlyExitEnabled AND prdUpdated AND StoryId' {
+    It 'PRD check requires earlyExitEnabled AND (prdUpdated OR periodicRecheck) AND StoryId' {
         $guardLine = ($script:funcBody -split "`n" | Where-Object { $_ -match 'earlyExitEnabled.*prdUpdated.*StoryId' })
         $guardLine | Should -Not -BeNullOrEmpty
-        $guardLine | Should -Match '\$earlyExitEnabled\s+-and\s+\$prdUpdated\s+-and\s+\$StoryId'
+        $guardLine | Should -Match '\$earlyExitEnabled\s+-and\s+\(\$prdUpdated\s+-or\s+\$periodicRecheck\)\s+-and\s+\$StoryId'
     }
 
     It 'grace period kill requires both storyCompletionDetected AND storyCompletionTime' {
@@ -441,20 +441,33 @@ Describe 'Early exit does not fire without StoryId' -Tag 'Unit', 'EarlyExit', 'S
     It 'empty StoryId prevents PRD check (simulates healing calls)' {
         $earlyExitEnabled = $true
         $prdUpdated = $true
+        $periodicRecheck = $false
         $StoryId = ""
         $storyCompletionDetected = $false
 
-        $shouldCheck = $earlyExitEnabled -and $prdUpdated -and $StoryId -and -not $storyCompletionDetected
+        $shouldCheck = $earlyExitEnabled -and ($prdUpdated -or $periodicRecheck) -and $StoryId -and -not $storyCompletionDetected
         $shouldCheck | Should -BeFalse
     }
 
-    It 'non-empty StoryId allows PRD check' {
+    It 'non-empty StoryId allows PRD check via prdUpdated' {
         $earlyExitEnabled = $true
         $prdUpdated = $true
+        $periodicRecheck = $false
         $StoryId = "US-53-010"
         $storyCompletionDetected = $false
 
-        $shouldCheck = $earlyExitEnabled -and $prdUpdated -and $StoryId -and -not $storyCompletionDetected
+        $shouldCheck = $earlyExitEnabled -and ($prdUpdated -or $periodicRecheck) -and $StoryId -and -not $storyCompletionDetected
+        $shouldCheck | Should -BeTrue
+    }
+
+    It 'non-empty StoryId allows PRD check via periodicRecheck' {
+        $earlyExitEnabled = $true
+        $prdUpdated = $false
+        $periodicRecheck = $true
+        $StoryId = "US-53-010"
+        $storyCompletionDetected = $false
+
+        $shouldCheck = $earlyExitEnabled -and ($prdUpdated -or $periodicRecheck) -and $StoryId -and -not $storyCompletionDetected
         $shouldCheck | Should -BeTrue
     }
 }
@@ -517,6 +530,112 @@ Describe 'Exit code override revalidates passes before overriding' -Tag 'Unit', 
         # The else branch should set stillPasses = $true
         $elseBlock = [regex]::Match($script:overrideBlock, 'else\s*\{\s*\$stillPasses\s*=\s*\$true\s*\}').Value
         $elseBlock | Should -Not -BeNullOrEmpty
+    }
+}
+
+# =============================================================================
+# PERIODIC RECHECK TESTS - Catch missed file writes
+# =============================================================================
+
+Describe 'Periodic recheck initialization' -Tag 'Unit', 'EarlyExit' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+        $funcPattern = 'function Invoke-ClaudeSubprocess\s*\{([\s\S]*?)^\}'
+        $script:funcBody = [regex]::Match($script:claudeSource, $funcPattern, 'Multiline').Groups[1].Value
+    }
+
+    It 'initializes earlyExitRecheckIntervalSec to 30' {
+        $script:funcBody | Should -Match '\$earlyExitRecheckIntervalSec\s*=\s*30'
+    }
+
+    It 'initializes lastEarlyExitRecheck to 0' {
+        $script:funcBody | Should -Match '\$lastEarlyExitRecheck\s*=\s*0'
+    }
+}
+
+Describe 'Periodic recheck logic' -Tag 'Unit', 'EarlyExit' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+        $funcPattern = 'function Invoke-ClaudeSubprocess\s*\{([\s\S]*?)^\}'
+        $script:funcBody = [regex]::Match($script:claudeSource, $funcPattern, 'Multiline').Groups[1].Value
+    }
+
+    It 'computes periodicRecheck based on totalElapsed and lastEarlyExitRecheck' {
+        $script:funcBody | Should -Match '\$periodicRecheck\s*=.*\$totalElapsed\s*-\s*\$lastEarlyExitRecheck.*-ge\s+\$earlyExitRecheckIntervalSec'
+    }
+
+    It 'updates lastEarlyExitRecheck when periodicRecheck fires' {
+        $script:funcBody | Should -Match 'if\s*\(\$periodicRecheck\).*\$lastEarlyExitRecheck\s*=\s*\$totalElapsed'
+    }
+
+    It 'includes detect method in DONE message (file change vs periodic recheck)' {
+        $script:funcBody | Should -Match '\$detectMethod\s*=.*file change.*periodic recheck'
+    }
+}
+
+Describe 'Periodic recheck simulation' -Tag 'Unit', 'EarlyExit', 'Simulation' {
+    It 'triggers periodic recheck after interval elapses with no prd update' {
+        $earlyExitEnabled = $true
+        $StoryId = "US-59-001"
+        $storyCompletionDetected = $false
+        $totalElapsed = 35
+        $lastEarlyExitRecheck = 0
+        $earlyExitRecheckIntervalSec = 30
+
+        $periodicRecheck = $earlyExitEnabled -and $StoryId -and -not $storyCompletionDetected -and ($totalElapsed - $lastEarlyExitRecheck) -ge $earlyExitRecheckIntervalSec
+        $periodicRecheck | Should -BeTrue
+    }
+
+    It 'does not trigger periodic recheck before interval elapses' {
+        $earlyExitEnabled = $true
+        $StoryId = "US-59-001"
+        $storyCompletionDetected = $false
+        $totalElapsed = 20
+        $lastEarlyExitRecheck = 0
+        $earlyExitRecheckIntervalSec = 30
+
+        $periodicRecheck = $earlyExitEnabled -and $StoryId -and -not $storyCompletionDetected -and ($totalElapsed - $lastEarlyExitRecheck) -ge $earlyExitRecheckIntervalSec
+        $periodicRecheck | Should -BeFalse
+    }
+
+    It 'does not trigger periodic recheck when storyCompletionDetected is already true' {
+        $earlyExitEnabled = $true
+        $StoryId = "US-59-001"
+        $storyCompletionDetected = $true
+        $totalElapsed = 60
+        $lastEarlyExitRecheck = 0
+        $earlyExitRecheckIntervalSec = 30
+
+        $periodicRecheck = $earlyExitEnabled -and $StoryId -and -not $storyCompletionDetected -and ($totalElapsed - $lastEarlyExitRecheck) -ge $earlyExitRecheckIntervalSec
+        $periodicRecheck | Should -BeFalse
+    }
+
+    It 'resets interval after periodic recheck fires' {
+        $totalElapsed = 65
+        $lastEarlyExitRecheck = 30  # Last recheck at 30s
+
+        $earlyExitRecheckIntervalSec = 30
+        $periodicRecheck = ($totalElapsed - $lastEarlyExitRecheck) -ge $earlyExitRecheckIntervalSec
+        $periodicRecheck | Should -BeTrue
+
+        # Simulate reset
+        $lastEarlyExitRecheck = $totalElapsed  # Now 65
+
+        # Next check at 70s should NOT trigger (only 5s since last)
+        $totalElapsed = 70
+        $periodicRecheck = ($totalElapsed - $lastEarlyExitRecheck) -ge $earlyExitRecheckIntervalSec
+        $periodicRecheck | Should -BeFalse
+    }
+
+    It 'periodic recheck catches passes:true even when prdUpdated is false' {
+        $earlyExitEnabled = $true
+        $prdUpdated = $false
+        $periodicRecheck = $true
+        $StoryId = "US-59-001"
+        $storyCompletionDetected = $false
+
+        $shouldCheck = $earlyExitEnabled -and ($prdUpdated -or $periodicRecheck) -and $StoryId -and -not $storyCompletionDetected
+        $shouldCheck | Should -BeTrue
     }
 }
 
