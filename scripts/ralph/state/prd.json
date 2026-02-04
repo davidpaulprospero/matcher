@@ -55,8 +55,8 @@
                 "Timecode parsing logic (tc_parts splitting at export.py:330-335 and reporting.py:180-185) is extracted into a parse_timecode_to_frames() utility",
                 "Add tests verifying frames_to_tc for edge cases: 0 frames, frame_rate=29.97 rounded, drop-frame separator"
             ],
-            "passes": false,
-            "notes": "Tier: refactor (low risk). Source files: src/otio/export.py:330-350 (timecode parsing + frames_to_tc), src/otio/reporting.py:180-199 (timecode parsing + frames_to_tc), src/otio/utils.py (destination). Both functions are nearly identical — extract to utils.py, add drop_frame separator support. The parse_timecode_to_frames helper should handle both ':' and ';' separators."
+            "passes": true,
+            "notes": "Extracted frames_to_tc(frames, fps, start_frame_offset, separator) and parse_timecode_to_frames(timecode, frame_rate) into src/otio/utils.py. Updated export.py and reporting.py to use shared functions. Added 9 new edge case tests. All 92 otio_utils tests pass."
         },
         {
             "id": "US-56-004",
@@ -69,8 +69,8 @@
                 "The <frame> calculation at xml_export.py:362 uses parsed timecode instead of fps_int*3600",
                 "Add test verifying XML output with non-default timecode (e.g., '00:00:00:00') contains correct <string> and <frame> values"
             ],
-            "passes": false,
-            "notes": "Tier: bug fix (medium risk). Source files: src/otio/xml_export.py:361-362 (media XML timecode), src/otio/xml_export.py:700-701 (media XML helper sequence), src/otio/xml_export.py:775-776 (sequence XML timecode). All three locations hardcode '01:00:00:00' and fps_int*3600. The config already has OutputConfig.timeline_start_tc='01:00:00:00' (src/config/sections/output.py:67) and types.py:38 has DEFAULT_TIMELINE_START. Use parse_timecode_to_frames from US-56-003 to calculate the frame offset."
+            "passes": true,
+            "notes": "Completed. Added timeline_start_tc parameter (default '01:00:00:00') to generate_resolve_xml_with_bins, _write_media_xml_part, and generate_davinci_sequence_xml. Replaced all 3 hardcoded '01:00:00:00' strings and fps_int*3600 calculations with the parameter and parse_timecode_to_frames(). Updated output.py callers to pass config.output.timeline_start_tc. Added 7 tests in TestConfigurableTimelineStartTC covering default/custom timecodes for all 3 XML locations. All tests pass."
         },
         {
             "id": "US-56-005",
