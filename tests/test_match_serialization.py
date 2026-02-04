@@ -8,7 +8,7 @@ dict input, including confidence clamping, video_file validation, and type coerc
 import pytest
 from unittest.mock import MagicMock
 
-from src.state import Match, restore_matches_from_dicts
+from src.state import Match, restore_matches_from_dicts, DEFAULT_MATCH_DURATION_SECONDS
 from src.stages.match import MatchStage
 from src.stages.iterative_match import IterativeMatchStage
 from src.state import PipelineState
@@ -151,6 +151,58 @@ class TestMatchFromDict:
 
 
 # ============================================================================
+# US-57-011: Named constant tests
+# ============================================================================
+
+class TestDefaultMatchDurationConstant:
+    """US-57-011: Verify restore_matches_from_dicts uses DEFAULT_MATCH_DURATION_SECONDS
+    when video_end is missing from match data (old checkpoint format)."""
+
+    def test_missing_video_end_uses_default_duration(self):
+        """When video_end is absent, video_end = video_start + DEFAULT_MATCH_DURATION_SECONDS."""
+        data = [{
+            'segment_index': 0,
+            'video_file': 'vid_no_end',
+            'video_start': 5.0,
+            # no video_end
+            'confidence': 0.8,
+        }]
+        result = restore_matches_from_dicts(data)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].video_end == 5.0 + DEFAULT_MATCH_DURATION_SECONDS
+
+    def test_missing_video_end_with_zero_start(self):
+        """video_start=0 + DEFAULT_MATCH_DURATION_SECONDS when video_end absent."""
+        data = [{
+            'segment_index': 0,
+            'video_file': 'vid_zero_start',
+            'video_start': 0.0,
+            'confidence': 0.5,
+        }]
+        result = restore_matches_from_dicts(data)
+        assert result is not None
+        assert result[0].video_end == DEFAULT_MATCH_DURATION_SECONDS
+
+    def test_explicit_video_end_not_overridden(self):
+        """When video_end IS present, DEFAULT_MATCH_DURATION_SECONDS is not used."""
+        data = [{
+            'segment_index': 0,
+            'video_file': 'vid_with_end',
+            'video_start': 5.0,
+            'video_end': 25.0,
+            'confidence': 0.9,
+        }]
+        result = restore_matches_from_dicts(data)
+        assert result is not None
+        assert result[0].video_end == 25.0
+
+    def test_constant_value_is_ten_seconds(self):
+        """DEFAULT_MATCH_DURATION_SECONDS is 10.0 seconds."""
+        assert DEFAULT_MATCH_DURATION_SECONDS == 10.0
+
+
+# ============================================================================
 # restore_matches_from_dicts unit tests
 # ============================================================================
 
@@ -226,15 +278,20 @@ class TestBatchDiagnostics:
         summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
         assert len(summary_msgs) == 1, \
             f"Expected exactly 1 summary message, got {len(summary_msgs)}: {summary_msgs}"
-        assert '80 of 100' in summary_msgs[0]
+        assert '80 match entries' in summary_msgs[0]
         assert 'likely all gap matches' in summary_msgs[0]
 
-        # Check actionable advice (80/100 > 50%)
-        advice_msgs = [m for m in warning_messages if '--match-only' in m]
-        assert len(advice_msgs) == 1, \
-            f"Expected actionable advice, got: {warning_messages}"
+        # Check actionable advice is embedded in the summary
+        assert '--match-only' in summary_msgs[0], \
+            f"Expected --match-only recommendation in summary, got: {summary_msgs[0]}"
 
-        # Individual errors should be DEBUG, not ERROR or WARNING
+        # Individual empty source_file errors suppressed when batch > 10
+        debug_empty_source = [r for r in caplog.records if r.levelno == logging.DEBUG
+                              and 'invalid video_file' in r.message]
+        assert len(debug_empty_source) == 0, \
+            f"Expected 0 individual DEBUG logs for empty source_file (batch > 10), got {len(debug_empty_source)}"
+
+        # No ERROR-level records
         error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
         assert len(error_records) == 0, \
             f"Expected no ERROR-level records, got {len(error_records)}"
@@ -269,8 +326,8 @@ class TestBatchDiagnostics:
         assert len(advice_msgs) == 0, \
             f"Expected no advice warning, got: {advice_msgs}"
 
-    def test_below_50_percent_no_advice(self, caplog):
-        """When <50% fail, summary appears but no actionable advice."""
+    def test_below_50_percent_still_includes_advice(self, caplog):
+        """When <50% fail, summary still includes --match-only recommendation."""
         import logging
 
         valid_base = {
@@ -295,14 +352,11 @@ class TestBatchDiagnostics:
         assert len(result) == 8
 
         warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        # Summary should appear (there are errors)
+        # Summary should appear with recommendation
         summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
         assert len(summary_msgs) == 1
-
-        # But no advice (only 20% failed, below 50%)
-        advice_msgs = [m for m in warning_messages if '--match-only' in m]
-        assert len(advice_msgs) == 0, \
-            f"Expected no advice for <50% failures, got: {advice_msgs}"
+        assert '--match-only' in summary_msgs[0], \
+            f"Expected --match-only in summary, got: {summary_msgs[0]}"
 
     def test_individual_errors_logged_as_debug(self, caplog):
         """Individual validation errors are logged at DEBUG, not WARNING/ERROR."""
@@ -321,6 +375,80 @@ class TestBatchDiagnostics:
                          and 'match[' in r.message]
         assert len(debug_records) == 5, \
             f"Expected 5 DEBUG-level individual errors, got {len(debug_records)}"
+
+    def test_100_empty_source_file_one_summary_no_individual(self, caplog):
+        """AC4: 100 entries with empty source_file produces one summary log, not 100 individual errors."""
+        import logging
+
+        invalid_dicts = [
+            {
+                'segment_index': i,
+                'video_file': '',
+                'video_start': 0.0,
+                'video_end': 10.0,
+                'confidence': 0.8,
+            }
+            for i in range(100)
+        ]
+
+        with caplog.at_level(logging.DEBUG):
+            result = restore_matches_from_dicts(invalid_dicts)
+
+        # All invalid → None
+        assert result is None
+
+        # Exactly one summary warning
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
+        assert len(summary_msgs) == 1, \
+            f"Expected exactly 1 summary, got {len(summary_msgs)}: {summary_msgs}"
+        assert '100 match entries' in summary_msgs[0]
+        assert '--match-only' in summary_msgs[0]
+
+        # No individual DEBUG-level errors (batch > 10 suppresses them)
+        debug_empty = [r for r in caplog.records if r.levelno == logging.DEBUG
+                       and 'invalid video_file' in r.message]
+        assert len(debug_empty) == 0, \
+            f"Expected 0 individual DEBUG logs (suppressed for batch > 10), got {len(debug_empty)}"
+
+    def test_other_invalid_fields_still_raise_individual_errors(self, caplog):
+        """AC5: Entries with non-source_file errors (e.g., non-numeric confidence,
+        non-dict entries) still produce individual DEBUG errors."""
+        import logging
+
+        entries = [
+            # Invalid: non-numeric confidence
+            {'segment_index': 0, 'video_file': 'vid_a', 'video_start': 0.0,
+             'video_end': 10.0, 'confidence': 'high'},
+            # Invalid: non-numeric segment_index
+            {'segment_index': 'bad', 'video_file': 'vid_b', 'video_start': 0.0,
+             'video_end': 10.0, 'confidence': 0.8},
+            # Invalid: not a dict at all
+            "not_a_dict_entry",
+            # Valid entry
+            {'segment_index': 3, 'video_file': 'good_vid', 'video_start': 0.0,
+             'video_end': 10.0, 'confidence': 0.9},
+        ]
+
+        with caplog.at_level(logging.DEBUG):
+            result = restore_matches_from_dicts(entries)
+
+        # Only the valid entry should be restored
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].video_file == 'good_vid'
+
+        # Individual DEBUG errors for non-source_file failures
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG
+                         and 'match[' in r.message]
+        assert len(debug_records) == 3, \
+            f"Expected 3 individual DEBUG errors for non-source_file failures, got {len(debug_records)}: {[r.message for r in debug_records]}"
+
+        # No empty source_file summary (none of the errors are empty source_file)
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        summary_msgs = [m for m in warning_messages if 'empty source_file' in m]
+        assert len(summary_msgs) == 0, \
+            f"Expected no empty source_file summary, got: {summary_msgs}"
 
 
 # ============================================================================
@@ -1175,7 +1303,9 @@ class TestSharedMatchSerializer:
         match = self._make_utils_match()
         result = serialize_match_for_match_stage(match, index=3)
         expected_keys = {'segment_index', 'source_file', 'start_time', 'confidence',
-                         'confidence_variance', 'matched_keywords', 'confidence_breakdown'}
+                         'confidence_variance', 'matched_keywords', 'confidence_breakdown',
+                         'alternatives', 'secondary_matches', 'strategy_matches',
+                         'has_gap', 'gap_reason'}
         assert set(result.keys()) == expected_keys
 
     def test_iterative_stage_format_keys(self):
@@ -1183,7 +1313,9 @@ class TestSharedMatchSerializer:
         match = self._make_utils_match()
         result = serialize_match_for_iterative_stage(match, index=3)
         expected_keys = {'segment_index', 'video_file', 'video_start', 'video_end',
-                         'confidence', 'strategy', 'reason', 'face_score'}
+                         'confidence', 'strategy', 'reason', 'face_score',
+                         'alternatives', 'secondary_matches', 'strategy_matches',
+                         'has_gap', 'gap_reason'}
         assert set(result.keys()) == expected_keys
 
     def test_is_empty_source_gap_match(self):
