@@ -42,6 +42,7 @@ from .cache import BaseCache, CacheEntry
 from src.caption.exceptions import (
     CaptionError,
     CaptionFetchError,
+    CaptionFormatUnavailableError,
     CaptionParseWarning,
     CaptionUnavailableError,
     ConfigValidationError,
@@ -4111,8 +4112,15 @@ class CaptionFetcher:
                     )
                     return result
             except CaptionUnavailableError:
-                # No captions in this format, try next
-                logger.debug(f"Caption {video_id}: {fmt} format unavailable, trying next")
+                # Video has no captions at all - no point trying other formats (US-59-004)
+                logger.debug(f"Caption {video_id}: no captions available, breaking format loop")
+                raise
+            except CaptionFormatUnavailableError as e:
+                # This specific format unavailable, but others may exist (US-59-004)
+                last_error = e
+                logger.debug(
+                    f"Caption {video_id}: {fmt} format unavailable, trying next"
+                )
                 continue
             except CaptionFetchError as e:
                 # Parse or fetch error - try next format (US-006)
@@ -4185,6 +4193,7 @@ class CaptionFetcher:
             # Check for errors indicating no captions
             if result.returncode != 0:
                 stderr_lower = result.stderr.lower()
+                # Video-level: no captions exist at all (any format)
                 if any(phrase in stderr_lower for phrase in [
                     'no subtitles',
                     'no automatic captions',
@@ -4193,6 +4202,11 @@ class CaptionFetcher:
                     'private video',
                 ]):
                     raise CaptionUnavailableError(video_id, result.stderr[:200])
+                # Format-level: this specific format unavailable (US-59-004)
+                elif 'requested format is not available' in stderr_lower:
+                    raise CaptionFormatUnavailableError(
+                        video_id, subtitle_format, result.stderr[:200]
+                    )
                 else:
                     raise CaptionFetchError(video_id, result.stderr[:200])
 

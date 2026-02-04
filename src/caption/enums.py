@@ -32,6 +32,7 @@ class CaptionErrorCategory(Enum):
     TIMEOUT = auto()    # Request/connection timeouts
     PARSE = auto()      # Caption content parsing failures
     UNAVAILABLE = auto()  # No captions exist for the video
+    FORMAT_UNAVAILABLE = auto()  # Specific format unavailable, others may exist (US-59-004)
     RATE_LIMIT = auto()   # API rate limiting (429, quota exceeded)
 
 
@@ -79,5 +80,6 @@ DEFAULT_RETRY_BUDGETS = {
     CaptionErrorCategory.TIMEOUT: 2,      # Timeouts get moderate retries
     CaptionErrorCategory.PARSE: 1,        # Parse errors rarely succeed on retry
     CaptionErrorCategory.UNAVAILABLE: 0,  # Never retry - video has no captions
+    CaptionErrorCategory.FORMAT_UNAVAILABLE: 0,  # Don't retry - format loop handles this
     CaptionErrorCategory.RATE_LIMIT: 2,   # Rate limits retry with backoff
 }
