@@ -34,12 +34,15 @@ def _make_mock_downloader(bot_floor_threshold=5, bot_abort_threshold=50):
     mock_dl.retry_queue.has_pending.return_value = False
     mock_dl.impersonation_manager = None
 
-    # Real-ish escalation manager mock that tracks set_tier_floor calls
+    # Real-ish escalation manager mock that tracks set_tier_floor calls.
+    # get_escalation_args returns None so _build_ydl_opts skips escalation
+    # and the tier comparison at line 615 doesn't crash on MagicMock > int.
     esc_mgr = MagicMock()
     esc_mgr.set_tier_floor = MagicMock()
     esc_mgr.clear_tier_floor = MagicMock()
     esc_mgr.record_failure = MagicMock()
     esc_mgr.record_success = MagicMock()
+    esc_mgr.get_escalation_args = MagicMock(return_value=None)
     mock_dl.escalation_manager = esc_mgr
 
     mock_dl.download_config = MagicMock()

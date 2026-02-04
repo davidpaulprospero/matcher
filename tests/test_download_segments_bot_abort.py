@@ -277,3 +277,155 @@ class TestBotDetectionAbortCheckpoint:
             )
 
         assert stats['attempted'] == threshold
+
+
+# ---------------------------------------------------------------------------
+# Test: Bot-detection abort logged as 'bot_detection_abort' category
+# ---------------------------------------------------------------------------
+
+
+class TestBotDetectionAbortCategory:
+    """US-52-007: Verify bot-detection abort is logged as a stage-level failure
+    with 'bot_detection_abort' category in error_categories stats."""
+
+    @pytest.mark.fast
+    def test_abort_records_bot_detection_abort_category(self):
+        """When the stage aborts due to bot-detection threshold, the stats
+        error_categories dict should contain 'bot_detection_abort'."""
+        threshold = 3
+        total_segments = 10
+        stage = DownloadVideoSegmentsStage()
+        stage.downloader = _make_mock_downloader(bot_abort_threshold=threshold)
+
+        segments = _make_segments(total_segments)
+
+        with patch('yt_dlp.YoutubeDL') as mock_yt_dlp_cls:
+            mock_ydl = MagicMock()
+            mock_ydl.download.side_effect = Exception(
+                "ERROR: [youtube] vid: HTTP Error 403: Forbidden"
+            )
+            mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+            mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+            downloaded, stats = stage._download_segments(
+                segments=segments,
+                output_dir=Path("/tmp/test_bot_abort_cat"),
+                buffer_seconds=5.0,
+                progress_callback=None,
+            )
+
+        assert stats['attempted'] == threshold
+        assert 'bot_detection_abort' in stats['error_categories'], (
+            f"Expected 'bot_detection_abort' in error_categories, "
+            f"got {stats['error_categories']}"
+        )
+        assert stats['error_categories']['bot_detection_abort'] == 1
+
+    @pytest.mark.fast
+    def test_abort_message_includes_count_and_cookie_guidance(self):
+        """The abort log message should include the count of bot detections
+        and recommend checking cookie configuration."""
+        threshold = 3
+        stage = DownloadVideoSegmentsStage()
+        stage.downloader = _make_mock_downloader(bot_abort_threshold=threshold)
+
+        segments = _make_segments(10)
+        error_messages = []
+
+        with patch('yt_dlp.YoutubeDL') as mock_yt_dlp_cls, \
+             patch('src.stages.download_segments.logger') as mock_logger:
+            mock_ydl = MagicMock()
+            mock_ydl.download.side_effect = Exception(
+                "ERROR: [youtube] vid: HTTP Error 403: Forbidden"
+            )
+            mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+            mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+            stage._download_segments(
+                segments=segments,
+                output_dir=Path("/tmp/test_bot_abort_msg"),
+                buffer_seconds=5.0,
+                progress_callback=None,
+            )
+
+            for call_args in mock_logger.error.call_args_list:
+                msg = str(call_args[0][0]) if call_args[0] else ''
+                error_messages.append(msg)
+
+        combined = ' '.join(error_messages).lower()
+        # Verify count is mentioned
+        assert str(threshold) in ' '.join(error_messages), (
+            f"Expected bot count '{threshold}' in error messages"
+        )
+        # Verify cookie guidance is included
+        assert 'cookie' in combined, (
+            "Expected 'cookie' guidance in abort error messages"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test: Mixed bot-detection + success resets counter (no false abort)
+# ---------------------------------------------------------------------------
+
+
+class TestBotDetectionMixedSuccessReset:
+    """US-52-007: Verify that successful downloads between bot-detection errors
+    reset the counter, preventing false aborts."""
+
+    @pytest.mark.fast
+    def test_mixed_bot_and_success_resets_counter(self):
+        """Pattern: 2 bot errors, 1 success, 2 bot errors → no abort
+        (threshold=3). The success at position 3 resets the counter."""
+        import tempfile, shutil
+        threshold = 3
+        stage = DownloadVideoSegmentsStage()
+        stage.downloader = _make_mock_downloader(
+            bot_abort_threshold=threshold,
+            bot_floor_threshold=50,  # High so tier floor doesn't interfere
+        )
+
+        segments = _make_segments(5)
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="test_mixed_bot_"))
+        try:
+            call_count = [0]
+
+            def _side_effect(urls):
+                call_count[0] += 1
+                idx = call_count[0]
+                if idx <= 2:
+                    raise Exception("ERROR: [youtube] vid: HTTP Error 403: Forbidden")
+                elif idx == 3:
+                    # Success: write the file for vid_2 (start=10-5=5, end=20+5=25)
+                    output_path = tmp_dir / "vid_2_5_25.mp4"
+                    output_path.write_bytes(b'fake video data')
+                    return None
+                else:
+                    raise Exception("ERROR: [youtube] vid: HTTP Error 403: Forbidden")
+
+            with patch('yt_dlp.YoutubeDL') as mock_yt_dlp_cls:
+                mock_ydl = MagicMock()
+                mock_ydl.download.side_effect = _side_effect
+                mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+                mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+                downloaded, stats = stage._download_segments(
+                    segments=segments,
+                    output_dir=tmp_dir,
+                    buffer_seconds=5.0,
+                    progress_callback=None,
+                )
+
+            # All 5 segments should have been attempted (no abort at threshold=3
+            # because the success at position 3 reset the counter)
+            assert stats['attempted'] == 5, (
+                f"Expected all 5 segments attempted, got {stats['attempted']} — "
+                f"counter was not reset on success"
+            )
+            assert stats['succeeded'] >= 1
+            # bot_detection_abort should NOT be in error_categories
+            assert 'bot_detection_abort' not in stats.get('error_categories', {}), (
+                "bot_detection_abort should not appear when abort didn't fire"
+            )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)

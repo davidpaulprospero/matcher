@@ -727,11 +727,20 @@ class DownloadVideoSegmentsStage(Stage):
                         and consecutive_bot_detections >= _bot_abort_threshold
                     ):
                         remaining = total - idx
+                        # US-52-007: Log bot-detection abort as stage-level failure category
+                        stats['error_categories']['bot_detection_abort'] = 1
+                        stats['error_aggregator'].record(
+                            f"Bot-detection abort: {consecutive_bot_detections} "
+                            f"consecutive bot errors exceeded threshold "
+                            f"({_bot_abort_threshold})",
+                            'bot_detection_abort',
+                        )
                         logger.error(
                             f"Aborting download loop: {consecutive_bot_detections} "
                             f"consecutive bot-detection errors (threshold: "
                             f"{_bot_abort_threshold}). YouTube is broadly blocking "
-                            f"requests. Skipping {remaining} remaining segment(s)."
+                            f"requests. Skipping {remaining} remaining segment(s). "
+                            f"Check cookie configuration."
                         )
                         logger.error(
                             "Suggested actions to resolve bot-detection:\n"

@@ -108,7 +108,7 @@
             "id": "US-52-007",
             "title": "Add bot-detection abort threshold to prevent futile download attempts",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When consecutive_bot_detections exceeds bot_detection_abort_threshold (config, default 15), the stage aborts with a clear error message",
                 "Abort message includes the count of bot detections and recommends checking cookie config",
@@ -117,7 +117,7 @@
                 "Unit test verifies mixed bot-detection and success resets the counter",
                 "Bot-detection abort is logged as a stage-level failure with 'bot_detection_abort' category"
             ],
-            "notes": "Tier: P2 (prevent futile retries). Files: src/stages/download_segments.py:577-578 (consecutive_bot_detections), lines 616-621 (bot_abort_threshold config read). Verify the abort logic actually fires — the counter and threshold exist from US-49-005/US-49-008 but the abort branch may not trigger correctly if bot-detection errors still reset counters elsewhere. The key behavior: without cookies, every request triggers bot detection, so the stage should abort quickly rather than hammering YouTube with N doomed requests."
+            "notes": "US-52-007 complete. Root cause: MagicMock escalation_result.tier.value > int comparison crashed in tests, preventing bot-detection counter from incrementing. Fix: (1) test mock get_escalation_args returns None to avoid MagicMock comparison, (2) added bot_detection_abort category to error_categories and error_aggregator when abort fires, (3) abort message includes count + cookie guidance, (4) added 3 new tests (abort category, abort message content, mixed success reset). All 75 related tests pass."
         },
         {
             "id": "US-52-008",
