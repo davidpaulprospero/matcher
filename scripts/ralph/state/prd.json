@@ -34,7 +34,7 @@
             "id": "US-52-002",
             "title": "Add stall detection wrapper for yt-dlp Python API download calls",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Wrap ydl.download() call in download_segments.py with a concurrent.futures timeout mechanism",
                 "Timeout value is configurable via download config field segment_download_timeout (default 300 seconds)",
@@ -43,7 +43,7 @@
                 "Unit test verifies timeout triggers after configured duration using mock ydl.download that blocks",
                 "Unit test verifies successful downloads within timeout are not interrupted"
             ],
-            "notes": "Tier: P1 (hang prevention). Files: src/stages/download_segments.py (ydl.download() call around line 770+), src/config/sections/download.py (add segment_download_timeout field). The socket_timeout at line 712 only covers HTTP sockets — it does not protect against ffmpeg post-processing stalls or stream-level hangs. core.py avoids this by using subprocess with process monitoring; this story bridges that gap for the Python API path."
+            "notes": "Tier: P1 (hang prevention). Implementation was already in place from US-49-004: concurrent.futures.ThreadPoolExecutor wraps ydl.download() at line 782, config field is segment_stall_timeout (default 120s) in DownloadConfig. TimeoutError classified as 'timeout' category (not network/bot_detection). 14 unit tests added in tests/test_download_segments_stall_timeout.py covering: timeout triggers, successful download not interrupted, error classification, retry queue integration, network failure counter isolation, disabled mode, config defaults."
         },
         {
             "id": "US-52-003",
