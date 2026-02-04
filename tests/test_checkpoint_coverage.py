@@ -413,10 +413,10 @@ class TestCheckpointValidation:
     """Test checkpoint validation."""
 
     def test_validate_checkpoint_data_valid(self, tmp_path):
-        """Test validation with valid data."""
+        """Test validation with valid data (current version)."""
         manager = CheckpointManager(tmp_path)
         data = CheckpointData(
-            version="1.0",
+            version="2.0",
             created_at="2026-01-01T00:00:00",
             last_completed_stage="ANALYZE"
         )
@@ -424,10 +424,10 @@ class TestCheckpointValidation:
 
     @pytest.mark.fast
     def test_validate_checkpoint_data_wrong_version(self, tmp_path):
-        """Test validation with wrong version."""
+        """Test validation with old version flags incompatibility."""
         manager = CheckpointManager(tmp_path)
         data = CheckpointData(
-            version="2.0",
+            version="1.0",
             created_at="2026-01-01T00:00:00",
             last_completed_stage="ANALYZE"
         )

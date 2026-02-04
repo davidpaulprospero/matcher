@@ -20,6 +20,7 @@ from src.checkpoint import (
     CheckpointData,
     STAGE_ORDER,
     STAGE_FIELD_MAP,
+    CURRENT_CHECKPOINT_VERSION,
 )
 
 
@@ -458,3 +459,92 @@ class TestStageFieldMap:
         for stage, field_name in STAGE_FIELD_MAP.items():
             assert field_name in CheckpointData.__dataclass_fields__, \
                 f"STAGE_FIELD_MAP[{stage}]={field_name} not in CheckpointData fields"
+
+
+# ============================================================================
+# US-57-003: Version constant — no false-positive warning for current version
+# ============================================================================
+
+@pytest.mark.fast
+class TestCheckpointVersionConstant:
+    """US-57-003: Centralized version constant eliminates false-positive warnings."""
+
+    def test_current_version_checkpoint_no_version_warning(self, tmp_path, caplog):
+        """Checkpoint with CURRENT_CHECKPOINT_VERSION triggers no version warning."""
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+
+        checkpoint_data = {
+            "version": CURRENT_CHECKPOINT_VERSION,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "last_completed_stage": "ANALYZE",
+            "analyze": {"keywords": ["test"]},
+        }
+
+        checkpoint_path = project_dir / "checkpoint.json"
+        with open(checkpoint_path, 'w', encoding='utf-8') as f:
+            json.dump(checkpoint_data, f)
+
+        with caplog.at_level(logging.DEBUG):
+            manager = CheckpointManager(project_dir)
+            result = manager.load()
+
+        assert result is not None
+        # No version-related warnings or debug messages about incompatibility
+        version_msgs = [
+            r for r in caplog.records
+            if "version" in r.message.lower() and "may not be" in r.message.lower()
+            or "differs from current" in r.message.lower()
+        ]
+        assert len(version_msgs) == 0, (
+            f"Unexpected version warning for current version: {[r.message for r in version_msgs]}"
+        )
+
+    def test_old_version_checkpoint_logs_migration_notice(self, tmp_path, caplog):
+        """Checkpoint with version '1.0' logs a migration/upgrade notice."""
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+
+        checkpoint_data = {
+            "version": "1.0",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "last_completed_stage": "ANALYZE",
+            "analyze": {"keywords": ["test"]},
+        }
+
+        checkpoint_path = project_dir / "checkpoint.json"
+        with open(checkpoint_path, 'w', encoding='utf-8') as f:
+            json.dump(checkpoint_data, f)
+
+        with caplog.at_level(logging.INFO):
+            manager = CheckpointManager(project_dir)
+            result = manager.load()
+
+        assert result is not None
+        # Should log migration notice (not a false alarm)
+        migration_msgs = [
+            r for r in caplog.records
+            if "migrat" in r.message.lower()
+        ]
+        assert len(migration_msgs) > 0, (
+            f"Expected migration notice for v1.0 checkpoint, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_checkpoint_data_default_version_matches_constant(self):
+        """CheckpointData default version field matches CURRENT_CHECKPOINT_VERSION."""
+        data = CheckpointData()
+        assert data.version == CURRENT_CHECKPOINT_VERSION
+
+    def test_save_writes_current_version(self, tmp_path):
+        """save() writes checkpoint with CURRENT_CHECKPOINT_VERSION."""
+        manager = CheckpointManager(tmp_path)
+        manager.save("ANALYZE", {"keywords": ["test"]})
+
+        # Read raw JSON to verify version field
+        checkpoint_path = tmp_path / "checkpoint.json"
+        with open(checkpoint_path, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+
+        assert raw["version"] == CURRENT_CHECKPOINT_VERSION
