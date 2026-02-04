@@ -2837,6 +2837,123 @@ class TestSegmentStallTimeout:
         # If it worked, the download completed successfully (no timeout at 90s)
         assert len(downloaded) == 1
 
+    @pytest.mark.fast
+    def test_stall_timeout_increments_failure_and_feeds_retry_queue(self, stage, tmp_path):
+        """US-50-005 AC6: Stall timeout errors increment retry counter, classify as
+        'timeout' category, and get added to the retry queue for re-attempt."""
+        import time as _time
+
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 2  # Fast timeout for test
+        mock_download_config.bot_detection_tier_floor_threshold = 0
+        mock_download_config.bot_detection_abort_threshold = 0
+        mock_download_config.cookies_from_browser = ''
+        mock_download_config.cookies_path = ''
+        mock_download_config.cookie_rotation = None
+
+        mock_retry_queue = MagicMock()
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = None
+        mock_downloader.retry_queue = mock_retry_queue
+        mock_downloader.circuit_breaker = None
+        mock_downloader.escalation_manager = None
+        mock_downloader.cookie_rotator = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'stall_retry_test', 'start': 0.0, 'end': 10.0},
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            # Simulate stalled download that blocks indefinitely
+            mock_ydl_instance.download.side_effect = lambda urls: _time.sleep(60)
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # AC6a: Failure counter is incremented
+        assert stats['failed'] == 1, f"Expected 1 failure, got {stats['failed']}"
+
+        # AC6b: Error classified as 'timeout' category
+        assert stats['error_categories'].get('timeout', 0) == 1, \
+            f"Expected 'timeout' category, got {stats['error_categories']}"
+
+        # AC6c: Failed download added to retry queue
+        mock_retry_queue.add.assert_called_once()
+        add_kwargs = mock_retry_queue.add.call_args
+        # Verify the video_id is in the retry queue entry
+        assert 'stall_retry_test' in str(add_kwargs)
+
+    @pytest.mark.fast
+    def test_stall_timeout_error_does_not_trigger_bot_escalation(self, stage, tmp_path):
+        """Stall timeouts are not bot-detection errors and should not trigger
+        bot-detection escalation or tier floor activation."""
+        import time as _time
+        from src.downloader.escalation_manager import EscalationManager
+
+        mock_imp_mgr = MagicMock()
+        mock_imp_mgr.get_impersonate_args.return_value = ['--impersonate', 'Chrome-136:Macos-15']
+        escalation_mgr = EscalationManager(impersonation_manager=mock_imp_mgr)
+
+        mock_download_config = MagicMock()
+        mock_download_config.socket_timeout = 30
+        mock_download_config.segment_socket_timeout = 0
+        mock_download_config.segment_max_resolution = 1080
+        mock_download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_download_config.segment_stall_timeout = 2
+        mock_download_config.bot_detection_tier_floor_threshold = 1  # Low threshold
+        mock_download_config.bot_detection_abort_threshold = 0
+        mock_download_config.cookies_from_browser = ''
+        mock_download_config.cookies_path = ''
+        mock_download_config.cookie_rotation = None
+
+        mock_downloader = MagicMock()
+        mock_downloader.download_config = mock_download_config
+        mock_downloader.impersonation_manager = mock_imp_mgr
+        mock_downloader.escalation_manager = escalation_mgr
+        mock_downloader.cookie_rotator = None
+        mock_downloader.retry_queue = None
+        mock_downloader.circuit_breaker = None
+
+        stage.downloader = mock_downloader
+
+        segments = [
+            {'video_id': 'stall_no_esc', 'start': 0.0, 'end': 10.0},
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch.object(stage, '_process_retry_queue'):
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = lambda urls: _time.sleep(60)
+            mock_cm = MagicMock()
+            mock_cm.__enter__ = MagicMock(return_value=mock_ydl_instance)
+            mock_cm.__exit__ = MagicMock(return_value=False)
+            mock_ydl_class.return_value = mock_cm
+
+            downloaded, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Stall timeout should NOT have recorded a failure in escalation manager
+        # (stalls are not bot-detection errors)
+        assert stats['failed'] == 1
+        assert stats['error_categories'].get('timeout', 0) == 1
+        assert stats['error_categories'].get('bot_detection', 0) == 0
+
 
 # ============================================================================
 # Bot-Detection Tier Floor (US-49-005)
