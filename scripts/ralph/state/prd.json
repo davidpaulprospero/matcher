@@ -69,8 +69,8 @@
                                                        "Replace static DEFAULT_SEGMENT_TIMEOUT with adaptive timeout when speed data available",
                                                        "Add test verifying timeout scales with observed download speed"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 (enhancement). Files: src/downloader/speed_tracker.py, src/downloader/audio_first.py (line ~36 DEFAULT_SEGMENT_TIMEOUT = 300). Currently all downloads use fixed 5-minute timeout regardless of file size or network conditions."
+                            "passes":  true,
+                            "notes":  "Complete. Added calculate_adaptive_timeout() method to DownloadSpeedTracker using formula: estimated_size / avg_speed * safety_factor. Updated window_size default to 10 for running average. Added safety_factor config (default 1.5). Wired adaptive timeout into download_video_segments in audio_first.py. Added 10 comprehensive tests in TestCalculateAdaptiveTimeout class including test_timeout_scales_with_observed_speed verifying fast networks get shorter timeouts and slow networks get proportionally longer timeouts."
                         },
                         {
                             "id":  "US-61-005",

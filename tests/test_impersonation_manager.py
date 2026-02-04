@@ -418,4 +418,185 @@ class TestImpersonationStats:
         stats = ImpersonationStats()
         stats.record_use("X:Y")
         d = stats.to_dict()
-        assert d == {"calls_made": 1, "unique_targets_used": {"X:Y": 1}}
+        assert d["calls_made"] == 1
+        assert d["unique_targets_used"] == {"X:Y": 1}
+        assert "success_count" in d
+        assert "failure_count" in d
+
+    @pytest.mark.fast
+    def test_record_success_increments(self):
+        stats = ImpersonationStats()
+        stats.record_success("A:1")
+        stats.record_success("A:1")
+        stats.record_success("B:2")
+        assert stats.success_count["A:1"] == 2
+        assert stats.success_count["B:2"] == 1
+
+    @pytest.mark.fast
+    def test_record_failure_increments(self):
+        stats = ImpersonationStats()
+        stats.record_failure("A:1")
+        stats.record_failure("A:1")
+        stats.record_failure("B:2")
+        assert stats.failure_count["A:1"] == 2
+        assert stats.failure_count["B:2"] == 1
+
+    @pytest.mark.fast
+    def test_success_rate_calculation(self):
+        stats = ImpersonationStats()
+        stats.record_success("A:1")
+        stats.record_success("A:1")
+        stats.record_failure("A:1")
+        # 2 successes / 3 total = 0.666...
+        assert stats.get_success_rate("A:1") == pytest.approx(2 / 3)
+
+    @pytest.mark.fast
+    def test_success_rate_no_data_returns_one(self):
+        """Untested targets should return 1.0 (optimistic default)."""
+        stats = ImpersonationStats()
+        assert stats.get_success_rate("Unknown:Target") == 1.0
+
+    @pytest.mark.fast
+    def test_success_rate_all_failures(self):
+        stats = ImpersonationStats()
+        stats.record_failure("A:1")
+        stats.record_failure("A:1")
+        assert stats.get_success_rate("A:1") == 0.0
+
+    @pytest.mark.fast
+    def test_success_rate_all_successes(self):
+        stats = ImpersonationStats()
+        stats.record_success("A:1")
+        stats.record_success("A:1")
+        assert stats.get_success_rate("A:1") == 1.0
+
+
+# ===========================================================================
+# Test: Success rate filtering in get_next_target
+# ===========================================================================
+
+@pytest.mark.fast
+class TestSuccessRateFiltering:
+    """AC: get_next_target() optionally skips targets with low success rates."""
+
+    def test_low_success_targets_deprioritized(self):
+        """Targets with success_rate < threshold are skipped in rotation."""
+        targets = ["Good:1", "Bad:2", "Good:3"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._min_success_rate = 0.2
+        mgr._enable_success_filtering = True
+
+        # Record failures for Bad:2 to make its success rate 0%
+        for _ in range(5):
+            mgr._stats.record_failure("Bad:2")
+
+        # Record some successes for Good targets
+        mgr._stats.record_success("Good:1")
+        mgr._stats.record_success("Good:3")
+
+        # Get many targets - Bad:2 should be skipped
+        returned = [mgr.get_next_target() for _ in range(10)]
+        assert "Bad:2" not in returned
+        assert "Good:1" in returned
+        assert "Good:3" in returned
+
+    @pytest.mark.fast
+    def test_new_targets_not_filtered(self):
+        """Targets with no recorded data should pass through (optimistic)."""
+        targets = ["New:1", "New:2"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._min_success_rate = 0.5
+        mgr._enable_success_filtering = True
+
+        # No data recorded - both should be returned
+        returned = {mgr.get_next_target() for _ in range(10)}
+        assert "New:1" in returned
+        assert "New:2" in returned
+
+    @pytest.mark.fast
+    def test_filtering_disabled_returns_all(self):
+        """When enable_success_filtering=False, all targets used."""
+        targets = ["A:1", "B:2"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._enable_success_filtering = False
+
+        # Record 100% failure for B:2
+        for _ in range(10):
+            mgr._stats.record_failure("B:2")
+
+        # Should still return B:2 because filtering is disabled
+        returned = [mgr.get_next_target() for _ in range(10)]
+        assert "B:2" in returned
+
+    @pytest.mark.fast
+    def test_skip_low_success_override(self):
+        """skip_low_success parameter overrides instance default."""
+        targets = ["A:1", "B:2"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._enable_success_filtering = True
+        mgr._min_success_rate = 0.5
+
+        # B:2 has 0% success
+        for _ in range(5):
+            mgr._stats.record_failure("B:2")
+
+        # With override=False, B:2 should be returned despite low rate
+        returned = [mgr.get_next_target(skip_low_success=False) for _ in range(10)]
+        assert "B:2" in returned
+
+    @pytest.mark.fast
+    def test_all_low_success_falls_back_to_rotation(self):
+        """When all targets have low success, fall back to round-robin."""
+        targets = ["Bad:1", "Bad:2"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._min_success_rate = 0.5
+        mgr._enable_success_filtering = True
+
+        # All targets fail
+        for _ in range(5):
+            mgr._stats.record_failure("Bad:1")
+            mgr._stats.record_failure("Bad:2")
+
+        # Should still return targets (fallback behavior)
+        returned = [mgr.get_next_target() for _ in range(10)]
+        assert len(returned) == 10
+        assert all(t in targets for t in returned)
+
+    @pytest.mark.fast
+    def test_manager_record_success_method(self):
+        """ImpersonationManager.record_success updates stats."""
+        mgr = _make_manager_with_targets(["A:1"])
+        mgr.record_success("A:1")
+        mgr.record_success("A:1")
+        assert mgr.stats.success_count.get("A:1") == 2
+
+    @pytest.mark.fast
+    def test_manager_record_failure_method(self):
+        """ImpersonationManager.record_failure updates stats."""
+        mgr = _make_manager_with_targets(["A:1"])
+        mgr.record_failure("A:1")
+        mgr.record_failure("A:1")
+        assert mgr.stats.failure_count.get("A:1") == 2
+
+    @pytest.mark.fast
+    def test_manager_get_success_rate(self):
+        """ImpersonationManager.get_success_rate returns correct rate."""
+        mgr = _make_manager_with_targets(["A:1"])
+        mgr.record_success("A:1")
+        mgr.record_failure("A:1")
+        assert mgr.get_success_rate("A:1") == 0.5
+
+    @pytest.mark.fast
+    def test_get_status_includes_success_rates(self):
+        """get_status() includes success_rates dict."""
+        targets = ["A:1", "B:2"]
+        mgr = _make_manager_with_targets(targets)
+        mgr.record_success("A:1")
+        mgr.record_failure("B:2")
+
+        status = mgr.get_status()
+        assert "success_rates" in status
+        assert status["success_rates"]["A:1"] == 1.0
+        assert status["success_rates"]["B:2"] == 0.0
+        assert "min_success_rate_threshold" in status
+        assert "success_filtering_enabled" in status
