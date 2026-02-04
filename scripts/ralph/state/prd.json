@@ -91,7 +91,7 @@
             "id": "US-50-006",
             "title": "Add global bot-detection counter with tier floor propagation across all video downloads",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "A stage-level consecutive_bot_detections counter in download_segments.py increments on every bot-detection error regardless of video_id",
                 "When consecutive_bot_detections exceeds BOT_DETECTION_ABORT_THRESHOLD (configurable, default 10), the stage sets a tier floor via escalation_manager.set_tier_floor() so subsequent downloads start at the highest tier",
@@ -100,7 +100,7 @@
                 "A unit test verifies that a successful download resets the consecutive bot-detection counter to zero",
                 "A unit test verifies that bot-detection errors no longer reset the network failure counter"
             ],
-            "notes": "Tier: P2 resilience. Source files: src/stages/download_segments.py (lines 447, 485-489, 722, 730-761), src/downloader/escalation_manager.py (set_tier_floor at lines 271-289). The exploration found existing bot-detection abort logic at lines 730-761 and tier floor at line 722. Verify the counter is stage-level (not per-video), and that the network failure counter reset at lines 558-560 no longer triggers on bot-detection errors."
+            "notes": "Tier: P2 resilience. Implementation pre-existed in download_segments.py (US-49-005/US-49-008). Stage-level counter at line 458, increments at line 726, tier floor set at lines 727-738 via set_tier_floor(VPN_ROTATION), abort at lines 740-772, success reset at lines 524-528/691-694, network counter isolation at lines 775-801. Added 5 tests in tests/test_bot_detection_global_counter.py: TestTierFloorPropagation (3 tests: threshold triggers set_tier_floor, below threshold no call, different video_ids prove stage-level), TestBotCounterResetOnSuccess (1 test: success resets counter and clears tier floor, second batch re-triggers), TestBotErrorsDoNotResetNetworkCounter (1 test: bot error between network errors preserves counter for abort). All 5 tests pass."
         },
         {
             "id": "US-50-007",
