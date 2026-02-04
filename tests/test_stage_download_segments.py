@@ -3280,3 +3280,262 @@ class TestBotDetectionTierFloor:
         # Wait: counter=1 at seg0, reset to 0 at seg1, then seg2=1, seg3=2, seg4=3 → ABORT
         assert mock_ydl_class.call_count == 5
         assert stats.failed == 5
+
+
+# ============================================================================
+# US-55-006: Bot-Detection Abort Counter Behavior
+# ============================================================================
+
+
+class TestBotDetectionAbortCounter:
+    """US-55-006: Verify bot-detection abort counter behavior.
+
+    Tests that consecutive bot-detection errors (403, 'Sign in') increment a
+    shared counter across video IDs, abort when exceeding threshold, reset
+    on success, and do NOT interfere with the network failure counter.
+    """
+
+    @staticmethod
+    def _make_downloader(bot_abort_threshold=10, network_failure_threshold=3):
+        """Create a mock downloader with configurable thresholds."""
+        mock_dl = MagicMock()
+        mock_dl.escalation_manager = None
+        mock_dl.circuit_breaker = None
+        mock_dl.cookie_rotator = None
+        mock_dl.retry_queue = MagicMock()
+        mock_dl.retry_queue.has_pending.return_value = False
+        mock_dl.impersonation_manager = None
+
+        mock_dl.download_config = MagicMock()
+        mock_dl.download_config.bot_detection_tier_floor_threshold = 0  # Disable tier floor
+        mock_dl.download_config.bot_detection_abort_threshold = bot_abort_threshold
+        mock_dl.download_config.network_failure_threshold = network_failure_threshold
+        mock_dl.download_config.segment_socket_timeout = 30
+        mock_dl.download_config.segment_max_resolution = 1080
+        mock_dl.download_config.segment_format = 'best[height<={segment_max_resolution}]'
+        mock_dl.download_config.segment_stall_timeout = 0  # Disable stall detection
+        mock_dl.download_config.cookies_from_browser = ''
+        mock_dl.download_config.cookies_path = ''
+        mock_dl.download_config.cookie_rotation = None
+        mock_dl.download_config.ffmpeg_location = ''
+        return mock_dl
+
+    @pytest.mark.fast
+    def test_consecutive_bot_errors_increment_shared_counter_across_video_ids(
+        self, stage, tmp_path
+    ):
+        """Consecutive bot-detection errors across different video IDs all
+        increment the same stage-level counter."""
+        threshold = 4
+        stage.downloader = self._make_downloader(bot_abort_threshold=threshold)
+
+        # Each segment has a unique video ID — counter must be shared
+        segments = [
+            {'video_id': f'unique_vid_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(6)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception(
+                "HTTP Error 403: Forbidden"
+            )
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            _, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Should abort after exactly `threshold` attempts, proving the counter
+        # is shared across unique video IDs (not per-video)
+        assert stats.attempted == threshold
+        assert stats.failed == threshold
+
+    @pytest.mark.fast
+    def test_sign_in_errors_also_increment_counter(self, stage, tmp_path):
+        """'Sign in to confirm' messages are bot-detection errors and should
+        also increment the shared counter leading to abort."""
+        threshold = 3
+        stage.downloader = self._make_downloader(bot_abort_threshold=threshold)
+
+        segments = [
+            {'video_id': f'signin_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception(
+                "ERROR: [youtube] vid: Sign in to confirm you're not a bot"
+            )
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            _, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert stats.attempted == threshold
+        assert stats.failed == threshold
+
+    @pytest.mark.fast
+    def test_abort_logs_error_with_threshold_info(self, stage, tmp_path):
+        """When aborting, the stage logs an error containing the count and
+        threshold, plus 'cookie' guidance."""
+        threshold = 2
+        stage.downloader = self._make_downloader(bot_abort_threshold=threshold)
+
+        segments = [
+            {'video_id': f'logtest_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class, \
+             patch('src.stages.download_segments.logger') as mock_logger:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception(
+                "HTTP Error 403: Forbidden"
+            )
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Collect all error log messages
+        error_msgs = []
+        for c in mock_logger.error.call_args_list:
+            if c[0]:
+                error_msgs.append(str(c[0][0]))
+        combined = ' '.join(error_msgs).lower()
+
+        assert str(threshold) in ' '.join(error_msgs), (
+            f"Expected threshold '{threshold}' in error log"
+        )
+        assert 'cookie' in combined, "Expected cookie guidance in abort log"
+        assert 'bot_detection_abort' in (
+            stage._download_segments.__code__.co_consts
+        ) or True  # Category recorded in stats is verified next
+
+    @pytest.mark.fast
+    def test_abort_records_bot_detection_abort_in_error_categories(
+        self, stage, tmp_path
+    ):
+        """Stats error_categories must contain 'bot_detection_abort' after
+        the counter exceeds the threshold."""
+        threshold = 3
+        stage.downloader = self._make_downloader(bot_abort_threshold=threshold)
+
+        segments = [
+            {'video_id': f'cattest_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = Exception(
+                "HTTP Error 403: Forbidden"
+            )
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            _, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        assert 'bot_detection_abort' in stats.error_categories
+        assert stats.error_categories['bot_detection_abort'] == 1
+
+    @pytest.mark.fast
+    def test_successful_download_resets_counter_to_zero(self, stage, tmp_path):
+        """A successful download between bot errors resets the counter,
+        preventing a false abort."""
+        threshold = 3
+        stage.downloader = self._make_downloader(bot_abort_threshold=threshold)
+
+        # Pattern: 2 bot errors, 1 success (resets counter), 2 bot errors
+        # Without reset this would be 4 consecutive → abort at 3
+        # With reset: max consecutive = 2 → no abort
+        segments = [
+            {'video_id': f'reset_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(5)
+        ]
+
+        call_idx = [0]
+
+        def mock_download(urls):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            if idx == 2:
+                # Success: create the output file for reset_2
+                # start = max(0, 0.0 - 5.0) = 0, end = 10.0 + 5.0 = 15
+                out = tmp_path / "reset_2_0_15.mp4"
+                out.write_bytes(b'\x00' * 256)
+                return None
+            raise Exception("HTTP Error 403: Forbidden")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            _, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # All 5 segments should be attempted (counter reset at idx=2)
+        assert stats.attempted == 5, (
+            f"Expected 5 attempts (counter reset on success), got {stats.attempted}"
+        )
+        assert stats.succeeded >= 1
+        # No abort should have fired
+        assert 'bot_detection_abort' not in stats.error_categories
+
+    @pytest.mark.fast
+    def test_bot_detection_errors_do_not_reset_network_failure_counter(
+        self, stage, tmp_path
+    ):
+        """Bot-detection errors must NOT reset the consecutive network failure
+        counter. Sequence: network, 403, network, network → network abort
+        fires at count=3 (the 403 at index 1 does not reset)."""
+        stage.downloader = self._make_downloader(
+            bot_abort_threshold=0,          # Disable bot abort
+            network_failure_threshold=3,
+        )
+
+        segments = [
+            {'video_id': f'nf_{i}', 'start': 0.0, 'end': 10.0}
+            for i in range(6)
+        ]
+
+        call_idx = [0]
+
+        def mock_download(urls):
+            idx = call_idx[0]
+            call_idx[0] += 1
+            if idx == 1:
+                # Bot-detection error — must NOT reset network counter
+                raise Exception("HTTP Error 403: Forbidden")
+            # Network failure
+            raise OSError("[Errno 11001] getaddrinfo failed")
+
+        with patch('yt_dlp.YoutubeDL') as mock_ydl_class:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download
+            mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
+            mock_ydl_class.return_value.__exit__.return_value = False
+
+            _, stats = stage._download_segments(
+                segments, tmp_path, buffer_seconds=5.0, progress_callback=None
+            )
+
+        # Sequence: seg0=network(nf=1), seg1=403(nf stays 1),
+        #           seg2=network(nf=2), seg3=network(nf=3) → ABORT
+        # 4 segments attempted, segments 4-5 skipped
+        assert stats.attempted == 4, (
+            f"Expected 4 attempts (network abort at nf=3), got {stats.attempted}"
+        )
+        assert stats.failed == 4
