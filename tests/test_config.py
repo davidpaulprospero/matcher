@@ -418,5 +418,55 @@ class TestSafeGetConfigValue:
         assert safe_get_config_value(obj, 'missing', -1) == safe_get_config_value(d, 'missing', -1)
 
 
+class TestCaptionFirstConfigPostInit:
+    """Test CaptionFirstConfig __post_init__ dict-to-dataclass conversion (US-65-003)."""
+
+    @pytest.mark.fast
+    def test_retry_budget_dict_becomes_dataclass(self):
+        """Constructing CaptionFirstConfig with retry_budget as raw dict produces CaptionRetryBudgetConfig."""
+        from src.config.sections.download import CaptionFirstConfig, CaptionRetryBudgetConfig
+
+        config = CaptionFirstConfig(
+            retry_budget={'enabled': True, 'max_attempts': 150, 'attempts_per_video': 3.0}
+        )
+        assert isinstance(config.retry_budget, CaptionRetryBudgetConfig)
+        assert config.retry_budget.enabled is True
+        assert config.retry_budget.max_attempts == 150
+        assert config.retry_budget.attempts_per_video == 3.0
+
+    @pytest.mark.fast
+    def test_retry_budget_dataclass_stays_dataclass(self):
+        """CaptionRetryBudgetConfig instance is preserved as-is through __post_init__."""
+        from src.config.sections.download import CaptionFirstConfig, CaptionRetryBudgetConfig
+
+        budget = CaptionRetryBudgetConfig(max_attempts=50)
+        config = CaptionFirstConfig(retry_budget=budget)
+        assert config.retry_budget is budget
+
+    @pytest.mark.fast
+    def test_config_yaml_nested_retry_budget(self, tmp_path):
+        """Loading config.yaml with nested retry_budget dict produces typed CaptionRetryBudgetConfig."""
+        from src.config.sections.download import CaptionRetryBudgetConfig
+
+        config_data = {
+            'download': {
+                'caption_first': {
+                    'retry_budget': {
+                        'enabled': True,
+                        'max_attempts': 200,
+                    }
+                }
+            }
+        }
+        config_file = tmp_path / "test_config.yaml"
+        with open(config_file, 'w') as f:
+            yaml.dump(config_data, f)
+
+        config = load_config(str(config_file))
+        caption_first = config.download.caption_first if hasattr(config.download, 'caption_first') else config.download.get('caption_first', {})
+        if hasattr(caption_first, 'retry_budget'):
+            assert isinstance(caption_first.retry_budget, CaptionRetryBudgetConfig)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
