@@ -37,6 +37,7 @@ from src.config.sections.download import (
 )
 from src.config.sections.matching import (
     MatchingConfig,
+    MatchingScoringConfig,
     LocationMatchingConfig,
     ChapterDetectionConfig,
 )
@@ -709,3 +710,121 @@ class TestMissingOptionalFieldDefaults:
         assert config.mullvad.verification_timeout == 10
         assert config.mullvad.rotation_delay_seconds == 5
         assert len(config.mullvad.preferred_countries) > 0
+
+
+# ─── US-65-007: Typed Dict field annotations ──────────────────────────────
+
+
+class TestTypedDictFieldAnnotations:
+    """Verify bare dict fields use properly typed Dict[str, T] annotations.
+
+    US-65-007: caption_quality_weights, multimodal_weights, and all other
+    dict fields in matching.py and download.py must use Dict[str, T] not bare dict.
+    """
+
+    @pytest.mark.fast
+    def test_caption_quality_weights_accepts_typed_dict(self):
+        """caption_quality_weights accepts Dict[str, float] values."""
+        weights = {'high': 1.0, 'medium': 0.9, 'low': 0.75}
+        config = MatchingConfig(caption_quality_weights=weights)
+        assert config.caption_quality_weights == weights
+        assert isinstance(config.caption_quality_weights, dict)
+
+    @pytest.mark.fast
+    def test_caption_quality_weights_default_none(self):
+        """caption_quality_weights defaults to None (Optional)."""
+        config = MatchingConfig()
+        assert config.caption_quality_weights is None
+
+    @pytest.mark.fast
+    def test_multimodal_weights_accepts_typed_dict(self):
+        """multimodal_weights accepts Dict[str, float] values."""
+        weights = {'text_embedding': 0.5, 'keyword_overlap': 0.3, 'entity_match': 0.2}
+        config = MatchingConfig(multimodal_weights=weights)
+        assert config.multimodal_weights == weights
+        assert isinstance(config.multimodal_weights, dict)
+
+    @pytest.mark.fast
+    def test_multimodal_weights_default_none(self):
+        """multimodal_weights defaults to None (Optional)."""
+        config = MatchingConfig()
+        assert config.multimodal_weights is None
+
+    @pytest.mark.fast
+    def test_scoring_entity_match_boosts_typed_dict(self):
+        """MatchingScoringConfig.entity_match_boosts uses Dict[str, float]."""
+        config = MatchingScoringConfig()
+        assert isinstance(config.entity_match_boosts, dict)
+        assert all(isinstance(k, str) for k in config.entity_match_boosts.keys())
+        assert all(isinstance(v, float) for v in config.entity_match_boosts.values())
+
+    @pytest.mark.fast
+    def test_scoring_keyword_overlap_thresholds_typed_dict(self):
+        """MatchingScoringConfig.keyword_overlap_thresholds uses Dict[str, float]."""
+        config = MatchingScoringConfig()
+        assert isinstance(config.keyword_overlap_thresholds, dict)
+        assert all(isinstance(k, str) for k in config.keyword_overlap_thresholds.keys())
+        assert all(isinstance(v, float) for v in config.keyword_overlap_thresholds.values())
+
+    @pytest.mark.fast
+    def test_scoring_multimodal_default_weights_typed_dict(self):
+        """MatchingScoringConfig.multimodal_default_weights uses Dict[str, float]."""
+        config = MatchingScoringConfig()
+        assert isinstance(config.multimodal_default_weights, dict)
+        assert all(isinstance(k, str) for k in config.multimodal_default_weights.keys())
+        assert all(isinstance(v, float) for v in config.multimodal_default_weights.values())
+
+    @pytest.mark.fast
+    def test_download_timeouts_typed_dict(self):
+        """DownloadConfig.download_timeouts uses Dict[str, int]."""
+        config = DownloadConfig()
+        assert isinstance(config.download_timeouts, dict)
+        assert all(isinstance(k, str) for k in config.download_timeouts.keys())
+        assert all(isinstance(v, int) for v in config.download_timeouts.values())
+
+    @pytest.mark.fast
+    def test_caption_first_retry_budgets_typed_dict(self):
+        """CaptionFirstConfig.retry_budgets uses Dict[str, int]."""
+        config = CaptionFirstConfig()
+        assert isinstance(config.retry_budgets, dict)
+        assert all(isinstance(k, str) for k in config.retry_budgets.keys())
+        assert all(isinstance(v, int) for v in config.retry_budgets.values())
+
+    @pytest.mark.fast
+    def test_caption_first_format_timeouts_typed_dict(self):
+        """CaptionFirstConfig.format_timeouts uses Dict[str, float]."""
+        config = CaptionFirstConfig()
+        assert isinstance(config.format_timeouts, dict)
+
+    @pytest.mark.fast
+    def test_no_bare_dict_annotations_in_matching(self):
+        """All dict fields in matching.py use typed Dict[str, T], not bare dict.
+
+        Inspects the __annotations__ of MatchingConfig and MatchingScoringConfig
+        to verify no field has a bare 'dict' annotation.
+        """
+        import typing
+        for cls in [MatchingConfig, MatchingScoringConfig]:
+            for field_name, annotation in cls.__annotations__.items():
+                # bare 'dict' type would be <class 'dict'>
+                assert annotation is not dict, (
+                    f"{cls.__name__}.{field_name} uses bare 'dict' annotation; "
+                    f"should use Dict[str, T] or Optional[Dict[str, T]]"
+                )
+
+    @pytest.mark.fast
+    def test_no_bare_dict_annotations_in_download(self):
+        """All dict fields in download.py use typed Dict[str, T], not bare dict.
+
+        Inspects the __annotations__ of DownloadConfig and CaptionFirstConfig
+        to verify no field has a bare 'dict' annotation.
+        """
+        from src.config.sections.download import (
+            DownloadConfig, CaptionFirstConfig, CaptionRetryBudgetConfig,
+        )
+        for cls in [DownloadConfig, CaptionFirstConfig, CaptionRetryBudgetConfig]:
+            for field_name, annotation in cls.__annotations__.items():
+                assert annotation is not dict, (
+                    f"{cls.__name__}.{field_name} uses bare 'dict' annotation; "
+                    f"should use Dict[str, T] or Optional[Dict[str, T]]"
+                )

@@ -112,7 +112,7 @@
                                                        "Import Dict and Optional from typing are added where needed",
                                                        "python -m py_compile src/config/sections/matching.py and python -m py_compile src/config/sections/download.py both pass"
                                                    ],
-                            "notes":  "Complete. Changed caption_quality_weights and multimodal_weights from bare dict to Optional[Dict[str, float]] in matching.py. download.py already used typed Dict throughout (no bare dict fields found). Dict and Optional were already imported in matching.py. Both files compile. All related tests pass (2 pre-existing failures unrelated to type hints)."
+                            "notes":  "All bare dict fields already used typed Dict[str, T] in both files. caption_quality_weights and multimodal_weights updated to Optional[Dict[str, float]] in prior attempt. Added 12 tests in TestTypedDictFieldAnnotations verifying typed annotations and runtime behavior. Introspection tests confirm zero bare dict annotations remain."
                         },
                         {
                             "id":  "US-65-008",
