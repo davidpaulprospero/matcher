@@ -288,6 +288,133 @@ class TestOrchestratorHealerTimeout:
         assert orchestrator.metrics.failed_heals == 1
 
 
+class TestTimeoutEnforcement:
+    """Test timeout enforcement wraps every healer.fix() call path (US-68-012)."""
+
+    def _create_orchestrator(self, strategy: HealingStrategy) -> HealingOrchestrator:
+        """Create orchestrator with mocked healers."""
+        config = MagicMock()
+        config.healing = None
+        orchestrator = HealingOrchestrator(
+            config, "/tmp/project", strategy=strategy, healers=[NoopHealer]
+        )
+        return orchestrator
+
+    @pytest.mark.fast
+    def test_try_healer_timeout_returns_reason_timeout(self):
+        """Test that timed-out healer result has reason='timeout' in details."""
+        strategy = HealingStrategy(
+            healer_timeouts={"slow-healer": 0.1},
+        )
+        orchestrator = self._create_orchestrator(strategy)
+
+        config = MagicMock()
+        slow_healer = SlowHealer(config, "/tmp/project", sleep_duration=5.0)
+        state = MagicMock()
+        error = Exception("slow error")
+
+        result = orchestrator._try_healer(slow_healer, error, state, "TEST")
+
+        assert not result.success
+        assert result.details.get("reason") == "timeout"
+
+    @pytest.mark.fast
+    def test_llm_healer_timeout_enforced(self):
+        """Test that _try_llm_healer enforces timeout on llm_healer.fix()."""
+        strategy = HealingStrategy(
+            healer_timeouts={"llm-healer": 0.1},
+        )
+        orchestrator = self._create_orchestrator(strategy)
+
+        # Create a mock LLM healer that sleeps
+        mock_llm_healer = MagicMock()
+        mock_llm_healer.name = "llm-healer"
+
+        def slow_fix(*args, **kwargs):
+            time.sleep(5.0)
+            return HealerResult.fixed("should not reach here")
+
+        mock_llm_healer.fix = slow_fix
+        mock_llm_healer.clear_failed_healers = MagicMock()
+        orchestrator.llm_healer = mock_llm_healer
+
+        state = MagicMock()
+        error = Exception("complex error")
+
+        start = time.time()
+        result = orchestrator._try_llm_healer(error, state, "TEST")
+        elapsed = time.time() - start
+
+        # Should have timed out, not waited full 5 seconds
+        assert result is not None
+        assert not result.success
+        assert "timed out" in result.message.lower()
+        assert result.details.get("reason") == "timeout"
+        assert elapsed < 1.0
+
+    @pytest.mark.fast
+    def test_llm_healer_timeout_reads_from_healer_timeouts_dict(self):
+        """Test that _try_llm_healer reads timeout from strategy.healer_timeouts."""
+        custom_timeout = 42.0
+        strategy = HealingStrategy(
+            healer_timeouts={"llm-healer": custom_timeout},
+        )
+        orchestrator = self._create_orchestrator(strategy)
+
+        timeout = orchestrator._get_healer_timeout("llm-healer")
+        assert timeout == custom_timeout
+
+    @pytest.mark.fast
+    def test_llm_healer_timeout_records_in_metrics(self):
+        """Test that LLM healer timeout is recorded in orchestrator metrics."""
+        strategy = HealingStrategy(
+            healer_timeouts={"llm-healer": 0.1},
+        )
+        orchestrator = self._create_orchestrator(strategy)
+
+        mock_llm_healer = MagicMock()
+        mock_llm_healer.name = "llm-healer"
+
+        def slow_fix(*args, **kwargs):
+            time.sleep(5.0)
+            return HealerResult.fixed("should not reach here")
+
+        mock_llm_healer.fix = slow_fix
+        mock_llm_healer.clear_failed_healers = MagicMock()
+        orchestrator.llm_healer = mock_llm_healer
+
+        state = MagicMock()
+        error = Exception("complex error")
+
+        orchestrator._try_llm_healer(error, state, "TEST")
+
+        # Check timeout recorded in errors
+        assert any("llm-healer timed out" in e for e in orchestrator.metrics.errors_encountered)
+
+    @pytest.mark.fast
+    def test_llm_healer_completes_within_timeout(self):
+        """Test that _try_llm_healer allows fast LLM healer to complete."""
+        strategy = HealingStrategy(
+            healer_timeouts={"llm-healer": 10.0},
+        )
+        orchestrator = self._create_orchestrator(strategy)
+
+        mock_llm_healer = MagicMock()
+        mock_llm_healer.name = "llm-healer"
+        mock_llm_healer.fix = MagicMock(return_value=HealerResult.fixed("LLM fixed it"))
+        mock_llm_healer.clear_failed_healers = MagicMock()
+        orchestrator.llm_healer = mock_llm_healer
+
+        state = MagicMock()
+        error = Exception("fixable error")
+
+        result = orchestrator._try_llm_healer(error, state, "TEST")
+
+        assert result is not None
+        assert result.success
+        mock_llm_healer.fix.assert_called_once()
+
+
 class TestStrategyPresets:
     """Test that strategy presets include healer timeout/attempts config."""
 

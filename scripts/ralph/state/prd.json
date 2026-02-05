@@ -160,7 +160,7 @@
                                                        "Verify with py_compile that all modified healer files compile without errors",
                                                        "Add type annotations to can_handle() methods in all 7 healers matching the base class signature"
                                                    ],
-                            "notes":  "Added type annotations to all 7 healer classes: explicit can_handle() overrides with (error: Exception, stage_name: str) -> bool, __init__ type annotations with Config/project_dir/return None, instance attribute annotations. All fix() methods already had full annotations. All 7 files compile. 856 tests pass (7 pre-existing failures unrelated to changes)."
+                            "notes":  "Added type annotations to all 7 healer classes: explicit can_handle() overrides with (error: Exception, stage_name: str) -\u003e bool, __init__ type annotations with Config/project_dir/return None, instance attribute annotations. All fix() methods already had full annotations. All 7 files compile. 856 tests pass (7 pre-existing failures unrelated to changes)."
                         },
                         {
                             "id":  "US-68-011",
@@ -174,7 +174,7 @@
                                                        "Add test that verifies RATE_LIMITED event propagates to download healer",
                                                        "Add test that verifies event handling errors in one subscriber don\u0027t prevent delivery to other subscribers"
                                                    ],
-                            "notes":  "Added 5 tests to tests/test_agents/test_healer_events.py: TestMultiSubscriberDelivery (2 tests for multi-subscriber delivery + error isolation), TestMultipleEventTypeRouting (2 tests for correct routing), TestEndToEndEventDelivery.test_rate_limited_propagates_to_download_healer. All 32 tests pass."
+                            "notes":  "All 32 tests in test_healer_events.py pass. 5/5 criteria verified: TestMultiSubscriberDelivery::test_publish_delivers_to_all_subscribers (AC1), TestMultipleEventTypeRouting::test_healer_receives_only_subscribed_events + test_healer_subscribed_to_multiple_types (AC2), TestHealerEventHandlers::test_api_healer_resets_backoff_on_config_changed + TestEndToEndEventDelivery::test_config_change_reaches_api_healer (AC3), TestEndToEndEventDelivery::test_rate_limited_propagates_to_download_healer (AC4), TestMultiSubscriberDelivery::test_error_in_one_subscriber_doesnt_block_others (AC5)."
                         },
                         {
                             "id":  "US-68-012",
