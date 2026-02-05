@@ -49,7 +49,7 @@
                             "id":  "US-66-003",
                             "title":  "Consolidate duplicate timestamp formatting (seconds_to_vtt/srt) into single location",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "seconds_to_vtt_timestamp and seconds_to_srt_timestamp exist in exactly ONE location (src/caption/normalizer.py or src/caption/parsers.py)",
                                                        "src/caption_fetcher.py:seconds_to_vtt_timestamp (line ~7537) and seconds_to_srt_timestamp (line ~7557) are removed or delegate to the canonical location",
@@ -57,7 +57,7 @@
                                                        "Existing tests in tests/test_caption_normalizer.py still pass",
                                                        "At least 2 new unit tests verify formatting edge cases (0 seconds, very large values \u003e 99 hours)"
                                                    ],
-                            "notes":  "Tier: refactoring. Files: src/caption_fetcher.py (lines 7537-7566, duplicate implementation), src/caption/normalizer.py (lines 555-585, canonical implementation). Both implementations are byte-identical. Remove the caption_fetcher.py copy and import from normalizer."
+                            "notes":  "Canonical implementations remain in src/caption/normalizer.py. caption_fetcher.py now delegates via _CanonicalNormalizer import. Added 3 new tests: >99h VTT, >99h SRT, delegation verification. All 16 timestamp tests pass."
                         },
                         {
                             "id":  "US-66-004",
