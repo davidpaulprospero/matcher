@@ -280,6 +280,12 @@ function Build-StoryPrompt {
         }
     }
 
+    # Section 5.5: Sprint progress context (what previous sessions accomplished)
+    $sprintProgress = Get-SprintProgressContext
+    if ($sprintProgress) {
+        $promptParts += $sprintProgress
+    }
+
     # Section 6: Resume context from checkpoints (Phase 4, Story 4.1)
     if ($RetryCount -gt 0 -and $StoryId) {
         try {
@@ -449,7 +455,8 @@ function Invoke-ClaudeExploration {
     try {
         $Prompt | Out-File -FilePath $tempFile -Encoding UTF8 -NoNewline
 
-        $claudeArgs = @("--print", "--dangerously-skip-permissions")
+        $model = if ($script:Config.model) { $script:Config.model } else { "opus" }
+        $claudeArgs = @("--print", "--dangerously-skip-permissions", "--model", $model)
 
         if ($FullExplore) {
             # Full exploration with Task/Explore agent access
@@ -787,4 +794,94 @@ function Invoke-PeriodicExplorationIfNeeded {
     }
 
     return $false
+}
+
+function Update-SprintProgress {
+    <#
+    .SYNOPSIS
+        Append a one-line entry to sprint_progress.md after each story.
+        Keeps only the last $MaxEntries entries to prevent bloat.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StoryId,
+        [string]$StoryTitle = "",
+        [Parameter(Mandatory)][bool]$Success,
+        [string]$Summary = "",
+        [int]$MaxEntries = 20
+    )
+
+    $progressFile = if ($script:Paths -and $script:Paths.SprintProgressFile) {
+        $script:Paths.SprintProgressFile
+    } else {
+        Join-Path $script:RalphDir "session\sprint_progress.md"
+    }
+
+    $tag = if ($Success) { "DONE" } else { "FAIL" }
+    $time = Get-Date -Format "HH:mm"
+    $titlePart = if ($StoryTitle) { ": $StoryTitle" } else { "" }
+    $summaryPart = if ($Summary -and $Summary -ne "completed" -and $Summary -ne "failed") { " ($Summary)" } else { "" }
+    $entry = "- [$tag] $StoryId$titlePart$summaryPart [$time]"
+
+    # Read existing entries
+    $entries = @()
+    if (Test-Path $progressFile) {
+        $entries = @(Get-Content $progressFile -ErrorAction SilentlyContinue | Where-Object { $_.Trim() -match '^- \[' })
+    }
+
+    $entries += $entry
+
+    # Truncate to last MaxEntries
+    if ($entries.Count -gt $MaxEntries) {
+        $entries = $entries[($entries.Count - $MaxEntries)..($entries.Count - 1)]
+    }
+
+    # Write file with header
+    $content = @("# Sprint Progress", "") + $entries
+    try {
+        $content -join "`n" | Set-Content $progressFile -Encoding UTF8
+    } catch {}
+}
+
+function Get-SprintProgressContext {
+    <#
+    .SYNOPSIS
+        Return formatted sprint progress for prompt injection.
+        Returns empty string if file doesn't exist or has no entries.
+    #>
+    $progressFile = if ($script:Paths -and $script:Paths.SprintProgressFile) {
+        $script:Paths.SprintProgressFile
+    } else {
+        Join-Path $script:RalphDir "session\sprint_progress.md"
+    }
+
+    if (-not (Test-Path $progressFile)) { return "" }
+
+    $content = Get-Content $progressFile -Raw -ErrorAction SilentlyContinue
+    if (-not $content -or $content.Trim().Length -lt 20) { return "" }
+
+    $entries = @($content -split "`n" | Where-Object { $_.Trim() -match '^- \[' })
+    if ($entries.Count -eq 0) { return "" }
+
+    $lines = @()
+    $lines += ""
+    $lines += "## Sprint Progress So Far"
+    $lines += "Previous stories in this sprint:"
+    $lines += $entries
+    return ($lines -join "`n")
+}
+
+function Reset-SprintProgress {
+    <#
+    .SYNOPSIS
+        Delete sprint_progress.md. Called at sprint start.
+    #>
+    $progressFile = if ($script:Paths -and $script:Paths.SprintProgressFile) {
+        $script:Paths.SprintProgressFile
+    } else {
+        Join-Path $script:RalphDir "session\sprint_progress.md"
+    }
+
+    if (Test-Path $progressFile) {
+        Remove-Item $progressFile -Force -ErrorAction SilentlyContinue
+    }
 }

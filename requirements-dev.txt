@@ -7,6 +7,7 @@ pytest-benchmark>=5.2.0
 pytest-xdist  # Parallel test execution
 pytest-timeout  # Timeout for slow tests
 pytest-rerunfailures>=15.0  # Retry flaky tests
+pytest-randomly>=3.15.0  # Randomized test ordering
 mutmut>=2.4.0,<3.0.0  # Mutation testing (2.x for Windows compatibility)
 hypothesis>=6.0.0  # Property-based testing
 
