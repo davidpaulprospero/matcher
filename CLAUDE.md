@@ -426,6 +426,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-06 | Fix: XML duration mismatch — `_get_segment_file_duration()` now uses ffprobe for actual file duration (cached) instead of filename-parsed range; yt-dlp keyframe cuts make files ~0.5-1.5s shorter than requested, causing DaVinci "timecode extents" rejection |
 | 2026-02-05 | Fix: Nearest-segment resolution + unresolved clip gapping — replaced `segments[0]` fallback with nearest-segment algorithm (60s tolerance, 1330 more clips resolved); bare video IDs now filtered from bins and gapped in V2-V8 alt tracks (1274→0 unresolved) |
 | 2026-02-05 | Fix: XML timecode extent mismatch — `<duration>` used VO duration not file duration, `<in>/<out>` exceeded segment bounds; added `_get_segment_file_duration()` helper and clamping at all 4 clip generation sites |
 | 2026-02-05 | Fix: Empty alt tracks (V2-V8) — 3 bugs: ITERATIVE_MATCH serialization dropped multi-track data, VoiceoverSegment/SRTSegment attribute mismatch crashed OUTPUT, `strategy_alternatives` typo in output.py |
