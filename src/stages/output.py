@@ -111,12 +111,14 @@ class OutputStage(Stage):
         """
         Scan disk for downloaded video segment files and build segment info list.
 
-        Video segments are stored in *_segments directories with filenames like:
-        {video_id}_{start_seconds}.mp4
+        Video segments may be stored in two formats:
+        1. Legacy: *_segments directories with {video_id}_{start_4digit}.mp4
+        2. Current: flat in downloaded_videos_dir with {video_id}_{start}_{end}.mp4
 
         This allows create_timeline to resolve audio files to video segment paths.
         """
         segments = []
+        seen_files = set()
 
         # Try to get videos root from config
         videos_root = None
@@ -144,7 +146,7 @@ class OutputStage(Stage):
 
         logger.info(f"Scanning for video segments in: {videos_root}")
 
-        # Find all *_segments directories
+        # Find all *_segments directories (legacy format)
         segment_dirs = list(videos_root.glob("*_segments"))
 
         # Also check date-prefixed subdirectories (e.g., E:/v/24__2026-01-13/*_segments)
@@ -152,31 +154,57 @@ class OutputStage(Stage):
             if subdir.is_dir():
                 segment_dirs.extend(subdir.glob("*_segments"))
 
-        # Pattern to parse segment filenames: {video_id}_{start_seconds}.mp4
-        # video_id can contain letters, numbers, hyphens, underscores
-        # start_seconds is always 4 digits (e.g., 0000, 0123)
-        segment_pattern = re.compile(r'^(.+)_(\d{4})\.mp4$')
+        # Pattern for legacy format: {video_id}_{start_4digit}.mp4
+        legacy_pattern = re.compile(r'^(.+)_(\d{4})\.mp4$')
 
         for seg_dir in segment_dirs:
             if not seg_dir.is_dir():
                 continue
 
             for mp4_file in seg_dir.glob("*.mp4"):
-                match = segment_pattern.match(mp4_file.name)
+                match = legacy_pattern.match(mp4_file.name)
                 if match:
                     video_id = match.group(1)
                     start_seconds = int(match.group(2))
-
-                    # Estimate segment duration (assume 60s segments, will be overridden if actual duration known)
-                    # The exact end time isn't critical - it's used for range matching
                     end_seconds = start_seconds + 120  # Conservative estimate
 
+                    file_str = str(mp4_file)
+                    seen_files.add(file_str)
                     segments.append(SegmentInfo(
                         video_id=video_id,
-                        file=str(mp4_file),
+                        file=file_str,
                         original_start=float(start_seconds),
                         original_end=float(end_seconds)
                     ))
+
+        # Scan downloaded_videos_dir for flat segment files: {video_id}_{start}_{end}.mp4
+        download_dir = getattr(config, 'downloaded_videos_dir', '')
+        if download_dir:
+            download_path = Path(download_dir)
+            if download_path.exists() and download_path.is_dir():
+                # Pattern: {video_id}_{start}_{end}.mp4 (variable-length numbers)
+                flat_pattern = re.compile(r'^(.+?)_(\d+)_(\d+)\.mp4$')
+                flat_count = 0
+                for mp4_file in download_path.glob("*.mp4"):
+                    file_str = str(mp4_file)
+                    if file_str in seen_files:
+                        continue
+                    match = flat_pattern.match(mp4_file.name)
+                    if match:
+                        video_id = match.group(1)
+                        start_seconds = int(match.group(2))
+                        end_seconds = int(match.group(3))
+
+                        seen_files.add(file_str)
+                        segments.append(SegmentInfo(
+                            video_id=video_id,
+                            file=file_str,
+                            original_start=float(start_seconds),
+                            original_end=float(end_seconds)
+                        ))
+                        flat_count += 1
+                if flat_count:
+                    logger.info(f"Found {flat_count} segments in download dir: {download_path}")
 
         if segments:
             logger.info(f"Found {len(segments)} video segments on disk for path resolution")

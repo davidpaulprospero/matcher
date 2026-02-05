@@ -77,6 +77,9 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 11 | Dataclass imports | Import from `src/state.py` or `src/config/` only |
 | 14 | OTIO paths | Use `file:///E:/...` URLs, forward slashes, skip audio-only |
 | 22 | Caption-first (always on) | Video IDs not file paths - don't filter as `caption_only` |
+| 38 | Segment file format | DOWNLOAD_SEGMENTS saves flat `{vid}_{start}_{end}.mp4` in `config.downloaded_videos_dir`; `_scan_video_segments` must check BOTH legacy `*_segments` dirs AND this flat dir |
+| 39 | Extension detection | Extensionless `source_file` (video IDs) needs `if not file_ext: is_video = True` — exists in `xml_export.py` (2) and `otio_builder.py` (2) |
+| 40 | project.name vs folder | `config.downloaded_videos_dir` uses `project.name` (e.g., `matcher-alt`), NOT the project folder name (e.g., `6__2026-01-15`) — path mismatches are silent |
 | 27 | Subprocess encoding | ALL `subprocess.Popen/run` with `text=True` MUST add `encoding='utf-8', errors='replace'` |
 | 28 | Download one-at-a-time | `_download_by_ids` must loop per video, NOT batch |
 | 29 | LLM response format | Use `ResponseFormat.TEXT` for non-JSON responses, not `JSON_ARRAY` |
@@ -357,6 +360,8 @@ pytest tests/ -v --tb=short -x
 | 403 Forbidden | Download failures | Wait 1 hour, check cookies, or use VPN |
 | Empty source_file | Caption-first mode | Rule 22: Video IDs not file paths |
 | `--output-only` no effect | Was dead code before 2026-02-05 fix | Now wired in main.py |
+| XML clips "not found" | Segments in wrong dir | Check `project.name` vs folder name; scan both flat + `*_segments` dirs |
+| Empty `<media>` in XML | Extensionless source_file | Rule 39: add `if not file_ext: is_video = True` |
 | Checkpoint corrupted | Various | Restore from `checkpoint.backup.json` |
 | Subprocess crash | Windows encoding | Rule 27: Add `encoding='utf-8', errors='replace'` |
 | Videos skipped (budget_exhausted) | Logs show `EXHAUSTED` | Increase `retry_budget.max_attempts` or check for rate limiting |
@@ -422,6 +427,7 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 | Date | Changes |
 |------|---------|
 | 2026-02-05 | Fix: Empty alt tracks (V2-V8) — 3 bugs: ITERATIVE_MATCH serialization dropped multi-track data, VoiceoverSegment/SRTSegment attribute mismatch crashed OUTPUT, `strategy_alternatives` typo in output.py |
+| 2026-02-05 | Fix: XML media import + path resolution — 3 bugs: empty `<media>` tags from extensionless video IDs (Rule 39), V2-V8 tracks missing from XML timeline, `_scan_video_segments` missed flat download dir (Rule 38) |
 | 2026-02-05 | Feat: Wire `--output-only` flag — was declared in args.py but never consumed in main.py; now creates output-only pipeline, resets checkpoint to DOWNLOAD_SEGMENTS, re-runs only OUTPUT |
 | 2026-02-05 | Fix: Caption fetch "Requested format not available" — escalation `--extractor-args` caused yt-dlp video format resolution to fail before subtitle extraction; added `--ignore-no-formats-error` to subtitle fetch and list-subs commands |
 | 2026-02-05 | Fix: `_fetch_captions_for_videos` crashed on cache hits — `CachedCaption.segments` are dicts but code used attribute access (`.end_time`); added `isinstance` branch for dict vs object segments |
