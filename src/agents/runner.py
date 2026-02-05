@@ -14,7 +14,7 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Type
 
-from .base import Healer, HealerResult, HealerAction
+from .base import Healer, HealerResult, HealerAction, SupportsBackoff
 from .healers import HEALER_REGISTRY
 
 if TYPE_CHECKING:
@@ -349,7 +349,7 @@ class ResilientRunner:
     def _reset_healers(self):
         """Reset healer states after successful operation."""
         for healer in self.healers:
-            if hasattr(healer, 'reset_backoff'):
+            if isinstance(healer, SupportsBackoff):
                 healer.reset_backoff()
 
     def get_summary(self) -> Dict:

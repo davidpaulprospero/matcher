@@ -35,7 +35,15 @@ Usage:
     orchestrator.print_report()
 """
 
-from .base import Healer, HealerResult, HealerAction
+from .base import (
+    Healer,
+    HealerResult,
+    HealerAction,
+    HealerEvent,
+    HealerEventData,
+    SupportsBackoff,
+    SupportsPreflight,
+)
 from .strategy import (
     HealingStrategy,
     HealingMode,
@@ -71,6 +79,12 @@ __all__ = [
     'Healer',
     'HealerResult',
     'HealerAction',
+    'HealerEvent',
+    'HealerEventData',
+
+    # Healer protocols
+    'SupportsBackoff',
+    'SupportsPreflight',
 
     # Strategy
     'HealingStrategy',
