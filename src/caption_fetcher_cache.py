@@ -182,9 +182,12 @@ class EnhancedCaptionCache:
         logger.debug(f"EnhancedCaptionCache initialized: compression={enable_compression}, "
                     f"compression_level={compression_level}, max_prefetch={max_prefetch}")
     
-    def _make_key(self, video_id: str, language: str) -> str:
-        """Create cache key."""
-        return f"{video_id}_{language}"
+    def _make_key(self, video_id: str, language: str, is_auto_generated: bool = False) -> str:
+        """Create cache key. US-67-012: '_autosub' suffix for auto-generated."""
+        key = f"{video_id}_{language}"
+        if is_auto_generated:
+            key += "_autosub"
+        return key
     
     def _compress_data(self, data: Dict[str, Any]) -> bytes:
         """Compress caption data using gzip."""

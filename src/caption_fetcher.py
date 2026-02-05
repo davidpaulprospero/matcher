@@ -6152,17 +6152,25 @@ class CaptionCache(BaseCache):
                     f"ttl={max_age_days} days, enabled={self.enabled}, "
                     f"validation={self.validation_mode}")
 
-    def _make_cache_key(self, video_id: str, language: str) -> str:
-        """Create cache key from video_id and language.
+    def _make_cache_key(self, video_id: str, language: str, is_auto_generated: bool = False) -> str:
+        """Create cache key from video_id, language, and auto-generated flag.
+
+        US-67-012: Auto-generated captions use a distinct '_autosub' suffix
+        to avoid confusion with manual captions in the cache.
 
         Args:
             video_id: YouTube video ID (11 characters).
             language: ISO 639-1 language code (e.g., 'en').
+            is_auto_generated: Whether caption is auto-generated.
 
         Returns:
-            Cache key in format 'video_id_language' (e.g., 'dQw4w9WgXcQ_en').
+            Cache key in format 'video_id_language' (e.g., 'dQw4w9WgXcQ_en')
+            or 'video_id_language_autosub' for auto-generated captions.
         """
-        return f"{video_id}_{language}"
+        key = f"{video_id}_{language}"
+        if is_auto_generated:
+            key += "_autosub"
+        return key
 
     def _serialize_entry(self, entry: CacheEntry) -> Dict[str, Any]:
         """Serialize CachedCaption to dict."""
@@ -6395,7 +6403,7 @@ class CaptionCache(BaseCache):
             expected_segment_count=int(cached.duration / 3) if cached.duration > 0 else None,
         )
 
-    def get_caption(self, video_id: str, language: str) -> Optional[CachedCaption]:
+    def get_caption(self, video_id: str, language: str, auto_generated: Optional[bool] = None) -> Optional[CachedCaption]:
         """Get cached caption for a video and language.
 
         Staleness handling depends on validation_mode (US-004 Sprint 8):
@@ -6403,9 +6411,15 @@ class CaptionCache(BaseCache):
         - 'warn': Logs warning for stale entries but returns them
         - 'skip': No staleness check, returns cached data as-is
 
+        US-67-012: When auto_generated is None (default), tries the manual key
+        first, then falls back to the '_autosub' key.
+
         Args:
             video_id: YouTube video ID.
             language: ISO 639-1 language code.
+            auto_generated: If None, try both manual and auto keys.
+                If True, only look up auto-generated key.
+                If False, only look up manual key.
 
         Returns:
             CachedCaption if found and valid, None otherwise.
@@ -6413,8 +6427,24 @@ class CaptionCache(BaseCache):
         if not self.enabled:
             return None
 
-        key = self._make_cache_key(video_id, language)
-        entry = self.get(key)
+        if auto_generated is None:
+            # Try manual first, then auto-generated (US-67-012)
+            key = self._make_cache_key(video_id, language, False)
+            entry = self.get(key)
+            if entry is None:
+                # Undo the miss count from first lookup — this is a single
+                # logical lookup that tries two keys (US-67-012)
+                self._misses -= 1
+                key = self._make_cache_key(video_id, language, True)
+                entry = self.get(key)
+            elif isinstance(entry.data, dict) and entry.data.get('unavailable', False):
+                # Skip unavailable markers — the autosub key may have a positive entry
+                self._hits -= 1
+                key = self._make_cache_key(video_id, language, True)
+                entry = self.get(key)
+        else:
+            key = self._make_cache_key(video_id, language, auto_generated)
+            entry = self.get(key)
 
         if entry is None:
             logger.debug(f"Caption cache miss: {key}")
@@ -6532,7 +6562,8 @@ class CaptionCache(BaseCache):
             logger.debug(f"Not caching empty caption result for {result.video_id}")
             return False
 
-        key = self._make_cache_key(result.video_id, result.language)
+        # US-67-012: Use '_autosub' suffix for auto-generated captions
+        key = self._make_cache_key(result.video_id, result.language, result.is_auto_generated)
 
         cached = CachedCaption(
             video_id=result.video_id,
