@@ -436,7 +436,21 @@ class Config:
 
         # Handle duration_tiers specially (nested structure)
         if 'duration_tiers' in data:
-            config.duration_tiers = cls._build_duration_tiers(data['duration_tiers'])
+            dt_data = data['duration_tiers']
+            if not isinstance(dt_data, dict):
+                raise ConfigError(
+                    f"Critical config section 'duration_tiers' (DurationTiersConfig) "
+                    f"failed to build: expected dict, got {type(dt_data).__name__}"
+                )
+            try:
+                config.duration_tiers = cls._build_duration_tiers(dt_data)
+            except ConfigError:
+                raise
+            except (TypeError, KeyError, AttributeError, ValueError) as e:
+                raise ConfigError(
+                    f"Critical config section 'duration_tiers' (DurationTiersConfig) "
+                    f"failed to build: {e}. Data provided: {list(dt_data.keys())}"
+                ) from e
 
         return config
 
