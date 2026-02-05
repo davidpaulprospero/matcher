@@ -1296,3 +1296,84 @@ class TestCustomPreflightValidators:
         orchestrator.unregister_preflight_check("reusable")
         # Should not raise
         orchestrator.register_preflight_check("reusable", lambda s: [])
+
+
+class TestHealerCacheDashboardMetrics:
+    """Tests for healer cache stats in dashboard metrics (US-68-008)."""
+
+    @pytest.mark.fast
+    def test_dashboard_metrics_include_cache_stats_after_activity(
+        self, mock_config, project_dir, mock_state
+    ):
+        """Test cache stats appear in dashboard metrics after cache hits and misses."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Replace with a properly configured cache (mock_config leaves Mock values)
+        from src.agents.healer_cache import HealerResultCache
+        orchestrator._healer_cache = HealerResultCache()
+
+        # Simulate cache activity
+        from src.agents.base import HealerResult, HealerAction
+        error = ValueError("test error for caching")
+        result = HealerResult.fixed("Fixed it", action=HealerAction.RETRY)
+        orchestrator._healer_cache.store(error, "MATCH", result, "test-healer")
+        orchestrator._healer_cache.get(error, "MATCH")  # hit
+        orchestrator._healer_cache.get(ValueError("unknown"), "MATCH")  # miss
+
+        dashboard = orchestrator.get_dashboard_metrics()
+
+        assert 'healer_cache' in dashboard
+        cache = dashboard['healer_cache']
+        assert cache['hits'] == 1
+        assert cache['misses'] == 1
+        assert cache['hit_rate'] == pytest.approx(0.5, rel=0.01)
+        assert cache['entry_count'] == 1
+        assert cache['invalidation_count'] == 0
+
+    @pytest.mark.fast
+    def test_dashboard_metrics_cache_stats_zeroed_when_no_activity(
+        self, mock_config, project_dir
+    ):
+        """Test cache stats are zeroed when no caching has occurred."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Replace with a properly configured cache (mock_config leaves Mock values)
+        from src.agents.healer_cache import HealerResultCache
+        orchestrator._healer_cache = HealerResultCache()
+
+        dashboard = orchestrator.get_dashboard_metrics()
+
+        assert 'healer_cache' in dashboard
+        cache = dashboard['healer_cache']
+        assert cache['hits'] == 0
+        assert cache['misses'] == 0
+        assert cache['hit_rate'] == 0.0
+        assert cache['invalidation_count'] == 0
+        assert cache['entry_count'] == 0
+
+    @pytest.mark.fast
+    def test_print_report_includes_cache_section(
+        self, mock_config, project_dir, capsys
+    ):
+        """Test print_report includes HEALER CACHE section when cache was used."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        # Replace with a properly configured cache (mock_config leaves Mock values)
+        from src.agents.healer_cache import HealerResultCache
+        orchestrator._healer_cache = HealerResultCache()
+
+        # Simulate cache activity
+        from src.agents.base import HealerResult
+        error = ValueError("cached error")
+        result = HealerResult.fixed("Fixed")
+        orchestrator._healer_cache.store(error, "MATCH", result, "api-healer")
+        orchestrator._healer_cache.get(error, "MATCH")  # hit
+        orchestrator._healer_cache.get(ValueError("miss"), "MATCH")  # miss
+
+        orchestrator.print_report()
+
+        captured = capsys.readouterr()
+        assert "HEALER CACHE" in captured.out
+        assert "Entries: 1" in captured.out
+        assert "Hits: 1, Misses: 1" in captured.out
+        assert "Hit Rate: 50.0%" in captured.out

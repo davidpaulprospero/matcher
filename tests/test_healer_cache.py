@@ -428,6 +428,49 @@ class TestCacheStats:
         assert stats['misses'] == 1
         assert stats['hit_rate'] == pytest.approx(2/3, rel=0.01)
 
+    @pytest.mark.fast
+    def test_get_cache_stats_returns_dashboard_keys(self):
+        """Test get_cache_stats returns dict with dashboard-specific keys (US-68-008)."""
+        from src.agents.healer_cache import HealerResultCache
+        cache = HealerResultCache()
+        stats = cache.get_cache_stats()
+        assert 'hits' in stats
+        assert 'misses' in stats
+        assert 'hit_rate' in stats
+        assert 'invalidation_count' in stats
+        assert 'entry_count' in stats
+
+    @pytest.mark.fast
+    def test_get_cache_stats_zeroed_when_no_activity(self):
+        """Test get_cache_stats returns zeroed values when no caching occurred (US-68-008)."""
+        from src.agents.healer_cache import HealerResultCache
+        cache = HealerResultCache()
+        stats = cache.get_cache_stats()
+        assert stats['hits'] == 0
+        assert stats['misses'] == 0
+        assert stats['hit_rate'] == 0.0
+        assert stats['invalidation_count'] == 0
+        assert stats['entry_count'] == 0
+
+    @pytest.mark.fast
+    def test_get_cache_stats_after_hits_and_misses(self):
+        """Test get_cache_stats reflects hits, misses, and entries after activity (US-68-008)."""
+        from src.agents.healer_cache import HealerResultCache
+        from src.agents.base import HealerResult
+        cache = HealerResultCache()
+        error = ValueError("test error")
+        result = HealerResult.fixed("Fixed it")
+        cache.store(error, "MATCH", result, "test_healer")
+        cache.get(error, "MATCH")  # hit
+        cache.get(ValueError("unknown"), "MATCH")  # miss
+        cache.invalidate_on_config_change()
+        stats = cache.get_cache_stats()
+        assert stats['hits'] == 1
+        assert stats['misses'] == 1
+        assert stats['hit_rate'] == pytest.approx(0.5, rel=0.01)
+        assert stats['invalidation_count'] == 1
+        assert stats['entry_count'] == 0  # invalidated
+
 
 class TestCacheClear:
     """Test cache clear operation."""
