@@ -20,43 +20,13 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
+# Canonical config source (Rule 11): import from config/sections/download.py
+from src.config.sections.download import CaptionCircuitBreakerConfig  # noqa: F401 - re-exported
+
 if TYPE_CHECKING:
     from src.downloader.circuit_breaker import CircuitBreaker as DownloadCircuitBreaker
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class CaptionCircuitBreakerConfig:
-    """Configuration for caption fetch failure circuit breaker.
-
-    When multiple consecutive caption fetches fail, the circuit breaker
-    trips and pauses all fetches for a duration. This prevents hammering
-    YouTube during rate limit windows.
-
-    Example with defaults:
-      - 10 fetches fail in a row → circuit trips
-      - Wait 120 seconds before allowing new fetches
-      - On next successful fetch → circuit resets to closed state
-
-    Configure in config.yaml under download.caption_first.circuit_breaker.
-    """
-    # Enable/disable circuit breaker
-    enabled: bool = True
-
-    # Number of consecutive failures before circuit trips (opens)
-    threshold: int = 10
-
-    # Duration to pause after circuit trips (seconds)
-    pause_seconds: float = 120.0
-
-    # Maximum pause duration cap (seconds) to prevent runaway pause scaling
-    max_pause_seconds: float = 300.0
-
-    # Circuit breaker cascade (US-61-003): when enabled, failures propagate to
-    # the download circuit breaker (and vice versa) to speed up coordinated pausing
-    # when YouTube is rate-limiting. Default: True.
-    circuit_breaker_cascade: bool = True
 
 
 @dataclass
