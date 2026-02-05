@@ -2,6 +2,7 @@
 
 | Date | Changes |
 |------|---------|
+| 2026-02-06 | Feat: 4 Carlini-inspired Ralph improvements — early-exit tuning (grace 60→30s + git commit detection), structured test output (Format-TestSummary replaces raw dump), randomized fast test mode (T3-fast on non-cadence), living sprint progress doc (sprint_progress.md) |
 | 2026-02-06 | Fix: OTIO `available_range` mismatch — `create_clip_with_timewarp()` estimated duration exceeded actual file length for keyframe-cut segments; now uses ffprobe in both `utils.py` and `otio_builder.py`, eliminating DaVinci "File not found in search directories" on OTIO import |
 | 2026-02-06 | Fix: XML duration mismatch — `_get_segment_file_duration()` now uses ffprobe for actual file duration (cached) instead of filename-parsed range; yt-dlp keyframe cuts make files ~0.5-1.5s shorter than requested, causing DaVinci "timecode extents" rejection |
 | 2026-02-05 | Fix: Nearest-segment resolution + unresolved clip gapping — replaced `segments[0]` fallback with nearest-segment algorithm (60s tolerance, 1330 more clips resolved); bare video IDs now filtered from bins and gapped in V2-V8 alt tracks (1274→0 unresolved) |
