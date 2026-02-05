@@ -167,6 +167,69 @@ class HealingStrategy:
             enable_rollback=False,
         )
 
+    @classmethod
+    def overnight(cls) -> 'HealingStrategy':
+        """Create overnight/batch processing strategy.
+
+        Optimized for unattended execution with maximum resilience:
+        - High retry limits to survive transient failures
+        - Long delays between attempts to respect rate limits
+        - All auto-fix enabled (no user to ask)
+        - Full rollback support to recover from bad states
+        - Never escalates to user (no one is watching)
+        """
+        return cls(
+            mode=HealingMode.AGGRESSIVE,
+            max_attempts_per_stage=8,
+            max_total_heals=100,
+            heal_delay=5.0,
+            run_preflight=True,
+            auto_fix_preflight=True,
+            enable_rollback=True,
+        )
+
+    @classmethod
+    def development(cls) -> 'HealingStrategy':
+        """Create development/debug strategy.
+
+        Optimized for developer iteration with fast feedback:
+        - Minimal retries (fail fast to surface issues)
+        - Short delays (don't waste developer time)
+        - No auto-fix (let developer see the raw error)
+        - No rollback (developer controls state manually)
+        - Preflight still runs to catch environment issues
+        """
+        return cls(
+            mode=HealingMode.MINIMAL,
+            max_attempts_per_stage=1,
+            max_total_heals=3,
+            heal_delay=0.0,
+            run_preflight=True,
+            auto_fix_preflight=False,
+            enable_rollback=False,
+        )
+
+    @classmethod
+    def production(cls) -> 'HealingStrategy':
+        """Create production strategy balancing resilience and efficiency.
+
+        Balanced approach for supervised production runs:
+        - Moderate retries (recover from transient errors)
+        - Standard delays (respect rate limits without stalling)
+        - Auto-fix for preflight issues only
+        - Rollback enabled as safety net
+        - Escalates critical issues to user
+        """
+        return cls(
+            mode=HealingMode.CONSERVATIVE,
+            max_attempts_per_stage=4,
+            max_total_heals=30,
+            heal_delay=3.0,
+            run_preflight=True,
+            auto_fix_preflight=True,
+            enable_rollback=True,
+        )
+
 
 @dataclass
 class ConfigSnapshot:

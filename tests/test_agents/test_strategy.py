@@ -78,6 +78,64 @@ class TestHealingStrategy:
         assert strategy.enable_rollback is False
 
     @pytest.mark.fast
+    def test_overnight_factory(self):
+        """Test overnight() factory method for unattended batch processing."""
+        strategy = HealingStrategy.overnight()
+
+        assert strategy.mode == HealingMode.AGGRESSIVE
+        assert strategy.max_attempts_per_stage == 8
+        assert strategy.max_total_heals == 100
+        assert strategy.heal_delay == 5.0
+        assert strategy.run_preflight is True
+        assert strategy.auto_fix_preflight is True
+        assert strategy.enable_rollback is True
+
+    @pytest.mark.fast
+    def test_development_factory(self):
+        """Test development() factory method for fast debugging."""
+        strategy = HealingStrategy.development()
+
+        assert strategy.mode == HealingMode.MINIMAL
+        assert strategy.max_attempts_per_stage == 1
+        assert strategy.max_total_heals == 3
+        assert strategy.heal_delay == 0.0
+        assert strategy.run_preflight is True
+        assert strategy.auto_fix_preflight is False
+        assert strategy.enable_rollback is False
+
+    @pytest.mark.fast
+    def test_production_factory(self):
+        """Test production() factory method for balanced resilience."""
+        strategy = HealingStrategy.production()
+
+        assert strategy.mode == HealingMode.CONSERVATIVE
+        assert strategy.max_attempts_per_stage == 4
+        assert strategy.max_total_heals == 30
+        assert strategy.heal_delay == 3.0
+        assert strategy.run_preflight is True
+        assert strategy.auto_fix_preflight is True
+        assert strategy.enable_rollback is True
+
+    @pytest.mark.fast
+    def test_overnight_more_resilient_than_aggressive(self):
+        """Overnight should have higher limits than aggressive for unattended runs."""
+        overnight = HealingStrategy.overnight()
+        aggressive = HealingStrategy.aggressive()
+
+        assert overnight.max_attempts_per_stage > aggressive.max_attempts_per_stage
+        assert overnight.max_total_heals > aggressive.max_total_heals
+        assert overnight.heal_delay > aggressive.heal_delay
+
+    @pytest.mark.fast
+    def test_development_faster_than_minimal(self):
+        """Development should fail faster than minimal (zero delay, fewer total heals)."""
+        dev = HealingStrategy.development()
+        minimal = HealingStrategy.minimal()
+
+        assert dev.heal_delay <= minimal.heal_delay
+        assert dev.max_total_heals <= minimal.max_total_heals
+
+    @pytest.mark.fast
     def test_healer_priority_default(self):
         """Test default healer priority order."""
         strategy = HealingStrategy()
