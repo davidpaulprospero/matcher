@@ -461,6 +461,132 @@ class TestMatchingConfigPostInitClamping:
         assert config.low_confidence_threshold == 0.0
 
 
+# ─── MatchingConfig confidence clamping (US-65-010) ───────────────────────
+
+
+class TestMatchingConfigConfidenceClamping:
+    """Test MatchingConfig __post_init__ clamps confidence fields to [0.0, 1.0]."""
+
+    @pytest.mark.fast
+    def test_confidence_above_one_clamped(self):
+        """Confidence value of 1.5 is clamped to 1.0."""
+        config = MatchingConfig(min_confidence=1.5)
+        assert config.min_confidence == 1.0
+
+    @pytest.mark.fast
+    def test_confidence_below_zero_clamped(self):
+        """Negative confidence is clamped to 0.0."""
+        config = MatchingConfig(min_confidence=-0.3)
+        assert config.min_confidence == 0.0
+
+    @pytest.mark.fast
+    def test_all_confidence_fields_clamped_above(self):
+        """All six confidence fields are clamped when above 1.0."""
+        config = MatchingConfig(
+            min_confidence=2.0,
+            high_confidence_threshold=1.5,
+            low_confidence_threshold=3.0,
+            ambiguous_threshold=1.1,
+            skip_llm_threshold=10.0,
+            confidence_threshold=1.01,
+        )
+        assert config.min_confidence == 1.0
+        assert config.high_confidence_threshold == 1.0
+        assert config.low_confidence_threshold == 1.0
+        assert config.ambiguous_threshold == 1.0
+        assert config.skip_llm_threshold == 1.0
+        assert config.confidence_threshold == 1.0
+
+    @pytest.mark.fast
+    def test_all_confidence_fields_clamped_below(self):
+        """All six confidence fields are clamped when below 0.0."""
+        config = MatchingConfig(
+            min_confidence=-1.0,
+            high_confidence_threshold=-0.5,
+            low_confidence_threshold=-0.01,
+            ambiguous_threshold=-100.0,
+            skip_llm_threshold=-0.1,
+            confidence_threshold=-0.5,
+        )
+        assert config.min_confidence == 0.0
+        assert config.high_confidence_threshold == 0.0
+        assert config.low_confidence_threshold == 0.0
+        assert config.ambiguous_threshold == 0.0
+        assert config.skip_llm_threshold == 0.0
+        assert config.confidence_threshold == 0.0
+
+    @pytest.mark.fast
+    def test_valid_confidence_values_unchanged(self):
+        """In-range confidence values are not modified."""
+        config = MatchingConfig(
+            min_confidence=0.7,
+            high_confidence_threshold=0.85,
+            low_confidence_threshold=0.5,
+            ambiguous_threshold=0.6,
+            skip_llm_threshold=0.85,
+            confidence_threshold=0.5,
+        )
+        assert config.min_confidence == 0.7
+        assert config.high_confidence_threshold == 0.85
+        assert config.low_confidence_threshold == 0.5
+        assert config.ambiguous_threshold == 0.6
+        assert config.skip_llm_threshold == 0.85
+        assert config.confidence_threshold == 0.5
+
+    @pytest.mark.fast
+    def test_clamping_emits_warning(self, caplog):
+        """Out-of-range confidence emits a logger.warning."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger='src.config.sections.matching'):
+            MatchingConfig(min_confidence=1.5)
+        assert any('min_confidence' in record.message for record in caplog.records)
+
+    @pytest.mark.fast
+    def test_positive_int_fields_reject_zero(self):
+        """Integer fields <= 0 are corrected to 1."""
+        config = MatchingConfig(
+            embedding_candidates=0,
+            llm_rerank_candidates=-5,
+            top_k_candidates=0,
+            context_window=-1,
+        )
+        assert config.embedding_candidates == 1
+        assert config.llm_rerank_candidates == 1
+        assert config.top_k_candidates == 1
+        assert config.context_window == 1
+
+    @pytest.mark.fast
+    def test_positive_int_fields_valid_unchanged(self):
+        """Positive integer fields with valid values are not changed."""
+        config = MatchingConfig(
+            embedding_candidates=50,
+            llm_rerank_candidates=5,
+            top_k_candidates=10,
+            context_window=2,
+        )
+        assert config.embedding_candidates == 50
+        assert config.llm_rerank_candidates == 5
+        assert config.top_k_candidates == 10
+        assert config.context_window == 2
+
+    @pytest.mark.fast
+    def test_nested_dataclass_conversion_preserved(self):
+        """Clamping validation doesn't break nested dataclass conversion."""
+        config = MatchingConfig(
+            min_confidence=1.5,
+            location_matching={'enabled': False},
+            chapter_detection={'max_chapters': 10},
+            scoring={'confidence_floor': 0.1},
+        )
+        assert config.min_confidence == 1.0
+        assert isinstance(config.location_matching, LocationMatchingConfig)
+        assert config.location_matching.enabled is False
+        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert config.chapter_detection.max_chapters == 10
+        assert isinstance(config.scoring, MatchingScoringConfig)
+        assert config.scoring.confidence_floor == 0.1
+
+
 # ─── CaptionRetryBudgetConfig validation ─────────────────────────────────
 
 

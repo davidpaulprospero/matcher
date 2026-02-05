@@ -387,6 +387,42 @@ class MatchingConfig:
     scoring: MatchingScoringConfig = None
 
     def __post_init__(self):
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Validate confidence thresholds (must be 0.0-1.0)
+        confidence_fields = [
+            'min_confidence', 'high_confidence_threshold',
+            'low_confidence_threshold', 'ambiguous_threshold',
+            'skip_llm_threshold', 'confidence_threshold',
+        ]
+        for field_name in confidence_fields:
+            value = getattr(self, field_name)
+            clamped = max(0.0, min(1.0, value))
+            if clamped != value:
+                logger.warning(
+                    "MatchingConfig.%s=%s out of range [0.0, 1.0], clamped to %s",
+                    field_name, value, clamped,
+                )
+                setattr(self, field_name, clamped)
+
+        # Validate positive integer fields
+        positive_int_fields = [
+            'embedding_candidates',
+            'llm_rerank_candidates',
+            'top_k_candidates',
+            'context_window',
+        ]
+        for field_name in positive_int_fields:
+            value = getattr(self, field_name)
+            if value <= 0:
+                logger.warning(
+                    "MatchingConfig.%s=%s must be positive, setting to 1",
+                    field_name, value,
+                )
+                setattr(self, field_name, 1)
+
+        # Nested dataclass conversion
         if self.location_matching is None:
             self.location_matching = LocationMatchingConfig()
         elif isinstance(self.location_matching, dict):
