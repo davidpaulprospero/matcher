@@ -1,7 +1,7 @@
 ﻿{
-    "sprintNumber":  65,
-    "focusArea":  "config",
-    "branchName":  "ralph/sprint-65",
+    "sprintNumber":  66,
+    "focusArea":  "transcription",
+    "branchName":  "ralph/sprint-66",
     "projectContext":  {
                            "sourceDir":  "src/",
                            "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,178 +11,181 @@
                        },
     "userStories":  [
                         {
-                            "id":  "US-65-001",
-                            "title":  "Generate sprint stories for config focus area",
+                            "id":  "US-66-001",
+                            "title":  "Generate sprint stories for transcription focus area",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027config\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027transcription\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027config\u0027",
-                                                       "Add stories US-65-002 through US-65-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027transcription\u0027",
+                                                       "Add stories US-66-002 through US-66-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-65-NNN to be unique across sprints",
-                                                       "Mark this story (US-65-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-66-NNN to be unique across sprints",
+                                                       "Mark this story (US-66-001) as passes: true when done"
                                                    ],
-                            "notes":  "Seed story completed. Generated 11 config improvement stories (US-65-002 through US-65-012) covering validation, utilities, error handling, type safety, and config documentation."
+                            "notes":  "Seed story completed. Generated 11 stories (US-66-002 through US-66-012) for the transcription focus area based on codebase analysis. Stories cover: duplicate code consolidation, config extraction, validation, thread safety, test coverage, and architectural improvements. Avoided duplicating work from sprints 38, 59, 60, 62."
                         },
                         {
-                            "id":  "US-65-002",
-                            "title":  "Add safe_get_config_value utility to eliminate scattered dict/object dual-access",
+                            "id":  "US-66-002",
+                            "title":  "Consolidate duplicate timestamp parsing into single canonical function",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Create safe_get_config_value(obj, key, default=None) function in src/config/utils.py that handles both dict .get() and dataclass getattr() access patterns",
-                                                       "Function returns obj.get(key, default) when obj is a dict, and getattr(obj, key, default) when obj is a dataclass or object",
-                                                       "Replace at least 5 scattered isinstance(x, dict)/getattr patterns in src/config/base.py with calls to safe_get_config_value",
-                                                       "Replace dict/object dual-access patterns in src/cli/config_utils.py with calls to safe_get_config_value",
-                                                       "Add unit tests in tests/test_config.py verifying safe_get_config_value works for dict input, dataclass input, and missing key with default"
+                                                       "src/caption/parsers.py:parse_timestamp is the single canonical timestamp parsing function",
+                                                       "src/caption_fetcher.py:_parse_timestamp (line ~5136) delegates to or is replaced by src/caption/parsers.py:parse_timestamp",
+                                                       "src/caption/normalizer.py:_parse_timestamp (line ~542) delegates to or is replaced by src/caption/parsers.py:parse_timestamp",
+                                                       "All three call sites produce identical results for HH:MM:SS.mmm, HH:MM:SS,mmm, and MM:SS.mmm formats",
+                                                       "Existing tests in tests/test_caption_normalizer.py and tests/test_caption_fetcher.py still pass",
+                                                       "At least 3 new unit tests verify the consolidated function handles edge cases (negative values, missing hours, overflow milliseconds)"
                                                    ],
-                            "notes":  "Evidence gate: 0/5 criteria verified (0%). Minimum: 90%."
+                            "notes":  "Consolidated parse_timestamp into src/caption/parsers.py. Both caption_fetcher.py and normalizer.py delegate via import. Added negative value guard. 25 unit tests in test_caption_parsers_timestamp.py covering all formats, edge cases (negative values, missing hours, overflow milliseconds), and delegation verification. All existing tests pass."
                         },
                         {
-                            "id":  "US-65-003",
-                            "title":  "Add __post_init__ to CaptionFirstConfig for nested dict-to-dataclass conversion",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add __post_init__ method to CaptionFirstConfig in src/config/sections/download.py that converts nested dict fields to their proper dataclass types",
-                                                       "The __post_init__ converts retry_budget field from dict to CaptionRetryBudgetConfig if it arrives as a dict",
-                                                       "Loading config.yaml with caption_first section containing nested retry_budget as a dict produces a properly typed CaptionRetryBudgetConfig instance",
-                                                       "Add test in tests/test_config.py that constructs CaptionFirstConfig with retry_budget as a raw dict and verifies it becomes CaptionRetryBudgetConfig after init",
-                                                       "Existing tests in tests/test_caption_circuit_breaker.py continue to pass"
-                                                   ],
-                            "notes":  "Tier: T1 (bug prevention). Implements CLAUDE.md Rule 2. Source file: src/config/sections/download.py (CaptionFirstConfig at ~line 265 has no __post_init__). Follow pattern from HealingConfig.__post_init__ in src/config/sections/infrastructure.py (~line 249) and IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (~line 95)."
-                        },
-                        {
-                            "id":  "US-65-004",
-                            "title":  "Expand Config.validate() with constraint validation for numeric ranges and threshold ordering",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Config.validate() in src/config/base.py validates that matching confidence thresholds are ordered: low_confidence_threshold \u003c= ambiguous_threshold \u003c= min_confidence \u003c= high_confidence_threshold",
-                                                       "Config.validate() validates that output.frame_rate \u003e 0 and output.time_scale_factor \u003e 0 when those fields exist",
-                                                       "Config.validate() validates that duration tier min \u003c= max for all configured duration tiers",
-                                                       "Validation failures are collected and logged as warnings (not exceptions) consistent with existing validate() pattern",
-                                                       "Add tests that create Config objects with invalid threshold ordering and verify warnings are generated"
-                                                   ],
-                            "notes":  "Tier: T2 (robustness). Source file: src/config/base.py validate() method at lines ~537-602. Currently only validates API keys, a few value ranges, and 2-3 enum fields. Duration tiers are in src/config/sections/duration.py, matching thresholds in src/config/sections/matching.py (lines ~175-180), output fields in src/config/sections/output.py (~line 120). Sprint 44 US-44-003 already added pipeline-level validation; this expands the Config-level validate()."
-                        },
-                        {
-                            "id":  "US-65-005",
-                            "title":  "Replace silent config loading fallback with explicit error logging",
+                            "id":  "US-66-003",
+                            "title":  "Consolidate duplicate timestamp formatting (seconds_to_vtt/srt) into single location",
                             "priority":  "high",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "The _build_dataclass method in src/config/base.py logs a warning that includes the specific field names that failed when falling back to empty defaults",
-                                                       "Critical config sections (download, matching, output) raise ConfigError instead of silently returning empty defaults when construction fails",
-                                                       "Optional config sections (broll, entity, media) continue to use silent fallback with a debug-level log message",
-                                                       "Add a CRITICAL_SECTIONS list or similar marker in base.py that distinguishes critical from optional sections",
-                                                       "Add test that attempts to load a malformed critical section and verifies ConfigError is raised with a descriptive message"
+                                                       "seconds_to_vtt_timestamp and seconds_to_srt_timestamp exist in exactly ONE location (src/caption/normalizer.py or src/caption/parsers.py)",
+                                                       "src/caption_fetcher.py:seconds_to_vtt_timestamp (line ~7537) and seconds_to_srt_timestamp (line ~7557) are removed or delegate to the canonical location",
+                                                       "All callers import from the single canonical location",
+                                                       "Existing tests in tests/test_caption_normalizer.py still pass",
+                                                       "At least 2 new unit tests verify formatting edge cases (0 seconds, very large values \u003e 99 hours)"
                                                    ],
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
+                            "notes":  "Tier: refactoring. Files: src/caption_fetcher.py (lines 7537-7566, duplicate implementation), src/caption/normalizer.py (lines 555-585, canonical implementation). Both implementations are byte-identical. Remove the caption_fetcher.py copy and import from normalizer."
                         },
                         {
-                            "id":  "US-65-006",
-                            "title":  "Add missing config.yaml sections for broll, iterative_matching, and negative_matching",
+                            "id":  "US-66-004",
+                            "title":  "Remove duplicate CaptionCircuitBreakerConfig dataclass definition",
+                            "priority":  "high",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "CaptionCircuitBreakerConfig is defined in exactly ONE location",
+                                                       "src/caption/circuit_breaker.py imports CaptionCircuitBreakerConfig from src/config/sections/download.py (or vice versa, whichever is the config canonical source)",
+                                                       "No duplicate field definitions exist between the two files",
+                                                       "CaptionCircuitBreaker class still functions correctly with the single config source",
+                                                       "tests/test_caption_circuit_breaker.py passes without modification (or with minimal import path updates)"
+                                                   ],
+                            "notes":  "Tier: refactoring. Files: src/config/sections/download.py (lines 136-160, config-layer definition), src/caption/circuit_breaker.py (lines 30-59, runtime-layer duplicate). Both define identical fields (enabled, threshold, pause_seconds, max_pause_seconds) plus circuit_breaker_cascade added only in circuit_breaker.py. The config/sections/download.py version is the canonical config source per project conventions (Rule 11). Keep that one, add any missing fields, import in circuit_breaker.py."
+                        },
+                        {
+                            "id":  "US-66-005",
+                            "title":  "Extract hardcoded batch processor thresholds to CaptionFirstConfig",
                             "priority":  "medium",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "config.yaml contains a documented broll section with all fields from BrollConfig in src/config/sections/broll.py and their defaults",
-                                                       "config.yaml contains a documented iterative_matching section with all fields from IterativeMatchingConfig in src/config/sections/iterative_matching.py and their defaults",
-                                                       "config.yaml contains a documented negative_matching subsection under matching with all fields from NegativeMatchingConfig in src/config/sections/matching.py",
-                                                       "Each new section has inline YAML comments explaining the purpose of each field",
-                                                       "Loading config.yaml with python still produces a valid Config object (python -m py_compile src/config/base.py passes)"
+                                                       "progress_report_interval is a field on CaptionFirstConfig (or CaptionBatchConfig) in src/config/sections/download.py with default 25",
+                                                       "unavailable_threshold is a field on CaptionFirstConfig in src/config/sections/download.py with default 0.8",
+                                                       "src/caption/batch_processor.py reads these values from config instead of hardcoding them (lines ~67-76)",
+                                                       "config.yaml documents these new fields under download.caption_first with comments",
+                                                       "At least 2 tests verify custom config values are respected by batch_processor"
                                                    ],
-                            "notes":  "All three sections already existed in config.yaml. broll (line 1849) and iterative_matching (line 1914) had all fields with comments. negative_matching (line 588) is a top-level section (matches code architecture). Added 2 missing fields to iterative_matching: caption_batch_size and caption_fetch_delay. Added cross-reference comment under matching section pointing to negative_matching. Config loads successfully with all fields verified."
+                            "notes":  "Tier: config extraction. Files: src/caption/batch_processor.py (lines 67-76, hardcoded defaults), src/config/sections/download.py (CaptionFirstConfig class, line ~265), config.yaml. Note: error_pattern_threshold and error_pattern_sample_size already exist in CaptionFirstConfig (line ~461) â€” only progress_report_interval and unavailable_threshold are missing."
                         },
                         {
-                            "id":  "US-65-007",
-                            "title":  "Add type hints for bare dict fields in matching and download config dataclasses",
+                            "id":  "US-66-006",
+                            "title":  "Extract hardcoded rate limit backoff parameters to config",
                             "priority":  "medium",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "caption_quality_weights field in MatchingConfig (src/config/sections/matching.py) uses Optional[Dict[str, float]] instead of bare dict",
-                                                       "multimodal_weights field in MatchingConfig uses Optional[Dict[str, float]] instead of bare dict",
-                                                       "Any other bare dict fields in matching.py and download.py are updated to use properly typed Dict[str, T] annotations",
-                                                       "Import Dict and Optional from typing are added where needed",
-                                                       "python -m py_compile src/config/sections/matching.py and python -m py_compile src/config/sections/download.py both pass"
+                                                       "base_backoff_seconds (default 5.0) is configurable via CaptionFirstConfig or a new RateLimitStateConfig",
+                                                       "max_backoff_seconds (default 300.0) is configurable via the same config",
+                                                       "max_history (default 10) is configurable via the same config",
+                                                       "src/caption/timeout.py RateLimitState dataclass reads from config or accepts these as constructor args",
+                                                       "config.yaml documents these fields under download.caption_first with comments",
+                                                       "At least 2 tests verify non-default values are propagated correctly"
                                                    ],
-                            "notes":  "All bare dict fields already used typed Dict[str, T] in both files. caption_quality_weights and multimodal_weights updated to Optional[Dict[str, float]] in prior attempt. Added 12 tests in TestTypedDictFieldAnnotations verifying typed annotations and runtime behavior. Introspection tests confirm zero bare dict annotations remain."
+                            "notes":  "Tier: config extraction. Files: src/caption/timeout.py (lines 70-72, hardcoded in RateLimitState dataclass), src/config/sections/download.py (CaptionFirstConfig, line ~265). These values control exponential backoff behavior for rate-limited caption fetches. Currently only changeable by editing code."
                         },
                         {
-                            "id":  "US-65-008",
-                            "title":  "Re-validate config sections after CLI merge overrides are applied",
+                            "id":  "US-66-007",
+                            "title":  "Add __post_init__ validation for CaptionCircuitBreakerConfig",
                             "priority":  "medium",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "After merge_config() in src/cli/config_utils.py applies all overrides, __post_init__() is called on each modified config section that has one",
-                                                       "Duration tier merges trigger DurationTiersConfig.__post_init__() to re-validate min \u003c= max constraints",
-                                                       "Healing config merges trigger HealingConfig.__post_init__() to re-convert nested dicts",
-                                                       "Add test that merges an invalid duration tier override (min \u003e max) and verifies the post-merge validation catches it",
-                                                       "Existing merge behavior is preserved for valid overrides (no regressions in config loading)"
+                                                       "CaptionCircuitBreakerConfig has a __post_init__ method that validates: pause_seconds \u003e 0, max_pause_seconds \u003e= pause_seconds, threshold \u003e= 1",
+                                                       "Invalid values raise ValueError with a descriptive message",
+                                                       "At least 3 tests verify validation: (1) pause_seconds \u003c= 0 raises, (2) max_pause_seconds \u003c pause_seconds raises, (3) threshold \u003c 1 raises",
+                                                       "Valid configurations (including edge cases like pause_seconds == max_pause_seconds) pass without error"
                                                    ],
-                            "notes":  "Added _revalidate_modified_sections() that calls __post_init__() on each modified section after merge. Extended DurationTiersConfig.__post_init__() to validate min/max on existing DurationTierConfig instances (not just dicts). Added 6 tests in TestPostMergeRevalidation: invalid duration tier warning, healing dict conversion (watcher + llm_healer), valid override preservation, unmodified section preservation, legacy path revalidation. All 50 config merge tests pass."
+                            "notes":  "Tier: validation. Files: src/config/sections/download.py (CaptionCircuitBreakerConfig, line ~136). Currently has NO __post_init__ validation â€” invalid values like negative pause_seconds or threshold=0 would silently cause bugs at runtime. Pattern: follow CaptionRetryBudgetConfig.__post_init__ (line ~231) which already validates its fields."
                         },
                         {
-                            "id":  "US-65-009",
-                            "title":  "Unify path resolution between base.py and cli/config_utils.py into single implementation",
+                            "id":  "US-66-008",
+                            "title":  "Add __post_init__ validation for TranscriptionConfig",
                             "priority":  "medium",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Path resolution logic exists in exactly one location (src/config/base.py _resolve_paths or a new shared function)",
-                                                       "src/cli/config_utils.py make_paths_project_relative() delegates to the shared path resolution instead of reimplementing",
-                                                       "Project-relative paths are only resolved once during config loading (no double-resolution)",
-                                                       "Paths containing forward slashes, backslashes, and mixed separators all resolve correctly on Windows",
-                                                       "Add test that loads config with relative paths and verifies they resolve to absolute project-relative paths exactly once"
+                                                       "TranscriptionConfig.__post_init__ validates: model is one of known Whisper model names (tiny, base, small, medium, large, large-v2, large-v3)",
+                                                       "TranscriptionConfig.__post_init__ validates: minimum_gpu_memory_mb \u003e= 100 (prevents misconfiguration)",
+                                                       "TranscriptionConfig.__post_init__ validates: compute_type is one of (auto, float16, int8, float32, int8_float16)",
+                                                       "TranscriptionConfig.__post_init__ validates: max_workers \u003e= 1 and batch_size \u003e= 1",
+                                                       "At least 4 tests verify each validation rule rejects invalid values with ValueError",
+                                                       "Valid default config passes validation without error"
                                                    ],
-                            "notes":  "Unified path resolution: (1) Config._resolve_paths() in base.py is the single source of truth for all path resolution. (2) make_paths_project_relative() delegates to _resolve_paths() - no reimplementation. (3) load_project_config() now delegates to make_paths_project_relative() instead of duplicating its logic (removed 4 duplicated lines). (4) _resolve_paths() uses pathlib which normalizes mixed separators. (5) Added 5 new tests: forward-slash, backslash, no-double-resolution, load_project_config delegation, plus existing mixed-separator and exact-once tests. All 36 tests pass."
+                            "notes":  "Tier: validation. Files: src/config/sections/core.py (TranscriptionConfig, line ~51). Currently the __post_init__ (line ~111) only handles PauseSplitConfig and audio_extraction_workers. No validation for model names, compute_type, or numeric ranges. Invalid model names would fail at Whisper load time with a cryptic error instead of at config load."
                         },
                         {
-                            "id":  "US-65-010",
-                            "title":  "Add MatchingConfig __post_init__ validation for confidence threshold ranges",
+                            "id":  "US-66-009",
+                            "title":  "Add thread safety to BatchCaptionCheckpoint.update_progress",
                             "priority":  "medium",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "MatchingConfig in src/config/sections/matching.py has a __post_init__ method that validates all float confidence fields are in range 0.0-1.0",
-                                                       "Fields validated include: min_confidence, high_confidence_threshold, low_confidence_threshold, ambiguous_threshold, skip_llm_threshold, confidence_threshold",
-                                                       "Out-of-range values are clamped to 0.0-1.0 with a logger.warning message (consistent with IterativeMatchingConfig pattern)",
-                                                       "Integer fields (max_videos_per_segment, max_results, min_results) are validated as positive with logger.warning if \u003c= 0",
-                                                       "Add test constructing MatchingConfig with out-of-range confidence (e.g., 1.5) and verify it is clamped to 1.0"
+                                                       "BatchCaptionCheckpoint has a threading.RLock (or uses its existing _lock if present)",
+                                                       "update_progress() method (src/caption_fetcher.py line ~950) acquires lock before modifying results, counts, remaining_video_ids, and updated_at",
+                                                       "mark_aborted() method (line ~972) also acquires lock before modifying shared state",
+                                                       "At least 2 tests verify thread safety: concurrent update_progress calls from multiple threads produce correct counts",
+                                                       "No deadlocks when calling update_progress from within a locked context"
                                                    ],
-                            "notes":  "Done. Added __post_init__ validation: 6 confidence fields clamped to [0.0,1.0] with logger.warning, 4 positive int fields (embedding_candidates, llm_rerank_candidates, top_k_candidates, context_window) corrected to 1 if <=0. 9 new tests in TestMatchingConfigConfidenceClamping. Note: max_videos_per_segment/max_results/min_results don't exist on MatchingConfig - validated the actual int fields instead."
+                            "notes":  "Tier: bug fix (thread safety). Files: src/caption_fetcher.py (BatchCaptionCheckpoint class, lines ~936-1027). The update_progress method modifies results dict, success_count, error_count, remaining_video_ids, and updated_at without holding a lock. CaptionMetrics (line ~649) correctly uses _lock for all mutations â€” BatchCaptionCheckpoint should follow the same pattern. Note: the batch processor runs workers concurrently, so this is a real race condition."
                         },
                         {
-                            "id":  "US-65-011",
-                            "title":  "Add EmbeddingConfig __post_init__ validation for batch_size and model settings",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "EmbeddingConfig in src/config/sections/core.py has a __post_init__ method that validates batch_size \u003e= 1",
-                                                       "The __post_init__ validates that provider field is one of the known providers (\u0027sentence-transformers\u0027, \u0027openai\u0027, etc.) or logs a warning for unknown providers",
-                                                       "Invalid batch_size values (0 or negative) are corrected to 1 with a logger.warning",
-                                                       "Add test constructing EmbeddingConfig with batch_size=0 and verifying it becomes 1 after init",
-                                                       "python -m py_compile src/config/sections/core.py passes"
-                                                   ],
-                            "notes":  "Done. Added __post_init__ to EmbeddingConfig: batch_size clamped to >=1, max_workers clamped to >=1, max_retries clamped to >=0, unknown provider logged as warning. Known providers: gemini, openai, local, sentence_transformers (from base.py:697). 12 new tests in TestEmbeddingConfigPostInitValidation."
-                        },
-                        {
-                            "id":  "US-65-012",
-                            "title":  "Extract hardcoded project name truncation length to config",
+                            "id":  "US-66-010",
+                            "title":  "Add deprecation warning for legacy transcripts/ cache directory",
                             "priority":  "low",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "ProjectConfig in src/config/sections/core.py has a max_name_display_length field defaulting to 15",
-                                                       "src/config/base.py uses config.project.max_name_display_length instead of hardcoded 15 for project name truncation",
-                                                       "config.yaml project section documents the max_name_display_length field with a comment explaining its purpose",
-                                                       "Default behavior is unchanged (truncation at 15 chars) unless explicitly overridden in config",
-                                                       "Add test verifying that project names longer than max_name_display_length are truncated to that length"
+                                                       "TranscriptionCache.__init__ logs a WARNING when alt_cache_dir (transcripts/) contains cached files",
+                                                       "Warning message includes migration guidance: \u0027Move files from transcripts/ to transcriptions/ and delete transcripts/\u0027",
+                                                       "New _migrate_legacy_cache() method copies entries from transcripts/ to transcriptions/ when both exist",
+                                                       "Migration only runs once per session (guard flag prevents repeated migration)",
+                                                       "At least 3 tests verify: (1) no warning when only transcriptions/ exists, (2) warning logged when transcripts/ has files, (3) migration copies files correctly"
                                                    ],
-                            "notes":  "Tier: T1 (configurability). Source files: src/config/base.py (line ~260 has project_name = project_name[:15] hardcoded), src/config/sections/core.py (ProjectConfig class). The fix adds one field to ProjectConfig and replaces the hardcoded [:15] slice with [:config_value]. config.yaml needs a comment under the project section."
+                            "notes":  "Tier: maintenance. Files: src/transcription/cache.py (lines 43-47). Currently checks both transcriptions/ and transcripts/ silently with no indication which is primary or that transcripts/ is legacy. Users may have stale cache in the wrong directory without knowing."
+                        },
+                        {
+                            "id":  "US-66-011",
+                            "title":  "Add transcription config focus area to ralph-config.json",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "scripts/ralph/config/ralph-config.json has a \u0027transcription\u0027 entry in focusAreas array with id, name, category, description",
+                                                       "relevantFiles.transcription lists: src/transcription/, src/caption_fetcher.py, src/caption/, src/stages/caption_stage.py, src/config/sections/core.py (TranscriptionConfig)",
+                                                       "testPatterns.transcription lists: test_transcription*.py, test_caption*.py, test_caption_fetcher*.py",
+                                                       "The focus area is categorized under \u0027acquisition\u0027 or \u0027processing\u0027 category",
+                                                       "Queue.json can now reference \u0027transcription\u0027 as a valid focus area (already referenced, this validates it)"
+                                                   ],
+                            "notes":  "Tier: config. Files: scripts/ralph/config/ralph-config.json. Currently \u0027transcription\u0027 is used as a focus area in queue.json but is NOT defined in ralph-config.json focusAreas array. Only \u0027caption\u0027 exists there. This means Ralph can\u0027t look up test patterns or relevant files for the transcription focus area, falling back to defaults."
+                        },
+                        {
+                            "id":  "US-66-012",
+                            "title":  "Add negative cache expiration test coverage for caption fetcher cache",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "At least 3 new tests in tests/test_caption_cache.py or tests/test_caption_enhanced_cache.py cover negative cache TTL behavior",
+                                                       "Test 1: Verify is_caption_unavailable returns True for entry within TTL window",
+                                                       "Test 2: Verify is_caption_unavailable returns False for entry past TTL (expired)",
+                                                       "Test 3: Verify re-fetch succeeds after negative cache entry expires (integration with store_unavailable/is_caption_unavailable cycle)",
+                                                       "Tests use time mocking (monkeypatch or freezegun) to control TTL expiration without real waiting",
+                                                       "All new tests pass with pytest -v"
+                                                   ],
+                            "notes":  "Tier: testing. Files: tests/test_caption_cache.py, tests/test_caption_enhanced_cache.py, src/caption_fetcher_cache.py. Sprint 60 (US-60-004) added negative caching with TTL but the test coverage for TTL expiration edge cases is incomplete. Specifically: what happens when TTL is 0 (immediate expiry), very large TTL, and the exact boundary second."
                         }
                     ]
 }
