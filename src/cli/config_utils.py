@@ -70,9 +70,44 @@ def validate_root_directories(config: 'Config') -> None:
         sys.exit(1)
 
 
+def _reset_wrongly_resolved_paths(config: 'Config', project_dir: Path) -> None:
+    """Reset section paths that were resolved to the wrong base directory.
+
+    When load_config() is called, __post_init__ runs _resolve_paths() with
+    the default project_dir=".".  This resolves relative paths (e.g. ".cache")
+    to the current working directory instead of the real project directory.
+
+    This function detects those wrongly-resolved paths and resets them to
+    their original relative defaults so _resolve_paths() can re-resolve
+    them correctly when called with the proper project_dir.
+
+    Args:
+        config: Configuration object whose paths may be cwd-resolved
+        project_dir: The actual project directory
+    """
+    project_str = str(project_dir)
+
+    # (section_obj, field_name, default_relative_value)
+    section_path_defaults = [
+        (config.cache, 'cache_dir', '.cache'),
+        (config.logging, 'log_dir', 'logs'),
+        (config.output, 'output_dir', 'output'),
+        (config.transcription, 'cache_dir', 'transcriptions'),
+    ]
+
+    for section_obj, field_name, default_val in section_path_defaults:
+        value = getattr(section_obj, field_name, None)
+        if value and Path(value).is_absolute() and not str(value).startswith(project_str):
+            setattr(section_obj, field_name, default_val)
+
+
 def make_paths_project_relative(config: 'Config', project_dir: Path) -> 'Config':
     """
     Ensure paths in config are relative to project directory.
+
+    Delegates to Config._resolve_paths() which is the single source of
+    truth for all path resolution (output_dir, download_dir, cache_dir,
+    log_dir, etc.).  Sets project_dir on the config then resolves.
 
     Args:
         config: Configuration object
@@ -81,24 +116,9 @@ def make_paths_project_relative(config: 'Config', project_dir: Path) -> 'Config'
     Returns:
         Updated configuration object
     """
-    # Update output directory
-    if hasattr(config.output, 'output_dir'):
-        output_path = Path(config.output.output_dir)
-        if not output_path.is_absolute():
-            config.output.output_dir = str(project_dir / output_path)
-
-    # Update video directory
-    if hasattr(config.download, 'download_dir'):
-        video_path = Path(config.download.download_dir)
-        if not video_path.is_absolute():
-            config.download.download_dir = str(project_dir / video_path)
-
-    # Update cache directory
-    if hasattr(config.transcription, 'cache_dir'):
-        cache_path = Path(config.transcription.cache_dir)
-        if not cache_path.is_absolute():
-            config.transcription.cache_dir = str(project_dir / cache_path)
-
+    config.project_dir = str(project_dir)
+    _reset_wrongly_resolved_paths(config, project_dir)
+    config._resolve_paths()
     return config
 
 
@@ -121,20 +141,9 @@ def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config'
     else:
         config = load_config()
 
-    # Set project_dir and resolve all paths relative to it
-    config.project_dir = str(project_dir)
-
-    # Reset cache_dir if it was resolved to wrong location
-    if config.cache.cache_dir and not str(config.cache.cache_dir).startswith(str(project_dir)):
-        config.cache.cache_dir = ".cache"
-
-    # Reset log_dir if it was resolved to wrong location
-    if config.logging.log_dir and not str(config.logging.log_dir).startswith(str(project_dir)):
-        config.logging.log_dir = "logs"
-
-    config._resolve_paths()
-
-    return config
+    # Delegate to make_paths_project_relative which is the single
+    # entry point for project-relative path resolution.
+    return make_paths_project_relative(config, project_dir)
 
 
 def _merge_single_tier(tier_config, overrides: dict):
