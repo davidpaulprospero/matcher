@@ -42,6 +42,7 @@ from .cache import BaseCache, CacheEntry
 from src.caption.exceptions import (
     CaptionError,
     CaptionFetchError,
+    CaptionFormatExhaustedError,
     CaptionFormatUnavailableError,
     CaptionParseWarning,
     CaptionUnavailableError,
@@ -2398,8 +2399,9 @@ class CaptionFetcher:
                     # Format preference (US-006)
                     preferred_formats = getattr(caption_first, 'preferred_formats', None)
                     if preferred_formats and isinstance(preferred_formats, list):
-                        self._preferred_formats = preferred_formats
-                        self._default_formats = list(preferred_formats)
+                        # US-67-002: Deduplicate formats preserving order
+                        self._preferred_formats = list(dict.fromkeys(preferred_formats))
+                        self._default_formats = list(self._preferred_formats)
                     # Adaptive format ordering (US-002 Sprint 7)
                     self._adaptive_format_order = getattr(
                         caption_first, 'adaptive_format_order', True
@@ -2544,6 +2546,8 @@ class CaptionFetcher:
         }
 
         # Only apply if order actually changed
+        # US-67-002: Deduplicate formats preserving order
+        optimal_order = list(dict.fromkeys(optimal_order))
         if optimal_order != self._default_formats:
             self._preferred_formats = optimal_order
             self._using_adaptive_order = True
@@ -4584,6 +4588,24 @@ class CaptionFetcher:
             return self._fetch_subtitle_formats(
                 video_url, video_id, temp_dir, language, auto_generated
             )
+        except CaptionFormatExhaustedError as e:
+            # US-67-002: All formats exhausted - only auto-fallback if caused by
+            # format unavailability (not rate limits/network errors)
+            if isinstance(e.last_error, CaptionFormatUnavailableError):
+                if not auto_generated and self._is_auto_fallback_allowed():
+                    logger.info(
+                        f"Caption {video_id}: Manual captions unavailable for '{language}', "
+                        f"falling back to auto-generated"
+                    )
+                    result = self._fetch_subtitle_formats(
+                        video_url, video_id, temp_dir, language, True
+                    )
+                    if result is not None:
+                        metrics_ref = getattr(self, '_active_metrics', None)
+                        if metrics_ref is not None:
+                            metrics_ref.record_auto_fallback(video_id, language)
+                    return result
+            raise
         except (CaptionUnavailableError, CaptionFormatUnavailableError):
             # US-59-007: Auto-generated fallback
             # When manual captions fail, retry with auto-generated if allowed
@@ -4620,9 +4642,11 @@ class CaptionFetcher:
         language: str,
         auto_generated: bool
     ) -> Optional[CaptionResult]:
-        """Try each subtitle format in preference order.
+        """Try each unique subtitle format in preference order.
 
         Internal helper for _fetch_subtitle (US-59-007 refactor).
+        US-67-002: Deduplicates format list and raises CaptionFormatExhaustedError
+        when all unique formats fail, preventing wasted subprocess calls.
 
         Args:
             video_url: Full YouTube URL.
@@ -4636,15 +4660,17 @@ class CaptionFetcher:
 
         Raises:
             CaptionUnavailableError: If video has no captions at all.
-            CaptionFormatUnavailableError: If all formats exhausted.
+            CaptionFormatExhaustedError: If all unique formats exhausted.
             CaptionFetchError: If fetch fails due to network/temporary error.
         """
-        # Try each format in preference order (US-006)
+        # US-67-002: Deduplicate format list to prevent retrying already-failed formats
+        unique_formats = list(dict.fromkeys(self._preferred_formats))
         last_error = None
         formats_skipped = 0
+        formats_tried_list: list = []
         retry_budget = getattr(self, '_active_retry_budget', None)
 
-        for fallback_level, fmt in enumerate(self._preferred_formats):
+        for fallback_level, fmt in enumerate(unique_formats):
             # US-62-008: Skip exhausted formats
             if retry_budget and retry_budget.is_format_exhausted(fmt):
                 logger.debug(
@@ -4654,6 +4680,7 @@ class CaptionFetcher:
                 formats_skipped += 1
                 continue
 
+            formats_tried_list.append(fmt)
             try:
                 result = self._fetch_subtitle_with_format(
                     video_url, video_id, temp_dir, language, auto_generated, fmt,
@@ -4684,15 +4711,18 @@ class CaptionFetcher:
                 )
                 continue
 
-        # All formats exhausted (US-62-003)
-        formats_tried = len(self._preferred_formats) - formats_skipped
+        # All formats exhausted (US-67-002)
+        formats_tried = len(unique_formats) - formats_skipped
         logger.debug(
             f"Caption {video_id}: All formats exhausted after {formats_tried} attempts "
             f"({formats_skipped} skipped due to exhaustion)"
         )
-        if last_error:
-            raise last_error
-        return None
+        raise CaptionFormatExhaustedError(
+            video_id,
+            formats_tried=formats_tried_list,
+            formats_skipped=formats_skipped,
+            last_error=last_error,
+        )
 
     def _fetch_subtitle_with_format(
         self,

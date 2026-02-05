@@ -18,6 +18,7 @@ from src.caption.enums import CaptionErrorCategory, DEFAULT_RETRY_BUDGETS
 from src.caption.error_handling import categorize_caption_error
 from src.caption.exceptions import (
     CaptionFetchError,
+    CaptionFormatExhaustedError,
     CaptionFormatUnavailableError,
     CaptionUnavailableError,
 )
@@ -468,7 +469,7 @@ class TestFormatOnlyTriedOnce:
 
         with patch.object(fetcher, '_fetch_subtitle_with_format', side_effect=mock_format):
             with tempfile.TemporaryDirectory() as td:
-                with pytest.raises(CaptionFormatUnavailableError):
+                with pytest.raises(CaptionFormatExhaustedError):
                     # Call _fetch_subtitle_formats directly (single pass)
                     fetcher._fetch_subtitle_formats(
                         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -512,7 +513,7 @@ class TestFormatOnlyTriedOnce:
         ]):
             with patch.object(fetcher, '_fetch_subtitle_with_format', side_effect=mock_format):
                 with tempfile.TemporaryDirectory() as td:
-                    with pytest.raises(CaptionFormatUnavailableError):
+                    with pytest.raises(CaptionFormatExhaustedError):
                         fetcher._fetch_subtitle(
                             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                             "dQw4w9WgXcQ",
@@ -553,7 +554,7 @@ class TestFormatOnlyTriedOnce:
         with caplog.at_level(logging.DEBUG):
             with patch.object(fetcher, '_fetch_subtitle_with_format', side_effect=mock_format):
                 with tempfile.TemporaryDirectory() as td:
-                    with pytest.raises(CaptionFormatUnavailableError):
+                    with pytest.raises(CaptionFormatExhaustedError):
                         fetcher._fetch_subtitle_formats(
                             "https://www.youtube.com/watch?v=test123",
                             "test123",

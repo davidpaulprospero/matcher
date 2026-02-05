@@ -476,10 +476,11 @@ class TestFormatSkippingInCaptionFetcher:
         assert "vtt" in formats_attempted, "Non-exhausted format vtt should be tried"
         assert result is not None, "Should return successful vtt result"
 
-    def test_all_formats_exhausted_returns_none(self):
-        """When all formats are exhausted, _fetch_subtitle_formats returns None."""
+    def test_all_formats_exhausted_raises_exhausted_error(self):
+        """When all formats are exhausted, _fetch_subtitle_formats raises CaptionFormatExhaustedError."""
         from pathlib import Path
         from src.caption_fetcher import CaptionFetcher
+        from src.caption.exceptions import CaptionFormatExhaustedError
 
         # Create budget with all formats exhausted
         budget = CaptionRetryBudget(max_format_failures=2)
@@ -499,7 +500,6 @@ class TestFormatSkippingInCaptionFetcher:
 
         # Track if _fetch_subtitle_with_format was called
         call_count = [0]
-        original_method = fetcher._fetch_subtitle_with_format
 
         def mock_fetch(*args, **kwargs):
             call_count[0] += 1
@@ -507,18 +507,19 @@ class TestFormatSkippingInCaptionFetcher:
 
         fetcher._fetch_subtitle_with_format = mock_fetch
 
-        # Call _fetch_subtitle_formats - should return None (all skipped)
-        result = fetcher._fetch_subtitle_formats(
-            "https://youtube.com/watch?v=test",
-            "test_video",
-            Path("/tmp"),
-            "en",
-            False
-        )
+        # Call _fetch_subtitle_formats - should raise CaptionFormatExhaustedError
+        with pytest.raises(CaptionFormatExhaustedError) as exc_info:
+            fetcher._fetch_subtitle_formats(
+                "https://youtube.com/watch?v=test",
+                "test_video",
+                Path("/tmp"),
+                "en",
+                False
+            )
 
-        # Verify no formats were tried
+        # Verify no formats were tried and error has correct metadata
         assert call_count[0] == 0, "No formats should be attempted when all are exhausted"
-        assert result is None
+        assert exc_info.value.formats_skipped == 3
 
     def test_format_not_skipped_without_retry_budget(self, monkeypatch):
         """When no retry_budget, all formats are attempted normally."""
