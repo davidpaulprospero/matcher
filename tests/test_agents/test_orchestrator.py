@@ -1138,3 +1138,161 @@ class TestVPNStatusEndpoint:
         assert "VPN STATUS" in captured.out
         assert "Connected: No" in captured.out
         assert "Total rotations: 1" in captured.out
+
+
+class TestCustomPreflightValidators:
+    """Tests for custom preflight validator extensibility (US-64-009)."""
+
+    @pytest.mark.fast
+    def test_register_preflight_check(self, mock_config, project_dir):
+        """Test registering a custom preflight validator."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        def my_validator(state):
+            return []
+
+        orchestrator.register_preflight_check("my-validator", my_validator)
+        assert "my-validator" in orchestrator._custom_preflight_validators
+        assert orchestrator._custom_preflight_validators["my-validator"] is my_validator
+
+    @pytest.mark.fast
+    def test_register_duplicate_raises(self, mock_config, project_dir):
+        """Test registering a duplicate name raises ValueError."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        orchestrator.register_preflight_check("dup", lambda s: [])
+        with pytest.raises(ValueError, match="already registered"):
+            orchestrator.register_preflight_check("dup", lambda s: [])
+
+    @pytest.mark.fast
+    def test_unregister_preflight_check(self, mock_config, project_dir):
+        """Test unregistering a custom preflight validator."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        orchestrator.register_preflight_check("removable", lambda s: [])
+        assert orchestrator.unregister_preflight_check("removable") is True
+        assert "removable" not in orchestrator._custom_preflight_validators
+
+    @pytest.mark.fast
+    def test_unregister_nonexistent_returns_false(self, mock_config, project_dir):
+        """Test unregistering a non-existent validator returns False."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+        assert orchestrator.unregister_preflight_check("nonexistent") is False
+
+    @pytest.mark.fast
+    def test_custom_validator_called_during_preflight(self, mock_config, project_dir):
+        """Test custom validators are called during run_preflight()."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        validator_called = []
+
+        def tracking_validator(state):
+            validator_called.append(True)
+            return []
+
+        orchestrator.register_preflight_check("tracker", tracking_validator)
+
+        state = Mock()
+        state.matches = None
+        orchestrator.run_preflight(state)
+
+        assert len(validator_called) == 1
+
+    @pytest.mark.fast
+    def test_custom_validator_issues_in_preflight_results(self, mock_config, project_dir):
+        """Test custom validator issues are included in preflight results."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        custom_issue = PreflightIssue(
+            category="custom-check",
+            severity="warning",
+            message="Custom validation failed: missing voiceover metadata",
+            auto_fixable=False,
+        )
+
+        def issue_validator(state):
+            return [custom_issue]
+
+        orchestrator.register_preflight_check("issue-gen", issue_validator)
+
+        state = Mock()
+        state.matches = None
+        issues = orchestrator.run_preflight(state)
+
+        assert custom_issue in issues
+        assert any(i.category == "custom-check" for i in issues)
+        assert any("Custom validation failed" in i.message for i in issues)
+
+    @pytest.mark.fast
+    def test_multiple_custom_validators_all_run(self, mock_config, project_dir):
+        """Test multiple registered validators all execute."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        issue_a = PreflightIssue(
+            category="validator-a", severity="info",
+            message="Issue from A", auto_fixable=False,
+        )
+        issue_b = PreflightIssue(
+            category="validator-b", severity="warning",
+            message="Issue from B", auto_fixable=False,
+        )
+
+        orchestrator.register_preflight_check("val-a", lambda s: [issue_a])
+        orchestrator.register_preflight_check("val-b", lambda s: [issue_b])
+
+        state = Mock()
+        state.matches = None
+        issues = orchestrator.run_preflight(state)
+
+        assert issue_a in issues
+        assert issue_b in issues
+
+    @pytest.mark.fast
+    def test_custom_validator_exception_handled(self, mock_config, project_dir):
+        """Test a validator that raises an exception doesn't crash preflight."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        def failing_validator(state):
+            raise RuntimeError("Validator exploded")
+
+        orchestrator.register_preflight_check("failing", failing_validator)
+
+        state = Mock()
+        state.matches = None
+        # Should not raise
+        issues = orchestrator.run_preflight(state)
+
+        # Should include an issue about the failed validator
+        failed_issues = [i for i in issues if i.category == "custom-validator"]
+        assert len(failed_issues) == 1
+        assert "failing" in failed_issues[0].message
+        assert "exploded" in failed_issues[0].message
+
+    @pytest.mark.fast
+    def test_custom_validator_returning_empty_list(self, mock_config, project_dir):
+        """Test a validator returning empty list adds no issues."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        orchestrator.register_preflight_check("empty", lambda s: [])
+
+        state = Mock()
+        state.matches = None
+        # Get baseline issues (API keys, etc.)
+        baseline_issues = orchestrator.run_preflight(state)
+
+        # Unregister and re-run to compare
+        orchestrator.unregister_preflight_check("empty")
+        baseline_without = orchestrator.run_preflight(state)
+
+        # Should be same count since empty validator adds nothing
+        assert len(baseline_issues) == len(baseline_without)
+
+    @pytest.mark.fast
+    def test_register_after_unregister_succeeds(self, mock_config, project_dir):
+        """Test re-registering after unregister works."""
+        orchestrator = HealingOrchestrator(mock_config, project_dir)
+
+        orchestrator.register_preflight_check("reusable", lambda s: [])
+        orchestrator.unregister_preflight_check("reusable")
+        # Should not raise
+        orchestrator.register_preflight_check("reusable", lambda s: [])
