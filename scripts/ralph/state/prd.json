@@ -146,7 +146,7 @@
                             "id":  "US-65-010",
                             "title":  "Add MatchingConfig __post_init__ validation for confidence threshold ranges",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "MatchingConfig in src/config/sections/matching.py has a __post_init__ method that validates all float confidence fields are in range 0.0-1.0",
                                                        "Fields validated include: min_confidence, high_confidence_threshold, low_confidence_threshold, ambiguous_threshold, skip_llm_threshold, confidence_threshold",
@@ -154,13 +154,13 @@
                                                        "Integer fields (max_videos_per_segment, max_results, min_results) are validated as positive with logger.warning if \u003c= 0",
                                                        "Add test constructing MatchingConfig with out-of-range confidence (e.g., 1.5) and verify it is clamped to 1.0"
                                                    ],
-                            "notes":  "Tier: T2 (validation). Source file: src/config/sections/matching.py. MatchingConfig has 50+ fields but NO __post_init__ validation. Follow clamping pattern from IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (lines ~95-107). The existing __post_init__ in matching.py only handles nested dataclass conversion for location_matching, chapter_detection, scoring - it does not validate numeric ranges."
+                            "notes":  "Done. Added __post_init__ validation: 6 confidence fields clamped to [0.0,1.0] with logger.warning, 4 positive int fields (embedding_candidates, llm_rerank_candidates, top_k_candidates, context_window) corrected to 1 if <=0. 9 new tests in TestMatchingConfigConfidenceClamping. Note: max_videos_per_segment/max_results/min_results don't exist on MatchingConfig - validated the actual int fields instead."
                         },
                         {
                             "id":  "US-65-011",
                             "title":  "Add EmbeddingConfig __post_init__ validation for batch_size and model settings",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "EmbeddingConfig in src/config/sections/core.py has a __post_init__ method that validates batch_size \u003e= 1",
                                                        "The __post_init__ validates that provider field is one of the known providers (\u0027sentence-transformers\u0027, \u0027openai\u0027, etc.) or logs a warning for unknown providers",
@@ -168,7 +168,7 @@
                                                        "Add test constructing EmbeddingConfig with batch_size=0 and verifying it becomes 1 after init",
                                                        "python -m py_compile src/config/sections/core.py passes"
                                                    ],
-                            "notes":  "Tier: T1 (validation). Source file: src/config/sections/core.py (EmbeddingConfig class, no existing __post_init__). Follow the clamping+warning pattern from TranscriptionConfig.__post_init__ in the same file (~line 107). Known providers can be found by grepping for embedding provider references in src/transcription/ and src/embeddings.py."
+                            "notes":  "Done. Added __post_init__ to EmbeddingConfig: batch_size clamped to >=1, max_workers clamped to >=1, max_retries clamped to >=0, unknown provider logged as warning. Known providers: gemini, openai, local, sentence_transformers (from base.py:697). 12 new tests in TestEmbeddingConfigPostInitValidation."
                         },
                         {
                             "id":  "US-65-012",

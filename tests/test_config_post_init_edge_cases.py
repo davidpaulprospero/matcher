@@ -41,6 +41,7 @@ from src.config.sections.matching import (
     LocationMatchingConfig,
     ChapterDetectionConfig,
 )
+from src.config.sections.core import EmbeddingConfig
 
 
 # ─── IterativeMatchingConfig boundary values ─────────────────────────────
@@ -954,3 +955,94 @@ class TestTypedDictFieldAnnotations:
                     f"{cls.__name__}.{field_name} uses bare 'dict' annotation; "
                     f"should use Dict[str, T] or Optional[Dict[str, T]]"
                 )
+
+
+# ─── EmbeddingConfig __post_init__ validation (US-65-011) ─────────────────
+
+
+class TestEmbeddingConfigPostInitValidation:
+    """Test EmbeddingConfig __post_init__ validates batch_size and provider."""
+
+    @pytest.mark.fast
+    def test_batch_size_zero_corrected_to_one(self):
+        """batch_size=0 is corrected to 1."""
+        config = EmbeddingConfig(batch_size=0)
+        assert config.batch_size == 1
+
+    @pytest.mark.fast
+    def test_batch_size_negative_corrected_to_one(self):
+        """Negative batch_size is corrected to 1."""
+        config = EmbeddingConfig(batch_size=-10)
+        assert config.batch_size == 1
+
+    @pytest.mark.fast
+    def test_batch_size_one_unchanged(self):
+        """batch_size=1 is valid and unchanged."""
+        config = EmbeddingConfig(batch_size=1)
+        assert config.batch_size == 1
+
+    @pytest.mark.fast
+    def test_batch_size_valid_unchanged(self):
+        """Valid batch_size is unchanged."""
+        config = EmbeddingConfig(batch_size=100)
+        assert config.batch_size == 100
+
+    @pytest.mark.fast
+    def test_batch_size_correction_emits_warning(self, caplog):
+        """Invalid batch_size emits a logger.warning."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger='src.config.sections.core'):
+            EmbeddingConfig(batch_size=0)
+        assert any('batch_size' in record.message for record in caplog.records)
+
+    @pytest.mark.fast
+    def test_max_workers_zero_corrected_to_one(self):
+        """max_workers=0 is corrected to 1."""
+        config = EmbeddingConfig(max_workers=0)
+        assert config.max_workers == 1
+
+    @pytest.mark.fast
+    def test_max_workers_negative_corrected_to_one(self):
+        """Negative max_workers is corrected to 1."""
+        config = EmbeddingConfig(max_workers=-5)
+        assert config.max_workers == 1
+
+    @pytest.mark.fast
+    def test_max_retries_negative_corrected_to_zero(self):
+        """Negative max_retries is corrected to 0."""
+        config = EmbeddingConfig(max_retries=-1)
+        assert config.max_retries == 0
+
+    @pytest.mark.fast
+    def test_known_provider_no_warning(self, caplog):
+        """Known provider does not emit a warning."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger='src.config.sections.core'):
+            EmbeddingConfig(provider='gemini')
+        provider_warnings = [r for r in caplog.records if 'provider' in r.message]
+        assert len(provider_warnings) == 0
+
+    @pytest.mark.fast
+    def test_unknown_provider_emits_warning(self, caplog):
+        """Unknown provider emits a logger.warning."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger='src.config.sections.core'):
+            EmbeddingConfig(provider='unknown_provider')
+        assert any('provider' in record.message and 'unknown_provider' in record.message
+                    for record in caplog.records)
+
+    @pytest.mark.fast
+    def test_all_known_providers_accepted(self):
+        """All known providers are accepted without error."""
+        for provider in ['gemini', 'openai', 'local', 'sentence_transformers']:
+            config = EmbeddingConfig(provider=provider)
+            assert config.provider == provider
+
+    @pytest.mark.fast
+    def test_default_config_unchanged(self):
+        """Default EmbeddingConfig passes validation with no changes."""
+        config = EmbeddingConfig()
+        assert config.provider == 'gemini'
+        assert config.batch_size == 100
+        assert config.max_retries == 3
+        assert config.max_workers == 4
