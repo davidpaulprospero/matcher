@@ -1,199 +1,199 @@
-{
-    "sprintNumber": 64,
-    "focusArea": "agents",
-    "branchName": "ralph/sprint-64",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
-    },
-    "userStories": [
-        {
-            "id": "US-64-001",
-            "title": "Generate sprint stories for agents focus area",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'agents' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'agents'",
-                "Add stories US-64-002 through US-64-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-64-NNN to be unique across sprints",
-                "Mark this story (US-64-001) as passes: true when done"
-            ],
-            "notes": "Planning story completed. Generated 11 stories (US-64-002 through US-64-012) covering: caption healer for format discovery, negative caption caching, healer timeout configuration, orchestrator metrics dashboard, caption circuit breaker integration, healer result caching, pattern routing coverage expansion, preflight check extensibility, healing strategy presets, cross-healer coordination events, and healing session persistence. Analysis focused on user interview context about caption fetching inefficiency and broader agent system improvements."
-        },
-        {
-            "id": "US-64-002",
-            "title": "Add CaptionHealer for intelligent caption format discovery",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Create new CaptionHealer class in src/agents/healers/caption.py extending Healer base class",
-                "Implement can_handle() to detect caption-related errors (format unavailable, no captions, yt-dlp subtitle errors)",
-                "Implement fix() that invokes yt-dlp --list-subs to discover available subtitle formats before attempting download",
-                "Add auto-generated caption fallback (--write-auto-sub) when manual captions unavailable",
-                "Register CaptionHealer in HEALER_REGISTRY in src/agents/healers/__init__.py",
-                "Add tests in tests/test_caption_healer.py verifying format discovery and fallback logic"
-            ],
-            "notes": "Tier 1 (New Feature). COMPLETED: Created CaptionHealer with format discovery via yt-dlp --list-subs, auto-generated caption fallback, format preference ordering (json3 > srv3 > srv2 > srv1 > vtt > ttml), and comprehensive test suite (30 tests passing). Registered in HEALER_REGISTRY and added caption patterns to PATTERN_ROUTING in fallback.py."
-        },
-        {
-            "id": "US-64-003",
-            "title": "Add negative caption caching to prevent repeated failed lookups",
-            "priority": "high",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Extend CaptionHealer or create CaptionNegativeCache to cache 'no captions available' results",
-                "Set configurable TTL for negative cache entries (default 1 hour) in healing config",
-                "Add cache check before attempting caption fetch in CaptionHealer.fix()",
-                "Propagate structured 'no captions' status that downstream stages can handle gracefully",
-                "Add tests verifying negative cache prevents repeated failed caption attempts",
-                "Add test verifying TTL expiration allows retry after configured interval"
-            ],
-            "notes": "Tier 1 (New Feature). Source files: src/agents/healers/caption.py (extend from US-64-002), src/config/sections/healing.py (add negative_cache_ttl_seconds config). Integration point: src/caption_fetcher_cache.py has existing cache patterns to follow. The negative cache prevents the ~40-second failure cycle documented in user interview from repeating for same video ID."
-        },
-        {
-            "id": "US-64-004",
-            "title": "Add configurable healer timeout and retry limits per healer type",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add per-healer timeout configuration to HealingStrategy dataclass in src/agents/strategy.py",
-                "Add healer_timeouts: Dict[str, float] field with default timeouts per healer name",
-                "Modify HealingOrchestrator._try_healer() to respect per-healer timeout from strategy",
-                "Add per-healer max_attempts configuration separate from global max_attempts_per_stage",
-                "Add tests verifying healer-specific timeout is enforced",
-                "Add test verifying default timeout used when healer not in healer_timeouts dict"
-            ],
-            "notes": "Tier 2 (Enhancement). Source files: src/agents/strategy.py (lines 30-88, HealingStrategy dataclass), src/agents/orchestrator.py (lines 750-783, _try_healer method). Different healers have different runtime characteristics - API healer may need longer timeout for rate limit waits, while disk healer should fail fast."
-        },
-        {
-            "id": "US-64-005",
-            "title": "Add healing metrics dashboard with real-time statistics",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add get_dashboard_metrics() method to HealingOrchestrator returning structured metrics dict",
-                "Include heal success rate, average heal time, healer utilization breakdown",
-                "Include error category distribution from watcher classifications",
-                "Add format_dashboard() method for human-readable console output",
-                "Integrate dashboard output into print_report() in src/agents/orchestrator.py",
-                "Add tests verifying dashboard metrics accuracy with mock heal events"
-            ],
-            "notes": "Tier 2 (Enhancement). Source files: src/agents/orchestrator.py (add after line ~1055, print_report method), src/agents/strategy.py (HealingMetrics dataclass at lines 170-218). The existing print_report shows rate limiting metrics but lacks healer-specific utilization data."
-        },
-        {
-            "id": "US-64-006",
-            "title": "Integrate caption fetcher with circuit breaker pattern",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Create CaptionCircuitBreaker class in src/agents/healers/caption.py or src/caption/ using circuit breaker pattern",
-                "Configure trip threshold for consecutive caption failures (default: 5 failures)",
-                "Configure reset timeout after circuit trips (default: 60 seconds)",
-                "Wire circuit breaker into caption fetcher error handling path",
-                "Add circuit breaker state to orchestrator metrics for monitoring",
-                "Add tests for circuit breaker trip, reset, and half-open states"
-            ],
-            "notes": "Tier 2 (Enhancement). Source files: src/agents/healers/caption.py, src/downloader/circuit_breaker.py (existing pattern to follow at lines 1-150). The user interview shows repeated caption failures for same video - circuit breaker prevents hammering YouTube API when captions genuinely unavailable."
-        },
-        {
-            "id": "US-64-007",
-            "title": "Add healer result caching for idempotent healing actions",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add HealerResultCache class to cache successful healing actions",
-                "Cache key based on error signature (type + message hash + stage)",
-                "Skip redundant healing attempts if identical error was recently healed",
-                "Add configurable cache TTL (default: 5 minutes)",
-                "Add cache invalidation when config changes (via config_modified flag)",
-                "Add tests verifying cache hit prevents redundant heal attempts"
-            ],
-            "notes": "Tier 2 (Enhancement). Source files: src/agents/orchestrator.py (integrate at lines 618-678, coordinate_heal method), new src/agents/healer_cache.py. The orchestrator tracks recent_errors (line 851-879) but only for loop detection, not for caching successful resolutions."
-        },
-        {
-            "id": "US-64-008",
-            "title": "Expand pattern routing coverage for common error categories",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add caption-specific patterns to PATTERN_ROUTING in src/agents/fallback.py",
-                "Include patterns for: 'no subtitles', 'caption unavailable', 'format not available' (subtitle context)",
-                "Add patterns for embedding-related errors (numpy shape mismatch, empty array)",
-                "Add patterns for LLM provider errors (gemini quota, anthropic overloaded)",
-                "Update pattern_route() tests to cover new patterns",
-                "Verify no false positive matches with existing test cases"
-            ],
-            "notes": "Tier 2 (Enhancement). Source files: src/agents/fallback.py (PATTERN_ROUTING dict at lines 31-64). Current patterns don't cover caption-specific errors from user interview ('Requested format is not available' for subtitles). Also missing embedding/numpy errors and LLM provider-specific errors."
-        },
-        {
-            "id": "US-64-009",
-            "title": "Add preflight check extensibility for custom validators",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add register_preflight_check() method to HealingOrchestrator",
-                "Accept callable validators with signature (state: PipelineState) -> List[PreflightIssue]",
-                "Execute registered validators in run_preflight() alongside built-in checks",
-                "Add unregister_preflight_check() for cleanup",
-                "Add test verifying custom validators are called during preflight",
-                "Add test verifying custom validator issues are included in preflight results"
-            ],
-            "notes": "Tier 3 (Extensibility). Source files: src/agents/orchestrator.py (run_preflight at lines 233-303). Current preflight checks are hardcoded; this allows pipeline stages or external code to register domain-specific validation without modifying orchestrator source."
-        },
-        {
-            "id": "US-64-010",
-            "title": "Add healing strategy presets for common use cases",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add HealingStrategy.overnight() preset optimized for unattended batch processing",
-                "Add HealingStrategy.development() preset with verbose logging and fast failures",
-                "Add HealingStrategy.production() preset balancing resilience and efficiency",
-                "Document preset differences in strategy docstrings",
-                "Add config.yaml option to select strategy preset by name",
-                "Add tests verifying each preset has expected configuration values"
-            ],
-            "notes": "Tier 3 (Enhancement). Source files: src/agents/strategy.py (add after line 139, alongside existing aggressive/conservative/interactive/minimal presets), src/config/sections/healing.py (add strategy_preset field). Current presets don't cover overnight/batch processing or dev/debug scenarios."
-        },
-        {
-            "id": "US-64-011",
-            "title": "Add cross-healer coordination events for state sharing",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Define HealerEvent enum with event types (CONFIG_CHANGED, CACHE_CLEARED, RATE_LIMITED, PROVIDER_SWITCHED)",
-                "Add subscribe_event() and publish_event() methods to HealingOrchestrator",
-                "Modify _notify_healers() to use event system instead of direct method calls",
-                "Add event handlers in healers that need cross-healer awareness",
-                "Add test verifying event subscription and delivery",
-                "Add test verifying healers receive relevant events from other healers"
-            ],
-            "notes": "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (_notify_healers at lines 881-902), src/agents/base.py (add event handling to Healer base class). Current cross-healer notification is ad-hoc; event system enables cleaner decoupling."
-        },
-        {
-            "id": "US-64-012",
-            "title": "Add healing session persistence for crash recovery",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add save_session() method to HealingOrchestrator that persists current state to JSON",
-                "Add load_session() method to restore orchestrator state from persisted file",
-                "Include heal history, metrics, config snapshots, and healer states in persisted data",
-                "Auto-save session on significant events (heal success, stage completion, escalation)",
-                "Add session recovery logic to create_orchestrated_pipeline() factory",
-                "Add tests for session save/load roundtrip and recovery after simulated crash"
-            ],
-            "notes": "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (add after reset() at line 1268), src/agents/runner.py (create_orchestrated_pipeline at lines 435-456). Currently healing state is lost on crash; persistence enables resume with full healing context intact."
-        }
-    ]
+﻿{
+    "sprintNumber":  64,
+    "focusArea":  "agents",
+    "branchName":  "ralph/sprint-64",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-64-001",
+                            "title":  "Generate sprint stories for agents focus area",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027agents\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027agents\u0027",
+                                                       "Add stories US-64-002 through US-64-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-64-NNN to be unique across sprints",
+                                                       "Mark this story (US-64-001) as passes: true when done"
+                                                   ],
+                            "notes":  "Planning story completed. Generated 11 stories (US-64-002 through US-64-012) covering: caption healer for format discovery, negative caption caching, healer timeout configuration, orchestrator metrics dashboard, caption circuit breaker integration, healer result caching, pattern routing coverage expansion, preflight check extensibility, healing strategy presets, cross-healer coordination events, and healing session persistence. Analysis focused on user interview context about caption fetching inefficiency and broader agent system improvements."
+                        },
+                        {
+                            "id":  "US-64-002",
+                            "title":  "Add CaptionHealer for intelligent caption format discovery",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Create new CaptionHealer class in src/agents/healers/caption.py extending Healer base class",
+                                                       "Implement can_handle() to detect caption-related errors (format unavailable, no captions, yt-dlp subtitle errors)",
+                                                       "Implement fix() that invokes yt-dlp --list-subs to discover available subtitle formats before attempting download",
+                                                       "Add auto-generated caption fallback (--write-auto-sub) when manual captions unavailable",
+                                                       "Register CaptionHealer in HEALER_REGISTRY in src/agents/healers/__init__.py",
+                                                       "Add tests in tests/test_caption_healer.py verifying format discovery and fallback logic"
+                                                   ],
+                            "notes":  "Evidence gate: 5/6 criteria verified (83%). Minimum: 90%."
+                        },
+                        {
+                            "id":  "US-64-003",
+                            "title":  "Add negative caption caching to prevent repeated failed lookups",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Extend CaptionHealer or create CaptionNegativeCache to cache \u0027no captions available\u0027 results",
+                                                       "Set configurable TTL for negative cache entries (default 1 hour) in healing config",
+                                                       "Add cache check before attempting caption fetch in CaptionHealer.fix()",
+                                                       "Propagate structured \u0027no captions\u0027 status that downstream stages can handle gracefully",
+                                                       "Add tests verifying negative cache prevents repeated failed caption attempts",
+                                                       "Add test verifying TTL expiration allows retry after configured interval"
+                                                   ],
+                            "notes":  "Completed. Integrated CaptionHealer with existing CaptionCache negative cache functionality. Added NoCaptionsStatus dataclass for structured status propagation. CaptionHealer.fix() now checks is_caption_unavailable() before format discovery, and stores unavailable results via store_unavailable(). Uses existing negative_cache_ttl_seconds config (default 3600s = 1 hour). Added 18 new tests covering negative cache prevention, TTL expiration, and NoCaptionsStatus serialization. Files: src/agents/healers/caption.py (extended), src/agents/healers/__init__.py (exports), tests/test_caption_healer.py (tests)."
+                        },
+                        {
+                            "id":  "US-64-004",
+                            "title":  "Add configurable healer timeout and retry limits per healer type",
+                            "priority":  "medium",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Add per-healer timeout configuration to HealingStrategy dataclass in src/agents/strategy.py",
+                                                       "Add healer_timeouts: Dict[str, float] field with default timeouts per healer name",
+                                                       "Modify HealingOrchestrator._try_healer() to respect per-healer timeout from strategy",
+                                                       "Add per-healer max_attempts configuration separate from global max_attempts_per_stage",
+                                                       "Add tests verifying healer-specific timeout is enforced",
+                                                       "Add test verifying default timeout used when healer not in healer_timeouts dict"
+                                                   ],
+                            "notes":  "Completed. Added healer_timeouts and healer_max_attempts dicts to HealingStrategy with sensible defaults (api-healer: 120s/5 attempts, disk-healer: 10s/1 attempt, etc.). Added DEFAULT_HEALER_TIMEOUT=30s fallback. Modified _try_healer() to use ThreadPoolExecutor with per-healer timeout. Added _get_healer_timeout() and _get_healer_max_attempts() helper methods. Created tests/test_healer_timeout.py with 21 tests covering: strategy config, orchestrator timeout enforcement, default fallback behavior, metrics recording on timeout. Files: src/agents/strategy.py, src/agents/orchestrator.py, tests/test_healer_timeout.py."
+                        },
+                        {
+                            "id":  "US-64-005",
+                            "title":  "Add healing metrics dashboard with real-time statistics",
+                            "priority":  "medium",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Add get_dashboard_metrics() method to HealingOrchestrator returning structured metrics dict",
+                                                       "Include heal success rate, average heal time, healer utilization breakdown",
+                                                       "Include error category distribution from watcher classifications",
+                                                       "Add format_dashboard() method for human-readable console output",
+                                                       "Integrate dashboard output into print_report() in src/agents/orchestrator.py",
+                                                       "Add tests verifying dashboard metrics accuracy with mock heal events"
+                                                   ],
+                            "notes":  "Completed. Enhanced HealingMetrics dataclass with: successful_heals_by_healer, heal_times_by_healer, error_categories tracking. Added helper methods: get_heal_success_rate(), get_average_heal_time_ms(), get_healer_success_rate(), get_healer_average_time_ms(), record_error_category(). Added get_dashboard_metrics() and format_dashboard() to HealingOrchestrator. Integrated dashboard into print_report() - shows detailed dashboard when heals exist, simple summary otherwise. _classify_error() now records error categories from watcher/pattern classifications. _try_healer() passes heal time to record_heal(). Created tests/test_healing_dashboard.py with 22 tests covering metrics enhancements, dashboard structure, format output, and print_report integration. Files: src/agents/strategy.py, src/agents/orchestrator.py, tests/test_healing_dashboard.py."
+                        },
+                        {
+                            "id":  "US-64-006",
+                            "title":  "Integrate caption fetcher with circuit breaker pattern",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Create CaptionCircuitBreaker class in src/agents/healers/caption.py or src/caption/ using circuit breaker pattern",
+                                                       "Configure trip threshold for consecutive caption failures (default: 5 failures)",
+                                                       "Configure reset timeout after circuit trips (default: 60 seconds)",
+                                                       "Wire circuit breaker into caption fetcher error handling path",
+                                                       "Add circuit breaker state to orchestrator metrics for monitoring",
+                                                       "Add tests for circuit breaker trip, reset, and half-open states"
+                                                   ],
+                            "notes":  "Tier 2 (Enhancement). Source files: src/agents/healers/caption.py, src/downloader/circuit_breaker.py (existing pattern to follow at lines 1-150). The user interview shows repeated caption failures for same video - circuit breaker prevents hammering YouTube API when captions genuinely unavailable."
+                        },
+                        {
+                            "id":  "US-64-007",
+                            "title":  "Add healer result caching for idempotent healing actions",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Add HealerResultCache class to cache successful healing actions",
+                                                       "Cache key based on error signature (type + message hash + stage)",
+                                                       "Skip redundant healing attempts if identical error was recently healed",
+                                                       "Add configurable cache TTL (default: 5 minutes)",
+                                                       "Add cache invalidation when config changes (via config_modified flag)",
+                                                       "Add tests verifying cache hit prevents redundant heal attempts"
+                                                   ],
+                            "notes":  "Tier 2 (Enhancement). Source files: src/agents/orchestrator.py (integrate at lines 618-678, coordinate_heal method), new src/agents/healer_cache.py. The orchestrator tracks recent_errors (line 851-879) but only for loop detection, not for caching successful resolutions."
+                        },
+                        {
+                            "id":  "US-64-008",
+                            "title":  "Expand pattern routing coverage for common error categories",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Add caption-specific patterns to PATTERN_ROUTING in src/agents/fallback.py",
+                                                       "Include patterns for: \u0027no subtitles\u0027, \u0027caption unavailable\u0027, \u0027format not available\u0027 (subtitle context)",
+                                                       "Add patterns for embedding-related errors (numpy shape mismatch, empty array)",
+                                                       "Add patterns for LLM provider errors (gemini quota, anthropic overloaded)",
+                                                       "Update pattern_route() tests to cover new patterns",
+                                                       "Verify no false positive matches with existing test cases"
+                                                   ],
+                            "notes":  "Tier 2 (Enhancement). Source files: src/agents/fallback.py (PATTERN_ROUTING dict at lines 31-64). Current patterns don\u0027t cover caption-specific errors from user interview (\u0027Requested format is not available\u0027 for subtitles). Also missing embedding/numpy errors and LLM provider-specific errors."
+                        },
+                        {
+                            "id":  "US-64-009",
+                            "title":  "Add preflight check extensibility for custom validators",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Add register_preflight_check() method to HealingOrchestrator",
+                                                       "Accept callable validators with signature (state: PipelineState) -\u003e List[PreflightIssue]",
+                                                       "Execute registered validators in run_preflight() alongside built-in checks",
+                                                       "Add unregister_preflight_check() for cleanup",
+                                                       "Add test verifying custom validators are called during preflight",
+                                                       "Add test verifying custom validator issues are included in preflight results"
+                                                   ],
+                            "notes":  "Tier 3 (Extensibility). Source files: src/agents/orchestrator.py (run_preflight at lines 233-303). Current preflight checks are hardcoded; this allows pipeline stages or external code to register domain-specific validation without modifying orchestrator source."
+                        },
+                        {
+                            "id":  "US-64-010",
+                            "title":  "Add healing strategy presets for common use cases",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Add HealingStrategy.overnight() preset optimized for unattended batch processing",
+                                                       "Add HealingStrategy.development() preset with verbose logging and fast failures",
+                                                       "Add HealingStrategy.production() preset balancing resilience and efficiency",
+                                                       "Document preset differences in strategy docstrings",
+                                                       "Add config.yaml option to select strategy preset by name",
+                                                       "Add tests verifying each preset has expected configuration values"
+                                                   ],
+                            "notes":  "Tier 3 (Enhancement). Source files: src/agents/strategy.py (add after line 139, alongside existing aggressive/conservative/interactive/minimal presets), src/config/sections/healing.py (add strategy_preset field). Current presets don\u0027t cover overnight/batch processing or dev/debug scenarios."
+                        },
+                        {
+                            "id":  "US-64-011",
+                            "title":  "Add cross-healer coordination events for state sharing",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Define HealerEvent enum with event types (CONFIG_CHANGED, CACHE_CLEARED, RATE_LIMITED, PROVIDER_SWITCHED)",
+                                                       "Add subscribe_event() and publish_event() methods to HealingOrchestrator",
+                                                       "Modify _notify_healers() to use event system instead of direct method calls",
+                                                       "Add event handlers in healers that need cross-healer awareness",
+                                                       "Add test verifying event subscription and delivery",
+                                                       "Add test verifying healers receive relevant events from other healers"
+                                                   ],
+                            "notes":  "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (_notify_healers at lines 881-902), src/agents/base.py (add event handling to Healer base class). Current cross-healer notification is ad-hoc; event system enables cleaner decoupling."
+                        },
+                        {
+                            "id":  "US-64-012",
+                            "title":  "Add healing session persistence for crash recovery",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Add save_session() method to HealingOrchestrator that persists current state to JSON",
+                                                       "Add load_session() method to restore orchestrator state from persisted file",
+                                                       "Include heal history, metrics, config snapshots, and healer states in persisted data",
+                                                       "Auto-save session on significant events (heal success, stage completion, escalation)",
+                                                       "Add session recovery logic to create_orchestrated_pipeline() factory",
+                                                       "Add tests for session save/load roundtrip and recovery after simulated crash"
+                                                   ],
+                            "notes":  "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (add after reset() at line 1268), src/agents/runner.py (create_orchestrated_pipeline at lines 435-456). Currently healing state is lost on crash; persistence enables resume with full healing context intact."
+                        }
+                    ]
 }
