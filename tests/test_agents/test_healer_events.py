@@ -1,5 +1,5 @@
 """
-Tests for cross-healer coordination events (US-64-011).
+Tests for cross-healer coordination events (US-64-011, US-68-011).
 
 Verifies:
 - HealerEvent enum has required event types
@@ -7,6 +7,11 @@ Verifies:
 - _notify_healers() uses event system
 - Healers receive and handle events from other healers
 - Event handlers in APIHealer, DownloadHealer, CheckpointHealer
+- publish_event delivers to ALL subscribed healers (US-68-011)
+- Multiple event type routing works correctly (US-68-011)
+- CONFIG_CHANGED triggers API healer backoff reset (US-68-011)
+- RATE_LIMITED propagates to download healer (US-68-011)
+- Error in one subscriber doesn't prevent delivery to others (US-68-011)
 """
 
 import pytest
@@ -339,8 +344,159 @@ class TestAutoSubscription:
         assert "download-healer" in orchestrator._event_subscriptions[HealerEvent.RATE_LIMITED]
 
 
+class TestMultiSubscriberDelivery:
+    """Test publish_event delivers to ALL subscribed healers, not just one."""
+
+    @pytest.mark.fast
+    def test_publish_delivers_to_all_subscribers(self, mock_config, project_dir):
+        """publish_event() delivers events to all subscribed healers."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+
+        # Create two mock healers and register them
+        healer_a = Mock(spec=Healer)
+        healer_a.name = "healer-a"
+        healer_b = Mock(spec=Healer)
+        healer_b.name = "healer-b"
+        orchestrator._healer_instances["healer-a"] = healer_a
+        orchestrator._healer_instances["healer-b"] = healer_b
+
+        # Subscribe both to the same event
+        orchestrator.subscribe_event(HealerEvent.RATE_LIMITED, "healer-a")
+        orchestrator.subscribe_event(HealerEvent.RATE_LIMITED, "healer-b")
+
+        # Publish from a third source
+        orchestrator.publish_event(
+            HealerEvent.RATE_LIMITED, "source-healer", reason="429"
+        )
+
+        # Both must receive the event
+        healer_a.handle_event.assert_called_once()
+        healer_b.handle_event.assert_called_once()
+
+        # Verify event data is correct for both
+        for mock_healer in [healer_a, healer_b]:
+            event_data = mock_healer.handle_event.call_args[0][0]
+            assert event_data.event == HealerEvent.RATE_LIMITED
+            assert event_data.source_healer == "source-healer"
+            assert event_data.details == {"reason": "429"}
+
+    @pytest.mark.fast
+    def test_error_in_one_subscriber_doesnt_block_others(self, mock_config, project_dir):
+        """Event handling error in one subscriber doesn't prevent delivery to others."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+
+        # First healer raises, second healer should still receive the event
+        bad_healer = Mock(spec=Healer)
+        bad_healer.name = "bad-healer"
+        bad_healer.handle_event.side_effect = RuntimeError("handler crash")
+
+        good_healer = Mock(spec=Healer)
+        good_healer.name = "good-healer"
+
+        orchestrator._healer_instances["bad-healer"] = bad_healer
+        orchestrator._healer_instances["good-healer"] = good_healer
+
+        orchestrator.subscribe_event(HealerEvent.CONFIG_CHANGED, "bad-healer")
+        orchestrator.subscribe_event(HealerEvent.CONFIG_CHANGED, "good-healer")
+
+        # Should not raise, and good-healer should still receive the event
+        orchestrator.publish_event(HealerEvent.CONFIG_CHANGED, "source-healer")
+
+        bad_healer.handle_event.assert_called_once()
+        good_healer.handle_event.assert_called_once()
+        event_data = good_healer.handle_event.call_args[0][0]
+        assert event_data.event == HealerEvent.CONFIG_CHANGED
+
+
+class TestMultipleEventTypeRouting:
+    """Test subscribe_event() with multiple event types routes correctly."""
+
+    @pytest.mark.fast
+    def test_healer_receives_only_subscribed_events(self, mock_config, project_dir):
+        """A healer subscribed to specific events receives only those events."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+
+        rate_healer = Mock(spec=Healer)
+        rate_healer.name = "rate-healer"
+        config_healer = Mock(spec=Healer)
+        config_healer.name = "config-healer"
+
+        orchestrator._healer_instances["rate-healer"] = rate_healer
+        orchestrator._healer_instances["config-healer"] = config_healer
+
+        # Subscribe to different events
+        orchestrator.subscribe_event(HealerEvent.RATE_LIMITED, "rate-healer")
+        orchestrator.subscribe_event(HealerEvent.CONFIG_CHANGED, "config-healer")
+
+        # Publish RATE_LIMITED
+        orchestrator.publish_event(HealerEvent.RATE_LIMITED, "source")
+        rate_healer.handle_event.assert_called_once()
+        config_healer.handle_event.assert_not_called()
+
+        # Reset mocks
+        rate_healer.reset_mock()
+        config_healer.reset_mock()
+
+        # Publish CONFIG_CHANGED
+        orchestrator.publish_event(HealerEvent.CONFIG_CHANGED, "source")
+        rate_healer.handle_event.assert_not_called()
+        config_healer.handle_event.assert_called_once()
+
+    @pytest.mark.fast
+    def test_healer_subscribed_to_multiple_types(self, mock_config, project_dir):
+        """A healer subscribed to multiple event types receives all of them."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+
+        multi_healer = Mock(spec=Healer)
+        multi_healer.name = "multi-healer"
+        orchestrator._healer_instances["multi-healer"] = multi_healer
+
+        # Subscribe to two event types
+        orchestrator.subscribe_event(HealerEvent.RATE_LIMITED, "multi-healer")
+        orchestrator.subscribe_event(HealerEvent.PROVIDER_SWITCHED, "multi-healer")
+
+        # Publish RATE_LIMITED
+        orchestrator.publish_event(HealerEvent.RATE_LIMITED, "source")
+        assert multi_healer.handle_event.call_count == 1
+        event_data = multi_healer.handle_event.call_args[0][0]
+        assert event_data.event == HealerEvent.RATE_LIMITED
+
+        # Publish PROVIDER_SWITCHED
+        orchestrator.publish_event(HealerEvent.PROVIDER_SWITCHED, "source")
+        assert multi_healer.handle_event.call_count == 2
+        event_data = multi_healer.handle_event.call_args[0][0]
+        assert event_data.event == HealerEvent.PROVIDER_SWITCHED
+
+
 class TestEndToEndEventDelivery:
     """Test full event flow: healer action -> _notify_healers -> event delivery."""
+
+    @pytest.mark.fast
+    def test_rate_limited_propagates_to_download_healer(self, mock_config, project_dir):
+        """RATE_LIMITED event propagates to download healer via orchestrator."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.conservative()
+        )
+
+        download_healer = orchestrator._healer_instances.get("download-healer")
+        if download_healer:
+            original_backoff = download_healer.backoff_time
+
+            # Publish RATE_LIMITED from api-healer
+            orchestrator.publish_event(
+                HealerEvent.RATE_LIMITED, "api-healer", status_code=429
+            )
+
+            # Download healer should have increased backoff
+            assert download_healer.backoff_time > original_backoff
 
     @pytest.mark.fast
     def test_config_change_reaches_api_healer(self, mock_config, project_dir):
