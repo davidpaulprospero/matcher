@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from .caption.rate_limiter import UnifiedCaptionRateLimiter
     from .caption.circuit_breaker import CaptionCircuitBreaker
     from .caption.retry_budget import CaptionRetryBudget
+    from .caption_fetcher_cache import EnhancedCaptionCache
 
 logger = logging.getLogger(__name__)
 
@@ -2345,6 +2346,7 @@ class CaptionFetcher:
         cookie_rotator: Optional['CookieRotator'] = None,
         caption_cache: Optional['CaptionCache'] = None,
         list_subs_cache: Optional['ListSubsCache'] = None,
+        preflight_cache: Optional['EnhancedCaptionCache'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2362,6 +2364,9 @@ class CaptionFetcher:
                            redundant yt-dlp calls on subsequent fetch attempts.
             list_subs_cache: Optional ListSubsCache for caching --list-subs output (US-59-012).
                              Avoids redundant subprocess calls on resume runs.
+            preflight_cache: Optional EnhancedCaptionCache for caching preflight discovery
+                             results (US-67-005). Uses '{video_id}_preflight' key with 1-hour TTL
+                             to avoid repeated --list-subs subprocess calls during batch retries.
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
@@ -2371,6 +2376,7 @@ class CaptionFetcher:
         self.cookie_rotator = cookie_rotator
         self._caption_cache = caption_cache
         self._list_subs_cache = list_subs_cache
+        self._preflight_cache = preflight_cache
 
         # Log cookie rotator status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -2592,6 +2598,21 @@ class CaptionFetcher:
         if not self._is_valid_video_id(video_id):
             raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
 
+        # US-67-005: Check preflight cache first (in-memory with 1-hour TTL)
+        if self._preflight_cache:
+            cached_preflight = self._preflight_cache.get_preflight(video_id)
+            if cached_preflight is not None:
+                languages = [
+                    AvailableLanguage(
+                        code=lang['code'],
+                        name=lang['name'],
+                        is_auto_generated=lang['is_auto_generated']
+                    )
+                    for lang in cached_preflight
+                ]
+                logger.debug(f"list_available_languages: preflight cache hit for {video_id} ({len(languages)} languages)")
+                return languages
+
         # US-59-012: Check persistent cache first
         if self._list_subs_cache:
             cached_languages = self._list_subs_cache.get_languages(video_id)
@@ -2639,6 +2660,10 @@ class CaptionFetcher:
 
             # Parse the output to extract available languages
             languages = self._parse_list_subs_output(result.stdout, result.stderr)
+
+            # US-67-005: Store in preflight cache (in-memory, 1-hour TTL)
+            if self._preflight_cache:
+                self._preflight_cache.store_preflight(video_id, languages)
 
             # US-59-012: Store in persistent cache
             if self._list_subs_cache:
