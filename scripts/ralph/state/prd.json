@@ -104,7 +104,7 @@
                             "id":  "US-65-007",
                             "title":  "Add type hints for bare dict fields in matching and download config dataclasses",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "caption_quality_weights field in MatchingConfig (src/config/sections/matching.py) uses Optional[Dict[str, float]] instead of bare dict",
                                                        "multimodal_weights field in MatchingConfig uses Optional[Dict[str, float]] instead of bare dict",
@@ -112,7 +112,7 @@
                                                        "Import Dict and Optional from typing are added where needed",
                                                        "python -m py_compile src/config/sections/matching.py and python -m py_compile src/config/sections/download.py both pass"
                                                    ],
-                            "notes":  "Tier: T1 (type safety). Source files: src/config/sections/matching.py (lines ~300-364 have dict = None fields), src/config/sections/download.py (check for bare dict fields). The fix is mechanical: replace \u0027dict\u0027 with \u0027Optional[Dict[str, float]]\u0027 or appropriate typed Dict. Follow existing patterns where Dict is already used (e.g., download.py line ~403 retry_budgets: Dict[str, int])."
+                            "notes":  "Complete. Changed caption_quality_weights and multimodal_weights from bare dict to Optional[Dict[str, float]] in matching.py. download.py already used typed Dict throughout (no bare dict fields found). Dict and Optional were already imported in matching.py. Both files compile. All related tests pass (2 pre-existing failures unrelated to type hints)."
                         },
                         {
                             "id":  "US-65-008",
