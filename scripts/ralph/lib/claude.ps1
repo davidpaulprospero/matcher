@@ -523,11 +523,24 @@ function Invoke-ClaudeSubprocess {
                         if ($story -and $story.passes -eq $true) {
                             $storyCompletionDetected = $true
                             $storyCompletionTime = Get-Date
+                            $storyCompletionGitHead = (git rev-parse HEAD 2>$null)
                             $detectMethod = if ($prdUpdated) { "file change" } else { "periodic recheck" }
                             Write-Host "  [$mins min] Story $StoryId marked DONE ($detectMethod) - grace period ${storyCompletionGraceSec}s for commit..." -ForegroundColor Green
                         }
                     } catch {
                         # PRD read failed (file locked, etc.) - skip this check
+                    }
+                }
+
+                # Early exit: immediate termination if git commit detected after story done
+                if ($storyCompletionDetected -and $storyCompletionGitHead) {
+                    $currentHead = (git rev-parse HEAD 2>$null)
+                    if ($currentHead -and $currentHead -ne $storyCompletionGitHead) {
+                        Write-Host "  [$mins min] Git commit after story done - terminating" -ForegroundColor Green
+                        try { taskkill /T /F /PID $process.Id 2>$null | Out-Null } catch {}
+                        if (-not $process.HasExited) { try { $process.Kill() } catch {} }
+                        Start-Sleep -Milliseconds 500
+                        break
                     }
                 }
 

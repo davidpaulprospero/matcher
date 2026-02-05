@@ -286,12 +286,38 @@ function Invoke-TieredHealthCheck {
         Write-Host " OK" -ForegroundColor DarkGray
     }
 
-    # === TIER 3: Full test run (cadence-based) ===
-    $runTier3 = $ForceFullRun -or ($iteration -eq 1) -or ($iteration % $FullRunCadence -eq 0)
+    # === TIER 3: Test run (full on cadence, fast otherwise) ===
+    $runFullTier3 = $ForceFullRun -or ($iteration -eq 1) -or ($iteration % $FullRunCadence -eq 0)
+    $runFastTier3 = -not $runFullTier3
 
-    if ($runTier3) {
+    if ($runFullTier3) {
         Write-Host "  Health [T3]: full test suite..." -ForegroundColor DarkGray -NoNewline
         $t3 = Invoke-FullHealthCheck
+        $result.TierResults += $t3
+
+        if ($t3.Skipped) {
+            Write-Host " SKIPPED" -ForegroundColor DarkGray
+        } elseif ($t3.HasErrors) {
+            Write-Host " ERRORS ($($t3.FailureCount)F/$($t3.ErrorCount)E)" -ForegroundColor Red
+            $result.HasErrors = $true
+            $result.FailedTier = 3
+            $result.RawDiagnostics = Build-TierDiagnostics -TierResult $t3
+            return $result
+        } else {
+            Write-Host " OK" -ForegroundColor DarkGray
+        }
+    } elseif ($runFastTier3) {
+        # Fast mode: randomized order, stop on first failure
+        $fastArgs = "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random"
+        try {
+            $config = Get-RalphConfig
+            if ($config.selfHealing -and $config.selfHealing.fastPytestArgs) {
+                $fastArgs = $config.selfHealing.fastPytestArgs
+            }
+        } catch {}
+
+        Write-Host "  Health [T3-fast]: randomized stop-on-fail..." -ForegroundColor DarkGray -NoNewline
+        $t3 = Invoke-FullHealthCheck -PytestArgs $fastArgs
         $result.TierResults += $t3
 
         if ($t3.Skipped) {
@@ -338,12 +364,75 @@ function Build-TierDiagnostics {
         foreach ($f in $TierResult.Failures) { $lines += "  FAIL: $($f.Test) -> $($f.Error)" }
     }
     if ($TierResult.RawOutput) {
-        $lines += ""
-        $lines += "Raw output:"
-        $lines += $TierResult.RawOutput
+        $structured = Format-TestSummary -TierResult $TierResult
+        if ($structured) {
+            $lines += ""
+            $lines += "Test summary:"
+            $lines += $structured
+        }
     }
 
     return $lines -join "`n"
+}
+
+function Format-TestSummary {
+    <#
+    .SYNOPSIS
+        Format a concise test summary from a tier result.
+        Returns summary line + max 10 FAIL/ERROR lines with truncated messages.
+        Raw output remains in $TierResult.RawOutput for log files — this just
+        produces a compact version for Claude prompts to reduce context pollution.
+    #>
+    param([Parameter(Mandatory)]$TierResult)
+
+    $summaryLines = @()
+
+    # Summary line (e.g., "3 failed, 42 passed")
+    if ($TierResult.Summary) {
+        $summaryLines += $TierResult.Summary
+    }
+
+    # Strip ANSI escape codes helper
+    $stripAnsi = { param($s) $s -replace '\x1b\[[0-9;]*m', '' }
+
+    # Failures (max 10)
+    $failCount = 0
+    if ($TierResult.Failures) {
+        foreach ($f in $TierResult.Failures) {
+            if ($failCount -ge 10) {
+                $remaining = $TierResult.Failures.Count - 10
+                $summaryLines += "  ... and $remaining more failures"
+                break
+            }
+            $testName = & $stripAnsi $f.Test
+            $errorMsg = & $stripAnsi $f.Error
+            # First line only, truncate to 200 chars
+            $errorMsg = ($errorMsg -split "`n")[0]
+            if ($errorMsg.Length -gt 200) { $errorMsg = $errorMsg.Substring(0, 200) + "..." }
+            $summaryLines += "  FAIL: $testName - $errorMsg"
+            $failCount++
+        }
+    }
+
+    # Collection errors (max 5)
+    $errCount = 0
+    if ($TierResult.CollectionErrors) {
+        foreach ($e in $TierResult.CollectionErrors) {
+            if ($errCount -ge 5) {
+                $remaining = $TierResult.CollectionErrors.Count - 5
+                $summaryLines += "  ... and $remaining more collection errors"
+                break
+            }
+            $file = & $stripAnsi $e.File
+            $errorMsg = & $stripAnsi $e.Error
+            $errorMsg = ($errorMsg -split "`n")[0]
+            if ($errorMsg.Length -gt 200) { $errorMsg = $errorMsg.Substring(0, 200) + "..." }
+            $summaryLines += "  ERROR: $file - $errorMsg"
+            $errCount++
+        }
+    }
+
+    return ($summaryLines -join "`n")
 }
 
 function Log-HealingEvent {
@@ -734,7 +823,8 @@ function Invoke-HealingSession {
             prompt      = ($prompt.Substring(0, [Math]::Min(500, $prompt.Length)) + "...")
         }
 
-        $claudeArgs = @("--print", "--dangerously-skip-permissions")
+        $model = if ($script:Config.model) { $script:Config.model } else { "opus" }
+        $claudeArgs = @("--print", "--dangerously-skip-permissions", "--model", $model)
         $outFile = Join-Path $script:RalphDir "healing_out_$attempt.log"
         $errFile = Join-Path $script:RalphDir "healing_err_$attempt.log"
 

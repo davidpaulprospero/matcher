@@ -80,6 +80,7 @@ function Initialize-RalphPaths {
         ApiTimeoutsFile        = Join-Path $RalphDir "session\api_timeouts.jsonl"
         RalphsChoicesLog       = Join-Path $RalphDir "session\ralphs_choices.log"
         MetricsFile            = Join-Path $RalphDir "session\metrics.csv"
+        SprintProgressFile     = Join-Path $RalphDir "session\sprint_progress.md"
         GracefulStopSignal     = Join-Path $RalphDir "session\graceful_stop.signal"
     }
 

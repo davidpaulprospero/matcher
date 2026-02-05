@@ -1,5 +1,6 @@
 {
     "claudePath": "claude",
+    "model": "opus",
     "iterationTimeout": 600,
     "focusAreaCategories": {
         "core": {
@@ -17,7 +18,7 @@
         "processing": {
             "name": "Content Processing",
             "emoji": "U+2699",
-            "areas": ["quality", "speed", "compilation"],
+            "areas": ["quality", "speed", "compilation", "iterative-phase"],
             "description": "Matching, performance, keyword modes"
         },
         "output": {
@@ -51,6 +52,7 @@
         {"id": "quality", "name": "Match Quality", "category": "processing", "description": "Improve matching accuracy and confidence scores"},
         {"id": "speed", "name": "Performance", "category": "processing", "description": "Optimize pipeline speed and caching"},
         {"id": "compilation", "name": "Compilation Mode", "category": "processing", "description": "Keyword compilation and montage features"},
+        {"id": "iterative-phase", "name": "Iterative Match Phase", "category": "processing", "description": "Gap analysis, query learning, iterative re-search to fill unmatched voiceover segments"},
         {"id": "otio", "name": "Timeline Output", "category": "output", "description": "OTIO/EDL/XML timeline generation"},
         {"id": "agents", "name": "Self-Healing", "category": "intelligence", "description": "Self-healing agents and error recovery"},
         {"id": "client-learning", "name": "Client Learning", "category": "intelligence", "description": "Cross-project learning and client presets"},
@@ -59,7 +61,8 @@
         {"id": "integration-tests", "name": "Integration Testing", "category": "meta", "description": "Component interaction tests"},
         {"id": "mutation-tests", "name": "Mutation Testing", "category": "meta", "description": "Verify test quality catches changes"},
         {"id": "documentation", "name": "Documentation", "category": "meta", "description": "API docs, README, inline comments"},
-        {"id": "ux", "name": "CLI Experience", "category": "meta", "description": "Prompts, progress feedback, error messages"}
+        {"id": "ux", "name": "CLI Experience", "category": "meta", "description": "Prompts, progress feedback, error messages"},
+        {"id": "cli-paths", "name": "CLI Path Refinement", "category": "core", "description": "CLI arg path validation, early error detection, --output-only/--match-only path preloading, tilde expansion, double path resolution fix, Windows extended path handling, config search order clarity. Automated bug prevention: validate paths at boundary so bad paths never cascade into AttributeError/KeyError deep in pipeline stages — catches the #1 bug class (dict-vs-object from stale/missing checkpoint paths) before it happens"}
     ],
     "categoryOrder": ["core", "acquisition", "processing", "output", "intelligence", "meta"],
     "autonomy": {
@@ -114,6 +117,7 @@
         "documentation": ["tests/test_docs*.py"],
         "ux": ["tests/test_cli*.py", "tests/test_prompts*.py"],
         "compilation": ["test_keyword*.py", "test_compilation*.py"],
+        "iterative-phase": ["test_iterative_match*.py", "test_stage_iterative_match*.py"],
         "client-learning": ["test_client*.py", "test_profile*.py"]
     },
     "relevantFiles": {
@@ -136,7 +140,8 @@
         "mutation-tests": ["tests/conftest.py", "pyproject.toml"],
         "documentation": ["CLAUDE.md", "README.md", "REFACTORING.md", "docs/"],
         "ux": ["src/cli/", "main.py"],
-        "compilation": ["src/keyword_extractor/", "src/stages/analyze.py", "src/compilation/"]
+        "compilation": ["src/keyword_extractor/", "src/stages/analyze.py", "src/compilation/"],
+        "iterative-phase": ["src/iterative_match/", "src/iterative_match/gap_analyzer.py", "src/iterative_match/query_learning.py", "src/stages/iterative_match.py"]
     },
     "flags": {
         "autoGeneratePesterTests": false,
@@ -176,7 +181,7 @@
     },
     "review": {
         "enabled": false,
-        "model": "sonnet",
+        "model": "opus",
         "timeout": 180,
         "minScoreToPass": 6
     },
@@ -197,6 +202,7 @@
         "healingTimeout": 300,
         "fullRunCadence": 3,
         "pytestArgs": "tests/ --tb=short -q --no-header",
+        "fastPytestArgs": "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random",
         "criticalFiles": ["main.py", "src/__init__.py", "config.yaml", "src/config.py", "src/pipeline.py"]
     },
     "budget": {
@@ -237,7 +243,7 @@
         },
         "storyCompletionEarlyExit": {
             "enabled": true,
-            "gracePeriodSeconds": 15,
+            "gracePeriodSeconds": 30,
             "evidenceThresholdPercent": 90
         },
         "focusAreaOverrides": {

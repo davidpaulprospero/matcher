@@ -255,14 +255,15 @@ function Get-StoryFailureContext {
         $lastOutput += "`n" + (Get-Content $errFile -Raw -ErrorAction SilentlyContinue)
     }
 
-    # Get last 50 lines of previous output
+    # Get last 20 lines of previous output (stripped of ANSI codes)
     if ($lastOutput) {
-        $lines = ($lastOutput -split "`n") | Where-Object { $_.Trim() }
-        $tailLines = if ($lines.Count -gt 50) { $lines[-50..-1] } else { $lines }
+        $cleanOutput = $lastOutput -replace '\x1b\[[0-9;]*m', ''
+        $lines = ($cleanOutput -split "`n") | Where-Object { $_.Trim() }
+        $tailLines = if ($lines.Count -gt 20) { $lines[-20..-1] } else { $lines }
         $tailText = ($tailLines -join "`n").Trim()
         if ($tailText) {
             $context += ""
-            $context += "Last 50 lines from previous attempt:"
+            $context += "Last 20 lines from previous attempt:"
             $context += "---"
             $context += $tailText
             $context += "---"

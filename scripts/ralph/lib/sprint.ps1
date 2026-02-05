@@ -541,6 +541,9 @@ function New-SeedPRD {
         )
     }
 
+    # Reset sprint progress for new sprint
+    Reset-SprintProgress
+
     # Write the seed PRD (atomic write)
     Save-StateFile -Path $prdPath -Data $seedPrd
 
@@ -761,13 +764,13 @@ function Get-SprintRetrospective {
         recommendations = @()
     }
 
-    $metricsFile = Join-Path $script:RalphDir "metrics.csv"
+    $metricsFile = $script:MetricsFile
     if (-not (Test-Path $metricsFile)) {
         return $retro
     }
 
     try {
-        $metrics = Import-Csv $metricsFile
+        $metrics = Import-CsvNonLocking $metricsFile
     }
     catch {
         return $retro

@@ -332,16 +332,17 @@ Describe 'Invoke-TieredHealthCheck (orchestrator)' -Tag 'Unit', 'Healing' {
         Should -Invoke Invoke-FullHealthCheck -Times 1
     }
 
-    It 'skips Tier 3 off cadence' {
+    It 'runs fast Tier 3 off cadence' {
         Mock Invoke-FastHealthCheck { return @{ HasErrors = $false; Tier = 1 } }
         Mock Invoke-CollectionHealthCheck { return @{ HasErrors = $false; Tier = 2; Skipped = $false } }
-        Mock Invoke-FullHealthCheck { return @{ HasErrors = $false; Tier = 3 } }
+        Mock Invoke-FullHealthCheck { return @{ HasErrors = $false; Tier = 3; Skipped = $false } }
+        Mock Get-RalphConfig { return @{ selfHealing = @{ fastPytestArgs = "tests/ --tb=line -q -x" } } }
         Mock Write-Host {}
 
-        # Iteration 4 = not on cadence
+        # Iteration 4 = not on cadence, runs fast Tier 3
         $script:State.IterationCount = 4
         $result = Invoke-TieredHealthCheck -ChangedFiles @() -FullRunCadence 3
-        Should -Invoke Invoke-FullHealthCheck -Times 0
+        Should -Invoke Invoke-FullHealthCheck -Times 1
     }
 
     It 'always runs Tier 3 on first iteration' {
@@ -497,7 +498,7 @@ Describe 'Build-TierDiagnostics' -Tag 'Unit', 'Healing' {
         $diag | Should -BeLike "*FAIL: tests/test_x.py::test_fail*"
     }
 
-    It 'includes raw output when present' {
+    It 'includes structured test summary when RawOutput present' {
         $tierResult = @{
             Tier = 3
             SyntaxErrors = $null
@@ -505,12 +506,14 @@ Describe 'Build-TierDiagnostics' -Tag 'Unit', 'Healing' {
             MissingFiles = $null
             ConfigErrors = $null
             CollectionErrors = $null
-            Failures = $null
-            RawOutput = "some raw output here"
+            Failures = @(@{ Test = "test_x.py::test_a"; Error = "AssertionError: 1 != 2" })
+            Summary = "1 failed, 5 passed"
+            RawOutput = "FAILED test_x.py::test_a - AssertionError: 1 != 2`n1 failed, 5 passed in 3.2s"
         }
 
         $diag = Build-TierDiagnostics -TierResult $tierResult
-        $diag | Should -BeLike "*Raw output:*some raw output here*"
+        $diag | Should -BeLike "*Test summary:*"
+        $diag | Should -BeLike "*FAIL: test_x.py::test_a*"
     }
 
     It 'formats config errors' {

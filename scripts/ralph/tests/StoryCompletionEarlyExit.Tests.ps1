@@ -220,8 +220,8 @@ Describe 'ralph-config.json storyCompletionEarlyExit' -Tag 'Unit', 'EarlyExit' {
         $script:config.stallDetection.storyCompletionEarlyExit.enabled | Should -BeTrue
     }
 
-    It 'has gracePeriodSeconds set to 15' {
-        $script:config.stallDetection.storyCompletionEarlyExit.gracePeriodSeconds | Should -Be 15
+    It 'has gracePeriodSeconds set to 30' {
+        $script:config.stallDetection.storyCompletionEarlyExit.gracePeriodSeconds | Should -Be 30
     }
 
     It 'gracePeriodSeconds is a positive number' {

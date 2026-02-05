@@ -216,6 +216,8 @@ function Start-InterviewQueueLoop {
                 else {
                     Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed"
                 }
+                $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
+                Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
 
                 # After first story (US-001 generates full PRD), update context
                 if (-not $contextRefreshed) {
@@ -404,6 +406,10 @@ function Start-TrueAutoLoop {
             if (Test-ShouldAbort) {
                 break
             }
+
+            # Track sprint progress
+            $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
+            Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
 
             # Check for periodic exploration after story completion
             if ($success) {
@@ -603,6 +609,8 @@ function Start-StandardLoop {
             else {
                 Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
             }
+            $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
+            Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
         }
         else {
             Write-Host "  No stories found in PRD" -ForegroundColor Yellow
@@ -783,6 +791,8 @@ function Start-RalphsChoiceLoop {
             else {
                 Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
             }
+            $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
+            Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
         } else {
             Write-Host "  No stories found in PRD" -ForegroundColor Yellow
             break
@@ -993,6 +1003,8 @@ function Start-RalphsChoiceAutoLoop {
             else {
                 Write-SessionLog -Event "story_failed" -Message "Story $($status.nextStory.id) failed"
             }
+            $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
+            Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
         } else {
             Write-Host "  No stories found in PRD" -ForegroundColor Yellow
             break
@@ -1252,6 +1264,8 @@ function Start-AdaptiveOvernightLoop {
                     sprint = $state.SprintNumber
                 }
             }
+            $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
+            Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
 
             if (Test-ShouldAbort) {
                 break
