@@ -151,13 +151,13 @@ class TestStaleEntryFiltering:
 
     def test_is_stale_boundary(self):
         """_is_stale correctly handles the 7-day boundary."""
-        exactly_7_days = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        just_over = (datetime.now(timezone.utc) - timedelta(days=7, seconds=1)).isoformat()
+        # Use a small buffer to avoid sub-millisecond drift between
+        # datetime.now() in the test and datetime.now() inside _is_stale
+        just_over = (datetime.now(timezone.utc) - timedelta(days=7, seconds=10)).isoformat()
         just_under = (datetime.now(timezone.utc) - timedelta(days=6, hours=23)).isoformat()
 
-        assert _is_stale(exactly_7_days, STALE_DAYS) is False  # exactly at boundary
-        assert _is_stale(just_over, STALE_DAYS) is True  # just over
-        assert _is_stale(just_under, STALE_DAYS) is False  # under
+        assert _is_stale(just_over, STALE_DAYS) is True  # clearly over 7 days
+        assert _is_stale(just_under, STALE_DAYS) is False  # clearly under 7 days
 
 
 class TestComputeOrder:
