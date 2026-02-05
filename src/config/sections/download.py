@@ -539,6 +539,14 @@ class CaptionFirstConfig:
     # Set to empty dict {} to use FormatTimeoutPolicy defaults.
     format_timeouts: Dict[str, float] = field(default_factory=dict)
 
+    # Total format timeout budget (US-67-003)
+    # Maximum total wall-clock seconds allowed across ALL format attempts per video.
+    # When cumulative time exceeds this budget, remaining formats are skipped.
+    # This prevents a video with no captions from wasting up to 95s (45+25+25)
+    # trying every format before giving up. Default 60s caps total format time.
+    # Set to 0 to disable the budget (unlimited time across formats).
+    total_format_timeout_seconds: float = 60.0
+
     # Allow auto-generated caption fallback (US-59-007)
     # When True, _fetch_subtitle will retry with auto_generated=True if manual
     # captions are unavailable. When False, only manual captions are accepted.
@@ -1268,6 +1276,13 @@ class DownloadConfig:
     rate_limit_budget: RateLimitBudgetConfig = field(default_factory=RateLimitBudgetConfig)
 
     # Segment download settings (used by DOWNLOAD_SEGMENTS stage)
+    # Delay between segment download requests (seconds).
+    # Prevents YouTube rate-limiting when downloading many segments back-to-back.
+    # Adaptive: doubles after each failure (capped at 30s), resets on success.
+    # yt-dlp recommends `-t sleep` for rate limits; this is the equivalent.
+    segment_request_delay: float = 1.0
+    # Maximum adaptive delay after consecutive failures (seconds)
+    segment_request_delay_max: float = 30.0
     # Buffer seconds to add before/after each matched segment for editing flexibility
     segment_buffer: float = 5.0
     # yt-dlp format string for segment downloads (height capped by segment_max_resolution)
