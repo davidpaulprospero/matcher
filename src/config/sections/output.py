@@ -26,6 +26,18 @@ class DeduplicationConfig:
     generate_report: bool = True
     frame_timeout: int = 30  # Seconds for FFmpeg frame extraction
 
+    def __post_init__(self):
+        if not (0 <= self.hash_threshold <= 64):
+            raise ValueError(
+                f"DeduplicationConfig.hash_threshold must be in range 0-64 "
+                f"(hamming distance for 64-bit hash), got {self.hash_threshold}"
+            )
+        if self.frame_timeout <= 0:
+            raise ValueError(
+                f"DeduplicationConfig.frame_timeout must be positive "
+                f"(seconds for FFmpeg extraction), got {self.frame_timeout}"
+            )
+
 
 @dataclass
 class VarietyConfig:

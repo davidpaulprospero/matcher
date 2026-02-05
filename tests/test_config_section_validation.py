@@ -1430,6 +1430,7 @@ duration_tiers:
 # =============================================================================
 
 from src.config.sections.core import EmbeddingConfig
+from src.config.sections.output import DeduplicationConfig
 
 
 @pytest.mark.fast
@@ -1525,6 +1526,41 @@ class TestEmbeddingConfigValueErrorValidation:
         assert config.max_retries == 0
         assert config.retry_delay == 0.0
         assert config.max_workers == 1
+
+
+@pytest.mark.fast
+class TestDeduplicationConfigValueErrorValidation:
+    """Test DeduplicationConfig raises ValueError for invalid values."""
+
+    def test_negative_hash_threshold_raises_valueerror(self):
+        """Test hash_threshold=-1 raises ValueError."""
+        with pytest.raises(ValueError, match="hash_threshold"):
+            DeduplicationConfig(hash_threshold=-1)
+
+    def test_hash_threshold_above_64_raises_valueerror(self):
+        """Test hash_threshold=65 raises ValueError."""
+        with pytest.raises(ValueError, match="hash_threshold"):
+            DeduplicationConfig(hash_threshold=65)
+
+    def test_zero_frame_timeout_raises_valueerror(self):
+        """Test frame_timeout=0 raises ValueError."""
+        with pytest.raises(ValueError, match="frame_timeout"):
+            DeduplicationConfig(frame_timeout=0)
+
+    def test_negative_frame_timeout_raises_valueerror(self):
+        """Test frame_timeout=-5 raises ValueError."""
+        with pytest.raises(ValueError, match="frame_timeout"):
+            DeduplicationConfig(frame_timeout=-5)
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = DeduplicationConfig(hash_threshold=0, frame_timeout=1)
+        assert config.hash_threshold == 0
+        assert config.frame_timeout == 1
+
+        config = DeduplicationConfig(hash_threshold=64, frame_timeout=30)
+        assert config.hash_threshold == 64
+        assert config.frame_timeout == 30
 
 
 if __name__ == "__main__":

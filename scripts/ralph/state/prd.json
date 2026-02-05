@@ -1,195 +1,193 @@
-﻿{
-    "sprintNumber":  68,
-    "focusArea":  "agents",
-    "branchName":  "ralph/sprint-68",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-68-001",
-                            "title":  "Generate sprint stories for agents focus area",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027agents\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027agents\u0027",
-                                                       "Add stories US-68-002 through US-68-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-68-NNN to be unique across sprints",
-                                                       "Mark this story (US-68-001) as passes: true when done"
-                                                   ],
-                            "notes":  "Seed story - generated 11 implementation stories covering orchestrator metrics, healer protocol standardization, checkpoint validation, fallback chain improvements, session persistence, watcher resilience, config access patterns, and test coverage."
-                        },
-                        {
-                            "id":  "US-68-002",
-                            "title":  "Add healer protocol interface to standardize hasattr checks",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Create a HealerProtocol (typing.Protocol) in src/agents/base.py with optional methods: reset_backoff(), preflight_check(), backoff_time property, retry_count property, cache_was_cleaned property",
-                                                       "Update orchestrator.py to use isinstance(healer, HealerProtocol) instead of hasattr() checks at lines ~192, 404, 1700, 1779-1783",
-                                                       "Update runner.py to use protocol checks instead of hasattr() at line ~352",
-                                                       "All existing tests in tests/test_healer_base.py continue to pass",
-                                                       "Add test that verifies each healer class satisfies the protocol"
-                                                   ],
-                            "notes":  "Tier: Refactoring. DONE: Created SupportsBackoff and SupportsPreflight runtime_checkable Protocols in base.py. Replaced 6 hasattr() calls with isinstance() in orchestrator.py (_init_event_subscriptions, run_preflight, reset, _serialize_healer_states, _restore_healer_states) and 1 in runner.py (_reset_healers). cache_was_cleaned kept as hasattr since it\u0027s a data-only attribute (runtime_checkable only checks methods pre-Python 3.12). Added 7 protocol satisfaction tests. All 41 test_healer_base tests pass."
-                        },
-                        {
-                            "id":  "US-68-003",
-                            "title":  "Add checkpoint backup JSON schema validation before restore",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In CheckpointHealer._restore_from_backup(), validate that the backup JSON has required keys (last_completed_stage, stages, timestamp) before overwriting the live checkpoint",
-                                                       "If backup validation fails, log the specific missing/invalid keys and return HealerResult.failed() instead of silently restoring corrupt data",
-                                                       "Add a _validate_checkpoint_schema() method that checks for required fields and valid stage names from STAGE_ORDER",
-                                                       "Add unit test for successful validation of a well-formed backup",
-                                                       "Add unit test for failed validation when backup is missing required keys",
-                                                       "Add unit test for failed validation when backup has invalid stage names"
-                                                   ],
-                            "notes":  "Tier: Bug prevention. DONE: Added _validate_checkpoint_schema() to CheckpointHealer that checks required keys (last_completed_stage, stages, timestamp), validates last_completed_stage against STAGE_ORDER, validates all stage dict keys, and checks stages is a dict. Modified _restore_from_backup() to call validation before restore, returning HealerResult.failed() with validation_errors detail on failure. 15 tests in test_checkpoint_schema_validation.py cover success, missing keys, invalid stages, and integration with restore. All 68 existing healer+checkpoint tests still pass."
-                        },
-                        {
-                            "id":  "US-68-004",
-                            "title":  "Add orchestrator healing metrics export to JSON",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add export_metrics_json() method to HealingOrchestrator that writes metrics to a JSON file at \u003cproject\u003e/healing_metrics.json",
-                                                       "Exported JSON includes: success_rate, total_heals, heals_by_stage, heals_by_healer, error_category_distribution, average_heal_time_ms, preflight_issues_found, rollback_count",
-                                                       "Method is called automatically at end of run_pipeline() in ResilientRunner if healing.print_report is true",
-                                                       "Add test that verifies export creates valid JSON with all required fields",
-                                                       "Add test that verifies metrics accumulate correctly across multiple heal attempts"
-                                                   ],
-                            "notes":  "Implemented in orchestrator.py:export_metrics_json(). Called from pipeline.py after print_report(). 5 tests in test_healing_dashboard.py::TestExportMetricsJson. All 27 dashboard tests pass."
-                        },
-                        {
-                            "id":  "US-68-005",
-                            "title":  "Add circuit breaker to watcher agent for repeated classification failures",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In WatcherAgent, track consecutive classification failures where confidence \u003c 0.3 (currently only tracks Ollama connectivity failures)",
-                                                       "After 5 low-confidence classifications in a row, disable watcher and fall through to pattern routing for 10 minutes",
-                                                       "Log a warning when circuit breaker trips with the failure count and cooldown duration",
-                                                       "Add reset_circuit_breaker() method that can be called externally to re-enable the watcher",
-                                                       "Add unit test that verifies circuit breaker trips after 5 low-confidence results",
-                                                       "Add unit test that verifies circuit breaker auto-resets after cooldown period"
-                                                   ],
-                            "notes":  "Tier: Reliability. DONE: Added low-confidence circuit breaker to WatcherAgent (watcher.py). Tracks consecutive classifications with confidence \u003c 0.3; trips after 5 in a row, disabling watcher for 600s cooldown with auto-reset. Added is_circuit_breaker_tripped(), reset_circuit_breaker(), _record_low_confidence(), _record_good_confidence() methods. classify_error() checks breaker before calling LLM. 10 tests in test_watcher_circuit_breaker.py: trips after 5, returns None when tripped, good confidence resets counter, boundary check, end-to-end classify flow, auto-reset after cooldown, still tripped during cooldown, classify works after reset, manual reset, safe reset when not tripped."
-                        },
-                        {
-                            "id":  "US-68-006",
-                            "title":  "Standardize config access pattern across all healers",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add a get_config_value(config_obj, field_name, default) helper function to src/agents/base.py that handles both dict and object access (Rule 6)",
-                                                       "Replace mixed hasattr/isinstance/dict-get patterns in api.py (lines ~187-245), caption.py (lines ~502-521), and download.py (lines ~402-404) with the new helper",
-                                                       "Helper handles None config objects by returning the default value",
-                                                       "Add unit test for helper with dict config input",
-                                                       "Add unit test for helper with dataclass config input",
-                                                       "Add unit test for helper with None config input"
-                                                   ],
-                            "notes":  "Tier: Refactoring. DONE: Added get_config_value() and set_config_value() helpers to agents/base.py. get_config_value handles dict (.get), object (getattr), and None (returns default). set_config_value handles dict ([]=), object (setattr), and None (returns False). Replaced 7 mixed hasattr/isinstance patterns: api.py _handle_timeout and _try_provider_switch (2 sites), caption.py _enable_auto_captions and _update_config_for_auto_subs (2 sites), download.py _handle_format_error, _handle_network_error, _handle_incomplete (3 sites). 12 tests in test_healer_config_helpers.py: 8 for get_config_value (dict, dataclass, None, missing key, falsy values), 4 for set_config_value (dict, new key, dataclass, None). All pass."
-                        },
-                        {
-                            "id":  "US-68-007",
-                            "title":  "Add fallback chain pattern routing for embedding and LLM provider errors",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add regex patterns to PATTERN_ROUTING in fallback.py for embedding dimension mismatch errors (e.g., \u0027shape mismatch\u0027, \u0027dimension.*expected.*got\u0027, \u0027embedding.*size.*!=\u0027) routing to \u0027api-healer\u0027",
-                                                       "Add regex patterns for LLM JSON parsing failures (e.g., \u0027json.decoder.JSONDecodeError\u0027, \u0027Expecting.*JSON\u0027, \u0027Invalid JSON response\u0027) routing to \u0027api-healer\u0027",
-                                                       "Add regex patterns for Whisper transcription failures (e.g., \u0027whisper.*failed\u0027, \u0027transcription.*timeout\u0027, \u0027audio.*too short\u0027) routing to a new \u0027transcription\u0027 category",
-                                                       "Each new pattern group has at least 3 regex alternatives",
-                                                       "Add unit test that verifies each new pattern matches its intended error message",
-                                                       "Existing pattern routing tests continue to pass"
-                                                   ],
-                            "notes":  "Added 9 new patterns (3 embedding dimension→api-healer, 3 LLM JSON→api-healer, 3 transcription→transcription-healer). 19 new tests, all 113 fallback tests pass. Committed as 1cc0d92."
-                        },
-                        {
-                            "id":  "US-68-008",
-                            "title":  "Add healer cache statistics to orchestrator dashboard metrics",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In HealingOrchestrator.get_dashboard_metrics(), include healer_cache stats: hits, misses, hit_rate, invalidations, entries_count",
-                                                       "Add a get_cache_stats() method to HealerResultCache that returns a dict with hits, misses, hit_rate, invalidation_count, entry_count",
-                                                       "Include cache stats in the print_report() output section of the orchestrator",
-                                                       "Add unit test that verifies cache stats appear in dashboard metrics after cache hits and misses",
-                                                       "Add unit test that verifies cache stats are zeroed when no caching has occurred"
-                                                   ],
-                            "notes":  "Evidence gate: 4/5 criteria verified (80%). Minimum: 90%."
-                        },
-                        {
-                            "id":  "US-68-009",
-                            "title":  "Add session persistence auto-cleanup for stale recovery files",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In HealingOrchestrator.load_session(), check the session file age and skip loading if older than 24 hours",
-                                                       "After successful pipeline completion, delete the session recovery file to prevent stale state from being loaded on next run",
-                                                       "Add a _cleanup_stale_sessions() method that removes recovery files older than the configurable TTL (default 24h)",
-                                                       "Call _cleanup_stale_sessions() during preflight checks",
-                                                       "Add unit test that verifies stale sessions (\u003e24h) are not loaded",
-                                                       "Add unit test that verifies recovery files are cleaned up after successful completion"
-                                                   ],
-                            "notes":  "All 6 criteria met. load_session() has 24h TTL check, cleanup_session_file() called after successful run_pipeline(), _cleanup_stale_sessions(ttl_seconds) with configurable TTL called in run_preflight(), 3 stale-skip tests + 7 cleanup tests added. 38/38 tests pass."
-                        },
-                        {
-                            "id":  "US-68-010",
-                            "title":  "Add type annotations to healer fix() method signatures",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add full type annotations to the fix() method in all 7 healer classes: api.py, checkpoint.py, download.py, disk.py, path.py, otio.py, caption.py",
-                                                       "Add type annotation for the error parameter using Union[Exception, str] where applicable",
-                                                       "Add type annotation for the context parameter as Dict[str, Any]",
-                                                       "Add return type annotation as HealerResult for all fix() methods",
-                                                       "Verify with py_compile that all modified healer files compile without errors",
-                                                       "Add type annotations to can_handle() methods in all 7 healers matching the base class signature"
-                                                   ],
-                            "notes":  "Added type annotations to all 7 healer classes: explicit can_handle() overrides with (error: Exception, stage_name: str) -\u003e bool, __init__ type annotations with Config/project_dir/return None, instance attribute annotations. All fix() methods already had full annotations. All 7 files compile. 856 tests pass (7 pre-existing failures unrelated to changes)."
-                        },
-                        {
-                            "id":  "US-68-011",
-                            "title":  "Add orchestrator event system test coverage",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add test that verifies publish_event() delivers events to all subscribed healers",
-                                                       "Add test that verifies subscribe_event() with multiple event types routes correctly",
-                                                       "Add test that verifies CONFIG_CHANGED event triggers API healer backoff reset",
-                                                       "Add test that verifies RATE_LIMITED event propagates to download healer",
-                                                       "Add test that verifies event handling errors in one subscriber don\u0027t prevent delivery to other subscribers"
-                                                   ],
-                            "notes":  "All 32 tests in test_healer_events.py pass. 5/5 criteria verified: TestMultiSubscriberDelivery::test_publish_delivers_to_all_subscribers (AC1), TestMultipleEventTypeRouting::test_healer_receives_only_subscribed_events + test_healer_subscribed_to_multiple_types (AC2), TestHealerEventHandlers::test_api_healer_resets_backoff_on_config_changed + TestEndToEndEventDelivery::test_config_change_reaches_api_healer (AC3), TestEndToEndEventDelivery::test_rate_limited_propagates_to_download_healer (AC4), TestMultiSubscriberDelivery::test_error_in_one_subscriber_doesnt_block_others (AC5)."
-                        },
-                        {
-                            "id":  "US-68-012",
-                            "title":  "Add healer timeout enforcement with configurable per-healer limits",
-                            "priority":  "high",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "In HealingOrchestrator.coordinate_heal(), wrap each healer.fix() call with a timeout using the per-healer timeouts already defined in the orchestrator (api-healer: 120s, download-healer: 60s, etc.)",
-                                                       "If a healer exceeds its timeout, log a warning and return HealerResult.failed() with reason \u0027timeout\u0027",
-                                                       "Use threading.Timer or signal-based timeout (compatible with Windows) to enforce the limit",
-                                                       "Add test that verifies a slow healer is terminated after its configured timeout",
-                                                       "Add test that verifies the timeout value is read from the healer_timeouts dict correctly",
-                                                       "Existing healer timeout tests in test_healer_timeout.py continue to pass"
-                                                   ],
-                            "notes":  "Tier: Reliability. Files: src/agents/orchestrator.py (modify coordinate_heal ~line 900-1050 where healer.fix() is called, use existing healer_timeouts dict defined at ~line 450). The per-healer timeouts are defined but the actual timeout enforcement mechanism may not be wrapping every fix() call path, allowing a stuck healer to block the entire healing pipeline."
-                        }
-                    ]
+{
+    "sprintNumber": 69,
+    "focusArea": "config",
+    "branchName": "ralph/sprint-69",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-69-001",
+            "title": "Generate sprint stories for config focus area",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'config' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'config'",
+                "Add stories US-69-002 through US-69-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-69-NNN to be unique across sprints",
+                "Mark this story (US-69-001) as passes: true when done"
+            ],
+            "notes": "Seed story. Generated 11 config improvement stories (US-69-002 through US-69-012) covering: section_mapping gaps, dict-to-dataclass conversion, validation standardization, config.yaml sync, and test coverage."
+        },
+        {
+            "id": "US-69-002",
+            "title": "Add missing section_mapping entries for broll, global_cache, and silent_video",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Add 'broll': (BrollConfig, 'broll') to section_mapping dict in src/config/base.py",
+                "Add 'global_cache': (GlobalCacheConfig, 'global_cache') to section_mapping dict in src/config/base.py",
+                "Add 'silent_video': (SilentVideoConfig, 'silent_video') to section_mapping dict in src/config/base.py",
+                "Write test that loads a config.yaml with broll section and verifies BrollConfig fields are populated",
+                "Write test that loads a config.yaml with global_cache section and verifies GlobalCacheConfig fields are populated",
+                "Write test that loads a config.yaml with silent_video section and verifies SilentVideoConfig fields are populated"
+            ],
+            "notes": "Tier: CRITICAL. DONE: Added 3 entries to section_mapping in base.py (broll, global_cache, silent_video). Added TestMissingSectionMappingEntries class with 4 tests in test_config_base_coverage.py verifying YAML values populate fields and defaults work. All tests pass."
+        },
+        {
+            "id": "US-69-003",
+            "title": "Add dict-to-dataclass conversion in KeywordConfig.__post_init__",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "KeywordConfig.__post_init__ converts list_detection from dict to ListDetectionConfig when isinstance(self.list_detection, dict)",
+                "Existing None-to-default conversion is preserved (list_detection=None creates ListDetectionConfig())",
+                "Write test that constructs KeywordConfig with list_detection={'enabled': False} and verifies it becomes a ListDetectionConfig instance",
+                "Write test that constructs KeywordConfig with list_detection=None and verifies default ListDetectionConfig is created",
+                "Write test that constructs KeywordConfig with list_detection=ListDetectionConfig(enabled=False) and verifies it passes through unchanged"
+            ],
+            "notes": "Tier: HIGH. DONE: Added `elif isinstance(self.list_detection, dict)` branch in KeywordConfig.__post_init__ to convert dict to ListDetectionConfig(**dict). Added 3 tests in TestKeywordConfigPostInit class in test_config_post_init.py covering dict, None, and dataclass pass-through. All 3 tests pass."
+        },
+        {
+            "id": "US-69-004",
+            "title": "Standardize config validation to use ValueError for out-of-range values",
+            "priority": "medium",
+            "passes": true,
+            "acceptanceCriteria": [
+                "MatchingConfig.__post_init__ raises ValueError instead of silently clamping for clearly invalid values (e.g., negative confidence thresholds)",
+                "EmbeddingConfig.__post_init__ raises ValueError instead of silently clamping for clearly invalid values",
+                "Add a docstring comment block in src/config/base.py documenting the validation convention: ValueError for invalid types/impossible values, warn+clamp for soft limits",
+                "Write test verifying MatchingConfig raises ValueError for negative confidence_threshold",
+                "Write test verifying EmbeddingConfig raises ValueError for negative dimensions"
+            ],
+            "notes": "Tier: MEDIUM. DONE: MatchingConfig raises ValueError for negative confidence thresholds and non-positive integer fields (embedding_candidates, etc). EmbeddingConfig raises ValueError for negative batch_size, max_retries, retry_delay, and max_workers. Values > 1.0 for confidence are warn+clamped. Validation convention docstring added to base.py. 19 new tests added to test_config_section_validation.py."
+        },
+        {
+            "id": "US-69-005",
+            "title": "Add __post_init__ validation to DeduplicationConfig",
+            "priority": "medium",
+            "passes": true,
+            "acceptanceCriteria": [
+                "DeduplicationConfig.__post_init__ validates hash_threshold is in range 0-64",
+                "DeduplicationConfig.__post_init__ validates frame_timeout is positive",
+                "DeduplicationConfig raises ValueError for hash_threshold=-1 or hash_threshold=65",
+                "DeduplicationConfig raises ValueError for frame_timeout=0 or frame_timeout=-5",
+                "Write tests for all four invalid value cases above"
+            ],
+            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to DeduplicationConfig in src/config/sections/output.py. Validates hash_threshold in 0-64 range and frame_timeout > 0, raising ValueError for invalid values. Added TestDeduplicationConfigValueErrorValidation class with 5 tests (4 invalid cases + boundary values) in test_config_section_validation.py. All 203 config validation tests pass."
+        },
+        {
+            "id": "US-69-006",
+            "title": "Add __post_init__ validation to VisionConfig and SceneDetectionConfig",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "VisionConfig.__post_init__ validates coverage_threshold is in range 0.0-1.0",
+                "VisionConfig.__post_init__ validates max_api_calls_per_run is positive",
+                "SceneDetectionConfig.__post_init__ validates threshold is positive",
+                "SceneDetectionConfig.__post_init__ validates min_scene_len is positive",
+                "Write tests for VisionConfig with coverage_threshold=1.5 (raises ValueError)",
+                "Write tests for SceneDetectionConfig with threshold=-1 (raises ValueError)"
+            ],
+            "notes": "Tier: MEDIUM. Files: src/config/sections/media.py (VisionConfig, SceneDetectionConfig). Neither has __post_init__. coverage_threshold is a ratio (0-1), max_api_calls_per_run should be >0, scene detection threshold and min_scene_len should be >0. Tests: tests/test_config_section_validation.py"
+        },
+        {
+            "id": "US-69-007",
+            "title": "Add __post_init__ validation to EnhancedFeaturesConfig and LLMTitleFilterConfig",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "EnhancedFeaturesConfig.__post_init__ validates min_confidence is in range 0.0-1.0",
+                "EnhancedFeaturesConfig.__post_init__ validates max_retries is positive",
+                "EnhancedFeaturesConfig.__post_init__ validates face_preference is one of 'neutral', 'more', 'none'",
+                "LLMTitleFilterConfig.__post_init__ validates min_relevance is in range 0.0-1.0",
+                "LLMTitleFilterConfig.__post_init__ validates batch_size is positive",
+                "Write tests covering invalid values for each validated field"
+            ],
+            "notes": "Tier: MEDIUM. Files: src/config/sections/download.py (EnhancedFeaturesConfig lines ~91-123, LLMTitleFilterConfig lines ~125-133). Neither has __post_init__. min_confidence and min_relevance are score thresholds (0-1), face_preference is an enum-like string. Tests: tests/test_config_section_validation.py"
+        },
+        {
+            "id": "US-69-008",
+            "title": "Add __post_init__ validation to RemixConfig and ZeroDownloadRemixConfig",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "RemixConfig.__post_init__ validates min_relevance_score is in range 0.0-1.0",
+                "RemixConfig.__post_init__ validates max_workers is positive",
+                "RemixConfig.__post_init__ validates auto_accept_filter is one of 'filtered', 'all', 'prompt'",
+                "ZeroDownloadRemixConfig.__post_init__ validates max_retries is positive",
+                "ZeroDownloadRemixConfig.__post_init__ validates max_keywords_per_batch is positive",
+                "Write tests covering invalid values for each validated field"
+            ],
+            "notes": "Tier: MEDIUM. Files: src/config/sections/download.py (RemixConfig lines ~36-73, ZeroDownloadRemixConfig lines ~75-89). Neither has __post_init__. min_relevance_score is a score threshold (0-1), auto_accept_filter is an enum-like string with known valid values. Tests: tests/test_config_section_validation.py"
+        },
+        {
+            "id": "US-69-009",
+            "title": "Add __post_init__ validation to VarietyConfig",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "VarietyConfig.__post_init__ validates min_time_distance is non-negative (>=0)",
+                "VarietyConfig.__post_init__ validates min_embedding_distance is in range 0.0-2.0",
+                "VarietyConfig.__post_init__ validates timeline_variety_window is positive",
+                "VarietyConfig.__post_init__ validates max_source_repeats_in_window is positive",
+                "Write tests for VarietyConfig with min_time_distance=-1 (raises ValueError)",
+                "Write tests for VarietyConfig with timeline_variety_window=0 (raises ValueError)"
+            ],
+            "notes": "Tier: MEDIUM. Files: src/config/sections/output.py (VarietyConfig lines 30-42). No __post_init__ exists. min_time_distance is seconds (>=0), min_embedding_distance is cosine distance (0-2), timeline_variety_window is seconds (>0), max_source_repeats_in_window is a count (>0). Tests: tests/test_config_section_validation.py"
+        },
+        {
+            "id": "US-69-010",
+            "title": "Handle duration_tiers loading through _build_dataclass for consistent error handling",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "duration_tiers loading in Config._from_dict uses the same error handling path as other sections",
+                "Malformed duration_tiers in YAML raises ConfigError with descriptive message instead of silently falling back",
+                "Write test that loads config with malformed duration_tiers dict and verifies ConfigError is raised",
+                "Write test that loads config with valid duration_tiers dict and verifies DurationTiersConfig is correctly populated",
+                "Existing _build_duration_tiers method is either integrated into the standard path or wrapped with try/except ConfigError"
+            ],
+            "notes": "Tier: LOW. Files: src/config/base.py (lines 418-420). duration_tiers is handled separately from section_mapping with cls._build_duration_tiers(data['duration_tiers']) which bypasses the _build_dataclass error handling. If duration_tiers config is malformed, it may raise raw KeyError/TypeError instead of ConfigError. Tests: tests/test_config_build_dataclass_errors.py"
+        },
+        {
+            "id": "US-69-011",
+            "title": "Add MultiStyleConfig validation and StockFootageConfig validation",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "MultiStyleConfig.__post_init__ validates styles list is non-empty when enabled=True",
+                "MultiStyleConfig.__post_init__ warns if enabled=True and styles contains only 'default'",
+                "StockFootageConfig.__post_init__ validates min/max duration fields are positive and min < max",
+                "Write test for MultiStyleConfig(enabled=True, styles=[]) raises ValueError",
+                "Write test for StockFootageConfig with min_duration > max_duration raises ValueError"
+            ],
+            "notes": "Tier: LOW. Files: src/config/sections/output.py (MultiStyleConfig lines 126-131), src/config/sections/media.py (StockFootageConfig). MultiStyleConfig has no __post_init__; enabling with empty styles would cause runtime errors. StockFootageConfig has duration range fields that should be validated for min < max. Tests: tests/test_config_section_validation.py"
+        },
+        {
+            "id": "US-69-012",
+            "title": "Add comprehensive config round-trip test for all section_mapping entries",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Write a parametrized test that iterates over all entries in Config._from_dict section_mapping",
+                "Each parametrized case loads a minimal YAML with one non-default value for that section and verifies it is applied",
+                "Test covers all sections including newly added broll, global_cache, silent_video from US-69-002",
+                "Test verifies that unknown YAML keys in a section are logged as warnings (not silently dropped or causing errors)",
+                "Write a separate test that loads the real config.yaml and verifies all sections parse without errors"
+            ],
+            "notes": "Tier: LOW. Files: src/config/base.py (section_mapping lines 382-410), tests/test_config*.py. Existing tests cover individual sections but no single parametrized test ensures every section_mapping entry actually works end-to-end. This catches regressions when new sections are added but not mapped. Tests: tests/test_config_base_coverage.py"
+        }
+    ]
 }
