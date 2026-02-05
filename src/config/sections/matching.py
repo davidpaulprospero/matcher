@@ -297,7 +297,7 @@ class MatchingConfig:
     # Keys: 'high', 'medium', 'low'; Values: multiplier (0.0-1.0)
     # Example: {high: 1.0, medium: 0.9, low: 0.75}
     # adjusted = raw_confidence * weight
-    caption_quality_weights: dict = None  # Dict[str, float] or None to use additive mode
+    caption_quality_weights: Optional[Dict[str, float]] = None  # None = use additive mode
 
     # Caption timing penalty (US-008 Sprint 7)
     # Penalizes matches when caption timing is poor (low coverage, exceeds video duration)
@@ -361,7 +361,7 @@ class MatchingConfig:
     # - visual_description (15%): Visual scene description similarity
     # Replaces simple additive boosting with weighted multi-modal scoring
     multimodal_enabled: bool = True  # Enable multi-modal similarity weighting
-    multimodal_weights: dict = None  # Custom weights dict (defaults used if None)
+    multimodal_weights: Optional[Dict[str, float]] = None  # Custom weights dict (defaults used if None)
 
     # Semantic coherence (topic flow between adjacent segments)
     # When enabled, evaluates embedding similarity between current match candidate
