@@ -63,7 +63,7 @@
                             "id":  "US-66-004",
                             "title":  "Remove duplicate CaptionCircuitBreakerConfig dataclass definition",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "CaptionCircuitBreakerConfig is defined in exactly ONE location",
                                                        "src/caption/circuit_breaker.py imports CaptionCircuitBreakerConfig from src/config/sections/download.py (or vice versa, whichever is the config canonical source)",
@@ -71,7 +71,7 @@
                                                        "CaptionCircuitBreaker class still functions correctly with the single config source",
                                                        "tests/test_caption_circuit_breaker.py passes without modification (or with minimal import path updates)"
                                                    ],
-                            "notes":  "Tier: refactoring. Files: src/config/sections/download.py (lines 136-160, config-layer definition), src/caption/circuit_breaker.py (lines 30-59, runtime-layer duplicate). Both define identical fields (enabled, threshold, pause_seconds, max_pause_seconds) plus circuit_breaker_cascade added only in circuit_breaker.py. The config/sections/download.py version is the canonical config source per project conventions (Rule 11). Keep that one, add any missing fields, import in circuit_breaker.py."
+                            "notes":  "Removed duplicate 30-line CaptionCircuitBreakerConfig class from src/caption/circuit_breaker.py. Replaced with import from canonical src/config/sections/download.py (Rule 11). Re-exported via noqa comment so all existing imports from src.caption.circuit_breaker continue to work unchanged. 312 tests pass (297 config/circuit-breaker + 15 integration)."
                         },
                         {
                             "id":  "US-66-005",
