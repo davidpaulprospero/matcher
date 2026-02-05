@@ -1,191 +1,191 @@
 ﻿{
-  "sprintNumber": 67,
-  "focusArea": "download",
-  "branchName": "ralph/sprint-67",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-67-001",
-      "title": "Generate sprint stories for download focus area",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'download' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'download'",
-        "Add stories US-67-002 through US-67-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-67-NNN to be unique across sprints",
-        "Mark this story (US-67-001) as passes: true when done"
-      ],
-      "notes": "Generated 11 stories (US-67-002 through US-67-012) covering caption format retry optimization, subprocess encoding audit, caption preflight discovery caching, adaptive format order persistence, VPN rotation exponential backoff, download speed tracking in segments stage, error classification consolidation, circuit breaker base class extraction, caption batch checkpoint thread safety tests, tier 4 VPN escalation integration tests, and caption fetcher modular extraction."
-    },
-    {
-      "id": "US-67-002",
-      "title": "Eliminate duplicate json3 retry in caption format fallback sequence",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Caption format fallback sequence does NOT repeat any format (no duplicate json3 at end)",
-        "When all formats fail for a video, total yt-dlp invocations is exactly len(unique_formats) not more",
-        "A new CaptionFormatExhaustedError is raised when all unique formats fail (not generic error)",
-        "Unit test verifies fallback tries each format exactly once then raises CaptionFormatExhaustedError",
-        "Unit test verifies no subprocess is spawned for a format that already failed in the same fetch cycle"
-      ],
-      "notes": "All 5 criteria verified: 15 tests passing in test_format_dedup_exhaustion.py. Implementation in src/caption_fetcher.py:_fetch_subtitle_formats() deduplicates via dict.fromkeys(), CaptionFormatExhaustedError in src/caption/exceptions.py."
-    },
-    {
-      "id": "US-67-003",
-      "title": "Add format-level timeout budget across all caption format attempts",
-      "priority": "high",
-      "passes": false,
-      "acceptanceCriteria": [
-        "A configurable total_format_timeout_seconds field exists in CaptionFirstConfig (default: 60)",
-        "When cumulative time across ALL format attempts exceeds the budget, remaining formats are skipped",
-        "Skipped-due-to-timeout formats are logged with DEBUG level including elapsed vs budget",
-        "Unit test verifies budget enforcement: mock slow subprocess, confirm 3rd format is skipped when budget is 30s and first 2 took 16s each",
-        "Config field is documented in config.yaml with comment explaining the budget"
-      ],
-      "notes": "Tier: P1 performance. Files: src/caption_fetcher.py (lines ~4615-4695 _fetch_subtitle_formats), src/config/sections/download.py (CaptionFirstConfig). Currently each format attempt gets its own independent timeout (45s json3, 25s vtt/srt) with no shared budget. A video with no captions wastes up to 95s (45+25+25) before giving up. A shared timeout budget caps total wall-clock time spent on format attempts per video."
-    },
-    {
-      "id": "US-67-004",
-      "title": "Audit and fix all subprocess calls missing encoding parameters",
-      "priority": "high",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Every subprocess.run and subprocess.Popen call with text=True also has encoding='utf-8' and errors='replace'",
-        "Files audited: src/downloader/audio_first.py, src/downloader/title_filter.py, src/downloader/vpn_manager.py, src/downloader/speech_screening.py, src/caption_fetcher.py",
-        "grep for 'text=True' across src/ returns zero hits without accompanying encoding='utf-8'",
-        "Unit test in tests/test_subprocess_encoding.py uses ast module to parse all Python files in src/ and assert every subprocess.run/Popen call with text=True also has encoding kwarg",
-        "No functional behavior changes beyond encoding parameter addition"
-      ],
-      "notes": "Tier: P0 bug fix (Rule 27 compliance). Files: src/downloader/audio_first.py (~lines 347, 594, 784, 900), src/downloader/title_filter.py (~line 179), src/downloader/vpn_manager.py (~lines 172, 226), src/downloader/speech_screening.py (~line 66). Several subprocess calls are missing encoding='utf-8', errors='replace' which causes crashes on non-UTF8 yt-dlp output in Windows environments. The mullvad_vpn.py file already has correct encoding as a reference pattern."
-    },
-    {
-      "id": "US-67-005",
-      "title": "Cache caption preflight discovery results to avoid repeated list-subs calls",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Caption preflight results (available formats per video ID) are cached in caption_fetcher_cache with 1-hour TTL",
-        "On cache hit, _check_captions_preflight skips the yt-dlp --list-subs subprocess call entirely",
-        "Cache key format is '{video_id}_preflight' to distinguish from caption content cache entries",
-        "Unit test verifies second call for same video_id does not spawn subprocess (mock subprocess, check call count)",
-        "Unit test verifies cache entry expires after TTL and triggers fresh --list-subs call"
-      ],
-      "notes": "Tier: P1 performance. Files: src/caption_fetcher.py (lines ~2598-2750 _check_captions_preflight), src/caption_fetcher_cache.py. Currently every call to _check_captions_preflight runs yt-dlp --list-subs even if the same video was checked seconds ago. In batch processing with retries, this can duplicate 100+ subprocess calls. Cache results using existing caption_fetcher_cache infrastructure with a distinct key prefix."
-    },
-    {
-      "id": "US-67-006",
-      "title": "Persist adaptive caption format ordering across pipeline runs",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Adaptive format order (success rates per format) is saved to .cache/caption_format_stats.json at end of caption stage",
-        "On next pipeline run, saved format order is loaded and used as initial preferred_formats list",
-        "File format is JSON with structure: {format_name: {successes: int, failures: int, last_updated: ISO timestamp}}",
-        "Unit test verifies round-trip: compute order from stats, save to file, load from file, confirm order matches",
-        "Stale entries (older than 7 days) are excluded from ordering calculation"
-      ],
-      "notes": "Tier: P2 performance optimization. Files: src/caption_fetcher.py (lines ~2500-2537 apply_adaptive_format_order), src/stages/caption_stage.py. Currently adaptive format ordering is computed per-run based on in-memory success rates. Every pipeline run re-learns that e.g. vtt succeeds more often than json3. Persisting the stats file eliminates the re-learning phase and immediately uses the optimal format order."
-    },
-    {
-      "id": "US-67-007",
-      "title": "Add exponential backoff to Mullvad VPN server rotation",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "VPN rotation delay increases exponentially: base_delay * 2^(rotation_count - 1) capped at max_rotation_delay_seconds",
-        "New config fields: initial_rotation_delay_seconds (default: 5), max_rotation_delay_seconds (default: 60) in MullvadConfig",
-        "When a rotation is followed by a successful download, the backoff counter resets to 0",
-        "Unit test verifies backoff progression: 5s, 10s, 20s, 40s, 60s (capped)",
-        "Unit test verifies backoff resets after success"
-      ],
-      "notes": "Tier: P2 resilience. Files: src/downloader/mullvad_vpn.py (lines ~200-270 rotate_server, ~line 116 _rotation_delay), src/config/sections/download.py (MullvadConfig). Currently VPN rotation uses a fixed delay (5s) regardless of whether rotation helped. If YouTube is rate-limiting at the account level (not IP level), rotating VPN servers won't help but wastes 5s per rotation. Exponential backoff reduces wasted time when rotations are ineffective."
-    },
-    {
-      "id": "US-67-008",
-      "title": "Integrate download speed tracking into SegmentDownloadStats",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "SegmentDownloadStats has new field download_speeds: List[float] tracking bytes/second per segment",
-        "After each segment download, speed is calculated from bytes and elapsed time and appended to list",
-        "New method average_speed() returns mean download speed across all segments (or 0.0 if empty)",
-        "New method is_speed_degrading(window=5, threshold=0.5) returns True if last N speeds are below threshold of overall average",
-        "Unit test verifies speed tracking with mock download timings",
-        "Unit test verifies is_speed_degrading detects sustained slowdown"
-      ],
-      "notes": "Tier: P2 observability. Files: src/stages/download_segments.py (lines ~88-114 SegmentDownloadStats). The stats dataclass tracks total_bytes and counts but not download speed over time. Without speed tracking, the pipeline can't detect gradual throttling (download works but gets slower and slower). This enables future escalation triggers based on speed degradation rather than just outright failures."
-    },
-    {
-      "id": "US-67-009",
-      "title": "Consolidate duplicate error classification between downloader and caption systems",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New module src/common/error_patterns.py contains shared error severity patterns (403, 429, bot detection, etc.)",
-        "src/downloader/error_classification.py imports patterns from src/common/error_patterns.py instead of defining its own",
-        "src/caption/error_handling.py imports patterns from src/common/error_patterns.py instead of defining its own",
-        "All existing tests in tests/test_downloader_error_classification*.py and tests/test_caption_error*.py still pass",
-        "New unit test verifies that adding a pattern to shared module is picked up by both downloader and caption classifiers"
-      ],
-      "notes": "Tier: P2 code quality. Files: src/downloader/error_classification.py (ERROR_SEVERITY_PATTERNS), src/caption/error_handling.py (categorize_caption_error). Both modules have overlapping regex patterns for classifying yt-dlp errors (403, 429, bot detection, etc.) but maintain them independently. Changes to one don't propagate to the other, leading to inconsistent error handling. Extract shared patterns to a common module."
-    },
-    {
-      "id": "US-67-010",
-      "title": "Extract common circuit breaker base class from download and caption implementations",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New abstract base class src/common/circuit_breaker_base.py with shared state management (open/closed/half-open), failure counting, and jitter calculation",
-        "src/downloader/circuit_breaker.py inherits from base class, keeping only download-specific cascade logic",
-        "src/caption/circuit_breaker.py inherits from base class, keeping only caption-specific threshold logic",
-        "All existing circuit breaker tests pass without modification",
-        "Unit test for base class verifies state transitions: closed -> open (on threshold) -> half-open (on timeout) -> closed (on success)"
-      ],
-      "notes": "Tier: P2 code quality / DRY. Files: src/downloader/circuit_breaker.py (705 lines), src/caption/circuit_breaker.py. Both files implement nearly identical circuit breaker state machines with open/closed/half-open states, failure threshold tracking, and jitter-based cooldown. Extract shared behavior to reduce maintenance burden and prevent divergence. Keep domain-specific behavior (download cascade vs caption batch abort) in subclasses."
-    },
-    {
-      "id": "US-67-011",
-      "title": "Add integration tests for Tier 4 VPN rotation escalation path",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New test file tests/test_escalation_tier4_vpn.py with at least 5 test cases",
-        "Test verifies full escalation path: Tier 1 fail -> Tier 2 fail -> Tier 3 fail -> Tier 4 VPN rotation triggers",
-        "Test verifies budget reset after VPN rotation (cookie budget and backoff budget refresh)",
-        "Test verifies max_rotations_per_session limit is enforced",
-        "Test verifies VPN rotation cooldown prevents rapid re-rotation",
-        "All tests use mocked Mullvad CLI (no actual VPN connections)"
-      ],
-      "notes": "Tier: P3 test coverage. Files: src/downloader/escalation_manager.py, src/downloader/mullvad_vpn.py, tests/test_downloader_escalation*.py (existing tests cover Tiers 1-3 but not Tier 4). The 4-tier escalation system has test coverage for impersonation, extractor-args, and cookie rotation, but Tier 4 VPN rotation is untested. Mock the Mullvad CLI subprocess calls to verify the full escalation path without network access."
-    },
-    {
-      "id": "US-67-012",
-      "title": "Add auto-generated caption fallback when manual captions unavailable",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "When manual captions (--write-sub) fail for all formats, fetcher attempts auto-generated captions (--write-auto-sub) before giving up",
-        "Auto-generated caption attempt uses the same format preference order as manual captions",
-        "Caption result object has new field is_auto_generated: bool (default False) to distinguish source",
-        "Unit test verifies auto-sub fallback triggers only after all manual formats fail",
-        "Unit test verifies is_auto_generated=True when auto-sub succeeds",
-        "Auto-generated captions are cached with a distinct cache key suffix '_autosub' to avoid confusion with manual captions"
-      ],
-      "notes": "Tier: P1 feature. Files: src/caption_fetcher.py (lines ~4615-4695 _fetch_subtitle_formats, ~4697-4793 _fetch_subtitle_with_format). Many YouTube videos lack manual captions but have auto-generated ones. Currently the fetcher only tries --write-sub and gives up if manual captions are unavailable, forcing an expensive Whisper transcription fallback. Adding --write-auto-sub as a secondary attempt can recover captions for a significant fraction of videos that currently fall through to transcription."
-    }
-  ]
+    "sprintNumber":  67,
+    "focusArea":  "download",
+    "branchName":  "ralph/sprint-67",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-67-001",
+                            "title":  "Generate sprint stories for download focus area",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027download\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027download\u0027",
+                                                       "Add stories US-67-002 through US-67-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-67-NNN to be unique across sprints",
+                                                       "Mark this story (US-67-001) as passes: true when done"
+                                                   ],
+                            "notes":  "Generated 11 stories (US-67-002 through US-67-012) covering caption format retry optimization, subprocess encoding audit, caption preflight discovery caching, adaptive format order persistence, VPN rotation exponential backoff, download speed tracking in segments stage, error classification consolidation, circuit breaker base class extraction, caption batch checkpoint thread safety tests, tier 4 VPN escalation integration tests, and caption fetcher modular extraction."
+                        },
+                        {
+                            "id":  "US-67-002",
+                            "title":  "Eliminate duplicate json3 retry in caption format fallback sequence",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Caption format fallback sequence does NOT repeat any format (no duplicate json3 at end)",
+                                                       "When all formats fail for a video, total yt-dlp invocations is exactly len(unique_formats) not more",
+                                                       "A new CaptionFormatExhaustedError is raised when all unique formats fail (not generic error)",
+                                                       "Unit test verifies fallback tries each format exactly once then raises CaptionFormatExhaustedError",
+                                                       "Unit test verifies no subprocess is spawned for a format that already failed in the same fetch cycle"
+                                                   ],
+                            "notes":  "All 5 criteria verified. Dedup via dict.fromkeys at init and in _fetch_subtitle_formats. CaptionFormatExhaustedError in src/caption/exceptions.py. 15 tests in tests/test_format_dedup_exhaustion.py all pass."
+                        },
+                        {
+                            "id":  "US-67-003",
+                            "title":  "Add format-level timeout budget across all caption format attempts",
+                            "priority":  "high",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "A configurable total_format_timeout_seconds field exists in CaptionFirstConfig (default: 60)",
+                                                       "When cumulative time across ALL format attempts exceeds the budget, remaining formats are skipped",
+                                                       "Skipped-due-to-timeout formats are logged with DEBUG level including elapsed vs budget",
+                                                       "Unit test verifies budget enforcement: mock slow subprocess, confirm 3rd format is skipped when budget is 30s and first 2 took 16s each",
+                                                       "Config field is documented in config.yaml with comment explaining the budget"
+                                                   ],
+                            "notes":  "Tier: P1 performance. Files: src/caption_fetcher.py (lines ~4615-4695 _fetch_subtitle_formats), src/config/sections/download.py (CaptionFirstConfig). Currently each format attempt gets its own independent timeout (45s json3, 25s vtt/srt) with no shared budget. A video with no captions wastes up to 95s (45+25+25) before giving up. A shared timeout budget caps total wall-clock time spent on format attempts per video."
+                        },
+                        {
+                            "id":  "US-67-004",
+                            "title":  "Audit and fix all subprocess calls missing encoding parameters",
+                            "priority":  "high",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Every subprocess.run and subprocess.Popen call with text=True also has encoding=\u0027utf-8\u0027 and errors=\u0027replace\u0027",
+                                                       "Files audited: src/downloader/audio_first.py, src/downloader/title_filter.py, src/downloader/vpn_manager.py, src/downloader/speech_screening.py, src/caption_fetcher.py",
+                                                       "grep for \u0027text=True\u0027 across src/ returns zero hits without accompanying encoding=\u0027utf-8\u0027",
+                                                       "Unit test in tests/test_subprocess_encoding.py uses ast module to parse all Python files in src/ and assert every subprocess.run/Popen call with text=True also has encoding kwarg",
+                                                       "No functional behavior changes beyond encoding parameter addition"
+                                                   ],
+                            "notes":  "Tier: P0 bug fix (Rule 27 compliance). Files: src/downloader/audio_first.py (~lines 347, 594, 784, 900), src/downloader/title_filter.py (~line 179), src/downloader/vpn_manager.py (~lines 172, 226), src/downloader/speech_screening.py (~line 66). Several subprocess calls are missing encoding=\u0027utf-8\u0027, errors=\u0027replace\u0027 which causes crashes on non-UTF8 yt-dlp output in Windows environments. The mullvad_vpn.py file already has correct encoding as a reference pattern."
+                        },
+                        {
+                            "id":  "US-67-005",
+                            "title":  "Cache caption preflight discovery results to avoid repeated list-subs calls",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Caption preflight results (available formats per video ID) are cached in caption_fetcher_cache with 1-hour TTL",
+                                                       "On cache hit, _check_captions_preflight skips the yt-dlp --list-subs subprocess call entirely",
+                                                       "Cache key format is \u0027{video_id}_preflight\u0027 to distinguish from caption content cache entries",
+                                                       "Unit test verifies second call for same video_id does not spawn subprocess (mock subprocess, check call count)",
+                                                       "Unit test verifies cache entry expires after TTL and triggers fresh --list-subs call"
+                                                   ],
+                            "notes":  "Tier: P1 performance. Files: src/caption_fetcher.py (lines ~2598-2750 _check_captions_preflight), src/caption_fetcher_cache.py. Currently every call to _check_captions_preflight runs yt-dlp --list-subs even if the same video was checked seconds ago. In batch processing with retries, this can duplicate 100+ subprocess calls. Cache results using existing caption_fetcher_cache infrastructure with a distinct key prefix."
+                        },
+                        {
+                            "id":  "US-67-006",
+                            "title":  "Persist adaptive caption format ordering across pipeline runs",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Adaptive format order (success rates per format) is saved to .cache/caption_format_stats.json at end of caption stage",
+                                                       "On next pipeline run, saved format order is loaded and used as initial preferred_formats list",
+                                                       "File format is JSON with structure: {format_name: {successes: int, failures: int, last_updated: ISO timestamp}}",
+                                                       "Unit test verifies round-trip: compute order from stats, save to file, load from file, confirm order matches",
+                                                       "Stale entries (older than 7 days) are excluded from ordering calculation"
+                                                   ],
+                            "notes":  "Tier: P2 performance optimization. Files: src/caption_fetcher.py (lines ~2500-2537 apply_adaptive_format_order), src/stages/caption_stage.py. Currently adaptive format ordering is computed per-run based on in-memory success rates. Every pipeline run re-learns that e.g. vtt succeeds more often than json3. Persisting the stats file eliminates the re-learning phase and immediately uses the optimal format order."
+                        },
+                        {
+                            "id":  "US-67-007",
+                            "title":  "Add exponential backoff to Mullvad VPN server rotation",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "VPN rotation delay increases exponentially: base_delay * 2^(rotation_count - 1) capped at max_rotation_delay_seconds",
+                                                       "New config fields: initial_rotation_delay_seconds (default: 5), max_rotation_delay_seconds (default: 60) in MullvadConfig",
+                                                       "When a rotation is followed by a successful download, the backoff counter resets to 0",
+                                                       "Unit test verifies backoff progression: 5s, 10s, 20s, 40s, 60s (capped)",
+                                                       "Unit test verifies backoff resets after success"
+                                                   ],
+                            "notes":  "Tier: P2 resilience. Files: src/downloader/mullvad_vpn.py (lines ~200-270 rotate_server, ~line 116 _rotation_delay), src/config/sections/download.py (MullvadConfig). Currently VPN rotation uses a fixed delay (5s) regardless of whether rotation helped. If YouTube is rate-limiting at the account level (not IP level), rotating VPN servers won\u0027t help but wastes 5s per rotation. Exponential backoff reduces wasted time when rotations are ineffective."
+                        },
+                        {
+                            "id":  "US-67-008",
+                            "title":  "Integrate download speed tracking into SegmentDownloadStats",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "SegmentDownloadStats has new field download_speeds: List[float] tracking bytes/second per segment",
+                                                       "After each segment download, speed is calculated from bytes and elapsed time and appended to list",
+                                                       "New method average_speed() returns mean download speed across all segments (or 0.0 if empty)",
+                                                       "New method is_speed_degrading(window=5, threshold=0.5) returns True if last N speeds are below threshold of overall average",
+                                                       "Unit test verifies speed tracking with mock download timings",
+                                                       "Unit test verifies is_speed_degrading detects sustained slowdown"
+                                                   ],
+                            "notes":  "Tier: P2 observability. Files: src/stages/download_segments.py (lines ~88-114 SegmentDownloadStats). The stats dataclass tracks total_bytes and counts but not download speed over time. Without speed tracking, the pipeline can\u0027t detect gradual throttling (download works but gets slower and slower). This enables future escalation triggers based on speed degradation rather than just outright failures."
+                        },
+                        {
+                            "id":  "US-67-009",
+                            "title":  "Consolidate duplicate error classification between downloader and caption systems",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "New module src/common/error_patterns.py contains shared error severity patterns (403, 429, bot detection, etc.)",
+                                                       "src/downloader/error_classification.py imports patterns from src/common/error_patterns.py instead of defining its own",
+                                                       "src/caption/error_handling.py imports patterns from src/common/error_patterns.py instead of defining its own",
+                                                       "All existing tests in tests/test_downloader_error_classification*.py and tests/test_caption_error*.py still pass",
+                                                       "New unit test verifies that adding a pattern to shared module is picked up by both downloader and caption classifiers"
+                                                   ],
+                            "notes":  "Tier: P2 code quality. Files: src/downloader/error_classification.py (ERROR_SEVERITY_PATTERNS), src/caption/error_handling.py (categorize_caption_error). Both modules have overlapping regex patterns for classifying yt-dlp errors (403, 429, bot detection, etc.) but maintain them independently. Changes to one don\u0027t propagate to the other, leading to inconsistent error handling. Extract shared patterns to a common module."
+                        },
+                        {
+                            "id":  "US-67-010",
+                            "title":  "Extract common circuit breaker base class from download and caption implementations",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "New abstract base class src/common/circuit_breaker_base.py with shared state management (open/closed/half-open), failure counting, and jitter calculation",
+                                                       "src/downloader/circuit_breaker.py inherits from base class, keeping only download-specific cascade logic",
+                                                       "src/caption/circuit_breaker.py inherits from base class, keeping only caption-specific threshold logic",
+                                                       "All existing circuit breaker tests pass without modification",
+                                                       "Unit test for base class verifies state transitions: closed -\u003e open (on threshold) -\u003e half-open (on timeout) -\u003e closed (on success)"
+                                                   ],
+                            "notes":  "Tier: P2 code quality / DRY. Files: src/downloader/circuit_breaker.py (705 lines), src/caption/circuit_breaker.py. Both files implement nearly identical circuit breaker state machines with open/closed/half-open states, failure threshold tracking, and jitter-based cooldown. Extract shared behavior to reduce maintenance burden and prevent divergence. Keep domain-specific behavior (download cascade vs caption batch abort) in subclasses."
+                        },
+                        {
+                            "id":  "US-67-011",
+                            "title":  "Add integration tests for Tier 4 VPN rotation escalation path",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "New test file tests/test_escalation_tier4_vpn.py with at least 5 test cases",
+                                                       "Test verifies full escalation path: Tier 1 fail -\u003e Tier 2 fail -\u003e Tier 3 fail -\u003e Tier 4 VPN rotation triggers",
+                                                       "Test verifies budget reset after VPN rotation (cookie budget and backoff budget refresh)",
+                                                       "Test verifies max_rotations_per_session limit is enforced",
+                                                       "Test verifies VPN rotation cooldown prevents rapid re-rotation",
+                                                       "All tests use mocked Mullvad CLI (no actual VPN connections)"
+                                                   ],
+                            "notes":  "Tier: P3 test coverage. Files: src/downloader/escalation_manager.py, src/downloader/mullvad_vpn.py, tests/test_downloader_escalation*.py (existing tests cover Tiers 1-3 but not Tier 4). The 4-tier escalation system has test coverage for impersonation, extractor-args, and cookie rotation, but Tier 4 VPN rotation is untested. Mock the Mullvad CLI subprocess calls to verify the full escalation path without network access."
+                        },
+                        {
+                            "id":  "US-67-012",
+                            "title":  "Add auto-generated caption fallback when manual captions unavailable",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "When manual captions (--write-sub) fail for all formats, fetcher attempts auto-generated captions (--write-auto-sub) before giving up",
+                                                       "Auto-generated caption attempt uses the same format preference order as manual captions",
+                                                       "Caption result object has new field is_auto_generated: bool (default False) to distinguish source",
+                                                       "Unit test verifies auto-sub fallback triggers only after all manual formats fail",
+                                                       "Unit test verifies is_auto_generated=True when auto-sub succeeds",
+                                                       "Auto-generated captions are cached with a distinct cache key suffix \u0027_autosub\u0027 to avoid confusion with manual captions"
+                                                   ],
+                            "notes":  "Tier: P1 feature. Files: src/caption_fetcher.py (lines ~4615-4695 _fetch_subtitle_formats, ~4697-4793 _fetch_subtitle_with_format). Many YouTube videos lack manual captions but have auto-generated ones. Currently the fetcher only tries --write-sub and gives up if manual captions are unavailable, forcing an expensive Whisper transcription fallback. Adding --write-auto-sub as a secondary attempt can recover captions for a significant fraction of videos that currently fall through to transcription."
+                        }
+                    ]
 }
