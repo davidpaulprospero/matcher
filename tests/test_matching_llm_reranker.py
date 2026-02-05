@@ -78,6 +78,23 @@ class TestLLMRerankerInit:
         assert reranker.config.ambiguous_threshold == 0.65  # Default
         assert reranker.config.cache_llm_responses is True  # Default
 
+    def test_llm_reranker_from_matching_config_spread_calibration(self):
+        """Verify factory reads spread calibration config from matching config."""
+        matching_config = MagicMock()
+        matching_config.ambiguous_threshold = 0.65
+        matching_config.cache_llm_responses = True
+        matching_config.llm_reranker_close_spread_threshold = 0.08
+        matching_config.llm_reranker_clear_winner_threshold = 0.25
+        matching_config.llm_reranker_close_spread_factor = 0.85
+        matching_config.llm_reranker_clear_winner_factor = 1.15
+
+        reranker = LLMReranker.from_matching_config(matching_config)
+
+        assert reranker.config.close_spread_threshold == 0.08
+        assert reranker.config.clear_winner_threshold == 0.25
+        assert reranker.config.close_spread_factor == 0.85
+        assert reranker.config.clear_winner_factor == 1.15
+
 
 class TestLLMRerankerPromptFormat:
     """Tests for LLMReranker prompt formatting via provider."""
@@ -267,3 +284,160 @@ class TestLLMRerankerConfidenceThreshold:
         assert result.selected_idx == 0
         assert result.confidence == 0.55
         assert result.used_secondary is False  # Secondary called but not used
+
+
+class TestLLMRerankerSpreadCalibration:
+    """Tests for US-63-008: confidence calibration based on candidate spread."""
+
+    def test_close_spread_reduces_confidence(self):
+        """Verify close spread (< 0.05) reduces confidence by factor 0.9."""
+        config = LLMRerankerConfig(
+            close_spread_threshold=0.05,
+            close_spread_factor=0.9
+        )
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.80 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.80, "Good match", "cot")])
+
+        # Candidates with close spread: 0.90 - 0.88 = 0.02 (< 0.05)
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.90),
+            (MockSRTSegment("video text 2"), 0.88),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # 0.80 * 0.9 = 0.72
+        assert result.confidence == pytest.approx(0.72, rel=0.01)
+        assert "spread_adj=" in result.reasoning
+
+    def test_clear_winner_boosts_confidence(self):
+        """Verify clear winner (spread > 0.20) boosts confidence by factor 1.1."""
+        config = LLMRerankerConfig(
+            clear_winner_threshold=0.20,
+            clear_winner_factor=1.1
+        )
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.80 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.80, "Good match", "cot")])
+
+        # Candidates with clear spread: 0.90 - 0.65 = 0.25 (> 0.20)
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.90),
+            (MockSRTSegment("video text 2"), 0.65),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # 0.80 * 1.1 = 0.88
+        assert result.confidence == pytest.approx(0.88, rel=0.01)
+        assert "spread_adj=" in result.reasoning
+
+    def test_clear_winner_boost_capped_at_one(self):
+        """Verify boosted confidence is capped at 1.0."""
+        config = LLMRerankerConfig(
+            clear_winner_threshold=0.20,
+            clear_winner_factor=1.1
+        )
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.95 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.95, "Great match", "cot")])
+
+        # Candidates with clear spread: 0.90 - 0.50 = 0.40 (> 0.20)
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.90),
+            (MockSRTSegment("video text 2"), 0.50),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # 0.95 * 1.1 = 1.045, but capped at 1.0
+        assert result.confidence == 1.0
+
+    def test_neutral_spread_no_adjustment(self):
+        """Verify neutral spread (0.05 <= spread <= 0.20) has no adjustment."""
+        config = LLMRerankerConfig(
+            close_spread_threshold=0.05,
+            clear_winner_threshold=0.20
+        )
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.80 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.80, "Good match", "cot")])
+
+        # Candidates with neutral spread: 0.90 - 0.80 = 0.10 (between 0.05 and 0.20)
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.90),
+            (MockSRTSegment("video text 2"), 0.80),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # No adjustment, confidence stays at 0.80
+        assert result.confidence == pytest.approx(0.80, rel=0.01)
+        assert "spread_adj=" not in result.reasoning
+
+    def test_single_candidate_no_calibration(self):
+        """Verify single candidate skips spread calibration."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.80 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.80, "Good match", "cot")])
+
+        # Single candidate - no spread to calculate
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.90),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # No adjustment, confidence stays at 0.80
+        assert result.confidence == pytest.approx(0.80, rel=0.01)
+        assert "spread_adj=" not in result.reasoning
+
+    def test_spread_calibration_config_in_llmrerankerconfig(self):
+        """Verify config options exist in LLMRerankerConfig."""
+        config = LLMRerankerConfig(
+            close_spread_threshold=0.08,
+            clear_winner_threshold=0.25,
+            close_spread_factor=0.85,
+            clear_winner_factor=1.15
+        )
+
+        assert config.close_spread_threshold == 0.08
+        assert config.clear_winner_threshold == 0.25
+        assert config.close_spread_factor == 0.85
+        assert config.clear_winner_factor == 1.15
+
+    def test_spread_calibration_default_values(self):
+        """Verify default values for spread calibration config."""
+        config = LLMRerankerConfig()
+
+        assert config.close_spread_threshold == 0.05
+        assert config.clear_winner_threshold == 0.20
+        assert config.close_spread_factor == 0.9
+        assert config.clear_winner_factor == 1.1

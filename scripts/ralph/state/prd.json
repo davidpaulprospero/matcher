@@ -108,7 +108,7 @@
             "id": "US-63-007",
             "title": "Add confidence score breakdown to Match objects",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add 'confidence_breakdown' field to Match dataclass as List[Dict] with keys: component, adjustment, reason",
                 "Populate breakdown during TieredMatcher scoring with adjustments from: duration penalty, topic penalty, broll boost, caption quality, timing penalty",
@@ -116,7 +116,7 @@
                 "Add unit test that verifies breakdown captures all applied adjustments",
                 "Log confidence breakdown at DEBUG level when verbose matching enabled"
             ],
-            "notes": "Tier: P2 (observability). Target files: src/utils.py (Match dataclass), src/matching/tiered_matcher.py (scoring flow). The _record_breakdown helper already exists at line ~104-111 but isn't exposed on Match objects. Makes match scoring transparent for debugging quality issues."
+            "notes": "IMPLEMENTED: (1) Added 'confidence_breakdown: List[Dict[str, Any]]' field to Match dataclass in src/utils.py with default_factory=list; (2) Populated breakdown in all 3 TieredMatcher Match creation paths (obvious match @752, high embedding @851, LLM reranking @1008) using _record_breakdown helper; (3) Match.to_dict() includes breakdown when non-empty, Match.from_dict() restores it (backward-compatible); (4) Added 11 unit tests in TestMatchConfidenceBreakdownField (8 tests) and TestTieredMatcherPopulatesBreakdown (3 tests); (5) Changed DEBUG log tag to 'US-63-007 confidence breakdown' in all 3 paths. All 11 new tests pass."
         },
         {
             "id": "US-63-008",
