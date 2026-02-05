@@ -224,6 +224,7 @@ class CaptionStage(Stage):
                 ErrorPatternAbortError,
                 determine_caption_quality,
             )
+            from ..caption.enums import CaptionStatus
 
             # Create impersonation manager if enabled (US-005 Sprint 9)
             impersonation_mgr = None
@@ -1009,6 +1010,7 @@ class CaptionStage(Stage):
                         # Success - convert to serializable dict
                         caption_results[video_id] = {
                             'video_id': video_id,
+                            'status': CaptionStatus.SUCCESS.value,  # US-63-006: Structured status
                             'segments': [seg.to_dict() for seg in result.segments],
                             'language': result.language,
                             'is_auto_generated': result.is_auto_generated,
@@ -1035,36 +1037,65 @@ class CaptionStage(Stage):
                         caption_results[video_id] = result
 
             # Count results
-            # US-62-007: Distinguish between no_captions_available and fetch_failed
+            # US-63-006: Use status field when available, fall back to legacy flags
             success_count = sum(
                 1 for r in caption_results.values()
-                if not r.get('unavailable') and not r.get('error') and not r.get('skipped')
-                and not r.get('no_captions_available')  # US-62-007
-                and r.get('segment_count', 0) > 0
+                if r.get('status') == CaptionStatus.SUCCESS.value
+                or (
+                    # Legacy fallback when status not present
+                    not r.get('status')
+                    and not r.get('unavailable') and not r.get('error') and not r.get('skipped')
+                    and not r.get('no_captions_available')
+                    and r.get('segment_count', 0) > 0
+                )
             ) - skip_count  # Don't double-count cached entries
 
-            # US-62-007: Count videos with no captions available (not an error, triggers transcription)
+            # US-63-006: Count videos with no captions available (not an error, triggers transcription)
+            # Uses status field when available
             no_captions_count = sum(
                 1 for r in caption_results.values()
-                if r.get('unavailable') and r.get('reason') == 'no_captions_available'
-                or r.get('no_captions_available')  # Direct flag from CaptionResult
+                if r.get('status') == CaptionStatus.NO_CAPTIONS.value
+                or r.get('status') == CaptionStatus.CACHED_UNAVAILABLE.value
+                or (
+                    # Legacy fallback when status not present
+                    not r.get('status')
+                    and (r.get('unavailable') and r.get('reason') == 'no_captions_available'
+                         or r.get('no_captions_available'))
+                )
             )
 
-            # US-62-007: Count actual fetch failures (errors, not including no_captions_available)
+            # US-63-006: Count actual fetch failures (errors, not including no_captions_available)
             fetch_failed_count = sum(
                 1 for r in caption_results.values()
-                if (r.get('error') or (r.get('unavailable') and r.get('reason') != 'no_captions_available'))
-                and not r.get('no_captions_available')  # Exclude videos marked as no_captions
+                if r.get('status') == CaptionStatus.ERROR.value
+                or (
+                    # Legacy fallback when status not present
+                    not r.get('status')
+                    and (r.get('error') or (r.get('unavailable') and r.get('reason') != 'no_captions_available'))
+                    and not r.get('no_captions_available')
+                )
             )
 
             # Legacy fail_count for backwards compatibility (includes both no_captions and errors)
             fail_count = no_captions_count + fetch_failed_count
 
+            # US-63-006: Add INFO log for count of videos with no captions
+            if no_captions_count > 0:
+                logger.info(
+                    f"US-63-006: {no_captions_count} videos have no captions available "
+                    f"(will use transcription fallback)"
+                )
+
             # US-60-006: Add videos that failed caption fetch to transcription fallback list
-            # This catches failures from the batch fetch (not pre-check or live stream filtering)
+            # US-63-006: Handle no_captions status gracefully - not an error, triggers fallback
             for video_id, result in caption_results.items():
                 if video_id not in self.needs_transcription:
-                    if result.get('unavailable') or result.get('error'):
+                    status = result.get('status')
+                    # Add to transcription list if no_captions, error, or budget exhausted
+                    if status in (CaptionStatus.NO_CAPTIONS.value, CaptionStatus.CACHED_UNAVAILABLE.value, CaptionStatus.ERROR.value):
+                        self.needs_transcription.append(video_id)
+                    elif result.get('unavailable') or result.get('error'):
+                        # Legacy fallback
                         self.needs_transcription.append(video_id)
                     elif result.get('skipped') and result.get('reason') == 'budget_exhausted':
                         self.needs_transcription.append(video_id)

@@ -503,12 +503,18 @@ class CaptionFirstConfig:
     # captions are unavailable. When False, only manual captions are accepted.
     allow_auto_generated: bool = True
 
-    # Negative cache TTL in hours (US-60-004)
+    # Negative cache TTL in hours (US-60-004) - DEPRECATED, use negative_cache_ttl_seconds
     # Cached "captions unavailable" entries expire after this TTL.
     # Shorter than max_cache_age_days since caption availability may change
     # (e.g., creator enables captions later). Default 1 hour.
     # Set to 0 to use max_cache_age_days for negative entries too.
     negative_cache_ttl_hours: float = 1.0
+
+    # Negative cache TTL in seconds (US-63-005) - preferred over negative_cache_ttl_hours
+    # When a video is found to have no captions, this result is cached to avoid
+    # repeated expensive lookups. Default: 3600 seconds (1 hour).
+    # If set, this takes precedence over negative_cache_ttl_hours.
+    negative_cache_ttl_seconds: int = 3600
 
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""

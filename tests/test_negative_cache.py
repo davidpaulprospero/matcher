@@ -261,22 +261,27 @@ class TestNegativeCacheTTLConfig:
         assert config.negative_cache_ttl_hours == 1.0
 
     def test_custom_negative_ttl_is_respected(self):
-        """Custom negative_cache_ttl_hours is used by CaptionCache."""
+        """Custom negative_cache_ttl_seconds is used by CaptionCache.
+
+        US-63-005: negative_cache_ttl_seconds takes precedence over negative_cache_ttl_hours.
+        """
         from src.config.sections.download import CaptionFirstConfig
+        # Test negative_cache_ttl_seconds (new field, takes precedence)
         config = CaptionFirstConfig(
             cache_dir=tempfile.mkdtemp(),
-            negative_cache_ttl_hours=2.5
+            negative_cache_ttl_seconds=9000  # 2.5 hours in seconds
         )
         cache = CaptionCache(config)
 
-        assert cache.negative_cache_ttl_hours == 2.5
+        assert cache.negative_cache_ttl_hours == 2.5  # 9000 / 3600 = 2.5
 
     def test_zero_negative_ttl_uses_max_age_days(self):
-        """When negative_cache_ttl_hours=0, is_negative_entry_stale uses max_age_days."""
+        """When negative_cache_ttl_seconds=0, is_negative_entry_stale uses max_age_days."""
         from src.config.sections.download import CaptionFirstConfig
         config = CaptionFirstConfig(
             cache_dir=tempfile.mkdtemp(),
-            negative_cache_ttl_hours=0,
+            negative_cache_ttl_seconds=0,  # US-63-005: use seconds field
+            negative_cache_ttl_hours=0,  # Also set hours to 0 for clarity
             max_cache_age_days=30
         )
         cache = CaptionCache(config)
@@ -292,11 +297,14 @@ class TestNegativeCacheTTLExpiration:
     """Tests for US-60-004: is_caption_unavailable() respecting TTL."""
 
     def _make_cache_with_ttl(self, ttl_hours, validation_mode='strict'):
-        """Create a CaptionCache with specific TTL and validation mode."""
+        """Create a CaptionCache with specific TTL and validation mode.
+
+        US-63-005: Uses negative_cache_ttl_seconds (preferred over hours).
+        """
         from src.config.sections.download import CaptionFirstConfig
         config = CaptionFirstConfig(
             cache_dir=tempfile.mkdtemp(),
-            negative_cache_ttl_hours=ttl_hours,
+            negative_cache_ttl_seconds=int(ttl_hours * 3600),  # Convert hours to seconds
             cache_validation=validation_mode,
             max_cache_age_days=30
         )
@@ -436,13 +444,15 @@ class TestNegativeCacheTTLIntegration:
 
         AC: Add test verifying negative cache hit prevents fetch attempts
         and respects TTL expiration.
+
+        US-63-005: Uses negative_cache_ttl_seconds instead of hours.
         """
         from src.config.sections.download import CaptionFirstConfig
 
         # Use 1 second TTL for testing
         config = CaptionFirstConfig(
             cache_dir=tempfile.mkdtemp(),
-            negative_cache_ttl_hours=1 / 3600,  # 1 second
+            negative_cache_ttl_seconds=1,  # 1 second
             cache_validation="strict"
         )
         cache = CaptionCache(config)

@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from .enums import StreamState
+from .enums import CaptionStatus, StreamState
 
 if TYPE_CHECKING:
     pass
@@ -324,6 +324,11 @@ class CaptionResult:
         skipped_segments: List of (index, reason) tuples for skipped segments (US-001 Sprint 7).
         partial_recovery: True when segments were skipped but result is still usable (US-001 Sprint 7).
         timing_validated: Result of timing validation, or None if not validated (US-007).
+        status: Structured status of the fetch operation (US-63-006).
+            Values: 'success', 'no_captions', 'error', 'cached_unavailable'
+        no_captions_available: True when video has no captions (not an error, triggers transcription fallback) (US-62-007).
+            Deprecated: Use status == CaptionStatus.NO_CAPTIONS instead.
+        fetch_error: Error message when fetch failed due to error (distinct from no_captions_available) (US-62-007).
     """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
@@ -334,6 +339,9 @@ class CaptionResult:
     skipped_segments: List[tuple] = field(default_factory=list)  # US-001: (index, reason) tuples
     partial_recovery: bool = False  # US-001: True when segments skipped but result usable
     timing_validated: Optional[TimingValidationResult] = None  # US-007: Timing validation result
+    status: CaptionStatus = CaptionStatus.SUCCESS  # US-63-006: Structured status
+    no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
+    fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
 
     @property
     def skipped_segments_count(self) -> int:

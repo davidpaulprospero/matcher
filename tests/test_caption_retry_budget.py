@@ -2118,7 +2118,7 @@ class TestCaptionRetryBudgetErrorCategoryTracking:
         for cat in CaptionErrorCategory:
             budget.record_failure(f"video_{cat.name}", error_category=cat)
 
-        assert budget.failures == 5  # All 5 categories
+        assert budget.failures == len(CaptionErrorCategory)  # All categories
         for cat in CaptionErrorCategory:
             assert cat in budget.error_counts
             assert budget.error_counts[cat] == 1
@@ -6173,3 +6173,246 @@ class TestEnsureScaledCheckpoint:
         assert result is False, "ensure_scaled should return False when already scaled"
         assert budget.batch_size == 200, "batch_size must still be 200"
         assert budget.max_attempts == 400, "max_attempts should remain 400"
+
+
+# =============================================================================
+# US-62-010: Error Category Metrics in Caption Retry Budget Summary
+# =============================================================================
+
+class TestCaptionRetryBudgetErrorMetrics:
+    """Tests for US-62-010: Add error category metrics to caption retry budget summary.
+
+    Verifies:
+    - error_counts populated on each failure with category
+    - get_top_errors returns sorted list of (category, count) tuples
+    - get_rate_limit_error_percentage calculates % of rate-limit failures
+    - get_formatted_summary includes error breakdown in output
+    - Log at INFO level when >50% of errors are same category
+    """
+
+    @pytest.mark.fast
+    def test_error_counts_populated_on_failure(self):
+        """US-62-010 AC1: error_counts populated on each failure with category."""
+        budget = CaptionRetryBudget()
+
+        # Record failures with different categories
+        budget.record_failure("v1", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v2", error_category=CaptionErrorCategory.RATE_LIMIT)
+        budget.record_failure("v3", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_failure("v4", error_category=CaptionErrorCategory.TIMEOUT)
+
+        # Verify error_counts has correct values
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 2
+        assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 1
+        assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 1
+        assert CaptionErrorCategory.PARSE not in budget.error_counts
+
+    @pytest.mark.fast
+    def test_get_top_errors_returns_sorted_tuples(self):
+        """US-62-010 AC2: get_top_errors returns sorted (category, count) tuples."""
+        budget = CaptionRetryBudget()
+
+        # Record failures to create distinct counts
+        for _ in range(10):
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for _ in range(5):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+        for _ in range(3):
+            budget.record_failure("v", error_category=CaptionErrorCategory.TIMEOUT)
+
+        top_errors = budget.get_top_errors()
+
+        # Verify order (descending by count)
+        assert len(top_errors) == 3
+        assert top_errors[0] == (CaptionErrorCategory.RATE_LIMIT, 10)
+        assert top_errors[1] == (CaptionErrorCategory.NETWORK, 5)
+        assert top_errors[2] == (CaptionErrorCategory.TIMEOUT, 3)
+
+    @pytest.mark.fast
+    def test_get_rate_limit_error_percentage(self):
+        """US-62-010 AC3: get_rate_limit_error_percentage calculates correctly."""
+        budget = CaptionRetryBudget()
+
+        # 6 rate limits out of 10 failures = 60%
+        for _ in range(6):
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for _ in range(4):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        percentage = budget.get_rate_limit_error_percentage()
+        assert percentage == 60.0
+
+    @pytest.mark.fast
+    def test_get_rate_limit_error_percentage_zero_failures(self):
+        """US-62-010 AC3: Returns 0.0 when no failures."""
+        budget = CaptionRetryBudget()
+        assert budget.get_rate_limit_error_percentage() == 0.0
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_includes_error_breakdown(self):
+        """US-62-010 AC4: get_formatted_summary includes error breakdown."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.batch_size = 50
+
+        # Record errors
+        for _ in range(5):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for _ in range(3):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        summary = budget.get_formatted_summary()
+
+        # Verify error breakdown in summary
+        assert "errors=" in summary
+        assert "RATE_LIMIT:5" in summary
+        assert "NETWORK:3" in summary
+
+    @pytest.mark.fast
+    def test_get_formatted_summary_no_errors_no_breakdown(self):
+        """US-62-010 AC4: Summary omits error breakdown when no errors."""
+        budget = CaptionRetryBudget()
+        budget.max_attempts = 100
+        budget.batch_size = 50
+
+        # Record only successes
+        for _ in range(10):
+            budget.record_attempt("v")
+            budget.record_success("v")
+
+        summary = budget.get_formatted_summary()
+
+        # Should not have errors= when no errors
+        assert "errors=" not in summary
+
+    @pytest.mark.fast
+    def test_dominant_error_pattern_log_at_info(self, caplog):
+        """US-62-010 AC5: Log at INFO level when >50% of errors are same category."""
+        import logging
+        budget = CaptionRetryBudget()
+
+        # Need at least 5 failures to trigger pattern detection
+        # 4 RATE_LIMIT + 2 NETWORK = 6 total, RATE_LIMIT = 66.7%
+        with caplog.at_level(logging.INFO):
+            for _ in range(4):
+                budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+            for _ in range(2):
+                budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        # Check that INFO log was emitted
+        assert any(
+            "[US-62-010] Dominant error pattern detected" in record.message
+            and "RATE_LIMIT" in record.message
+            and record.levelno == logging.INFO
+            for record in caplog.records
+        ), "Should log INFO when >50% of errors are same category"
+
+    @pytest.mark.fast
+    def test_dominant_error_pattern_logs_once_per_category(self, caplog):
+        """US-62-010 AC5: Only log once per category to avoid spam."""
+        import logging
+        budget = CaptionRetryBudget()
+
+        with caplog.at_level(logging.INFO):
+            # First batch: creates dominant RATE_LIMIT pattern
+            for _ in range(10):
+                budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        # Count RATE_LIMIT pattern logs
+        rate_limit_logs = [
+            r for r in caplog.records
+            if "[US-62-010] Dominant error pattern detected" in r.message
+            and "RATE_LIMIT" in r.message
+        ]
+
+        # Should only have logged once, not 5-6 times
+        assert len(rate_limit_logs) == 1, "Should log dominant pattern only once"
+
+    @pytest.mark.fast
+    def test_dominant_error_pattern_requires_5_failures(self, caplog):
+        """US-62-010 AC5: No pattern log with <5 failures."""
+        import logging
+        budget = CaptionRetryBudget()
+
+        with caplog.at_level(logging.INFO):
+            # Only 4 failures - below threshold
+            for _ in range(4):
+                budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        # Should not log dominant pattern yet
+        pattern_logs = [
+            r for r in caplog.records
+            if "[US-62-010] Dominant error pattern detected" in r.message
+        ]
+        assert len(pattern_logs) == 0, "Should not log pattern with <5 failures"
+
+    @pytest.mark.fast
+    def test_error_category_tracking_across_multiple_failures(self):
+        """US-62-010 AC6: Error category tracking works across multiple failures."""
+        budget = CaptionRetryBudget()
+
+        # Simulate realistic failure pattern across many videos
+        categories = [
+            CaptionErrorCategory.RATE_LIMIT,
+            CaptionErrorCategory.RATE_LIMIT,
+            CaptionErrorCategory.NETWORK,
+            CaptionErrorCategory.RATE_LIMIT,
+            CaptionErrorCategory.TIMEOUT,
+            CaptionErrorCategory.RATE_LIMIT,
+            CaptionErrorCategory.NETWORK,
+            CaptionErrorCategory.RATE_LIMIT,
+            CaptionErrorCategory.PARSE,
+            CaptionErrorCategory.RATE_LIMIT,
+        ]
+
+        for i, cat in enumerate(categories):
+            budget.record_failure(f"video_{i}", error_category=cat)
+
+        # Verify all tracked correctly
+        assert budget.failures == 10
+        assert budget.error_counts[CaptionErrorCategory.RATE_LIMIT] == 6
+        assert budget.error_counts[CaptionErrorCategory.NETWORK] == 2
+        assert budget.error_counts[CaptionErrorCategory.TIMEOUT] == 1
+        assert budget.error_counts[CaptionErrorCategory.PARSE] == 1
+
+        # Verify top errors
+        top = budget.get_top_errors(limit=3)
+        assert top[0][0] == CaptionErrorCategory.RATE_LIMIT
+        assert top[0][1] == 6
+
+        # Verify rate limit percentage
+        assert budget.get_rate_limit_error_percentage() == 60.0
+
+        # Verify summary includes breakdown
+        summary = budget.get_formatted_summary()
+        assert "RATE_LIMIT:6" in summary
+
+    @pytest.mark.fast
+    def test_reset_clears_logged_dominant_patterns(self, caplog):
+        """US-62-010: Reset clears logged patterns so they can log again."""
+        import logging
+        budget = CaptionRetryBudget()
+
+        # Create dominant pattern and trigger log
+        with caplog.at_level(logging.INFO):
+            for _ in range(10):
+                budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        # Verify it logged once
+        first_logs = [r for r in caplog.records if "[US-62-010]" in r.message]
+        assert len(first_logs) == 1
+
+        # Reset budget
+        budget.reset()
+        caplog.clear()
+
+        # Create same pattern again
+        with caplog.at_level(logging.INFO):
+            for _ in range(10):
+                budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        # Should log again after reset
+        second_logs = [r for r in caplog.records if "[US-62-010]" in r.message]
+        assert len(second_logs) == 1, "Should log pattern again after reset"

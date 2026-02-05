@@ -73,6 +73,36 @@ class StreamState(Enum):
     UNKNOWN = auto()    # Could not determine state
 
 
+class CaptionStatus(str, Enum):
+    """Status of a caption fetch operation (US-63-006).
+
+    Provides structured status for distinguishing between successful fetches,
+    videos without captions (not an error), actual errors, and cached unavailable.
+
+    Status values:
+    - SUCCESS: Captions were fetched successfully
+    - NO_CAPTIONS: Video has no captions available (triggers transcription fallback)
+    - ERROR: Fetch failed due to an error (network, timeout, parse, etc.)
+    - CACHED_UNAVAILABLE: Previous fetch determined no captions; returning from negative cache
+
+    The status field replaces the need to check multiple boolean flags
+    (no_captions_available, fetch_error, unavailable) when determining
+    how to handle a CaptionResult.
+
+    Example:
+        >>> if result.status == CaptionStatus.SUCCESS:
+        ...     process_captions(result.segments)
+        >>> elif result.status in (CaptionStatus.NO_CAPTIONS, CaptionStatus.CACHED_UNAVAILABLE):
+        ...     queue_for_transcription(result.video_id)
+        >>> elif result.status == CaptionStatus.ERROR:
+        ...     log_error(result.fetch_error)
+    """
+    SUCCESS = "success"
+    NO_CAPTIONS = "no_captions"
+    ERROR = "error"
+    CACHED_UNAVAILABLE = "cached_unavailable"
+
+
 # Default retry budgets per error category (US-003 Sprint 7)
 # These can be overridden in CaptionFirstConfig.retry_budgets
 DEFAULT_RETRY_BUDGETS = {
