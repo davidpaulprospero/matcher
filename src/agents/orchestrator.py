@@ -373,6 +373,9 @@ class HealingOrchestrator:
         logger.info("Running preflight checks...")
         issues: List[PreflightIssue] = []
 
+        # Clean up stale session recovery files (US-68-009)
+        self._cleanup_stale_sessions()
+
         # Warm up watcher (local LLM) if enabled
         if self.watcher:
             watcher_config = getattr(getattr(self.config, 'healing', None), 'watcher', None)
@@ -1770,6 +1773,7 @@ class HealingOrchestrator:
     # =========================================================================
 
     SESSION_FILENAME = "healing_session.json"
+    SESSION_TTL_SECONDS = 24 * 60 * 60  # 24 hours default TTL
 
     def _get_session_path(self) -> Path:
         """Get path to session persistence file."""
@@ -1878,6 +1882,17 @@ class HealingOrchestrator:
             logger.warning(f"[orchestrator] Unknown session version: {version}")
             return False
 
+        # Age check - skip loading stale sessions (US-68-009)
+        session_timestamp = session_data.get("timestamp", 0)
+        session_age = time.time() - session_timestamp
+        if session_age > self.SESSION_TTL_SECONDS:
+            logger.warning(
+                f"[orchestrator] Session file is stale "
+                f"({session_age / 3600:.1f}h old, TTL={self.SESSION_TTL_SECONDS / 3600:.0f}h). "
+                f"Skipping recovery."
+            )
+            return False
+
         try:
             # Restore current stage
             self.current_stage = session_data.get("current_stage")
@@ -1956,6 +1971,69 @@ class HealingOrchestrator:
         except Exception as e:
             # Never let auto-save failure disrupt the pipeline
             logger.debug(f"[orchestrator] Auto-save failed after {event}: {e}")
+
+    def cleanup_session_file(self) -> bool:
+        """Delete the session recovery file after successful pipeline completion.
+
+        Should be called after the pipeline completes successfully to prevent
+        stale healer state from being loaded on the next run (US-68-009).
+
+        Returns:
+            True if file was deleted (or didn't exist), False on error.
+        """
+        session_path = self._get_session_path()
+        if not session_path.exists():
+            return True
+        try:
+            session_path.unlink()
+            logger.info("[orchestrator] Session recovery file cleaned up after successful completion")
+            return True
+        except OSError as e:
+            logger.warning(f"[orchestrator] Failed to clean up session file: {e}")
+            return False
+
+    def _cleanup_stale_sessions(self, ttl_seconds: float = None) -> int:
+        """Remove recovery files older than the configurable TTL.
+
+        Called during preflight checks to prevent accumulation of stale
+        session files (US-68-009).
+
+        Args:
+            ttl_seconds: Maximum age in seconds before a session file is
+                        considered stale. Defaults to SESSION_TTL_SECONDS (24h).
+
+        Returns:
+            Number of stale files removed.
+        """
+        if ttl_seconds is None:
+            ttl_seconds = self.SESSION_TTL_SECONDS
+
+        session_path = self._get_session_path()
+        if not session_path.exists():
+            return 0
+
+        try:
+            session_data = json.loads(session_path.read_text(encoding="utf-8"))
+            session_timestamp = session_data.get("timestamp", 0)
+            session_age = time.time() - session_timestamp
+
+            if session_age > ttl_seconds:
+                session_path.unlink()
+                logger.info(
+                    f"[orchestrator] Removed stale session file "
+                    f"({session_age / 3600:.1f}h old, TTL={ttl_seconds / 3600:.0f}h)"
+                )
+                return 1
+        except (json.JSONDecodeError, OSError) as e:
+            # Corrupt file - remove it too
+            try:
+                session_path.unlink()
+                logger.info(f"[orchestrator] Removed corrupt session file: {e}")
+                return 1
+            except OSError:
+                pass
+
+        return 0
 
 
 def create_orchestrated_pipeline(
