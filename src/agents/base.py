@@ -20,6 +20,47 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def get_config_value(config_obj: Any, field_name: str, default: Any = None) -> Any:
+    """Safely get a config value from either a dict or dataclass/object.
+
+    Handles the common Rule 6 pattern where config sections may be
+    either dicts (from JSON loads) or dataclass objects.
+
+    Args:
+        config_obj: Config object (dict, dataclass, or None)
+        field_name: Field name to retrieve
+        default: Default value if field not found or config is None
+
+    Returns:
+        The field value, or default if not found
+    """
+    if config_obj is None:
+        return default
+    if isinstance(config_obj, dict):
+        return config_obj.get(field_name, default)
+    return getattr(config_obj, field_name, default)
+
+
+def set_config_value(config_obj: Any, field_name: str, value: Any) -> bool:
+    """Safely set a config value on either a dict or dataclass/object.
+
+    Args:
+        config_obj: Config object (dict, dataclass, or None)
+        field_name: Field name to set
+        value: Value to set
+
+    Returns:
+        True if the value was set, False if config_obj is None
+    """
+    if config_obj is None:
+        return False
+    if isinstance(config_obj, dict):
+        config_obj[field_name] = value
+        return True
+    setattr(config_obj, field_name, value)
+    return True
+
+
 class HealerEvent(Enum):
     """Events for cross-healer coordination."""
     CONFIG_CHANGED = "config_changed"       # A healer modified pipeline config

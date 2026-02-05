@@ -15,7 +15,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from ..base import Healer, HealerResult, HealerAction
+from ..base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData, get_config_value, set_config_value
 
 if TYPE_CHECKING:
     from ...config import Config
@@ -181,13 +181,10 @@ class APIHealer(Healer):
         # Try to increase timeout in config
         llm_config = getattr(self.config, 'llm', None)
         if llm_config:
-            current_timeout = getattr(llm_config, 'timeout', 30)
+            current_timeout = get_config_value(llm_config, 'timeout', 30)
             new_timeout = min(current_timeout * 2, 300)  # Max 5 minutes
 
-            if hasattr(llm_config, 'timeout'):
-                llm_config.timeout = new_timeout
-            elif isinstance(llm_config, dict):
-                llm_config['timeout'] = new_timeout
+            set_config_value(llm_config, 'timeout', new_timeout)
 
             self.log_success(f"Increased timeout: {current_timeout}s -> {new_timeout}s")
             return HealerResult.config_changed(
@@ -225,9 +222,9 @@ class APIHealer(Healer):
         if not llm_config:
             return HealerResult.failed("No LLM config available for provider switch")
 
-        current_provider = getattr(llm_config, 'provider', None)
+        current_provider = get_config_value(llm_config, 'provider', None)
         if not current_provider:
-            current_provider = getattr(llm_config, 'default_provider', 'gemini')
+            current_provider = get_config_value(llm_config, 'default_provider', 'gemini')
 
         # Get fallback list
         fallbacks = self.PROVIDER_FALLBACK.get(current_provider, [])
@@ -237,13 +234,11 @@ class APIHealer(Healer):
         for provider in fallbacks:
             # Check if provider is configured (has API key)
             if self._is_provider_available(provider):
-                # Update config
-                if hasattr(llm_config, 'provider'):
-                    llm_config.provider = provider
-                elif hasattr(llm_config, 'default_provider'):
-                    llm_config.default_provider = provider
-                elif isinstance(llm_config, dict):
-                    llm_config['provider'] = provider
+                # Update config - try 'provider' first, then 'default_provider'
+                if get_config_value(llm_config, 'provider') is not None:
+                    set_config_value(llm_config, 'provider', provider)
+                else:
+                    set_config_value(llm_config, 'default_provider', provider)
 
                 self.log_success(f"Switched provider: {current_provider} -> {provider}")
                 return HealerResult.config_changed(
@@ -270,6 +265,26 @@ class APIHealer(Healer):
             return True  # Assume available
 
         return bool(os.environ.get(env_var))
+
+    def handle_event(self, event_data: HealerEventData) -> None:
+        """Handle cross-healer coordination events.
+
+        Reacts to:
+        - CONFIG_CHANGED: Reset backoff since config may have fixed the issue
+        - RATE_LIMITED: Increase backoff preemptively
+        - PROVIDER_SWITCHED: Reset backoff for the new provider
+        """
+        if event_data.event == HealerEvent.CONFIG_CHANGED:
+            self.reset_backoff()
+            logger.debug(f"[{self.name}] Reset backoff due to config change from {event_data.source_healer}")
+        elif event_data.event == HealerEvent.RATE_LIMITED:
+            # Another healer hit rate limits - increase our backoff preemptively
+            self.backoff_time = min(self.backoff_time * self.BACKOFF_MULTIPLIER, self.MAX_BACKOFF)
+            logger.debug(f"[{self.name}] Increased backoff to {self.backoff_time:.1f}s due to rate limit from {event_data.source_healer}")
+        elif event_data.event == HealerEvent.PROVIDER_SWITCHED:
+            # Provider changed - reset backoff for fresh start
+            self.reset_backoff()
+            logger.debug(f"[{self.name}] Reset backoff due to provider switch from {event_data.source_healer}")
 
     def reset_backoff(self):
         """Reset backoff state after successful operation."""

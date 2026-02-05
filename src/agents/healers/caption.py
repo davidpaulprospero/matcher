@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
-from ..base import Healer, HealerResult, HealerAction
+from ..base import Healer, HealerResult, HealerAction, get_config_value, set_config_value
 
 if TYPE_CHECKING:
     from ...config import Config
@@ -496,13 +496,9 @@ class CaptionHealer(Healer):
         """Enable auto-caption fallback in config."""
         download_config = getattr(self.config, 'download', None)
         if download_config:
-            caption_config = getattr(download_config, 'caption_first', None)
+            caption_config = get_config_value(download_config, 'caption_first', None)
             if caption_config:
-                # Enable auto-sub fallback
-                if hasattr(caption_config, 'enable_auto_subs'):
-                    caption_config.enable_auto_subs = True
-                elif isinstance(caption_config, dict):
-                    caption_config['enable_auto_subs'] = True
+                set_config_value(caption_config, 'enable_auto_subs', True)
 
         self.log_success("Enabled auto-caption fallback (--write-auto-sub)")
         return HealerResult.config_changed(
@@ -514,12 +510,9 @@ class CaptionHealer(Healer):
         """Update config to prefer auto-subs when no manual available."""
         download_config = getattr(self.config, 'download', None)
         if download_config:
-            caption_config = getattr(download_config, 'caption_first', None)
+            caption_config = get_config_value(download_config, 'caption_first', None)
             if caption_config:
-                if hasattr(caption_config, 'prefer_auto_subs_if_no_manual'):
-                    caption_config.prefer_auto_subs_if_no_manual = True
-                elif isinstance(caption_config, dict):
-                    caption_config['prefer_auto_subs_if_no_manual'] = True
+                set_config_value(caption_config, 'prefer_auto_subs_if_no_manual', True)
 
     def get_discovered_formats(self, video_id: str) -> List[SubtitleInfo]:
         """Get cached format discovery results for a video."""
