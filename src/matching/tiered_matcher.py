@@ -749,6 +749,7 @@ class TieredMatcher:
             if project_reason:
                 final_reasoning += f" [{project_reason}]"
 
+            # US-63-007: Store confidence breakdown on Match object
             match = Match(
                 voiceover_segment=vo_segment,
                 video_segment=best_seg,
@@ -756,7 +757,8 @@ class TieredMatcher:
                 confidence=adjusted_confidence,
                 reasoning=final_reasoning,
                 embedding_similarity=top_similarity,
-                clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
+                clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg),
+                confidence_breakdown=confidence_breakdown,
             )
 
             alternatives = self.alt_selector.get_alternatives(
@@ -777,10 +779,10 @@ class TieredMatcher:
 
             confidence_variance = self._calculate_confidence_variance(valid_candidates)
 
-            # Log confidence breakdown at DEBUG level (US-53-003)
+            # Log confidence breakdown at DEBUG level (US-63-007)
             if confidence_breakdown:
                 parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
-                logger.debug(f"confidence: {boosted_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+                logger.debug(f"US-63-007 confidence breakdown: {boosted_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
 
             return MatchResult(
                 primary_match=match,
@@ -846,6 +848,7 @@ class TieredMatcher:
             if project_reason:
                 reasoning += f" [{project_reason}]"
 
+            # US-63-007: Store confidence breakdown on Match object
             match = Match(
                 voiceover_segment=vo_segment,
                 video_segment=best_seg,
@@ -853,7 +856,8 @@ class TieredMatcher:
                 confidence=adjusted_confidence,
                 reasoning=reasoning,
                 embedding_similarity=top_similarity,
-                clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
+                clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg),
+                confidence_breakdown=confidence_breakdown,
             )
 
             alternatives = self.alt_selector.get_alternatives(
@@ -878,10 +882,10 @@ class TieredMatcher:
             # Extract matched keywords between voiceover and selected video
             matched_keywords = self._extract_matched_keywords(vo_segment, best_seg)
 
-            # Log confidence breakdown at DEBUG level (US-53-003)
+            # Log confidence breakdown at DEBUG level (US-63-007)
             if confidence_breakdown:
                 parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
-                logger.debug(f"confidence: {top_similarity:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+                logger.debug(f"US-63-007 confidence breakdown: {top_similarity:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
 
             return MatchResult(
                 primary_match=match,
@@ -1001,6 +1005,7 @@ class TieredMatcher:
         if project_reason:
             final_reasoning += f" [{project_reason}]"
 
+        # US-63-007: Store confidence breakdown on Match object
         match = Match(
             voiceover_segment=vo_segment,
             video_segment=best_seg,
@@ -1010,7 +1015,8 @@ class TieredMatcher:
             is_keyword_match=is_kw_match,
             is_visual_match=is_vis_match,
             embedding_similarity=valid_candidates[selected_idx][1],
-            clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg)
+            clip_reuse_count=self.reuse_tracker.get_usage_count(best_seg),
+            confidence_breakdown=confidence_breakdown,
         )
 
         # Log match decision
@@ -1071,10 +1077,10 @@ class TieredMatcher:
         if total_elapsed > 2.0:
             logger.info(f"  match_segment: TOTAL time for segment was {total_elapsed:.2f}s")
 
-        # Log confidence breakdown at DEBUG level (US-53-003)
+        # Log confidence breakdown at DEBUG level (US-63-007)
         if confidence_breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
-            logger.debug(f"confidence: {base_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+            logger.debug(f"US-63-007 confidence breakdown: {base_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
 
         return MatchResult(
             primary_match=match,

@@ -462,6 +462,10 @@ class Match:
     # Match type marker (e.g., 'gap' for gap matches created by create_gap_match)
     match_type: str = ""
 
+    # US-63-007: Confidence score breakdown for debugging
+    # List of dicts with keys: component, adjustment, reason
+    confidence_breakdown: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict (handles numpy types)"""
         result = {
@@ -477,6 +481,9 @@ class Match:
         }
         if self.match_type:
             result['match_type'] = self.match_type
+        # US-63-007: Include confidence breakdown in serialization
+        if self.confidence_breakdown:
+            result['confidence_breakdown'] = list(self.confidence_breakdown)
         return result
 
     @classmethod
@@ -491,7 +498,8 @@ class Match:
             is_visual_match=bool(data.get('is_visual_match', False)),
             embedding_similarity=float(data.get('embedding_similarity', 0.0)),
             clip_reuse_count=int(data.get('clip_reuse_count', 0)),
-            match_type=data.get('match_type', '')
+            match_type=data.get('match_type', ''),
+            confidence_breakdown=list(data.get('confidence_breakdown', []))
         )
 
 
