@@ -32,6 +32,7 @@ class TestSegmentDownloadStatsDefaults:
         assert stats.segment_durations == []
         assert stats.error_categories == {}
         assert isinstance(stats.error_aggregator, ErrorAggregator)
+        assert stats.download_speeds == []
 
     def test_total_from_constructor(self):
         stats = SegmentDownloadStats(total=42)
@@ -170,3 +171,103 @@ class TestInstanceIsolation:
         b = SegmentDownloadStats()
         a.progress_hooks_data['segments_finished'] = 10
         assert b.progress_hooks_data['segments_finished'] == 0
+
+    def test_separate_download_speeds(self):
+        a = SegmentDownloadStats()
+        b = SegmentDownloadStats()
+        a.download_speeds.append(100.0)
+        assert b.download_speeds == []
+
+
+class TestDownloadSpeedTracking:
+    """US-67-008: Verify speed tracking with mock download timings."""
+
+    def test_speed_calculated_on_success(self):
+        stats = SegmentDownloadStats()
+        # 1000 bytes in 2 seconds = 500 bytes/sec
+        stats.increment_success(duration=2.0, file_bytes=1000)
+        assert len(stats.download_speeds) == 1
+        assert stats.download_speeds[0] == pytest.approx(500.0)
+
+    def test_speed_not_recorded_when_duration_zero(self):
+        stats = SegmentDownloadStats()
+        stats.increment_success(duration=0.0, file_bytes=1000)
+        assert stats.download_speeds == []
+
+    def test_speed_not_recorded_when_bytes_zero(self):
+        stats = SegmentDownloadStats()
+        stats.increment_success(duration=2.0, file_bytes=0)
+        assert stats.download_speeds == []
+
+    def test_multiple_downloads_tracked(self):
+        stats = SegmentDownloadStats()
+        # 3 downloads at different speeds
+        stats.increment_success(duration=1.0, file_bytes=1000)   # 1000 B/s
+        stats.increment_success(duration=2.0, file_bytes=1000)   # 500 B/s
+        stats.increment_success(duration=0.5, file_bytes=1000)   # 2000 B/s
+        assert len(stats.download_speeds) == 3
+        assert stats.download_speeds[0] == pytest.approx(1000.0)
+        assert stats.download_speeds[1] == pytest.approx(500.0)
+        assert stats.download_speeds[2] == pytest.approx(2000.0)
+
+    def test_average_speed_empty(self):
+        stats = SegmentDownloadStats()
+        assert stats.average_speed() == 0.0
+
+    def test_average_speed_single(self):
+        stats = SegmentDownloadStats()
+        stats.increment_success(duration=2.0, file_bytes=1000)
+        assert stats.average_speed() == pytest.approx(500.0)
+
+    def test_average_speed_multiple(self):
+        stats = SegmentDownloadStats()
+        # Speeds: 1000, 500, 2000 → average = 1166.67
+        stats.increment_success(duration=1.0, file_bytes=1000)
+        stats.increment_success(duration=2.0, file_bytes=1000)
+        stats.increment_success(duration=0.5, file_bytes=1000)
+        assert stats.average_speed() == pytest.approx(3500.0 / 3)
+
+
+class TestSpeedDegradation:
+    """US-67-008: Verify is_speed_degrading detects sustained slowdown."""
+
+    def test_not_enough_samples(self):
+        stats = SegmentDownloadStats()
+        stats.download_speeds = [100.0, 100.0, 100.0]
+        assert stats.is_speed_degrading(window=5) is False
+
+    def test_no_degradation_steady_speed(self):
+        stats = SegmentDownloadStats()
+        stats.download_speeds = [100.0] * 10
+        assert stats.is_speed_degrading(window=5, threshold=0.5) is False
+
+    def test_detects_sustained_slowdown(self):
+        """Start fast, then last 5 downloads drop below 50% of average."""
+        stats = SegmentDownloadStats()
+        # 10 fast downloads at 1000 B/s, then 5 slow at 100 B/s
+        stats.download_speeds = [1000.0] * 10 + [100.0] * 5
+        # Overall average = (10*1000 + 5*100)/15 = 10500/15 = 700
+        # Cutoff = 700 * 0.5 = 350
+        # Last 5 are all 100 < 350 → degrading
+        assert stats.is_speed_degrading(window=5, threshold=0.5) is True
+
+    def test_partial_slowdown_not_detected(self):
+        """Only some of the tail window is slow — not sustained."""
+        stats = SegmentDownloadStats()
+        stats.download_speeds = [1000.0] * 10 + [100.0, 100.0, 1000.0, 100.0, 100.0]
+        # Last 5: [100, 100, 1000, 100, 100] — 1000 is above cutoff
+        assert stats.is_speed_degrading(window=5, threshold=0.5) is False
+
+    def test_custom_window_and_threshold(self):
+        stats = SegmentDownloadStats()
+        stats.download_speeds = [1000.0] * 6 + [200.0] * 3
+        # average = (6*1000 + 3*200)/9 = 6600/9 ≈ 733
+        # threshold 0.3 → cutoff = 733 * 0.3 ≈ 220
+        # Last 3 are 200 < 220 → degrading with window=3, threshold=0.3
+        assert stats.is_speed_degrading(window=3, threshold=0.3) is True
+
+    def test_all_zero_speeds_returns_false(self):
+        """Edge case: average is 0 should return False, not error."""
+        stats = SegmentDownloadStats()
+        stats.download_speeds = [0.0] * 5
+        assert stats.is_speed_degrading(window=5) is False

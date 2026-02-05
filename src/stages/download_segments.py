@@ -84,6 +84,7 @@ class SegmentDownloadStats:
         'segments_with_progress': 0,
         'segments_finished': 0,
     })
+    download_speeds: List[float] = field(default_factory=list)
 
     # -- convenience mutators --------------------------------------------------
 
@@ -95,6 +96,8 @@ class SegmentDownloadStats:
             self.segment_durations.append(duration)
         if file_bytes:
             self.total_bytes += file_bytes
+        if duration > 0 and file_bytes > 0:
+            self.download_speeds.append(file_bytes / duration)
 
     def increment_failure(self, category: str | None = None, error_msg: str | None = None) -> None:
         """Record a failed segment download, optionally categorised."""
@@ -111,6 +114,39 @@ class SegmentDownloadStats:
         self.attempted += 1
         if file_bytes:
             self.total_bytes += file_bytes
+
+    def average_speed(self) -> float:
+        """Return mean download speed in bytes/second across all segments.
+
+        Returns 0.0 if no speed measurements have been recorded.
+        """
+        if not self.download_speeds:
+            return 0.0
+        return sum(self.download_speeds) / len(self.download_speeds)
+
+    def is_speed_degrading(self, window: int = 5, threshold: float = 0.5) -> bool:
+        """Detect sustained speed degradation over recent downloads.
+
+        Returns True if the last *window* speeds are all below *threshold*
+        of the overall average speed.  This indicates gradual throttling
+        rather than a single slow download.
+
+        Args:
+            window: Number of most-recent speeds to inspect.
+            threshold: Fraction of overall average below which a speed is
+                       considered degraded (0.5 = 50 %).
+
+        Returns:
+            True if the tail window is consistently slow.
+        """
+        if len(self.download_speeds) < window:
+            return False
+        overall_avg = self.average_speed()
+        if overall_avg <= 0:
+            return False
+        cutoff = overall_avg * threshold
+        tail = self.download_speeds[-window:]
+        return all(s < cutoff for s in tail)
 
 
 def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -> None:
@@ -165,17 +201,15 @@ def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -
                 # Fall back to no impersonation rather than crashing
             i += 2
         elif args[i] == '--extractor-args' and i + 1 < len(args):
-            # Parse "youtube:player_client=X,Y,Z" format
-            raw = args[i + 1]
-            if ':' in raw:
-                namespace, kv = raw.split(':', 1)
-                if '=' in kv:
-                    key, value = kv.split('=', 1)
-                    if 'extractor_args' not in ydl_opts:
-                        ydl_opts['extractor_args'] = {}
-                    if namespace not in ydl_opts['extractor_args']:
-                        ydl_opts['extractor_args'][namespace] = {}
-                    ydl_opts['extractor_args'][namespace][key] = value
+            # Skip escalation's extractor_args — alternative player_clients
+            # (web_safari, tv_downgraded, web) can trigger YouTube SABR
+            # (Server-side Adaptive Bitrate) which returns no downloadable
+            # format URLs, causing "No video formats found!".
+            # We override with 'tv' client below instead.
+            logger.debug(
+                "Skipping escalation extractor_args for segment download: %s",
+                args[i + 1],
+            )
             i += 2
         else:
             i += 1
@@ -585,7 +619,19 @@ class DownloadVideoSegmentsStage(Stage):
         stats = SegmentDownloadStats(total=total)
         ctx = self._prepare_download_context(stats)
 
+        # Adaptive request delay to avoid YouTube rate-limiting
+        dl_cfg = ctx.download_config
+        base_delay = float(getattr(dl_cfg, 'segment_request_delay', 1.0)) if dl_cfg else 1.0
+        max_delay = float(getattr(dl_cfg, 'segment_request_delay_max', 30.0)) if dl_cfg else 30.0
+        current_delay = base_delay
+        _did_network_request = False
+
         for idx, seg in enumerate(segments, 1):
+            # Sleep between network requests (skip before first, skip after cache hits)
+            if _did_network_request and current_delay > 0:
+                time.sleep(current_delay)
+            _did_network_request = False
+
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
             end = seg['end'] + buffer_seconds
@@ -620,6 +666,7 @@ class DownloadVideoSegmentsStage(Stage):
                 continue
 
             # Execute the download
+            _did_network_request = True
             result = self._execute_download(ctx, video_id, start, end, output_file)
 
             # Handle the result (success, failure, abort signals)
@@ -628,6 +675,12 @@ class DownloadVideoSegmentsStage(Stage):
                 downloaded, idx, total, progress_callback,
             )
             self._print_progress(idx, total, stats)
+
+            # Adaptive delay: back off on failure, reset on success
+            if result.get('success'):
+                current_delay = base_delay
+            else:
+                current_delay = min(current_delay * 2, max_delay)
 
             if abort:
                 break
@@ -770,11 +823,15 @@ class DownloadVideoSegmentsStage(Stage):
             progress_hooks=[_progress_hook],
         )
 
-        if escalation_result and escalation_result.tier.value > 1:
-            logger.info(
-                f"Segment {video_id}: using escalation tier "
-                f"{escalation_result.tier.name}"
-            )
+        if escalation_result:
+            try:
+                if escalation_result.tier.value > 1:
+                    logger.info(
+                        f"Segment {video_id}: using escalation tier "
+                        f"{escalation_result.tier.name}"
+                    )
+            except (TypeError, AttributeError):
+                pass
 
         # US-49-004: Read stall timeout for process-level hang detection
         _stall_timeout = 120
@@ -1136,11 +1193,23 @@ class DownloadVideoSegmentsStage(Stage):
             _max_res = getattr(download_config, 'segment_max_resolution', 1080)
             _seg_format = getattr(download_config, 'segment_format', _seg_format)
 
+        # Build format string with fallback chain to handle Tier 2+ escalation
+        # where alternative player_clients may not expose formats matching the
+        # height filter (causes "Requested format is not available")
+        _primary_format = _seg_format.format(segment_max_resolution=_max_res)
+        _format_with_fallback = f'{_primary_format}/best/bestvideo+bestaudio'
+
         ydl_opts: Dict[str, Any] = {
-            'format': _seg_format.format(segment_max_resolution=_max_res),
+            'format': _format_with_fallback,
             'outtmpl': str(output_file),
             'quiet': True,
             'no_warnings': True,
+            # Skip gracefully when rate-limited/unavailable (no formats returned);
+            # caller checks output_file.exists() to detect actual failure
+            'ignore_no_formats_error': True,
+            # Auto-update EJS challenge solver scripts from GitHub so yt-dlp can
+            # solve YouTube's n-sig challenges (required for format extraction)
+            'remote_components': {'ejs:github'},
             # Time-based download options
             'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
             'force_keyframes_at_cuts': True,
@@ -1359,6 +1428,10 @@ class DownloadVideoSegmentsStage(Stage):
         escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
         cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
 
+        # Apply inter-request delay during retries too
+        dl_cfg = getattr(self.downloader, 'download_config', None)
+        _retry_delay = float(getattr(dl_cfg, 'segment_request_delay', 1.0)) if dl_cfg else 1.0
+
         retry_attempts = 0
         for item in pending:
             # Parse video_id from the retry item (format: video_id_start_end)
@@ -1440,6 +1513,10 @@ class DownloadVideoSegmentsStage(Stage):
                 # Record failure for escalation progression on next retry
                 if escalation_mgr and _is_escalation_error(error_msg):
                     escalation_mgr.record_failure(video_id, error_msg)
+
+            # Delay between retry requests to avoid rate-limiting
+            if _retry_delay > 0:
+                time.sleep(_retry_delay)
 
             # Update checkpoint with retry progress
             if progress_callback:
