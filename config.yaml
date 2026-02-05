@@ -24,6 +24,7 @@ project:
   name: matcher-alt
   version: 4.0.0
   description: AI-powered voiceover-to-footage matching pipeline (caption-first)
+  # max_name_display_length: 15  # Max chars for project name in short download paths (e.g., E:/v/<name>)
 
 project_dir: "."
 
