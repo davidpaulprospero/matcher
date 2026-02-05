@@ -56,6 +56,8 @@ from src.config.sections.download import (
     DownloadConfig,
     EnhancedFeaturesConfig,
     LLMTitleFilterConfig,
+    RemixConfig,
+    ZeroDownloadRemixConfig,
 )
 
 # Base config for validation
@@ -1724,6 +1726,94 @@ class TestLLMTitleFilterConfigValueErrorValidation:
         config = LLMTitleFilterConfig(min_relevance=1.0, batch_size=100)
         assert config.min_relevance == 1.0
         assert config.batch_size == 100
+
+
+@pytest.mark.fast
+class TestRemixConfigValueErrorValidation:
+    """Test RemixConfig raises ValueError for invalid values."""
+
+    def test_min_relevance_score_above_one_raises_valueerror(self):
+        """Test min_relevance_score=1.5 raises ValueError."""
+        with pytest.raises(ValueError, match="min_relevance_score"):
+            RemixConfig(min_relevance_score=1.5)
+
+    def test_min_relevance_score_negative_raises_valueerror(self):
+        """Test min_relevance_score=-0.1 raises ValueError."""
+        with pytest.raises(ValueError, match="min_relevance_score"):
+            RemixConfig(min_relevance_score=-0.1)
+
+    def test_max_workers_zero_raises_valueerror(self):
+        """Test max_workers=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers"):
+            RemixConfig(max_workers=0)
+
+    def test_max_workers_negative_raises_valueerror(self):
+        """Test max_workers=-2 raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers"):
+            RemixConfig(max_workers=-2)
+
+    def test_auto_accept_filter_invalid_raises_valueerror(self):
+        """Test auto_accept_filter='invalid' raises ValueError."""
+        with pytest.raises(ValueError, match="auto_accept_filter"):
+            RemixConfig(auto_accept_filter="invalid")
+
+    def test_auto_accept_filter_case_sensitive(self):
+        """Test auto_accept_filter='Filtered' (wrong case) raises ValueError."""
+        with pytest.raises(ValueError, match="auto_accept_filter"):
+            RemixConfig(auto_accept_filter="Filtered")
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = RemixConfig(min_relevance_score=0.0, max_workers=1, auto_accept_filter="filtered")
+        assert config.min_relevance_score == 0.0
+        assert config.max_workers == 1
+        assert config.auto_accept_filter == "filtered"
+
+        config = RemixConfig(min_relevance_score=1.0, max_workers=100, auto_accept_filter="all")
+        assert config.min_relevance_score == 1.0
+        assert config.max_workers == 100
+        assert config.auto_accept_filter == "all"
+
+    def test_all_valid_auto_accept_values(self):
+        """Test all valid auto_accept_filter values are accepted."""
+        for value in ("filtered", "all", "prompt"):
+            config = RemixConfig(auto_accept_filter=value)
+            assert config.auto_accept_filter == value
+
+
+@pytest.mark.fast
+class TestZeroDownloadRemixConfigValueErrorValidation:
+    """Test ZeroDownloadRemixConfig raises ValueError for invalid values."""
+
+    def test_max_retries_zero_raises_valueerror(self):
+        """Test max_retries=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_retries"):
+            ZeroDownloadRemixConfig(max_retries=0)
+
+    def test_max_retries_negative_raises_valueerror(self):
+        """Test max_retries=-1 raises ValueError."""
+        with pytest.raises(ValueError, match="max_retries"):
+            ZeroDownloadRemixConfig(max_retries=-1)
+
+    def test_max_keywords_per_batch_zero_raises_valueerror(self):
+        """Test max_keywords_per_batch=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_keywords_per_batch"):
+            ZeroDownloadRemixConfig(max_keywords_per_batch=0)
+
+    def test_max_keywords_per_batch_negative_raises_valueerror(self):
+        """Test max_keywords_per_batch=-5 raises ValueError."""
+        with pytest.raises(ValueError, match="max_keywords_per_batch"):
+            ZeroDownloadRemixConfig(max_keywords_per_batch=-5)
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = ZeroDownloadRemixConfig(max_retries=1, max_keywords_per_batch=1)
+        assert config.max_retries == 1
+        assert config.max_keywords_per_batch == 1
+
+        config = ZeroDownloadRemixConfig(max_retries=50, max_keywords_per_batch=100)
+        assert config.max_retries == 50
+        assert config.max_keywords_per_batch == 100
 
 
 if __name__ == "__main__":

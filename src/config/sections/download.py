@@ -71,6 +71,21 @@ class RemixConfig:
     parallel_scoring: bool = True
     max_workers: int = 4
 
+    def __post_init__(self):
+        if not (0.0 <= self.min_relevance_score <= 1.0):
+            raise ValueError(
+                f"RemixConfig.min_relevance_score must be in range 0.0-1.0, got {self.min_relevance_score}"
+            )
+        if self.max_workers < 1:
+            raise ValueError(
+                f"RemixConfig.max_workers must be positive, got {self.max_workers}"
+            )
+        valid_auto_accept = ("filtered", "all", "prompt")
+        if self.auto_accept_filter not in valid_auto_accept:
+            raise ValueError(
+                f"RemixConfig.auto_accept_filter must be one of {valid_auto_accept}, got '{self.auto_accept_filter}'"
+            )
+
 
 @dataclass
 class ZeroDownloadRemixConfig:
@@ -86,6 +101,16 @@ class ZeroDownloadRemixConfig:
     cache_results: bool = True  # Cache remix results
     min_keywords_to_trigger: int = 1  # Minimum failed keywords to trigger remix
     max_keywords_per_batch: int = 20  # Maximum keywords to remix at once
+
+    def __post_init__(self):
+        if self.max_retries < 1:
+            raise ValueError(
+                f"ZeroDownloadRemixConfig.max_retries must be positive, got {self.max_retries}"
+            )
+        if self.max_keywords_per_batch < 1:
+            raise ValueError(
+                f"ZeroDownloadRemixConfig.max_keywords_per_batch must be positive, got {self.max_keywords_per_batch}"
+            )
 
 
 @dataclass
