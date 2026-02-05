@@ -145,7 +145,7 @@ class CaptionHealer(Healer):
     # Preferred format order (json3 is best for parsing, then srv variants, then vtt)
     FORMAT_PREFERENCE = ["json3", "srv3", "srv2", "srv1", "vtt", "ttml"]
 
-    def __init__(self, config: 'Config', project_dir, caption_cache: Optional['CaptionCache'] = None):
+    def __init__(self, config: 'Config', project_dir: Any, caption_cache: Optional['CaptionCache'] = None) -> None:
         super().__init__(config, project_dir)
         # Cache discovered formats to avoid repeated --list-subs calls
         self._format_cache: Dict[str, List[SubtitleInfo]] = {}
