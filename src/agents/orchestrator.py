@@ -30,6 +30,7 @@ from .strategy import (
 )
 from .healers import HEALER_REGISTRY
 from .fallback import FallbackChain, pattern_route, PatternClassification
+from .healer_cache import HealerResultCache, HealerCacheConfig
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -138,8 +139,33 @@ class HealingOrchestrator:
         self.watcher: Optional['WatcherAgent'] = None
         self.llm_healer: Optional['LLMHealer'] = None
 
+        # Healer result cache for idempotent healing (US-64-007)
+        self._healer_cache = self._init_healer_cache()
+
         # Initialize two-tier LLM system if enabled
         self._init_llm_delegation()
+
+    def _init_healer_cache(self) -> HealerResultCache:
+        """Initialize healer result cache from config (US-64-007).
+
+        Reads cache settings from healing.healer_cache config section,
+        or uses defaults if not configured.
+        """
+        healing_config = getattr(self.config, 'healing', None)
+        cache_config = None
+
+        if healing_config:
+            healer_cache_cfg = getattr(healing_config, 'healer_cache', None)
+            if healer_cache_cfg:
+                cache_config = HealerCacheConfig(
+                    enabled=getattr(healer_cache_cfg, 'enabled', True),
+                    ttl_seconds=getattr(healer_cache_cfg, 'ttl_seconds', 300.0),
+                    max_entries=getattr(healer_cache_cfg, 'max_entries', 100)
+                )
+
+        cache = HealerResultCache(cache_config)
+        logger.debug(f"[orchestrator] Healer cache initialized: {cache}")
+        return cache
 
     def _init_llm_delegation(self):
         """Initialize two-tier LLM delegation system (watcher + LLM healer)."""
@@ -645,6 +671,27 @@ class HealingOrchestrator:
         if not self._should_attempt_heal(error, stage_name):
             return HealerResult.failed("Healing loop detected, aborting")
 
+        # US-64-007: Check healer cache for recently-healed identical error
+        cached_result = self._healer_cache.get(error, stage_name)
+        if cached_result:
+            logger.info(
+                f"[orchestrator] Skipping heal: identical error recently fixed "
+                f"by {cached_result.healer_name} ({cached_result.action})"
+            )
+            self.metrics.time_spent_healing += time.time() - start_time
+            # Return a success result based on cached data
+            action = HealerAction.RETRY  # Default action for cached results
+            try:
+                action = HealerAction(cached_result.action)
+            except (ValueError, KeyError):
+                pass
+            return HealerResult.fixed(
+                f"Cached heal: {cached_result.message}",
+                action=action,
+                cached=True,
+                original_healer=cached_result.healer_name
+            )
+
         # Check if we should escalate immediately
         error_str = str(error).lower()
         if any(p in error_str for p in self.strategy.always_escalate):
@@ -654,12 +701,18 @@ class HealingOrchestrator:
         classification = self._classify_error(error, stage_name)
 
         # Step 2: Select and try healers based on classification
-        result = self._try_healers_with_classification(
+        result, healer_name = self._try_healers_with_classification(
             error, state, stage_name, classification
         )
 
         if result.success:
             self.metrics.time_spent_healing += time.time() - start_time
+            # US-64-007: Cache successful result
+            if healer_name:
+                self._healer_cache.store(error, stage_name, result, healer_name)
+                # Invalidate cache if config was modified
+                if result.modified_config:
+                    self._healer_cache.invalidate_on_config_change()
             return result
 
         # Step 3: Escalate to LLM healer if needed
@@ -667,6 +720,10 @@ class HealingOrchestrator:
             llm_result = self._try_llm_healer(error, state, stage_name)
             if llm_result:
                 self.metrics.time_spent_healing += time.time() - start_time
+                # US-64-007: Cache LLM healer result
+                self._healer_cache.store(error, stage_name, llm_result, "llm_healer")
+                if llm_result.modified_config:
+                    self._healer_cache.invalidate_on_config_change()
                 return llm_result
 
         # All healers failed
@@ -711,8 +768,13 @@ class HealingOrchestrator:
         state: 'PipelineState',
         stage_name: str,
         classification: Optional[Any]
-    ) -> HealerResult:
-        """Try healers based on classification confidence."""
+    ) -> Tuple[HealerResult, Optional[str]]:
+        """Try healers based on classification confidence.
+
+        Returns:
+            Tuple of (HealerResult, healer_name) where healer_name is the name
+            of the healer that succeeded, or None if all failed.
+        """
         failed_healers: List[str] = []
 
         # Get suggested healer from classification
@@ -729,7 +791,7 @@ class HealingOrchestrator:
             if healer:
                 result = self._try_healer(healer, error, state, stage_name)
                 if result.success:
-                    return result
+                    return result, healer.name
                 failed_healers.append(healer.name)
 
         # Medium confidence: try suggested, then others
@@ -738,7 +800,7 @@ class HealingOrchestrator:
             if healer:
                 result = self._try_healer(healer, error, state, stage_name)
                 if result.success:
-                    return result
+                    return result, healer.name
                 failed_healers.append(healer.name)
 
         # Try all applicable healers
@@ -749,7 +811,7 @@ class HealingOrchestrator:
 
             result = self._try_healer(healer, error, state, stage_name)
             if result.success:
-                return result
+                return result, healer.name
             failed_healers.append(healer.name)
 
         # Record failed healers for LLM healer context
@@ -757,7 +819,7 @@ class HealingOrchestrator:
             for name in failed_healers:
                 self.llm_healer.add_failed_healer(name)
 
-        return HealerResult.failed("Standard healers exhausted")
+        return HealerResult.failed("Standard healers exhausted"), None
 
     def _get_healer_timeout(self, healer_name: str) -> float:
         """Get timeout for a specific healer.

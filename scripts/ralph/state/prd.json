@@ -88,13 +88,13 @@
                                                        "Integrate dashboard output into print_report() in src/agents/orchestrator.py",
                                                        "Add tests verifying dashboard metrics accuracy with mock heal events"
                                                    ],
-                            "notes":  "Completed. Enhanced HealingMetrics dataclass with: successful_heals_by_healer, heal_times_by_healer, error_categories tracking. Added helper methods: get_heal_success_rate(), get_average_heal_time_ms(), get_healer_success_rate(), get_healer_average_time_ms(), record_error_category(). Added get_dashboard_metrics() and format_dashboard() to HealingOrchestrator. Integrated dashboard into print_report() - shows detailed dashboard when heals exist, simple summary otherwise. _classify_error() now records error categories from watcher/pattern classifications. _try_healer() passes heal time to record_heal(). Created tests/test_healing_dashboard.py with 22 tests covering metrics enhancements, dashboard structure, format output, and print_report integration. Files: src/agents/strategy.py, src/agents/orchestrator.py, tests/test_healing_dashboard.py."
+                            "notes":  "Completed. Implementation includes: (1) get_dashboard_metrics() returns structured dict with success_rate, average_heal_time_ms, total_heals, successful_heals, failed_heals, healer_utilization (per-healer breakdown with attempts/success/rate/avg_time), error_categories, heals_by_stage, time_spent_healing, preflight_issues, user_escalations, rollbacks. (2) HealingMetrics enhanced with record_error_category(), get_heal_success_rate(), get_average_heal_time_ms(), get_healer_success_rate(), get_healer_average_time_ms(). (3) format_dashboard() produces human-readable console output with sections for overall stats, healer utilization breakdown, error categories (sorted by count), heals by stage, preflight issues, escalations, and rollbacks. (4) print_report() shows dashboard when total_heals > 0, otherwise shows summary. (5) Error category tracking integrated into _classify_error() for both watcher and pattern classifications. Files: src/agents/strategy.py (HealingMetrics), src/agents/orchestrator.py (dashboard methods), tests/test_healing_dashboard.py (22 tests). All 22 tests pass."
                         },
                         {
                             "id":  "US-64-006",
                             "title":  "Integrate caption fetcher with circuit breaker pattern",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Create CaptionCircuitBreaker class in src/agents/healers/caption.py or src/caption/ using circuit breaker pattern",
                                                        "Configure trip threshold for consecutive caption failures (default: 5 failures)",
@@ -103,13 +103,13 @@
                                                        "Add circuit breaker state to orchestrator metrics for monitoring",
                                                        "Add tests for circuit breaker trip, reset, and half-open states"
                                                    ],
-                            "notes":  "Tier 2 (Enhancement). Source files: src/agents/healers/caption.py, src/downloader/circuit_breaker.py (existing pattern to follow at lines 1-150). The user interview shows repeated caption failures for same video - circuit breaker prevents hammering YouTube API when captions genuinely unavailable."
+                            "notes":  "Completed. CaptionCircuitBreaker already existed at src/caption/circuit_breaker.py with full circuit breaker pattern implementation. Updated defaults to match story requirements: threshold=5 (was 10), pause_seconds=60 (was 120). Integration already in place: caption_fetcher.py uses circuit breaker in error handling path (lines 3758-3955), orchestrator.py includes circuit_breaker in metrics (line 1310). Added circuit_breaker config section to config.yaml under caption_first. Updated tests to match new defaults. Files modified: src/caption/circuit_breaker.py, src/config/sections/download.py, config.yaml, tests/test_caption_circuit_breaker.py. All 54 circuit breaker tests + 26 cascade tests pass."
                         },
                         {
                             "id":  "US-64-007",
                             "title":  "Add healer result caching for idempotent healing actions",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Add HealerResultCache class to cache successful healing actions",
                                                        "Cache key based on error signature (type + message hash + stage)",
@@ -118,7 +118,7 @@
                                                        "Add cache invalidation when config changes (via config_modified flag)",
                                                        "Add tests verifying cache hit prevents redundant heal attempts"
                                                    ],
-                            "notes":  "Tier 2 (Enhancement). Source files: src/agents/orchestrator.py (integrate at lines 618-678, coordinate_heal method), new src/agents/healer_cache.py. The orchestrator tracks recent_errors (line 851-879) but only for loop detection, not for caching successful resolutions."
+                            "notes":  "Completed. Created HealerResultCache class in src/agents/healer_cache.py with: (1) error signature based on type + MD5 hash of message + stage, (2) configurable TTL (default 300s = 5 min), (3) config hash invalidation via set_config_hash() and invalidate_on_config_change(), (4) max_entries limit with LRU eviction. Integrated into HealingOrchestrator: cache check at start of coordinate_heal() before attempting healing, cache store after successful heal (both standard healers and LLM healer), cache invalidation when result.modified_config is True. Modified _try_healers_with_classification() to return tuple (result, healer_name) for cache storage. Added 33 tests in tests/test_healer_cache.py covering: config defaults, signature generation, store/get operations, TTL expiration, config invalidation, disabled cache behavior, max_entries enforcement, statistics, and integration test verifying cache hit prevents redundant heal. Files: src/agents/healer_cache.py (new), src/agents/orchestrator.py (modified), tests/test_healer_cache.py (new). All 33 tests pass."
                         },
                         {
                             "id":  "US-64-008",
