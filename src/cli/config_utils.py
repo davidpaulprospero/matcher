@@ -234,12 +234,31 @@ def _merge_duration_tiers(tiers_or_tier, overrides: dict):
         return _merge_single_tier(tiers_or_tier, overrides)
 
 
+def _revalidate_modified_sections(config: 'Config', modified_sections: set) -> None:
+    """
+    Re-run __post_init__() on modified config sections that have one.
+
+    After merge_config() applies raw overrides, nested dicts may need
+    converting to dataclass instances and constraints may need re-checking.
+
+    Args:
+        config: Configuration object with sections already modified
+        modified_sections: Set of section attribute names that were modified
+    """
+    for section_name in modified_sections:
+        section_obj = getattr(config, section_name, None)
+        if section_obj is not None and hasattr(section_obj, '__post_init__'):
+            section_obj.__post_init__()
+
+
 def merge_config(config: 'Config', overrides: dict) -> 'Config':
     """
     Merge override dict into config object.
 
     Handles nested configuration sections like 'keyword', 'download', etc.
     Special handling for duration_tiers with key aliases.
+    After all overrides are applied, re-runs __post_init__() on modified
+    sections to re-validate constraints and convert nested dicts.
 
     Args:
         config: Base configuration object
@@ -272,6 +291,8 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
                 overrides['duration_tiers'] = {}
             overrides['duration_tiers'].update(tier_overrides)
 
+    modified_sections = set()
+
     for section, values in overrides.items():
         # Special handling for duration_tiers
         if section == 'duration_tiers' and isinstance(values, dict):
@@ -281,6 +302,7 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
                     if hasattr(tiers_obj, tier_name) and isinstance(tier_overrides, dict):
                         tier_config = getattr(tiers_obj, tier_name)
                         _merge_single_tier(tier_config, tier_overrides)
+                modified_sections.add('duration_tiers')
             continue
 
         if hasattr(config, section):
@@ -289,8 +311,13 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
                 for key, value in values.items():
                     if hasattr(section_obj, key):
                         setattr(section_obj, key, value)
+                modified_sections.add(section)
             else:
                 setattr(config, section, values)
+
+    # Re-validate modified sections (convert nested dicts, check constraints)
+    _revalidate_modified_sections(config, modified_sections)
+
     return config
 
 

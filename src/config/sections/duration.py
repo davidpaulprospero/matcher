@@ -32,7 +32,7 @@ class DurationTiersConfig:
     longer: DurationTierConfig = field(default_factory=lambda: DurationTierConfig(1500, 3000, 1, 1))  # 1 per project
 
     def __post_init__(self):
-        """Convert dict fields to DurationTierConfig instances."""
+        """Convert dict fields to DurationTierConfig instances and validate."""
         import logging
         logger = logging.getLogger(__name__)
 
@@ -45,19 +45,21 @@ class DurationTiersConfig:
                 count = tier.get('videos_per_keyword', tier.get('count', tier.get('per_keyword', 5)))
                 max_total = tier.get('max_total', 0)
 
-                # Validate min/max
-                if min_sec > 0 and max_sec > 0:
-                    if min_sec >= max_sec:
-                        logger.warning(
-                            f"duration_tiers.{tier_name}: min >= max ({min_sec} >= {max_sec}), values may need adjustment"
-                        )
-
                 setattr(self, tier_name, DurationTierConfig(
                     min_seconds=min_sec,
                     max_seconds=max_sec,
                     videos_per_keyword=count,
                     max_total=max_total
                 ))
+                tier = getattr(self, tier_name)
+
+            # Validate min/max on all tiers (dict-converted or existing dataclass)
+            if isinstance(tier, DurationTierConfig):
+                if tier.min_seconds > 0 and tier.max_seconds > 0:
+                    if tier.min_seconds >= tier.max_seconds:
+                        logger.warning(
+                            f"duration_tiers.{tier_name}: min >= max ({tier.min_seconds} >= {tier.max_seconds}), values may need adjustment"
+                        )
 
 
 @dataclass
