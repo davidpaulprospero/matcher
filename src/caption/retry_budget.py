@@ -49,10 +49,11 @@ class CaptionRetryBudgetConfig:
     # Only scales UP when batch > max_attempts / attempts_per_video
     attempts_per_video: float = 2.0
 
-    # VPN rotation on rate limit exhaustion (US-37-008)
+    # VPN rotation on rate limit exhaustion (US-37-008, US-61-011)
     # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
     # This resets the budget and retries remaining videos with a new IP
-    trigger_vpn_rotation_on_rate_limit: bool = True
+    # Default: false - VPN rotation is opt-in behavior
+    vpn_rotation_on_caption_exhaustion: bool = False
 
     # Maximum VPN-triggered budget resets per session (US-37-008)
     # Prevents infinite loops if VPN rotation doesn't help
@@ -121,8 +122,8 @@ class CaptionRetryBudget:
     auto_scale: bool = True
     attempts_per_video: float = 2.0
 
-    # VPN rotation settings (US-37-008)
-    trigger_vpn_on_rate_limit: bool = True
+    # VPN rotation settings (US-37-008, US-61-011)
+    vpn_rotation_on_caption_exhaustion: bool = False
     max_vpn_resets: int = 2
     vpn_resets_used: int = 0
 
@@ -183,8 +184,8 @@ class CaptionRetryBudget:
             budget.max_backoff_time = float(config.get('max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(config.get('auto_scale', True))
             budget.attempts_per_video = float(config.get('attempts_per_video', 2.0))
-            # US-37-008: VPN rotation on rate limit exhaustion
-            budget.trigger_vpn_on_rate_limit = bool(config.get('trigger_vpn_rotation_on_rate_limit', True))
+            # US-37-008, US-61-011: VPN rotation on rate limit exhaustion
+            budget.vpn_rotation_on_caption_exhaustion = bool(config.get('vpn_rotation_on_caption_exhaustion', False))
             budget.max_vpn_resets = int(config.get('max_vpn_resets_per_session', 2))
             # US-37-009: Early termination on low success rate
             budget.min_success_rate = float(config.get('min_success_rate', 0.3))
@@ -197,8 +198,8 @@ class CaptionRetryBudget:
             budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
             budget.auto_scale = bool(getattr(config, 'auto_scale', True))
             budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 2.0))
-            # US-37-008: VPN rotation on rate limit exhaustion
-            budget.trigger_vpn_on_rate_limit = bool(getattr(config, 'trigger_vpn_rotation_on_rate_limit', True))
+            # US-37-008, US-61-011: VPN rotation on rate limit exhaustion
+            budget.vpn_rotation_on_caption_exhaustion = bool(getattr(config, 'vpn_rotation_on_caption_exhaustion', False))
             budget.max_vpn_resets = int(getattr(config, 'max_vpn_resets_per_session', 2))
             # US-37-009: Early termination on low success rate
             budget.min_success_rate = float(getattr(config, 'min_success_rate', 0.3))
@@ -541,12 +542,12 @@ class CaptionRetryBudget:
             return round((rate_limit_count / self.failures) * 100, 1)
 
     def should_trigger_vpn_rotation(self, rate_limit_threshold: float = 50.0) -> bool:
-        """Check if VPN rotation should be triggered due to rate limit exhaustion (US-37-008).
+        """Check if VPN rotation should be triggered due to rate limit exhaustion (US-37-008, US-61-011).
 
         VPN rotation is triggered when:
         1. Budget is exhausted
         2. Rate limit errors account for >50% of failures
-        3. VPN rotation is enabled in config
+        3. VPN rotation is enabled in config (vpn_rotation_on_caption_exhaustion=True)
         4. VPN resets haven't been exhausted
 
         Args:
@@ -560,7 +561,7 @@ class CaptionRetryBudget:
             # Check prerequisites
             if not self.budget_exhausted():
                 return False
-            if not self.trigger_vpn_on_rate_limit:
+            if not self.vpn_rotation_on_caption_exhaustion:
                 return False
             if self.vpn_resets_used >= self.max_vpn_resets:
                 logger.info(
@@ -573,8 +574,8 @@ class CaptionRetryBudget:
             rate_limit_pct = self.get_rate_limit_error_percentage()
             if rate_limit_pct > rate_limit_threshold:
                 logger.info(
-                    f"Budget exhausted with {rate_limit_pct:.1f}% rate limit errors, "
-                    f"rotating VPN ({self.vpn_resets_used + 1}/{self.max_vpn_resets})"
+                    f"Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited), "
+                    f"rotating VPN and retrying ({self.vpn_resets_used + 1}/{self.max_vpn_resets})"
                 )
                 return True
 

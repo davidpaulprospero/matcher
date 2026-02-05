@@ -411,3 +411,152 @@ class TestFormatResetBehavior:
         summary = budget.get_summary()
         assert "format_attempts" in summary
         assert summary["format_attempts"]["json3"]["failures"] == 1
+
+
+class TestFormatSkippingInCaptionFetcher:
+    """Tests for US-62-008: Exhausted format skipping in _fetch_subtitle_formats (criterion 4, 5)."""
+
+    def test_exhausted_format_skipped_in_fetch_loop(self, monkeypatch):
+        """When format is exhausted, _fetch_subtitle_formats skips it and tries next format.
+
+        US-62-008 AC4: When format exhausted, skip that format in future attempts.
+        US-62-008 AC5: Test verifies format skipped after max_format_failures failures.
+        """
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        from src.caption_fetcher import CaptionFetcher, CaptionResult
+
+        # Create budget with json3 exhausted (3 failures with max_format_failures=3)
+        budget = CaptionRetryBudget(max_format_failures=3)
+        for i in range(3):
+            budget.record_attempt(video_id=f"v{i}", format="json3")
+            budget.record_failure(video_id=f"v{i}", format="json3")
+        assert budget.is_format_exhausted("json3")
+        assert not budget.is_format_exhausted("vtt")
+        assert not budget.is_format_exhausted("srt")
+
+        # Create fetcher with retry_budget
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt", "srt"]
+        fetcher._active_retry_budget = budget
+
+        # Mock _fetch_subtitle_with_format to track which formats are attempted
+        formats_attempted = []
+
+        def mock_fetch_with_format(
+            video_url, video_id, temp_dir, language, auto_generated, subtitle_format,
+            fallback_level=0
+        ):
+            formats_attempted.append(subtitle_format)
+            if subtitle_format == "vtt":
+                # vtt succeeds
+                result = MagicMock(spec=CaptionResult)
+                result.segments = [MagicMock()]
+                return result
+            # Other formats fail
+            from src.caption_fetcher import CaptionFetchError
+            raise CaptionFetchError("test_video", "Format failed")
+
+        monkeypatch.setattr(
+            fetcher, '_fetch_subtitle_with_format',
+            mock_fetch_with_format
+        )
+
+        # Call _fetch_subtitle_formats
+        result = fetcher._fetch_subtitle_formats(
+            "https://youtube.com/watch?v=test",
+            "test_video",
+            Path("/tmp"),
+            "en",
+            False
+        )
+
+        # Verify json3 was SKIPPED, vtt was tried and succeeded
+        assert "json3" not in formats_attempted, "Exhausted format json3 should be skipped"
+        assert "vtt" in formats_attempted, "Non-exhausted format vtt should be tried"
+        assert result is not None, "Should return successful vtt result"
+
+    def test_all_formats_exhausted_returns_none(self):
+        """When all formats are exhausted, _fetch_subtitle_formats returns None."""
+        from pathlib import Path
+        from src.caption_fetcher import CaptionFetcher
+
+        # Create budget with all formats exhausted
+        budget = CaptionRetryBudget(max_format_failures=2)
+        for fmt in ["json3", "vtt", "srt"]:
+            for i in range(2):
+                budget.record_attempt(video_id=f"v{i}", format=fmt)
+                budget.record_failure(video_id=f"v{i}", format=fmt)
+
+        assert budget.is_format_exhausted("json3")
+        assert budget.is_format_exhausted("vtt")
+        assert budget.is_format_exhausted("srt")
+
+        # Create fetcher with retry_budget
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt", "srt"]
+        fetcher._active_retry_budget = budget
+
+        # Track if _fetch_subtitle_with_format was called
+        call_count = [0]
+        original_method = fetcher._fetch_subtitle_with_format
+
+        def mock_fetch(*args, **kwargs):
+            call_count[0] += 1
+            raise AssertionError("Should not be called when all formats exhausted")
+
+        fetcher._fetch_subtitle_with_format = mock_fetch
+
+        # Call _fetch_subtitle_formats - should return None (all skipped)
+        result = fetcher._fetch_subtitle_formats(
+            "https://youtube.com/watch?v=test",
+            "test_video",
+            Path("/tmp"),
+            "en",
+            False
+        )
+
+        # Verify no formats were tried
+        assert call_count[0] == 0, "No formats should be attempted when all are exhausted"
+        assert result is None
+
+    def test_format_not_skipped_without_retry_budget(self, monkeypatch):
+        """When no retry_budget, all formats are attempted normally."""
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        from src.caption_fetcher import CaptionFetcher, CaptionResult
+
+        fetcher = CaptionFetcher()
+        fetcher._preferred_formats = ["json3", "vtt", "srt"]
+        fetcher._active_retry_budget = None  # No budget
+
+        formats_attempted = []
+
+        def mock_fetch_with_format(
+            video_url, video_id, temp_dir, language, auto_generated, subtitle_format,
+            fallback_level=0
+        ):
+            formats_attempted.append(subtitle_format)
+            if subtitle_format == "json3":
+                result = MagicMock(spec=CaptionResult)
+                result.segments = [MagicMock()]
+                return result
+            from src.caption_fetcher import CaptionFetchError
+            raise CaptionFetchError("test_video", "Format failed")
+
+        monkeypatch.setattr(
+            fetcher, '_fetch_subtitle_with_format',
+            mock_fetch_with_format
+        )
+
+        result = fetcher._fetch_subtitle_formats(
+            "https://youtube.com/watch?v=test",
+            "test_video",
+            Path("/tmp"),
+            "en",
+            False
+        )
+
+        # Without retry_budget, json3 should be tried (not skipped)
+        assert "json3" in formats_attempted
+        assert result is not None

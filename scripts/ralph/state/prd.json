@@ -87,7 +87,7 @@
                                                        "Metrics track count of videos using auto-generated vs manual captions"
                                                    ],
                             "passes":  true,
-                            "notes":  "All 6 criteria verified. Tests in tests/test_caption_auto_fallback.py: test_manual_fail_falls_back_to_auto (AC1), test_auto_fallback_respects_config_false/true via allow_auto_generated config (AC2), test_auto_fallback_logs_selection_reason with 'auto-generated fallback' (AC3), test_auto_only_video_returns_auto_result (AC4), test_auto_fallback_respects_config_false verifies fallback disabled when config false (AC5), test_auto_fallback_records_metrics and test_no_metrics_when_manual_succeeds for metrics (AC6). 15 tests passing."
+                            "notes":  "All 6 criteria verified. Tests in tests/test_caption_auto_fallback.py: test_manual_fail_falls_back_to_auto (AC1), test_auto_fallback_respects_config_false/true via allow_auto_generated config (AC2), test_auto_fallback_logs_selection_reason with \u0027auto-generated fallback\u0027 (AC3), test_auto_only_video_returns_auto_result (AC4), test_auto_fallback_respects_config_false verifies fallback disabled when config false (AC5), test_auto_fallback_records_metrics and test_no_metrics_when_manual_succeeds for metrics (AC6). 15 tests passing."
                         },
                         {
                             "id":  "US-62-006",
@@ -116,8 +116,8 @@
                                                        "Test verifies pipeline continues when video has no captions",
                                                        "Test verifies transcription fallback triggered for no_captions videos"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 - Pipeline integration. Target files: src/caption_fetcher.py (CaptionResult dataclass), src/stages/caption_stage.py. Currently \u0027no captions\u0027 may be conflated with errors - need clean status propagation."
+                            "passes":  true,
+                            "notes":  "Pre-implemented. CaptionResult has no_captions_available field (src/caption_fetcher.py:1953). Stage handles no_captions without error (caption_stage.py:1046-1058). Videos marked for transcription (caption_stage.py:1063-1070). Summary shows distinct counts (caption_stage.py:1153-1156). All 5 tests passing in TestCaptionStageNoCaptionsStatusPropagation: test_caption_result_has_no_captions_available_field, test_caption_result_has_fetch_error_field, test_stage_summary_shows_separate_no_captions_and_fetch_failed_counts, test_no_captions_videos_marked_for_transcription_cleanly, test_no_captions_not_treated_as_error."
                         },
                         {
                             "id":  "US-62-008",
@@ -131,8 +131,8 @@
                                                        "Test verifies format skipped after max_format_failures failures",
                                                        "Summary includes format-level stats in get_summary output"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 - Extends existing budget infrastructure. Target files: src/caption/retry_budget.py (format_attempts field exists at line 156, is_format_exhausted at line 373, budget_exhausted at line 404). US-59-010 added fields - verify logic completeness."
+                            "passes":  true,
+                            "notes":  "All 6 criteria verified. AC1-3 pre-existed from US-59-010 (retry_budget.py:156, 373-392, 404-469). AC4: Added is_format_exhausted check to _fetch_subtitle_formats loop (caption_fetcher.py:4583-4598) - exhausted formats now skipped with debug log. AC5: Added 3 new tests in test_format_budget_tracking.py::TestFormatSkippingInCaptionFetcher - test_exhausted_format_skipped_in_fetch_loop, test_all_formats_exhausted_returns_none, test_format_not_skipped_without_retry_budget. AC6: get_summary includes format_attempts (line 897). 31 tests passing."
                         },
                         {
                             "id":  "US-62-009",
@@ -146,8 +146,8 @@
                                                        "Test verifies impersonation rotation after 403 error",
                                                        "Logging includes impersonation target used for each caption fetch"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier 2 - Applies download pattern to captions. Target files: src/caption_fetcher.py (yt-dlp subprocess calls ~line 2563, 4607), src/downloader/impersonation.py (ImpersonationManager). Per prompt.md, caption_fetcher.py line 2966 is one of 8 yt-dlp call sites needing impersonation."
+                            "passes":  true,
+                            "notes":  "All 6 criteria verified. AC1: _add_bypass_args_to_cmd adds --impersonate flag to all yt-dlp calls (caption_fetcher.py:2433-2455). AC2: get_next_target() called for each call via ImpersonationManager.get_impersonate_args() or direct get_next_target() (caption_fetcher.py:2448). AC3: _handle_impersonation_failure records failures on 403/rate-limit triggering rotation (caption_fetcher.py:5224-5271). AC4-5: 8 tests in tests/test_caption_impersonation.py verify flag presence and rotation. AC6: Debug logs include impersonation target (caption_fetcher.py:2442-2445, 2451-2453). Also fixed 6 existing tests that needed stdout attribute on mock results."
                         },
                         {
                             "id":  "US-62-010",
