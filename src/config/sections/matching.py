@@ -391,6 +391,7 @@ class MatchingConfig:
         logger = logging.getLogger(__name__)
 
         # Validate confidence thresholds (must be 0.0-1.0)
+        # ValueError for impossible values (negative); warn+clamp for soft limits (>1.0)
         confidence_fields = [
             'min_confidence', 'high_confidence_threshold',
             'low_confidence_threshold', 'ambiguous_threshold',
@@ -398,15 +399,20 @@ class MatchingConfig:
         ]
         for field_name in confidence_fields:
             value = getattr(self, field_name)
-            clamped = max(0.0, min(1.0, value))
-            if clamped != value:
-                logger.warning(
-                    "MatchingConfig.%s=%s out of range [0.0, 1.0], clamped to %s",
-                    field_name, value, clamped,
+            if value < 0.0:
+                raise ValueError(
+                    f"MatchingConfig.{field_name}={value} is negative. "
+                    f"Confidence thresholds must be in range [0.0, 1.0]. "
+                    f"Check matching.{field_name} in config.yaml"
                 )
-                setattr(self, field_name, clamped)
+            if value > 1.0:
+                logger.warning(
+                    "MatchingConfig.%s=%s exceeds 1.0, clamped to 1.0",
+                    field_name, value,
+                )
+                setattr(self, field_name, 1.0)
 
-        # Validate positive integer fields
+        # Validate positive integer fields — ValueError for impossible values (<= 0)
         positive_int_fields = [
             'embedding_candidates',
             'llm_rerank_candidates',
@@ -416,11 +422,10 @@ class MatchingConfig:
         for field_name in positive_int_fields:
             value = getattr(self, field_name)
             if value <= 0:
-                logger.warning(
-                    "MatchingConfig.%s=%s must be positive, setting to 1",
-                    field_name, value,
+                raise ValueError(
+                    f"MatchingConfig.{field_name}={value} must be a positive integer. "
+                    f"Check matching.{field_name} in config.yaml"
                 )
-                setattr(self, field_name, 1)
 
         # Nested dataclass conversion
         if self.location_matching is None:

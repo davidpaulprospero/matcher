@@ -198,29 +198,30 @@ class EmbeddingConfig:
     KNOWN_PROVIDERS = {'gemini', 'openai', 'local', 'sentence_transformers'}
 
     def __post_init__(self):
-        # Validate batch_size >= 1
+        # ValueError for impossible values (negative); warn+clamp for soft limits
         if self.batch_size < 1:
-            logger.warning(
-                "EmbeddingConfig.batch_size=%s is invalid (must be >= 1), "
-                "correcting to 1", self.batch_size
+            raise ValueError(
+                f"EmbeddingConfig.batch_size={self.batch_size} must be >= 1. "
+                f"Check embedding.batch_size in config.yaml"
             )
-            self.batch_size = 1
 
-        # Validate max_retries >= 0
         if self.max_retries < 0:
-            logger.warning(
-                "EmbeddingConfig.max_retries=%s is invalid (must be >= 0), "
-                "correcting to 0", self.max_retries
+            raise ValueError(
+                f"EmbeddingConfig.max_retries={self.max_retries} must be >= 0. "
+                f"Check embedding.max_retries in config.yaml"
             )
-            self.max_retries = 0
 
-        # Validate max_workers >= 1
-        if self.max_workers < 1:
-            logger.warning(
-                "EmbeddingConfig.max_workers=%s is invalid (must be >= 1), "
-                "correcting to 1", self.max_workers
+        if self.retry_delay < 0:
+            raise ValueError(
+                f"EmbeddingConfig.retry_delay={self.retry_delay} must be >= 0. "
+                f"Check embedding.retry_delay in config.yaml"
             )
-            self.max_workers = 1
+
+        if self.max_workers < 1:
+            raise ValueError(
+                f"EmbeddingConfig.max_workers={self.max_workers} must be >= 1. "
+                f"Check embedding.max_workers in config.yaml"
+            )
 
         # Warn on unknown provider
         if self.provider not in self.KNOWN_PROVIDERS:
