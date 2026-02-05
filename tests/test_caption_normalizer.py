@@ -607,6 +607,30 @@ class TestSecondsToTimestamp:
 
         assert result == "02:02:03.456"
 
+    @pytest.mark.fast
+    def test_seconds_to_vtt_very_large_over_99_hours(self):
+        """Test converting very large value > 99 hours"""
+        # 100 hours = 360000 seconds
+        result = CaptionNormalizer.seconds_to_vtt_timestamp(360000.789)
+
+        assert result == "100:00:00.789"
+
+    @pytest.mark.fast
+    def test_seconds_to_srt_very_large_over_99_hours(self):
+        """Test SRT format with very large value > 99 hours"""
+        result = CaptionNormalizer.seconds_to_srt_timestamp(360000.789)
+
+        assert result == "100:00:00,789"
+
+    @pytest.mark.fast
+    def test_fetcher_delegates_to_normalizer(self):
+        """Test caption_fetcher.CaptionNormalizer delegates formatting to canonical location"""
+        from src.caption_fetcher import CaptionNormalizer as FetcherNormalizer
+
+        for seconds in [0.0, 5445.123, 360000.789, -10.0]:
+            assert FetcherNormalizer.seconds_to_vtt_timestamp(seconds) == CaptionNormalizer.seconds_to_vtt_timestamp(seconds)
+            assert FetcherNormalizer.seconds_to_srt_timestamp(seconds) == CaptionNormalizer.seconds_to_srt_timestamp(seconds)
+
 
 @pytest.mark.fast
 class TestCaptionNormalizationError:

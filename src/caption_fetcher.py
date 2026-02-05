@@ -56,6 +56,7 @@ from src.caption.enums import (
 )
 from src.caption.error_handling import categorize_caption_error
 from src.caption.parsers import parse_timestamp as _canonical_parse_timestamp
+from src.caption.normalizer import CaptionNormalizer as _CanonicalNormalizer
 from src.caption.retry_budget import BatchRetryBudget
 from src.caption_timeout_manager import FormatTimeoutPolicy
 
@@ -7479,34 +7480,17 @@ class CaptionNormalizer:
     def seconds_to_vtt_timestamp(seconds: float) -> str:
         """Convert seconds to VTT timestamp format.
 
-        Args:
-            seconds: Time in seconds.
-
-        Returns:
-            VTT timestamp string (HH:MM:SS.mmm).
+        Delegates to the canonical implementation in src.caption.normalizer.
         """
-        if seconds < 0:
-            seconds = 0
-
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        millis = int((seconds * 1000) % 1000)
-
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+        return _CanonicalNormalizer.seconds_to_vtt_timestamp(seconds)
 
     @staticmethod
     def seconds_to_srt_timestamp(seconds: float) -> str:
         """Convert seconds to SRT timestamp format.
 
-        Args:
-            seconds: Time in seconds.
-
-        Returns:
-            SRT timestamp string (HH:MM:SS,mmm).
+        Delegates to the canonical implementation in src.caption.normalizer.
         """
-        vtt_ts = CaptionNormalizer.seconds_to_vtt_timestamp(seconds)
-        return vtt_ts.replace('.', ',')
+        return _CanonicalNormalizer.seconds_to_srt_timestamp(seconds)
 
 
 @dataclass
