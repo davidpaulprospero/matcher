@@ -173,7 +173,12 @@ class EnhancedCaptionCache:
         # Prefetch queue
         self._prefetch_queue: List[str] = []
         self._prefetch_lock = threading.Lock()
-        
+
+        # Preflight cache (US-67-005): in-memory store for list-subs results
+        # with 1-hour TTL to avoid repeated subprocess calls during batch processing
+        self._preflight_store: Dict[str, Dict[str, Any]] = {}
+        self._preflight_ttl_seconds: float = 3600.0  # 1 hour
+
         logger.debug(f"EnhancedCaptionCache initialized: compression={enable_compression}, "
                     f"compression_level={compression_level}, max_prefetch={max_prefetch}")
     
@@ -550,6 +555,77 @@ class EnhancedCaptionCache:
         """Clear warmed video tracking."""
         with self._warmed_lock:
             self._warmed_videos.clear()
+
+    # ==================== Preflight Cache (US-67-005) ====================
+
+    def get_preflight(self, video_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Get cached preflight discovery results for a video (US-67-005).
+
+        Returns cached list-subs output (available subtitle formats) to avoid
+        repeated yt-dlp --list-subs subprocess calls during batch processing
+        with retries.
+
+        Cache key format: '{video_id}_preflight'
+        TTL: 1 hour (3600 seconds)
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            List of language dicts with 'code', 'name', 'is_auto_generated',
+            or None if not cached or expired.
+        """
+        key = f"{video_id}_preflight"
+        entry = self._preflight_store.get(key)
+        if entry is None:
+            return None
+
+        # Check TTL (1 hour)
+        cached_at = entry.get('cached_at', 0.0)
+        if (time.time() - cached_at) > self._preflight_ttl_seconds:
+            # Expired - remove entry
+            self._preflight_store.pop(key, None)
+            logger.debug(f"Preflight cache expired: {video_id}")
+            return None
+
+        languages = entry.get('languages', [])
+        logger.debug(f"Preflight cache hit: {video_id} ({len(languages)} languages)")
+        return languages
+
+    def store_preflight(
+        self,
+        video_id: str,
+        languages: List[Any],
+    ) -> None:
+        """Store preflight discovery results in cache (US-67-005).
+
+        Caches the result of list_available_languages() to avoid redundant
+        yt-dlp --list-subs subprocess calls when the same video is checked
+        multiple times during batch processing.
+
+        Args:
+            video_id: YouTube video ID.
+            languages: List of AvailableLanguage objects or dicts.
+        """
+        key = f"{video_id}_preflight"
+
+        # Convert AvailableLanguage objects to dicts if needed
+        language_dicts = []
+        for lang in languages:
+            if hasattr(lang, 'code'):
+                language_dicts.append({
+                    'code': lang.code,
+                    'name': lang.name,
+                    'is_auto_generated': lang.is_auto_generated,
+                })
+            elif isinstance(lang, dict):
+                language_dicts.append(lang)
+
+        self._preflight_store[key] = {
+            'languages': language_dicts,
+            'cached_at': time.time(),
+        }
+        logger.debug(f"Preflight cache stored: {video_id} ({len(language_dicts)} languages)")
 
 
 # Import at end to avoid circular imports
