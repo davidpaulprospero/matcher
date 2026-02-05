@@ -11,7 +11,7 @@
         "acquisition": {
             "name": "Content Acquisition",
             "emoji": "U+1F4E5",
-            "areas": ["rate-limiting", "caption", "download", "mullvad-vpn"],
+            "areas": ["rate-limiting", "caption", "transcription", "download", "mullvad-vpn"],
             "description": "YouTube downloads, captions, rate limit handling"
         },
         "processing": {
@@ -45,6 +45,7 @@
         {"id": "architecture", "name": "Architecture", "category": "core", "description": "Cross-cutting architectural concerns: download_segments Python API, escalation state, error classification, stage integration patterns"},
         {"id": "rate-limiting", "name": "Rate Limiting", "category": "acquisition", "description": "YouTube download resilience: cookie rotation, circuit breaker, impersonation escalation, extractor-args bypass"},
         {"id": "caption", "name": "Caption System", "category": "acquisition", "description": "YouTube caption fetching (always-on caption-first), transcript caching"},
+        {"id": "transcription", "name": "Transcription System", "category": "acquisition", "description": "Whisper transcription, parallel processing, transcription caching, caption-to-transcription pipeline"},
         {"id": "download", "name": "Download Core", "category": "acquisition", "description": "Core download logic, yt-dlp integration, browser impersonation (curl_cffi), TLS fingerprint bypass"},
         {"id": "mullvad-vpn", "name": "Mullvad VPN Integration", "category": "acquisition", "description": "Mullvad VPN for Tier 3 bypass: geographic server rotation, am.i.mullvad.net verification, daemon CLI control"},
         {"id": "quality", "name": "Match Quality", "category": "processing", "description": "Improve matching accuracy and confidence scores"},
@@ -102,6 +103,7 @@
         "pipeline": ["test_pipeline*.py", "test_stage*.py"],
         "rate-limiting": ["test_download*.py", "test_rate*.py"],
         "caption": ["test_caption*.py", "test_stage_caption*.py"],
+        "transcription": ["test_transcription*.py", "test_caption*.py", "test_caption_fetcher*.py"],
         "config": ["test_config*.py"],
         "architecture": ["test_download_segment*.py", "test_iterative_match*.py", "test_error_classif*.py", "test_escalation*.py", "test_tier*.py"],
         "download": ["test_download*.py", "test_downloader*.py"],
@@ -124,6 +126,7 @@
         "pipeline": ["src/pipeline.py", "src/checkpoint.py", "src/stages/"],
         "rate-limiting": ["src/downloader/", "src/downloader/core.py", "src/downloader/rate_limit_budget.py", "src/downloader/cookie_rotator.py", "src/config/sections/download.py"],
         "caption": ["src/caption_fetcher.py", "src/stages/caption_stage.py", "src/transcription/"],
+        "transcription": ["src/transcription/", "src/caption_fetcher.py", "src/caption/", "src/stages/caption_stage.py", "src/config/sections/core.py"],
         "config": ["src/config.py", "src/config/", "config.yaml"],
         "architecture": ["src/stages/download_segments.py", "src/stages/iterative_match.py", "src/downloader/error_classification.py", "src/downloader/escalation_manager.py", "src/downloader/circuit_breaker.py"],
         "download": ["src/downloader/", "src/downloader/core.py", "src/downloader/audio_first.py", "src/downloader/title_filter.py", "src/downloader/speech_screening.py", "src/downloader/utils.py", "src/caption_fetcher.py", "src/config/sections/download.py"],
