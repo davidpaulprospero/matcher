@@ -476,6 +476,13 @@ class CaptionFirstConfig:
     # 0.8 = switch when 80% of recent videos are unavailable.
     unavailable_threshold: float = 0.8
 
+    # Rate limit backoff parameters (US-66-006)
+    # Controls exponential backoff behavior for rate-limited caption fetches.
+    # Used by RateLimitState in src/caption/timeout.py.
+    rate_limit_base_backoff_seconds: float = 5.0      # Initial backoff delay (1st: 5s, 2nd: 10s, 3rd: 20s...)
+    rate_limit_max_backoff_seconds: float = 300.0      # Maximum backoff cap (5 minutes)
+    rate_limit_max_history: int = 10                   # Recent rate limit events to track
+
     # Worker-level progress tracking (US-008 Sprint 8)
     # Time threshold in seconds for considering a worker "stuck" on a video.
     # Workers exceeding this threshold are reported in progress callbacks.

@@ -224,7 +224,7 @@ class RateLimitTracker:
     _instance: Optional['RateLimitTracker'] = None
     _lock: threading.Lock = threading.Lock()
     
-    def __new__(cls) -> 'RateLimitTracker':
+    def __new__(cls, **kwargs) -> 'RateLimitTracker':
         """Singleton pattern for global state sharing."""
         if cls._instance is None:
             with cls._lock:
@@ -232,12 +232,21 @@ class RateLimitTracker:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        base_backoff_seconds: float = 5.0,
+        max_backoff_seconds: float = 300.0,
+        max_history: int = 10,
+    ):
         if getattr(self, '_initialized', False):
             return
-            
-        self._state = RateLimitState()
+
+        self._state = RateLimitState(
+            base_backoff_seconds=base_backoff_seconds,
+            max_backoff_seconds=max_backoff_seconds,
+            max_history=max_history,
+        )
         self._state_lock = threading.RLock()
         self._initialized = True
     
