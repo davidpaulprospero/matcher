@@ -1296,10 +1296,19 @@ class IterativeMatchStage(Stage):
                         cache.store(result)
 
                 if result and result.segments:
+                    # Segments may be CaptionSegment objects (fresh fetch) or dicts (from cache)
+                    first_seg = result.segments[0]
+                    segments_are_dicts = isinstance(first_seg, dict)
+
                     # Determine caption quality
-                    total_duration = sum(
-                        (s.end_time - s.start_time) for s in result.segments
-                    )
+                    if segments_are_dicts:
+                        total_duration = sum(
+                            (s['end'] - s['start']) for s in result.segments
+                        )
+                    else:
+                        total_duration = sum(
+                            (s.end_time - s.start_time) for s in result.segments
+                        )
                     quality = determine_caption_quality(
                         is_auto_generated=result.is_auto_generated,
                         segment_count=len(result.segments),
@@ -1307,14 +1316,24 @@ class IterativeMatchStage(Stage):
                     )
 
                     # Convert segments to dict format
-                    segments = [
-                        {
-                            'text': seg.text,
-                            'start': seg.start_time,
-                            'end': seg.end_time,
-                        }
-                        for seg in result.segments
-                    ]
+                    if segments_are_dicts:
+                        segments = [
+                            {
+                                'text': seg.get('text', ''),
+                                'start': seg.get('start', seg.get('start_time', 0)),
+                                'end': seg.get('end', seg.get('end_time', 0)),
+                            }
+                            for seg in result.segments
+                        ]
+                    else:
+                        segments = [
+                            {
+                                'text': seg.text,
+                                'start': seg.start_time,
+                                'end': seg.end_time,
+                            }
+                            for seg in result.segments
+                        ]
 
                     candidates.append({
                         'video_id': video_id,
