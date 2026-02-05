@@ -831,11 +831,17 @@ def create_clip_with_timewarp(
     unique_media_name = f"{folder_name}_{filename}"
 
     # Determine available_range for the media file
-    # If we don't know the media duration, estimate from source_start + source_duration
+    # Prefer ffprobe for actual duration — yt-dlp keyframe cuts make files
+    # slightly shorter than requested, and DaVinci rejects clips whose
+    # available_range exceeds the real file length.
     if media_duration is None:
-        # Estimate: assume media is at least as long as what we're using
-        estimated_duration = source_start + source_duration + 10  # Add buffer
-        media_duration = estimated_duration
+        probed = _get_media_duration(abs_path) if Path(abs_path).exists() else None
+        if probed is not None:
+            media_duration = probed
+        else:
+            # Estimate: assume media is at least as long as what we're using
+            estimated_duration = source_start + source_duration + 10  # Add buffer
+            media_duration = estimated_duration
 
     available_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(0, rate),
