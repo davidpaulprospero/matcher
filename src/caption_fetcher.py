@@ -50,6 +50,7 @@ from src.caption.exceptions import (
 )
 from src.caption.enums import (
     CaptionErrorCategory,
+    CaptionStatus,
     DEFAULT_RETRY_BUDGETS,
     StreamState,
 )
@@ -1938,7 +1939,10 @@ class CaptionResult:
         skipped_segments: List of (index, reason) tuples for skipped segments (US-001 Sprint 7).
         partial_recovery: True when segments were skipped but result is still usable (US-001 Sprint 7).
         timing_validated: Result of timing validation, or None if not validated (US-007).
+        status: Structured status of the fetch operation (US-63-006).
+            Values: 'success', 'no_captions', 'error', 'cached_unavailable'
         no_captions_available: True when video has no captions (not an error, triggers transcription fallback) (US-62-007).
+            Deprecated: Use status == CaptionStatus.NO_CAPTIONS instead.
         fetch_error: Error message when fetch failed due to error (distinct from no_captions_available) (US-62-007).
     """
     video_id: str
@@ -1950,6 +1954,7 @@ class CaptionResult:
     skipped_segments: List[tuple] = field(default_factory=list)  # US-001: (index, reason) tuples
     partial_recovery: bool = False  # US-001: True when segments skipped but result usable
     timing_validated: Optional[TimingValidationResult] = None  # US-007: Timing validation result
+    status: CaptionStatus = CaptionStatus.SUCCESS  # US-63-006: Structured status
     no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
     fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
 
@@ -3903,6 +3908,7 @@ class CaptionFetcher:
                 error_result = {
                     'video_id': video_id,
                     'unavailable': True,
+                    'status': CaptionStatus.NO_CAPTIONS.value,  # US-63-006: Structured status
                     'reason': str(e.reason),
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
@@ -3956,6 +3962,7 @@ class CaptionFetcher:
                 error_result = {
                     'video_id': video_id,
                     'error': True,
+                    'status': CaptionStatus.ERROR.value,  # US-63-006: Structured status
                     'reason': str(e.reason),
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
@@ -3998,6 +4005,7 @@ class CaptionFetcher:
                 error_result = {
                     'video_id': video_id,
                     'error': True,
+                    'status': CaptionStatus.ERROR.value,  # US-63-006: Structured status
                     'reason': str(e),
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
@@ -4153,6 +4161,7 @@ class CaptionFetcher:
                     results[video_id] = {
                         'video_id': video_id,
                         'error': True,
+                        'status': CaptionStatus.ERROR.value,  # US-63-006: Structured status
                         'reason': str(e),
                         'caption_quality': 'low',
                     }
@@ -4297,7 +4306,7 @@ class CaptionFetcher:
         """
         # US-59-003: Check negative cache before any network calls
         if self._caption_cache and self._caption_cache.is_caption_unavailable(video_id, language):
-            logger.info(
+            logger.debug(
                 f"Caption {video_id}: Negative cache hit - known unavailable for '{language}'"
             )
             # US-59-009: Track negative cache savings
@@ -6041,16 +6050,22 @@ class CaptionCache(BaseCache):
             # Cache validation settings (US-008 Sprint 6)
             self.validation_mode = getattr(config, 'cache_validation', 'warn')
             self.validation_tolerance = getattr(config, 'cache_validation_tolerance', 0.2)
-            # Negative cache TTL (US-60-004)
-            # Separate TTL for "unavailable" entries (default 1 hour)
-            self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
+            # Negative cache TTL (US-60-004, US-63-005)
+            # Separate TTL for "unavailable" entries (default 1 hour = 3600 seconds)
+            # US-63-005: Prefer negative_cache_ttl_seconds if set, else use hours
+            negative_cache_ttl_seconds = getattr(config, 'negative_cache_ttl_seconds', None)
+            if isinstance(negative_cache_ttl_seconds, (int, float)) and negative_cache_ttl_seconds > 0:
+                # Convert seconds to hours for internal storage
+                self.negative_cache_ttl_hours = negative_cache_ttl_seconds / 3600.0
+            else:
+                self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
             self.enabled = True
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
-            self.negative_cache_ttl_hours = 1.0
+            self.negative_cache_ttl_hours = 1.0  # 1 hour default = 3600 seconds
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))

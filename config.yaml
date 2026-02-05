@@ -1103,6 +1103,12 @@ download:
     cache_validation: "warn"      # Validation mode (default: warn)
     cache_validation_tolerance: 0.2  # Max segment count deviation ratio (20%)
 
+    # Negative cache TTL (US-63-005): how long to remember videos without captions
+    # When a video is found to have no captions, this result is cached to avoid
+    # repeated expensive lookups. TTL allows re-checking since captions may be added later.
+    # Default: 3600 seconds (1 hour). Set to 0 to use max_cache_age_days for negative entries.
+    negative_cache_ttl_seconds: 3600  # Negative cache TTL in seconds (default: 1 hour)
+
     # Per-category retry budgets (US-003 Sprint 7)
     # Maps error type to maximum retry attempts. Different errors need different strategies:
     # - network: Transient connectivity issues, retry aggressively

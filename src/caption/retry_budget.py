@@ -163,6 +163,9 @@ class CaptionRetryBudget:
     # Expected skips calculated when budget is insufficient but continuing anyway
     _expected_skips: Optional[int] = field(default=None, repr=False, compare=False)
 
+    # US-62-010: Tracks which categories have triggered dominant pattern log (avoids spam)
+    _logged_dominant_patterns: set = field(default_factory=set, repr=False, compare=False)
+
     @classmethod
     def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
         """Create a CaptionRetryBudget from config.
@@ -294,6 +297,8 @@ class CaptionRetryBudget:
                      f"{f' [format={format}]' if format else ''}")
         # Check if we crossed a consumption threshold (US-37-005)
         self._check_and_log_threshold(video_id)
+        # US-62-010: Check for dominant error pattern
+        self._check_dominant_error_pattern()
 
     def record_backoff(self, seconds: float, video_id: str = "") -> None:
         """Record backoff time spent.
@@ -792,6 +797,32 @@ class CaptionRetryBudget:
                 self._log_consumption_status("threshold", video_id)
                 break
 
+    def _check_dominant_error_pattern(self) -> None:
+        """Log INFO when >50% of errors are the same category (US-62-010).
+
+        This indicates a systematic pattern (e.g., rate limiting, network issues)
+        that may benefit from intervention like VPN rotation or backoff.
+
+        Only logs once per category per session to avoid log spam.
+        """
+        with self._lock:
+            # Need at least 5 failures to detect a meaningful pattern
+            if self.failures < 5:
+                return
+
+            # Check if any category exceeds 50% threshold
+            for category, count in self.error_counts.items():
+                percentage = (count / self.failures) * 100
+                if percentage > 50 and category not in self._logged_dominant_patterns:
+                    self._logged_dominant_patterns.add(category)
+                    logger.info(
+                        f"[US-62-010] Dominant error pattern detected: "
+                        f"{category.name} accounts for {percentage:.0f}% of failures "
+                        f"({count}/{self.failures})"
+                    )
+                    # Only log the first dominant pattern found
+                    break
+
     def get_progress_percentage(self) -> Optional[float]:
         """Get batch progress as percentage of videos processed (US-41-010).
 
@@ -919,26 +950,34 @@ class CaptionRetryBudget:
         return None
 
     def get_formatted_summary(self) -> str:
-        """Get a formatted summary string for logging at stage completion (US-39-005).
+        """Get a formatted summary string for logging at stage completion (US-39-005, US-62-010).
 
         Returns a single-line summary with all key budget metrics for easy
-        diagnosis of budget exhaustion issues.
+        diagnosis of budget exhaustion issues, including error breakdown.
 
         Returns:
             Formatted string: 'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts,
-            {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N}, circuit_breaker={state})'
+            {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N}, circuit_breaker={state}, errors={breakdown})'
 
         Example:
             >>> budget.get_formatted_summary()
-            'CaptionRetryBudget summary: 150/175 attempts, 120 succeeded, 30 failed, 5 skipped (batch_size=150, circuit_breaker=closed)'
+            'CaptionRetryBudget summary: 150/175 attempts, 120 succeeded, 30 failed, 5 skipped (batch_size=150, circuit_breaker=closed, errors=RATE_LIMIT:20,NETWORK:8,TIMEOUT:2)'
         """
         with self._lock:
             cb_state = self._get_circuit_breaker_state()
             cb_suffix = f", circuit_breaker={cb_state}" if cb_state else ""
+
+            # US-62-010: Include error breakdown in summary
+            error_suffix = ""
+            if self.error_counts:
+                top_errors = self.get_top_errors(limit=5)
+                error_parts = [f"{cat.name}:{count}" for cat, count in top_errors]
+                error_suffix = f", errors={','.join(error_parts)}"
+
             return (
                 f"CaptionRetryBudget summary: {self.attempts}/{self.max_attempts} attempts, "
                 f"{self.successes} succeeded, {self.failures} failed, "
-                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{cb_suffix})"
+                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{cb_suffix}{error_suffix})"
             )
 
     def log_skip_comparison(self) -> None:
@@ -1183,6 +1222,7 @@ class CaptionRetryBudget:
             self.attempts_per_video_id.clear()  # US-41-005
             self.circuit_breaker_trips = 0  # US-41-006
             self.format_attempts.clear()  # US-59-010
+            self._logged_dominant_patterns.clear()  # US-62-010
             if not preserve_vpn_count:
                 self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
             # US-37-009: Reset early termination state

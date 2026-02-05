@@ -5440,6 +5440,11 @@ class TestRetryBudgetSummaryLogging:
             'is_exhausted': False,
         }
         mock_budget.to_dict.return_value = {'attempts': 50}
+        # US-62-012: Mock verify_budget_sufficient to return None (budget is sufficient)
+        mock_budget.verify_budget_sufficient.return_value = None
+        mock_budget.budget_exhausted.return_value = False
+        mock_budget.log_health_check.return_value = None
+        mock_budget.log_skip_comparison.return_value = None
 
         with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
              patch('src.caption_fetcher.CaptionMetrics') as mock_metrics_class, \
@@ -5513,6 +5518,11 @@ class TestRetryBudgetSummaryLogging:
             'backoff_time_spent': 1.0,
             'is_exhausted': False,
         }
+        # US-62-012: Mock verify_budget_sufficient to return None (budget is sufficient)
+        mock_budget.verify_budget_sufficient.return_value = None
+        mock_budget.budget_exhausted.return_value = False
+        mock_budget.log_health_check.return_value = None
+        mock_budget.log_skip_comparison.return_value = None
 
         with patch('src.caption_fetcher.CaptionFetcher') as mock_fetcher_class, \
              patch('src.caption_fetcher.CaptionMetrics') as mock_metrics_class, \

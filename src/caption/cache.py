@@ -78,16 +78,22 @@ class CaptionCache(BaseCache):
             # Cache validation settings (US-008 Sprint 6)
             self.validation_mode = getattr(config, 'cache_validation', 'warn')
             self.validation_tolerance = getattr(config, 'cache_validation_tolerance', 0.2)
-            # Negative cache TTL (US-60-004)
-            # Separate TTL for "unavailable" entries (default 1 hour)
-            self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
+            # Negative cache TTL (US-60-004, US-63-005)
+            # Separate TTL for "unavailable" entries (default 1 hour = 3600 seconds)
+            # US-63-005: Prefer negative_cache_ttl_seconds if set, else use hours
+            negative_cache_ttl_seconds = getattr(config, 'negative_cache_ttl_seconds', None)
+            if isinstance(negative_cache_ttl_seconds, (int, float)) and negative_cache_ttl_seconds > 0:
+                # Convert seconds to hours for internal storage
+                self.negative_cache_ttl_hours = negative_cache_ttl_seconds / 3600.0
+            else:
+                self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
             self.enabled = True
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
-            self.negative_cache_ttl_hours = 1.0
+            self.negative_cache_ttl_hours = 1.0  # 1 hour default = 3600 seconds
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -1158,9 +1164,9 @@ class ListSubsCache(BaseCache):
                 # Direct list format (backward compat)
                 languages = cached_data
 
-            # US-62-004: Log specific message for negative cache hit
+            # US-62-004, US-63-005: Log specific message for negative cache hit at DEBUG level
             if len(languages) == 0:
-                logger.info(f"Negative cache hit: no captions for {video_id}")
+                logger.debug(f"Negative cache hit: no captions for {video_id}")
             else:
                 logger.debug(f"ListSubsCache hit: {video_id} ({len(languages)} languages)")
             return languages

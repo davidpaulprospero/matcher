@@ -1102,3 +1102,299 @@ class TestCaptionStageNoCaptionsStatusPropagation:
         assert result.data['fetch_failed_count'] == 0, (
             f"Expected fetch_failed_count=0 (no errors), got {result.data.get('fetch_failed_count')}"
         )
+
+
+# =============================================================================
+# US-63-006: Propagate Structured No-Caption Status Tests
+# =============================================================================
+
+
+class TestCaptionStatusField:
+    """Tests for the structured status field (US-63-006).
+
+    Verifies that caption results use the status field with values:
+    'success', 'no_captions', 'error', 'cached_unavailable'
+    """
+
+    @pytest.mark.integration
+    def test_status_field_success(self):
+        """Test that successful caption fetches have status='success'.
+
+        AC1: CaptionResult has 'status' field with value 'success' on success.
+        """
+        video_ids = ["vidSucc001x"]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[MockVideoSearchResult(vid, 120.0) for vid in video_ids],
+        )
+
+        config = make_mock_config(retry_budget_config={'enabled': True, 'max_attempts': 100})
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                video_ids[0]: {
+                    'video_id': video_ids[0],
+                    'status': 'success',
+                    'segments': [{'text': 'test', 'start': 0, 'end': 1}],
+                    'segment_count': 1,
+                    'language': 'en',
+                    'is_auto_generated': False,
+                    'caption_quality': 'high',
+                }
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        caption_results = result.data.get('caption_results', {})
+        assert caption_results[video_ids[0]].get('status') == 'success', (
+            "Successful fetch should have status='success'"
+        )
+
+    @pytest.mark.integration
+    def test_status_field_no_captions(self):
+        """Test that videos without captions have status='no_captions'.
+
+        AC1: CaptionResult has 'status' field with value 'no_captions' when unavailable.
+        AC2: Caption stage handles no_captions status without treating as error.
+        """
+        video_ids = ["vidNoCap01x"]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[MockVideoSearchResult(vid, 120.0) for vid in video_ids],
+        )
+
+        config = make_mock_config(retry_budget_config={'enabled': True, 'max_attempts': 100})
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                video_ids[0]: {
+                    'video_id': video_ids[0],
+                    'unavailable': True,
+                    'status': 'no_captions',
+                    'reason': 'no_captions_available',
+                    'caption_quality': 'low',
+                }
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        # AC2: Stage should succeed (no_captions is not an error)
+        assert result.success is True, "Stage should succeed with no_captions status"
+
+        caption_results = result.data.get('caption_results', {})
+        assert caption_results[video_ids[0]].get('status') == 'no_captions', (
+            "Unavailable video should have status='no_captions'"
+        )
+
+        # AC3: Video should be marked for transcription fallback
+        assert video_ids[0] in stage.needs_transcription, (
+            "Video with no_captions should be in needs_transcription"
+        )
+
+    @pytest.mark.integration
+    def test_status_field_error(self):
+        """Test that fetch errors have status='error'.
+
+        AC1: CaptionResult has 'status' field with value 'error' on failure.
+        """
+        video_ids = ["vidError01x"]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[MockVideoSearchResult(vid, 120.0) for vid in video_ids],
+        )
+
+        config = make_mock_config(retry_budget_config={'enabled': True, 'max_attempts': 100})
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                video_ids[0]: {
+                    'video_id': video_ids[0],
+                    'error': True,
+                    'status': 'error',
+                    'reason': 'Network timeout',
+                    'caption_quality': 'low',
+                }
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        assert result.success is True  # Stage continues despite errors
+
+        caption_results = result.data.get('caption_results', {})
+        assert caption_results[video_ids[0]].get('status') == 'error', (
+            "Fetch error should have status='error'"
+        )
+        assert result.data.get('fetch_failed_count') == 1, (
+            "fetch_failed_count should be 1"
+        )
+
+    @pytest.mark.integration
+    def test_mixed_status_values_pipeline_continues(self):
+        """Test pipeline continues with mixed success/no_captions/error statuses.
+
+        AC5: Test verifies pipeline continues when some videos have no captions.
+        """
+        video_ids = ["vidSuccess1x", "vidNoCaps2x", "vidError03x"]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[MockVideoSearchResult(vid, 120.0) for vid in video_ids],
+        )
+
+        config = make_mock_config(retry_budget_config={'enabled': True, 'max_attempts': 100})
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                'vidSuccess1x': {
+                    'video_id': 'vidSuccess1x',
+                    'status': 'success',
+                    'segments': [{'text': 'test', 'start': 0, 'end': 1}],
+                    'segment_count': 1,
+                    'language': 'en',
+                    'is_auto_generated': False,
+                    'caption_quality': 'high',
+                },
+                'vidNoCaps2x': {
+                    'video_id': 'vidNoCaps2x',
+                    'unavailable': True,
+                    'status': 'no_captions',
+                    'reason': 'no_captions_available',
+                    'caption_quality': 'low',
+                },
+                'vidError03x': {
+                    'video_id': 'vidError03x',
+                    'error': True,
+                    'status': 'error',
+                    'reason': 'Rate limited',
+                    'caption_quality': 'low',
+                },
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        # AC5: Pipeline should continue successfully
+        assert result.success is True, (
+            f"Pipeline should continue with mixed statuses: {result.error}"
+        )
+
+        # Verify counts
+        assert result.data.get('success_count') == 1, "1 video should succeed"
+        assert result.data.get('no_captions_count') == 1, "1 video should have no_captions"
+        assert result.data.get('fetch_failed_count') == 1, "1 video should have error"
+
+        # AC3: no_captions and error videos should be in needs_transcription
+        assert 'vidNoCaps2x' in stage.needs_transcription
+        assert 'vidError03x' in stage.needs_transcription
+        assert 'vidSuccess1x' not in stage.needs_transcription
+
+    @pytest.mark.integration
+    def test_info_log_for_no_captions_count(self, caplog):
+        """Test that INFO log is generated listing count of videos with no captions.
+
+        AC4: Add log message at INFO level listing count of videos with no captions available.
+        """
+        import logging
+
+        video_ids = ["vid001xxxxx", "vid002xxxxx", "vid003xxxxx"]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[MockVideoSearchResult(vid, 120.0) for vid in video_ids],
+        )
+
+        config = make_mock_config(retry_budget_config={'enabled': True, 'max_attempts': 100})
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        # 2 videos have no captions
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                'vid001xxxxx': {
+                    'video_id': 'vid001xxxxx',
+                    'status': 'success',
+                    'segments': [{'text': 'test', 'start': 0, 'end': 1}],
+                    'segment_count': 1,
+                    'language': 'en',
+                    'caption_quality': 'high',
+                },
+                'vid002xxxxx': {
+                    'video_id': 'vid002xxxxx',
+                    'unavailable': True,
+                    'status': 'no_captions',
+                    'reason': 'no_captions_available',
+                    'caption_quality': 'low',
+                },
+                'vid003xxxxx': {
+                    'video_id': 'vid003xxxxx',
+                    'unavailable': True,
+                    'status': 'no_captions',
+                    'reason': 'no_captions_available',
+                    'caption_quality': 'low',
+                },
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            with caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+                result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+
+        # AC4: Check for INFO log about no_captions count
+        log_messages = [r.message for r in caplog.records if 'US-63-006' in r.message]
+        assert len(log_messages) >= 1, (
+            f"Expected INFO log with US-63-006 about no_captions count. Logs: {[r.message for r in caplog.records]}"
+        )
+        assert '2 videos' in log_messages[0], (
+            f"Log should mention 2 videos with no captions: {log_messages[0]}"
+        )
