@@ -2799,7 +2799,11 @@ def generate_resolve_xml_with_bins(
         is_video = file_ext in video_exts
         is_image = file_ext in image_exts
         is_audio = file_ext in audio_exts
-        
+
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         xml_lines.extend([
             f'                    <clip id="masterclip-{file_info["file_id"]}">',
             f'                        <uuid>{file_info["uuid"]}</uuid>',
@@ -3107,7 +3111,11 @@ def _write_media_xml_part(
         audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
         is_video = file_ext in video_exts
         is_audio = file_ext in audio_exts
-        
+
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         clip_num = file_info["file_id"].replace("file-", "")
         
         part_lines.extend([

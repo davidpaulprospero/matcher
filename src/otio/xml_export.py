@@ -296,6 +296,10 @@ def generate_resolve_xml_with_bins(
         is_image = file_ext in image_exts
         is_audio = file_ext in audio_exts
 
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         # File definition must be at clip level (direct child of <clip>), not nested in media
         xml_lines.extend([
             f'                    <clip id="masterclip-{file_info["file_id"]}">',
@@ -451,6 +455,90 @@ def generate_resolve_xml_with_bins(
 
     xml_lines.extend([
         '                        </track>',
+    ])
+
+    # Add V2-V8 tracks (disabled by default)
+    # V2-V3: Alternatives, V4-V6: Secondary, V7-V8: Strategy
+    track_configs = []
+
+    # V2-V3: alternatives
+    for alt_idx in range(2):
+        track_configs.append({
+            'name': f'V{alt_idx + 2} - Alternative {alt_idx + 1}',
+            'get_match': lambda mr, idx=alt_idx: mr.alternatives[idx] if idx < len(mr.alternatives) else None,
+        })
+
+    # V4-V6: secondary_matches
+    for sec_idx in range(3):
+        track_configs.append({
+            'name': f'V{sec_idx + 4} - Secondary {sec_idx + 1}',
+            'get_match': lambda mr, idx=sec_idx: (
+                mr.secondary_matches[idx]
+                if hasattr(mr, 'secondary_matches') and mr.secondary_matches and idx < len(mr.secondary_matches)
+                else None
+            ),
+        })
+
+    # V7-V8: strategy_matches
+    for strat_idx in range(2):
+        strat_labels = ['Embedding-Diversity', 'B-roll Only']
+        track_configs.append({
+            'name': f'V{strat_idx + 7} - {strat_labels[strat_idx]}',
+            'get_match': lambda mr, idx=strat_idx: (
+                mr.strategy_matches[idx]
+                if hasattr(mr, 'strategy_matches') and mr.strategy_matches and idx < len(mr.strategy_matches)
+                else None
+            ),
+        })
+
+    for track_config in track_configs:
+        xml_lines.append('                        <track>')
+        # Disabled track
+        xml_lines.append('                            <enabled>FALSE</enabled>')
+
+        alt_timeline_pos = 0
+        for match_idx, match_result in enumerate(matches):
+            vo_seg = match_result.primary_match.voiceover_segment
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+            target_frames = int(target_duration * frame_rate)
+
+            alt_match = track_config['get_match'](match_result)
+            if alt_match is not None:
+                alt_seg = alt_match.video_segment
+                alt_source_duration = alt_seg.end_time - alt_seg.start_time
+                alt_source_start = alt_seg.start_time
+                alt_source_frames = int(alt_source_duration * frame_rate)
+
+                resolved_path, adjusted_start = _resolve_video_segment(
+                    alt_seg.source_file, alt_source_start, segment_lookup
+                )
+                alt_start_frames = int(adjusted_start * frame_rate)
+
+                file_info = all_files.get(resolved_path, {})
+                file_id = file_info.get('file_id', '')
+
+                segment_id = f"S{match_idx:03d}"
+                folder_name = Path(resolved_path).parent.name
+                base_name = Path(resolved_path).stem
+                unique_name = escape_xml(f"[{segment_id}] {folder_name}_{base_name}")
+
+                xml_lines.extend([
+                    '                            <clipitem>',
+                    f'                                <name>{unique_name}</name>',
+                    f'                                <duration>{target_frames}</duration>',
+                    f'                                <start>{alt_timeline_pos}</start>',
+                    f'                                <end>{alt_timeline_pos + target_frames}</end>',
+                    f'                                <in>{alt_start_frames}</in>',
+                    f'                                <out>{alt_start_frames + alt_source_frames}</out>',
+                    f'                                <file id="{file_id}"/>',
+                    '                            </clipitem>',
+                ])
+
+            alt_timeline_pos += target_frames
+
+        xml_lines.append('                        </track>')
+
+    xml_lines.extend([
         '                    </video>',
     ])
 
@@ -618,6 +706,10 @@ def _write_media_xml_part(
         is_image = file_ext in image_exts
         is_audio_only = file_ext in audio_exts and file_ext not in video_exts
 
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         clip_num = file_info["file_id"].replace("file-", "")
 
         # Skip audio-only files - DaVinci XML import doesn't handle them well
@@ -753,6 +845,136 @@ def _write_media_xml_part(
 
     generated_paths.append(str(output_path))
     logger.info(f"Saved media XML: {output_path} ({len(files_subset)} files)")
+
+
+def _add_sequence_alt_tracks(
+    xml_lines: list,
+    matches: List['MatchResult'],
+    frame_rate: float,
+    fps_int: int,
+    ntsc_str: str,
+    is_ntsc: bool,
+    segment_lookup: Dict,
+    file_ids: Dict,
+    width: int,
+    height: int,
+):
+    """Add V2-V8 disabled tracks to sequence XML."""
+    track_configs = []
+
+    # V2-V3: alternatives
+    for alt_idx in range(2):
+        track_configs.append({
+            'name': f'V{alt_idx + 2} - Alternative {alt_idx + 1}',
+            'get_match': lambda mr, idx=alt_idx: mr.alternatives[idx] if idx < len(mr.alternatives) else None,
+        })
+
+    # V4-V6: secondary_matches
+    for sec_idx in range(3):
+        track_configs.append({
+            'name': f'V{sec_idx + 4} - Secondary {sec_idx + 1}',
+            'get_match': lambda mr, idx=sec_idx: (
+                mr.secondary_matches[idx]
+                if hasattr(mr, 'secondary_matches') and mr.secondary_matches and idx < len(mr.secondary_matches)
+                else None
+            ),
+        })
+
+    # V7-V8: strategy_matches
+    for strat_idx in range(2):
+        strat_labels = ['Embedding-Diversity', 'B-roll Only']
+        track_configs.append({
+            'name': f'V{strat_idx + 7} - {strat_labels[strat_idx]}',
+            'get_match': lambda mr, idx=strat_idx: (
+                mr.strategy_matches[idx]
+                if hasattr(mr, 'strategy_matches') and mr.strategy_matches and idx < len(mr.strategy_matches)
+                else None
+            ),
+        })
+
+    for track_config in track_configs:
+        xml_lines.append('                <track>')
+        xml_lines.append('                    <enabled>FALSE</enabled>')
+
+        alt_timeline_pos = 0
+        for match_idx, match_result in enumerate(matches):
+            vo_seg = match_result.primary_match.voiceover_segment
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+            target_frames = int(target_duration * frame_rate)
+
+            alt_match = track_config['get_match'](match_result)
+            if alt_match is not None:
+                alt_seg = alt_match.video_segment
+                alt_source_start = alt_seg.start_time
+                alt_source_duration = alt_seg.end_time - alt_seg.start_time
+                alt_source_frames = int(alt_source_duration * frame_rate)
+
+                resolved_path, adjusted_start = _resolve_video_segment(
+                    alt_seg.source_file, alt_source_start, segment_lookup
+                )
+                in_frames = int(adjusted_start * frame_rate)
+                out_frames = in_frames + alt_source_frames
+
+                # Get or create file ID
+                if resolved_path not in file_ids:
+                    file_ids[resolved_path] = max(file_ids.values(), default=0) + 1
+                current_file_id = file_ids[resolved_path]
+
+                clip_name = escape_xml(Path(resolved_path).name)
+                path_url = format_path_url(resolved_path)
+                file_duration = max(alt_source_frames + in_frames, int(300 * frame_rate))
+
+                segment_id = f"S{match_idx:03d}"
+
+                xml_lines.extend([
+                    f'                    <clipitem id="{clip_name} {match_idx} {track_config["name"]}">',
+                    f'                        <name>{clip_name}</name>',
+                    f'                        <duration>{file_duration}</duration>',
+                    '                        <rate>',
+                    f'                            <timebase>{fps_int}</timebase>',
+                    f'                            <ntsc>{ntsc_str}</ntsc>',
+                    '                        </rate>',
+                    f'                        <start>{alt_timeline_pos}</start>',
+                    f'                        <end>{alt_timeline_pos + target_frames}</end>',
+                    '                        <enabled>TRUE</enabled>',
+                    f'                        <in>{in_frames}</in>',
+                    f'                        <out>{out_frames}</out>',
+                    f'                        <file id="{clip_name} {current_file_id}">',
+                    f'                            <duration>{file_duration}</duration>',
+                    '                            <rate>',
+                    f'                                <timebase>{fps_int}</timebase>',
+                    f'                                <ntsc>{ntsc_str}</ntsc>',
+                    '                            </rate>',
+                    f'                            <name>{clip_name}</name>',
+                    f'                            <pathurl>{path_url}</pathurl>',
+                    '                            <timecode>',
+                    '                                <string>00:00:00:00</string>',
+                    f'                                <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
+                    '                                <rate>',
+                    f'                                    <timebase>{fps_int}</timebase>',
+                    f'                                    <ntsc>{ntsc_str}</ntsc>',
+                    '                                </rate>',
+                    '                            </timecode>',
+                    '                            <media>',
+                    '                                <video>',
+                    f'                                    <duration>{file_duration}</duration>',
+                    '                                    <samplecharacteristics>',
+                    f'                                        <width>{width}</width>',
+                    f'                                        <height>{height}</height>',
+                    '                                    </samplecharacteristics>',
+                    '                                </video>',
+                    '                                <audio>',
+                    '                                    <channelcount>2</channelcount>',
+                    '                                </audio>',
+                    '                            </media>',
+                    '                        </file>',
+                    '                        <compositemode>normal</compositemode>',
+                    '                    </clipitem>',
+                ])
+
+            alt_timeline_pos += target_frames
+
+        xml_lines.append('                </track>')
 
 
 def generate_davinci_sequence_xml(
@@ -919,9 +1141,18 @@ def generate_davinci_sequence_xml(
 
         timeline_pos += target_frames
 
-    # Close video track
+    # Close V1 video track
     xml_lines.extend([
         '                </track>',
+    ])
+
+    # Add V2-V8 tracks (disabled by default)
+    _add_sequence_alt_tracks(
+        xml_lines, matches, frame_rate, fps_int, ntsc_str, is_ntsc,
+        segment_lookup, file_ids, width, height
+    )
+
+    xml_lines.extend([
         '            </video>',
     ])
 
