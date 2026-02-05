@@ -384,6 +384,23 @@ class CaptionStage(Stage):
                 if self._fetcher._using_adaptive_order:
                     print(f"  Using adaptive format order based on historical success rates")
 
+            # US-67-006: Load persisted format stats from .cache/caption_format_stats.json
+            # If adaptive ordering wasn't activated from in-memory cache, try the file
+            format_stats_file = None
+            _project_dir = getattr(state, 'project_dir', None)
+            if adaptive_enabled and _project_dir:
+                from ..caption.format_stats import FormatStatsFile
+                format_stats_file = FormatStatsFile(_project_dir)
+                if not getattr(self._fetcher, '_using_adaptive_order', False):
+                    persisted_order = format_stats_file.compute_order(
+                        default_formats=list(self._fetcher._default_formats),
+                    )
+                    if persisted_order:
+                        self._fetcher._preferred_formats = persisted_order
+                        self._fetcher._using_adaptive_order = True
+                        logger.info(f"[US-67-006] Loaded persisted format order: {persisted_order}")
+                        print(f"  Using persisted format order from previous run")
+
             # US-004: Get video durations for coverage calculation
             video_durations = self._get_video_durations(state, config)
 
@@ -1272,6 +1289,17 @@ class CaptionStage(Stage):
                     logger.info(f"Saved format statistics: {metrics.format_success_counts}")
                 else:
                     logger.warning("Failed to save format statistics to cache")
+
+            # US-67-006: Persist format stats to .cache/caption_format_stats.json
+            if format_stats_file is not None and metrics.format_success_counts:
+                from ..caption.format_stats import FormatStatsFile
+                stats_dict = FormatStatsFile.from_metrics_counts(
+                    success_counts=metrics.format_success_counts,
+                )
+                if format_stats_file.save(stats_dict):
+                    logger.info(f"[US-67-006] Persisted format stats to {format_stats_file.path}")
+                else:
+                    logger.warning("[US-67-006] Failed to persist format stats to file")
 
             # US-60-006: Set state.videos_needing_transcription for downstream TRANSCRIBE stage
             state.videos_needing_transcription = list(self.needs_transcription)
