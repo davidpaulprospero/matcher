@@ -1,188 +1,188 @@
-{
-    "sprintNumber": 65,
-    "focusArea": "config",
-    "branchName": "ralph/sprint-65",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
-    },
-    "userStories": [
-        {
-            "id": "US-65-001",
-            "title": "Generate sprint stories for config focus area",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'config' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'config'",
-                "Add stories US-65-002 through US-65-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-65-NNN to be unique across sprints",
-                "Mark this story (US-65-001) as passes: true when done"
-            ],
-            "notes": "Seed story completed. Generated 11 config improvement stories (US-65-002 through US-65-012) covering validation, utilities, error handling, type safety, and config documentation."
-        },
-        {
-            "id": "US-65-002",
-            "title": "Add safe_get_config_value utility to eliminate scattered dict/object dual-access",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Create safe_get_config_value(obj, key, default=None) function in src/config/utils.py that handles both dict .get() and dataclass getattr() access patterns",
-                "Function returns obj.get(key, default) when obj is a dict, and getattr(obj, key, default) when obj is a dataclass or object",
-                "Replace at least 5 scattered isinstance(x, dict)/getattr patterns in src/config/base.py with calls to safe_get_config_value",
-                "Replace dict/object dual-access patterns in src/cli/config_utils.py with calls to safe_get_config_value",
-                "Add unit tests in tests/test_config.py verifying safe_get_config_value works for dict input, dataclass input, and missing key with default"
-            ],
-            "notes": "Completed. Created src/config/utils.py with safe_get_config_value(). Replaced 11 patterns in base.py (_validate_enums, _validate_constraints, get_nested) and 2 in config_utils.py (validate_root_directories). Added 7 unit tests in TestSafeGetConfigValue class. Exported from src/config/__init__.py. All 297 config tests pass."
-        },
-        {
-            "id": "US-65-003",
-            "title": "Add __post_init__ to CaptionFirstConfig for nested dict-to-dataclass conversion",
-            "priority": "high",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Add __post_init__ method to CaptionFirstConfig in src/config/sections/download.py that converts nested dict fields to their proper dataclass types",
-                "The __post_init__ converts retry_budget field from dict to CaptionRetryBudgetConfig if it arrives as a dict",
-                "Loading config.yaml with caption_first section containing nested retry_budget as a dict produces a properly typed CaptionRetryBudgetConfig instance",
-                "Add test in tests/test_config.py that constructs CaptionFirstConfig with retry_budget as a raw dict and verifies it becomes CaptionRetryBudgetConfig after init",
-                "Existing tests in tests/test_caption_circuit_breaker.py continue to pass"
-            ],
-            "notes": "Tier: T1 (bug prevention). Implements CLAUDE.md Rule 2. Source file: src/config/sections/download.py (CaptionFirstConfig at ~line 265 has no __post_init__). Follow pattern from HealingConfig.__post_init__ in src/config/sections/infrastructure.py (~line 249) and IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (~line 95)."
-        },
-        {
-            "id": "US-65-004",
-            "title": "Expand Config.validate() with constraint validation for numeric ranges and threshold ordering",
-            "priority": "high",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Config.validate() in src/config/base.py validates that matching confidence thresholds are ordered: low_confidence_threshold <= ambiguous_threshold <= min_confidence <= high_confidence_threshold",
-                "Config.validate() validates that output.frame_rate > 0 and output.time_scale_factor > 0 when those fields exist",
-                "Config.validate() validates that duration tier min <= max for all configured duration tiers",
-                "Validation failures are collected and logged as warnings (not exceptions) consistent with existing validate() pattern",
-                "Add tests that create Config objects with invalid threshold ordering and verify warnings are generated"
-            ],
-            "notes": "Tier: T2 (robustness). Source file: src/config/base.py validate() method at lines ~537-602. Currently only validates API keys, a few value ranges, and 2-3 enum fields. Duration tiers are in src/config/sections/duration.py, matching thresholds in src/config/sections/matching.py (lines ~175-180), output fields in src/config/sections/output.py (~line 120). Sprint 44 US-44-003 already added pipeline-level validation; this expands the Config-level validate()."
-        },
-        {
-            "id": "US-65-005",
-            "title": "Replace silent config loading fallback with explicit error logging",
-            "priority": "high",
-            "passes": false,
-            "acceptanceCriteria": [
-                "The _build_dataclass method in src/config/base.py logs a warning that includes the specific field names that failed when falling back to empty defaults",
-                "Critical config sections (download, matching, output) raise ConfigError instead of silently returning empty defaults when construction fails",
-                "Optional config sections (broll, entity, media) continue to use silent fallback with a debug-level log message",
-                "Add a CRITICAL_SECTIONS list or similar marker in base.py that distinguishes critical from optional sections",
-                "Add test that attempts to load a malformed critical section and verifies ConfigError is raised with a descriptive message"
-            ],
-            "notes": "Tier: T2 (error handling). Source file: src/config/base.py _build_dataclass() at lines ~437-441. Current code catches TypeError and returns empty dataclass_type() silently. The fix should differentiate critical sections (download, matching, output, infrastructure) from optional (broll, entity, media, keywords). Pattern: check if section name is in CRITICAL_SECTIONS before deciding error vs warning."
-        },
-        {
-            "id": "US-65-006",
-            "title": "Add missing config.yaml sections for broll, iterative_matching, and negative_matching",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "config.yaml contains a documented broll section with all fields from BrollConfig in src/config/sections/broll.py and their defaults",
-                "config.yaml contains a documented iterative_matching section with all fields from IterativeMatchingConfig in src/config/sections/iterative_matching.py and their defaults",
-                "config.yaml contains a documented negative_matching subsection under matching with all fields from NegativeMatchingConfig in src/config/sections/matching.py",
-                "Each new section has inline YAML comments explaining the purpose of each field",
-                "Loading config.yaml with python still produces a valid Config object (python -m py_compile src/config/base.py passes)"
-            ],
-            "notes": "Tier: T2 (documentation/completeness). Source files: config.yaml (currently missing these sections entirely), src/config/sections/broll.py (BrollConfig at ~line 89), src/config/sections/iterative_matching.py (IterativeMatchingConfig at ~line 95), src/config/sections/matching.py (NegativeMatchingConfig). Follow existing config.yaml patterns with inline comments. CLAUDE.md Rule 1: Update BOTH config.yaml AND dataclasses (dataclasses already exist)."
-        },
-        {
-            "id": "US-65-007",
-            "title": "Add type hints for bare dict fields in matching and download config dataclasses",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "caption_quality_weights field in MatchingConfig (src/config/sections/matching.py) uses Optional[Dict[str, float]] instead of bare dict",
-                "multimodal_weights field in MatchingConfig uses Optional[Dict[str, float]] instead of bare dict",
-                "Any other bare dict fields in matching.py and download.py are updated to use properly typed Dict[str, T] annotations",
-                "Import Dict and Optional from typing are added where needed",
-                "python -m py_compile src/config/sections/matching.py and python -m py_compile src/config/sections/download.py both pass"
-            ],
-            "notes": "Tier: T1 (type safety). Source files: src/config/sections/matching.py (lines ~300-364 have dict = None fields), src/config/sections/download.py (check for bare dict fields). The fix is mechanical: replace 'dict' with 'Optional[Dict[str, float]]' or appropriate typed Dict. Follow existing patterns where Dict is already used (e.g., download.py line ~403 retry_budgets: Dict[str, int])."
-        },
-        {
-            "id": "US-65-008",
-            "title": "Re-validate config sections after CLI merge overrides are applied",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "After merge_config() in src/cli/config_utils.py applies all overrides, __post_init__() is called on each modified config section that has one",
-                "Duration tier merges trigger DurationTiersConfig.__post_init__() to re-validate min <= max constraints",
-                "Healing config merges trigger HealingConfig.__post_init__() to re-convert nested dicts",
-                "Add test that merges an invalid duration tier override (min > max) and verifies the post-merge validation catches it",
-                "Existing merge behavior is preserved for valid overrides (no regressions in config loading)"
-            ],
-            "notes": "Tier: T2 (correctness). Source files: src/cli/config_utils.py merge_config() at lines ~235-292, specifically lines ~276-282 for duration tier merges. Currently merges raw values without re-validating. The fix: after _merge_single_tier() calls, invoke __post_init__() on the parent config section. Check which sections have __post_init__: duration.py, infrastructure.py, matching.py, iterative_matching.py, keywords.py, llm.py, broll.py."
-        },
-        {
-            "id": "US-65-009",
-            "title": "Unify path resolution between base.py and cli/config_utils.py into single implementation",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Path resolution logic exists in exactly one location (src/config/base.py _resolve_paths or a new shared function)",
-                "src/cli/config_utils.py make_paths_project_relative() delegates to the shared path resolution instead of reimplementing",
-                "Project-relative paths are only resolved once during config loading (no double-resolution)",
-                "Paths containing forward slashes, backslashes, and mixed separators all resolve correctly on Windows",
-                "Add test that loads config with relative paths and verifies they resolve to absolute project-relative paths exactly once"
-            ],
-            "notes": "Tier: T2 (deduplication). Source files: src/config/base.py _resolve_paths() at lines ~245-283, src/cli/config_utils.py make_paths_project_relative() at lines ~71-100. Both functions try to resolve paths but with different logic. The unified function should handle: download.root_dir, download.download_dir, transcription.cache_dir, image_search.root_dir. CLAUDE.md Rule 14 (OTIO paths use file:/// URLs) should be preserved."
-        },
-        {
-            "id": "US-65-010",
-            "title": "Add MatchingConfig __post_init__ validation for confidence threshold ranges",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "MatchingConfig in src/config/sections/matching.py has a __post_init__ method that validates all float confidence fields are in range 0.0-1.0",
-                "Fields validated include: min_confidence, high_confidence_threshold, low_confidence_threshold, ambiguous_threshold, skip_llm_threshold, confidence_threshold",
-                "Out-of-range values are clamped to 0.0-1.0 with a logger.warning message (consistent with IterativeMatchingConfig pattern)",
-                "Integer fields (max_videos_per_segment, max_results, min_results) are validated as positive with logger.warning if <= 0",
-                "Add test constructing MatchingConfig with out-of-range confidence (e.g., 1.5) and verify it is clamped to 1.0"
-            ],
-            "notes": "Tier: T2 (validation). Source file: src/config/sections/matching.py. MatchingConfig has 50+ fields but NO __post_init__ validation. Follow clamping pattern from IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (lines ~95-107). The existing __post_init__ in matching.py only handles nested dataclass conversion for location_matching, chapter_detection, scoring - it does not validate numeric ranges."
-        },
-        {
-            "id": "US-65-011",
-            "title": "Add EmbeddingConfig __post_init__ validation for batch_size and model settings",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "EmbeddingConfig in src/config/sections/core.py has a __post_init__ method that validates batch_size >= 1",
-                "The __post_init__ validates that provider field is one of the known providers ('sentence-transformers', 'openai', etc.) or logs a warning for unknown providers",
-                "Invalid batch_size values (0 or negative) are corrected to 1 with a logger.warning",
-                "Add test constructing EmbeddingConfig with batch_size=0 and verifying it becomes 1 after init",
-                "python -m py_compile src/config/sections/core.py passes"
-            ],
-            "notes": "Tier: T1 (validation). Source file: src/config/sections/core.py (EmbeddingConfig class, no existing __post_init__). Follow the clamping+warning pattern from TranscriptionConfig.__post_init__ in the same file (~line 107). Known providers can be found by grepping for embedding provider references in src/transcription/ and src/embeddings.py."
-        },
-        {
-            "id": "US-65-012",
-            "title": "Extract hardcoded project name truncation length to config",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "ProjectConfig in src/config/sections/core.py has a max_name_display_length field defaulting to 15",
-                "src/config/base.py uses config.project.max_name_display_length instead of hardcoded 15 for project name truncation",
-                "config.yaml project section documents the max_name_display_length field with a comment explaining its purpose",
-                "Default behavior is unchanged (truncation at 15 chars) unless explicitly overridden in config",
-                "Add test verifying that project names longer than max_name_display_length are truncated to that length"
-            ],
-            "notes": "Tier: T1 (configurability). Source files: src/config/base.py (line ~260 has project_name = project_name[:15] hardcoded), src/config/sections/core.py (ProjectConfig class). The fix adds one field to ProjectConfig and replaces the hardcoded [:15] slice with [:config_value]. config.yaml needs a comment under the project section."
-        }
-    ]
+﻿{
+    "sprintNumber":  65,
+    "focusArea":  "config",
+    "branchName":  "ralph/sprint-65",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-65-001",
+                            "title":  "Generate sprint stories for config focus area",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027config\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027config\u0027",
+                                                       "Add stories US-65-002 through US-65-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-65-NNN to be unique across sprints",
+                                                       "Mark this story (US-65-001) as passes: true when done"
+                                                   ],
+                            "notes":  "Seed story completed. Generated 11 config improvement stories (US-65-002 through US-65-012) covering validation, utilities, error handling, type safety, and config documentation."
+                        },
+                        {
+                            "id":  "US-65-002",
+                            "title":  "Add safe_get_config_value utility to eliminate scattered dict/object dual-access",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Create safe_get_config_value(obj, key, default=None) function in src/config/utils.py that handles both dict .get() and dataclass getattr() access patterns",
+                                                       "Function returns obj.get(key, default) when obj is a dict, and getattr(obj, key, default) when obj is a dataclass or object",
+                                                       "Replace at least 5 scattered isinstance(x, dict)/getattr patterns in src/config/base.py with calls to safe_get_config_value",
+                                                       "Replace dict/object dual-access patterns in src/cli/config_utils.py with calls to safe_get_config_value",
+                                                       "Add unit tests in tests/test_config.py verifying safe_get_config_value works for dict input, dataclass input, and missing key with default"
+                                                   ],
+                            "notes":  "Evidence gate: 0/5 criteria verified (0%). Minimum: 90%."
+                        },
+                        {
+                            "id":  "US-65-003",
+                            "title":  "Add __post_init__ to CaptionFirstConfig for nested dict-to-dataclass conversion",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Add __post_init__ method to CaptionFirstConfig in src/config/sections/download.py that converts nested dict fields to their proper dataclass types",
+                                                       "The __post_init__ converts retry_budget field from dict to CaptionRetryBudgetConfig if it arrives as a dict",
+                                                       "Loading config.yaml with caption_first section containing nested retry_budget as a dict produces a properly typed CaptionRetryBudgetConfig instance",
+                                                       "Add test in tests/test_config.py that constructs CaptionFirstConfig with retry_budget as a raw dict and verifies it becomes CaptionRetryBudgetConfig after init",
+                                                       "Existing tests in tests/test_caption_circuit_breaker.py continue to pass"
+                                                   ],
+                            "notes":  "Tier: T1 (bug prevention). Implements CLAUDE.md Rule 2. Source file: src/config/sections/download.py (CaptionFirstConfig at ~line 265 has no __post_init__). Follow pattern from HealingConfig.__post_init__ in src/config/sections/infrastructure.py (~line 249) and IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (~line 95)."
+                        },
+                        {
+                            "id":  "US-65-004",
+                            "title":  "Expand Config.validate() with constraint validation for numeric ranges and threshold ordering",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Config.validate() in src/config/base.py validates that matching confidence thresholds are ordered: low_confidence_threshold \u003c= ambiguous_threshold \u003c= min_confidence \u003c= high_confidence_threshold",
+                                                       "Config.validate() validates that output.frame_rate \u003e 0 and output.time_scale_factor \u003e 0 when those fields exist",
+                                                       "Config.validate() validates that duration tier min \u003c= max for all configured duration tiers",
+                                                       "Validation failures are collected and logged as warnings (not exceptions) consistent with existing validate() pattern",
+                                                       "Add tests that create Config objects with invalid threshold ordering and verify warnings are generated"
+                                                   ],
+                            "notes":  "Tier: T2 (robustness). Source file: src/config/base.py validate() method at lines ~537-602. Currently only validates API keys, a few value ranges, and 2-3 enum fields. Duration tiers are in src/config/sections/duration.py, matching thresholds in src/config/sections/matching.py (lines ~175-180), output fields in src/config/sections/output.py (~line 120). Sprint 44 US-44-003 already added pipeline-level validation; this expands the Config-level validate()."
+                        },
+                        {
+                            "id":  "US-65-005",
+                            "title":  "Replace silent config loading fallback with explicit error logging",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "The _build_dataclass method in src/config/base.py logs a warning that includes the specific field names that failed when falling back to empty defaults",
+                                                       "Critical config sections (download, matching, output) raise ConfigError instead of silently returning empty defaults when construction fails",
+                                                       "Optional config sections (broll, entity, media) continue to use silent fallback with a debug-level log message",
+                                                       "Add a CRITICAL_SECTIONS list or similar marker in base.py that distinguishes critical from optional sections",
+                                                       "Add test that attempts to load a malformed critical section and verifies ConfigError is raised with a descriptive message"
+                                                   ],
+                            "notes":  "Implemented: Added ConfigError exception class and CRITICAL_SECTIONS frozenset to base.py. _build_dataclass now accepts section_name param; critical sections raise ConfigError with field names, optional sections fall back to defaults with debug log. _from_dict passes yaml_key as section_name. 29 tests in test_config_build_dataclass_errors.py. All 537 config tests pass (1 pre-existing failure in test_config_post_init.py unrelated)."
+                        },
+                        {
+                            "id":  "US-65-006",
+                            "title":  "Add missing config.yaml sections for broll, iterative_matching, and negative_matching",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "config.yaml contains a documented broll section with all fields from BrollConfig in src/config/sections/broll.py and their defaults",
+                                                       "config.yaml contains a documented iterative_matching section with all fields from IterativeMatchingConfig in src/config/sections/iterative_matching.py and their defaults",
+                                                       "config.yaml contains a documented negative_matching subsection under matching with all fields from NegativeMatchingConfig in src/config/sections/matching.py",
+                                                       "Each new section has inline YAML comments explaining the purpose of each field",
+                                                       "Loading config.yaml with python still produces a valid Config object (python -m py_compile src/config/base.py passes)"
+                                                   ],
+                            "notes":  "Tier: T2 (documentation/completeness). Source files: config.yaml (currently missing these sections entirely), src/config/sections/broll.py (BrollConfig at ~line 89), src/config/sections/iterative_matching.py (IterativeMatchingConfig at ~line 95), src/config/sections/matching.py (NegativeMatchingConfig). Follow existing config.yaml patterns with inline comments. CLAUDE.md Rule 1: Update BOTH config.yaml AND dataclasses (dataclasses already exist)."
+                        },
+                        {
+                            "id":  "US-65-007",
+                            "title":  "Add type hints for bare dict fields in matching and download config dataclasses",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "caption_quality_weights field in MatchingConfig (src/config/sections/matching.py) uses Optional[Dict[str, float]] instead of bare dict",
+                                                       "multimodal_weights field in MatchingConfig uses Optional[Dict[str, float]] instead of bare dict",
+                                                       "Any other bare dict fields in matching.py and download.py are updated to use properly typed Dict[str, T] annotations",
+                                                       "Import Dict and Optional from typing are added where needed",
+                                                       "python -m py_compile src/config/sections/matching.py and python -m py_compile src/config/sections/download.py both pass"
+                                                   ],
+                            "notes":  "Tier: T1 (type safety). Source files: src/config/sections/matching.py (lines ~300-364 have dict = None fields), src/config/sections/download.py (check for bare dict fields). The fix is mechanical: replace \u0027dict\u0027 with \u0027Optional[Dict[str, float]]\u0027 or appropriate typed Dict. Follow existing patterns where Dict is already used (e.g., download.py line ~403 retry_budgets: Dict[str, int])."
+                        },
+                        {
+                            "id":  "US-65-008",
+                            "title":  "Re-validate config sections after CLI merge overrides are applied",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "After merge_config() in src/cli/config_utils.py applies all overrides, __post_init__() is called on each modified config section that has one",
+                                                       "Duration tier merges trigger DurationTiersConfig.__post_init__() to re-validate min \u003c= max constraints",
+                                                       "Healing config merges trigger HealingConfig.__post_init__() to re-convert nested dicts",
+                                                       "Add test that merges an invalid duration tier override (min \u003e max) and verifies the post-merge validation catches it",
+                                                       "Existing merge behavior is preserved for valid overrides (no regressions in config loading)"
+                                                   ],
+                            "notes":  "Tier: T2 (correctness). Source files: src/cli/config_utils.py merge_config() at lines ~235-292, specifically lines ~276-282 for duration tier merges. Currently merges raw values without re-validating. The fix: after _merge_single_tier() calls, invoke __post_init__() on the parent config section. Check which sections have __post_init__: duration.py, infrastructure.py, matching.py, iterative_matching.py, keywords.py, llm.py, broll.py."
+                        },
+                        {
+                            "id":  "US-65-009",
+                            "title":  "Unify path resolution between base.py and cli/config_utils.py into single implementation",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Path resolution logic exists in exactly one location (src/config/base.py _resolve_paths or a new shared function)",
+                                                       "src/cli/config_utils.py make_paths_project_relative() delegates to the shared path resolution instead of reimplementing",
+                                                       "Project-relative paths are only resolved once during config loading (no double-resolution)",
+                                                       "Paths containing forward slashes, backslashes, and mixed separators all resolve correctly on Windows",
+                                                       "Add test that loads config with relative paths and verifies they resolve to absolute project-relative paths exactly once"
+                                                   ],
+                            "notes":  "Tier: T2 (deduplication). Source files: src/config/base.py _resolve_paths() at lines ~245-283, src/cli/config_utils.py make_paths_project_relative() at lines ~71-100. Both functions try to resolve paths but with different logic. The unified function should handle: download.root_dir, download.download_dir, transcription.cache_dir, image_search.root_dir. CLAUDE.md Rule 14 (OTIO paths use file:/// URLs) should be preserved."
+                        },
+                        {
+                            "id":  "US-65-010",
+                            "title":  "Add MatchingConfig __post_init__ validation for confidence threshold ranges",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "MatchingConfig in src/config/sections/matching.py has a __post_init__ method that validates all float confidence fields are in range 0.0-1.0",
+                                                       "Fields validated include: min_confidence, high_confidence_threshold, low_confidence_threshold, ambiguous_threshold, skip_llm_threshold, confidence_threshold",
+                                                       "Out-of-range values are clamped to 0.0-1.0 with a logger.warning message (consistent with IterativeMatchingConfig pattern)",
+                                                       "Integer fields (max_videos_per_segment, max_results, min_results) are validated as positive with logger.warning if \u003c= 0",
+                                                       "Add test constructing MatchingConfig with out-of-range confidence (e.g., 1.5) and verify it is clamped to 1.0"
+                                                   ],
+                            "notes":  "Tier: T2 (validation). Source file: src/config/sections/matching.py. MatchingConfig has 50+ fields but NO __post_init__ validation. Follow clamping pattern from IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (lines ~95-107). The existing __post_init__ in matching.py only handles nested dataclass conversion for location_matching, chapter_detection, scoring - it does not validate numeric ranges."
+                        },
+                        {
+                            "id":  "US-65-011",
+                            "title":  "Add EmbeddingConfig __post_init__ validation for batch_size and model settings",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "EmbeddingConfig in src/config/sections/core.py has a __post_init__ method that validates batch_size \u003e= 1",
+                                                       "The __post_init__ validates that provider field is one of the known providers (\u0027sentence-transformers\u0027, \u0027openai\u0027, etc.) or logs a warning for unknown providers",
+                                                       "Invalid batch_size values (0 or negative) are corrected to 1 with a logger.warning",
+                                                       "Add test constructing EmbeddingConfig with batch_size=0 and verifying it becomes 1 after init",
+                                                       "python -m py_compile src/config/sections/core.py passes"
+                                                   ],
+                            "notes":  "Tier: T1 (validation). Source file: src/config/sections/core.py (EmbeddingConfig class, no existing __post_init__). Follow the clamping+warning pattern from TranscriptionConfig.__post_init__ in the same file (~line 107). Known providers can be found by grepping for embedding provider references in src/transcription/ and src/embeddings.py."
+                        },
+                        {
+                            "id":  "US-65-012",
+                            "title":  "Extract hardcoded project name truncation length to config",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "ProjectConfig in src/config/sections/core.py has a max_name_display_length field defaulting to 15",
+                                                       "src/config/base.py uses config.project.max_name_display_length instead of hardcoded 15 for project name truncation",
+                                                       "config.yaml project section documents the max_name_display_length field with a comment explaining its purpose",
+                                                       "Default behavior is unchanged (truncation at 15 chars) unless explicitly overridden in config",
+                                                       "Add test verifying that project names longer than max_name_display_length are truncated to that length"
+                                                   ],
+                            "notes":  "Tier: T1 (configurability). Source files: src/config/base.py (line ~260 has project_name = project_name[:15] hardcoded), src/config/sections/core.py (ProjectConfig class). The fix adds one field to ProjectConfig and replaces the hardcoded [:15] slice with [:config_value]. config.yaml needs a comment under the project section."
+                        }
+                    ]
 }

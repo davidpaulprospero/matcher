@@ -20,6 +20,8 @@ from __future__ import annotations
 # Main config class and functions
 from .base import (
     Config,
+    ConfigError,
+    CRITICAL_SECTIONS,
     load_config,
     get_config,
     set_config,
@@ -91,6 +93,8 @@ from .sections import (
 __all__ = [
     # Main config and functions
     'Config',
+    'ConfigError',
+    'CRITICAL_SECTIONS',
     'load_config',
     'get_config',
     'set_config',

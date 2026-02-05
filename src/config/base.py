@@ -122,6 +122,21 @@ logger = logging.getLogger(__name__)
 # Type variable for dataclass building
 T = TypeVar('T')
 
+
+class ConfigError(Exception):
+    """Raised when a critical config section fails to build from YAML data."""
+    pass
+
+
+# Sections whose construction failure should raise ConfigError instead of
+# silently returning empty defaults.  These are the sections without which
+# the pipeline cannot produce meaningful output.
+CRITICAL_SECTIONS = frozenset({
+    'download', 'downloading', 'matching', 'output',
+    'transcription', 'embedding', 'pipeline', 'llm',
+    'healing', 'logging', 'cache', 'api_keys', 'project',
+})
+
 # =============================================================================
 # PERFORMANCE TRACKING
 # =============================================================================
@@ -341,7 +356,7 @@ class Config:
 
         # Project settings
         if 'project' in data:
-            config.project = cls._build_dataclass(ProjectConfig, data['project'])
+            config.project = cls._build_dataclass(ProjectConfig, data['project'], section_name='project')
 
         config.project_dir = data.get('project_dir', config.project_dir)
 
@@ -379,7 +394,7 @@ class Config:
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():
             section_data = data.get(yaml_key, {})
             if section_data:
-                section_config = cls._build_dataclass(dataclass_type, section_data)
+                section_config = cls._build_dataclass(dataclass_type, section_data, section_name=yaml_key)
                 setattr(config, attr_name, section_config)
 
         # Handle duration_tiers specially (nested structure)
@@ -389,8 +404,17 @@ class Config:
         return config
 
     @staticmethod
-    def _build_dataclass(dataclass_type: Type[T], data: Dict) -> T:
-        """Build a dataclass from dict, handling missing/extra fields and nested dataclasses"""
+    def _build_dataclass(dataclass_type: Type[T], data: Dict, section_name: Optional[str] = None) -> T:
+        """Build a dataclass from dict, handling missing/extra fields and nested dataclasses.
+
+        Args:
+            dataclass_type: The dataclass type to construct.
+            data: Dictionary of field values from YAML.
+            section_name: Optional config section name (e.g. 'download').
+                When provided, critical sections raise ConfigError on failure
+                while optional sections fall back to empty defaults with a
+                debug-level log message.
+        """
         if not data:
             return dataclass_type()
 
@@ -439,8 +463,21 @@ class Config:
         try:
             return dataclass_type(**filtered_data)
         except TypeError as e:
-            logger.warning(f"Error building {dataclass_type.__name__}: {e}")
-            return dataclass_type()
+            failed_fields = list(data.keys())
+            is_critical = section_name is not None and section_name in CRITICAL_SECTIONS
+
+            if is_critical:
+                raise ConfigError(
+                    f"Critical config section '{section_name}' ({dataclass_type.__name__}) "
+                    f"failed to build: {e}. Fields provided: {failed_fields}"
+                ) from e
+            else:
+                # Optional section — fall back to empty defaults
+                logger.debug(
+                    f"Optional config section '{section_name or dataclass_type.__name__}' "
+                    f"falling back to defaults: {e}. Fields that failed: {failed_fields}"
+                )
+                return dataclass_type()
 
     @staticmethod
     def _build_duration_tiers(data: Dict) -> DurationTiersConfig:
