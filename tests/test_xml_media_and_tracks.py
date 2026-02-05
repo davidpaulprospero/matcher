@@ -395,7 +395,7 @@ class TestSegmentLookupResolution:
 
     @pytest.mark.fast
     def test_get_segment_file_duration_found(self):
-        """_get_segment_file_duration returns physical segment duration."""
+        """_get_segment_file_duration returns physical segment duration when no file on disk."""
         segments = [
             SegmentInfo(
                 video_id="vid123",
@@ -405,6 +405,9 @@ class TestSegmentLookupResolution:
             )
         ]
         lookup = _build_segment_lookup(segments)
+        # File doesn't exist on disk, so falls back to segment range
+        from src.otio.xml_export import _ffprobe_cache
+        _ffprobe_cache.pop("E:/v/project/vid123_100_200.mp4", None)
         dur = _get_segment_file_duration("E:/v/project/vid123_100_200.mp4", lookup)
         assert dur == 100.0
 
@@ -414,6 +417,43 @@ class TestSegmentLookupResolution:
         lookup = _build_segment_lookup([])
         dur = _get_segment_file_duration("unknown_path.mp4", lookup, fallback_duration=42.0)
         assert dur == 42.0
+
+    @pytest.mark.fast
+    def test_get_segment_file_duration_prefers_ffprobe(self):
+        """_get_segment_file_duration uses ffprobe over segment range when file exists."""
+        segments = [
+            SegmentInfo(
+                video_id="vid123",
+                file="/fake/vid123_100_200.mp4",
+                original_start=100.0,
+                original_end=200.0
+            )
+        ]
+        lookup = _build_segment_lookup(segments)
+        from src.otio.xml_export import _ffprobe_cache
+        _ffprobe_cache.pop("/fake/vid123_100_200.mp4", None)
+        # Mock ffprobe returning a slightly shorter real duration
+        with patch('src.otio.xml_export._get_media_duration', return_value=97.35):
+            with patch('pathlib.Path.exists', return_value=True):
+                dur = _get_segment_file_duration("/fake/vid123_100_200.mp4", lookup)
+        _ffprobe_cache.pop("/fake/vid123_100_200.mp4", None)
+        assert dur == 97.35, f"Expected ffprobe duration 97.35, got {dur}"
+
+    @pytest.mark.fast
+    def test_get_segment_file_duration_caches_ffprobe_result(self):
+        """_get_segment_file_duration caches ffprobe results per path."""
+        from src.otio.xml_export import _ffprobe_cache
+        _ffprobe_cache.pop("/fake/cached_test.mp4", None)
+        lookup = _build_segment_lookup([])
+        with patch('src.otio.xml_export._get_media_duration', return_value=55.5) as mock_probe:
+            with patch('pathlib.Path.exists', return_value=True):
+                dur1 = _get_segment_file_duration("/fake/cached_test.mp4", lookup)
+                dur2 = _get_segment_file_duration("/fake/cached_test.mp4", lookup)
+        _ffprobe_cache.pop("/fake/cached_test.mp4", None)
+        assert dur1 == 55.5
+        assert dur2 == 55.5
+        # ffprobe called only once due to caching
+        assert mock_probe.call_count == 1
 
 
 # ============================================================================
