@@ -661,14 +661,6 @@ class Config:
         """Validate constraint relationships between config values"""
         errors = []
 
-        # min_confidence should be <= high_confidence_threshold
-        high_conf = safe_get_config_value(self.matching, 'high_confidence_threshold', 0.85)
-        if self.matching.min_confidence > high_conf:
-            errors.append(
-                f"matching.min_confidence ({self.matching.min_confidence}) should be <= "
-                f"high_confidence_threshold ({high_conf})"
-            )
-
         # embedding_candidates should be >= num_alternatives * 3 for diversity
         num_alts = safe_get_config_value(self.output, 'num_alternatives', 2)
         embed_candidates = safe_get_config_value(self.matching, 'embedding_candidates', 50)
@@ -697,6 +689,55 @@ class Config:
                     f"transcription.pause_split.min_gap_ms ({min_gap}ms) should be >= "
                     f"min_segment_duration ({min_seg}s = {min_seg * 1000}ms)"
                 )
+
+        # Matching confidence threshold ordering:
+        # low_confidence_threshold <= ambiguous_threshold <= min_confidence <= high_confidence_threshold
+        low_conf = safe_get_config_value(self.matching, 'low_confidence_threshold', 0.5)
+        ambig = safe_get_config_value(self.matching, 'ambiguous_threshold', 0.6)
+        min_conf = safe_get_config_value(self.matching, 'min_confidence', 0.7)
+        high_conf = safe_get_config_value(self.matching, 'high_confidence_threshold', 0.85)
+
+        if low_conf > ambig:
+            errors.append(
+                f"matching.low_confidence_threshold ({low_conf}) should be <= "
+                f"ambiguous_threshold ({ambig})"
+            )
+        if ambig > min_conf:
+            errors.append(
+                f"matching.ambiguous_threshold ({ambig}) should be <= "
+                f"min_confidence ({min_conf})"
+            )
+        if min_conf > high_conf:
+            errors.append(
+                f"matching.min_confidence ({min_conf}) should be <= "
+                f"high_confidence_threshold ({high_conf})"
+            )
+
+        # Output positive value checks
+        frame_rate = safe_get_config_value(self.output, 'frame_rate', 30.0)
+        if frame_rate is not None and frame_rate <= 0:
+            errors.append(
+                f"output.frame_rate must be > 0, got {frame_rate}"
+            )
+        time_scale = safe_get_config_value(self.output, 'time_scale_factor', 1.0)
+        if time_scale is not None and time_scale <= 0:
+            errors.append(
+                f"output.time_scale_factor must be > 0, got {time_scale}"
+            )
+
+        # Duration tier min <= max for all configured tiers
+        duration_tiers = safe_get_config_value(self, 'duration_tiers')
+        if duration_tiers:
+            for tier_name in ['short', 'medium', 'long', 'longer']:
+                tier = safe_get_config_value(duration_tiers, tier_name)
+                if tier:
+                    tier_min = safe_get_config_value(tier, 'min_seconds', 0)
+                    tier_max = safe_get_config_value(tier, 'max_seconds', 0)
+                    if tier_min > 0 and tier_max > 0 and tier_min > tier_max:
+                        errors.append(
+                            f"duration_tiers.{tier_name}: min_seconds ({tier_min}) "
+                            f"should be <= max_seconds ({tier_max})"
+                        )
 
         return errors
 

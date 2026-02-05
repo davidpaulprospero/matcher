@@ -1279,5 +1279,151 @@ download:
         assert config.download.cookies_path == ""
 
 
+# =============================================================================
+# US-65-004: Expanded constraint validation tests
+# =============================================================================
+
+@pytest.mark.fast
+class TestThresholdOrderingValidation:
+    """Test matching confidence threshold ordering validation."""
+
+    @pytest.mark.parametrize("low,ambig,min_c,high,expected_errors", [
+        (0.5, 0.6, 0.7, 0.85, 0),   # Default ordering - valid
+        (0.3, 0.4, 0.5, 0.9, 0),     # All properly ordered - valid
+        (0.5, 0.5, 0.5, 0.5, 0),     # All equal - valid (edge case)
+        (0.7, 0.6, 0.7, 0.85, 1),    # low > ambig - 1 error
+        (0.5, 0.8, 0.7, 0.85, 1),    # ambig > min - 1 error
+        (0.5, 0.6, 0.9, 0.85, 1),    # min > high - 1 error
+        (0.9, 0.3, 0.5, 0.85, 1),    # low > ambig - 1 error
+        (0.9, 0.8, 0.7, 0.6, 3),     # Fully reversed - 3 errors
+    ])
+    def test_threshold_ordering(self, low, ambig, min_c, high, expected_errors, tmp_path):
+        """Test threshold ordering validation catches misordered thresholds."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+matching:
+  low_confidence_threshold: {low}
+  ambiguous_threshold: {ambig}
+  min_confidence: {min_c}
+  high_confidence_threshold: {high}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        threshold_errors = [e for e in errors if "threshold" in e.lower() or "ambiguous" in e.lower() or "min_confidence" in e.lower() and "should be <=" in e]
+        assert len(threshold_errors) == expected_errors, f"Expected {expected_errors} errors, got {len(threshold_errors)}: {threshold_errors}"
+
+    def test_threshold_errors_in_validate(self, tmp_path):
+        """Test threshold ordering errors appear in full validate() output."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+matching:
+  low_confidence_threshold: 0.9
+  ambiguous_threshold: 0.3
+  min_confidence: 0.7
+  high_confidence_threshold: 0.85
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config.validate()
+        assert any("low_confidence_threshold" in e and "ambiguous_threshold" in e for e in errors)
+
+
+@pytest.mark.fast
+class TestOutputPositiveValueValidation:
+    """Test output.frame_rate and output.time_scale_factor positive value validation."""
+
+    @pytest.mark.parametrize("frame_rate,should_error", [
+        (30.0, False),   # Default - valid
+        (24.0, False),   # 24fps - valid
+        (0.001, False),  # Very small positive - valid
+        (0, True),       # Zero - invalid
+        (-1, True),      # Negative - invalid
+        (-30.0, True),   # Negative - invalid
+    ])
+    def test_frame_rate_validation(self, frame_rate, should_error, tmp_path):
+        """Test frame_rate > 0 validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+output:
+  frame_rate: {frame_rate}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        frame_errors = [e for e in errors if "frame_rate" in e]
+        if should_error:
+            assert len(frame_errors) > 0, f"Expected error for frame_rate={frame_rate}"
+        else:
+            assert len(frame_errors) == 0, f"Unexpected error for frame_rate={frame_rate}: {frame_errors}"
+
+    @pytest.mark.parametrize("time_scale,should_error", [
+        (1.0, False),    # Default - valid
+        (1.065, False),  # Scaled up - valid
+        (0.5, False),    # Scaled down - valid
+        (0.001, False),  # Very small positive - valid
+        (0, True),       # Zero - invalid
+        (-1, True),      # Negative - invalid
+    ])
+    def test_time_scale_factor_validation(self, time_scale, should_error, tmp_path):
+        """Test time_scale_factor > 0 validation."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(f"""
+output:
+  time_scale_factor: {time_scale}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        scale_errors = [e for e in errors if "time_scale_factor" in e]
+        if should_error:
+            assert len(scale_errors) > 0, f"Expected error for time_scale_factor={time_scale}"
+        else:
+            assert len(scale_errors) == 0, f"Unexpected error for time_scale_factor={time_scale}: {scale_errors}"
+
+
+@pytest.mark.fast
+class TestDurationTierMinMaxValidation:
+    """Test duration tier min_seconds <= max_seconds validation."""
+
+    @pytest.mark.parametrize("tier_name,min_s,max_s,should_error", [
+        ("short", 20, 120, False),    # Default - valid
+        ("medium", 120, 600, False),  # Default - valid
+        ("short", 100, 100, False),   # Equal - valid (edge case)
+        ("short", 200, 100, True),    # Reversed - invalid
+        ("long", 1500, 600, True),    # Reversed - invalid
+    ])
+    def test_tier_min_max(self, tier_name, min_s, max_s, should_error, tmp_path):
+        """Test duration tier min <= max validation."""
+        config_file = tmp_path / "config.yaml"
+        # _build_duration_tiers uses 'min'/'max' keys (short format)
+        config_file.write_text(f"""
+duration_tiers:
+  {tier_name}:
+    min: {min_s}
+    max: {max_s}
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        tier_errors = [e for e in errors if f"duration_tiers.{tier_name}" in e]
+        if should_error:
+            assert len(tier_errors) > 0, f"Expected error for {tier_name} min={min_s} max={max_s}"
+        else:
+            assert len(tier_errors) == 0, f"Unexpected error for {tier_name}: {tier_errors}"
+
+    def test_multiple_invalid_tiers(self, tmp_path):
+        """Test multiple invalid tiers generate separate errors."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+duration_tiers:
+  short:
+    min: 200
+    max: 100
+  medium:
+    min: 700
+    max: 500
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config._validate_constraints()
+        tier_errors = [e for e in errors if "duration_tiers" in e]
+        assert len(tier_errors) >= 2, f"Expected at least 2 tier errors, got {len(tier_errors)}: {tier_errors}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
