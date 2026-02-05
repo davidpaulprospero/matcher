@@ -182,7 +182,7 @@ class TitleFilter:
                 text=True,
                 timeout=search_timeout,
                 encoding='utf-8',
-                errors='ignore',  # Ignore encoding errors in output
+                errors='replace',
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
             )
 
