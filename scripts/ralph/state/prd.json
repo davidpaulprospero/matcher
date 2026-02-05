@@ -139,7 +139,7 @@
                             "id":  "US-64-009",
                             "title":  "Add preflight check extensibility for custom validators",
                             "priority":  "low",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
                                                        "Add register_preflight_check() method to HealingOrchestrator",
                                                        "Accept callable validators with signature (state: PipelineState) -\u003e List[PreflightIssue]",
@@ -148,13 +148,13 @@
                                                        "Add test verifying custom validators are called during preflight",
                                                        "Add test verifying custom validator issues are included in preflight results"
                                                    ],
-                            "notes":  "Pre-implemented. All 6 criteria verified: register_preflight_check() at orchestrator.py:264-303, accepts Callable[[PipelineState], List[PreflightIssue]] signature, custom validators executed in run_preflight() at lines 380-400, unregister_preflight_check() at lines 305-319. TestCustomPreflightValidators has 10 tests including test_custom_validator_called_during_preflight and test_custom_validator_issues_in_preflight_results. All 10 tests pass."
+                            "notes":  "HARD STORY: Phantom success - exits 0 but never sets passes: true"
                         },
                         {
                             "id":  "US-64-010",
                             "title":  "Add healing strategy presets for common use cases",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Add HealingStrategy.overnight() preset optimized for unattended batch processing",
                                                        "Add HealingStrategy.development() preset with verbose logging and fast failures",
