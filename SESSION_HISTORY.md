@@ -1,0 +1,34 @@
+# Session History
+
+| Date | Changes |
+|------|---------|
+| 2026-02-06 | Fix: OTIO `available_range` mismatch — `create_clip_with_timewarp()` estimated duration exceeded actual file length for keyframe-cut segments; now uses ffprobe in both `utils.py` and `otio_builder.py`, eliminating DaVinci "File not found in search directories" on OTIO import |
+| 2026-02-06 | Fix: XML duration mismatch — `_get_segment_file_duration()` now uses ffprobe for actual file duration (cached) instead of filename-parsed range; yt-dlp keyframe cuts make files ~0.5-1.5s shorter than requested, causing DaVinci "timecode extents" rejection |
+| 2026-02-05 | Fix: Nearest-segment resolution + unresolved clip gapping — replaced `segments[0]` fallback with nearest-segment algorithm (60s tolerance, 1330 more clips resolved); bare video IDs now filtered from bins and gapped in V2-V8 alt tracks (1274→0 unresolved) |
+| 2026-02-05 | Fix: XML timecode extent mismatch — `<duration>` used VO duration not file duration, `<in>/<out>` exceeded segment bounds; added `_get_segment_file_duration()` helper and clamping at all 4 clip generation sites |
+| 2026-02-05 | Fix: Empty alt tracks (V2-V8) — 3 bugs: ITERATIVE_MATCH serialization dropped multi-track data, VoiceoverSegment/SRTSegment attribute mismatch crashed OUTPUT, `strategy_alternatives` typo in output.py |
+| 2026-02-05 | Fix: XML media import + path resolution — 3 bugs: empty `<media>` tags from extensionless video IDs (Rule 39), V2-V8 tracks missing from XML timeline, `_scan_video_segments` missed flat download dir (Rule 38) |
+| 2026-02-05 | Feat: Wire `--output-only` flag — was declared in args.py but never consumed in main.py; now creates output-only pipeline, resets checkpoint to DOWNLOAD_SEGMENTS, re-runs only OUTPUT |
+| 2026-02-05 | Fix: Caption fetch "Requested format not available" — escalation `--extractor-args` caused yt-dlp video format resolution to fail before subtitle extraction; added `--ignore-no-formats-error` to subtitle fetch and list-subs commands |
+| 2026-02-05 | Fix: `_fetch_captions_for_videos` crashed on cache hits — `CachedCaption.segments` are dicts but code used attribute access (`.end_time`); added `isinstance` branch for dict vs object segments |
+| 2026-02-05 | Fix: Early exit race condition — added 30s periodic re-check of prd.json for `passes:true` regardless of file write detection; catches cases where `passes:true` written in same polling interval as prior write, reducing worst-case stall from 360s to ~45s |
+| 2026-02-05 | Fix: Phantom revalidation — exit code override in `Invoke-ClaudeSubprocess` now re-reads `prd.json` before overriding; prevents false phantom when Claude reverts `passes:true` during grace period, which caused permanent hard-story ban |
+| 2026-02-05 | Fix: PHANTOM false-positive — `Log-StoryVerification` return value leaked to pipeline in timeout/failure paths of `Resolve-ClaudeResult`, making `$resolution.Success` truthy via array member enumeration; suppressed with `$null =` |
+| 2026-02-05 | Fix: Evidence gate diff excludes Ralph metadata dirs (`state/`, `session/`, `archive/`) — `prd.json` (40K chars) consumed entire 8K truncation budget, causing 0% criteria verified on valid implementations |
+| 2026-02-04 | Feat: Replace keyword evidence gate with LLM-based criteria verification — `Confirm-CriteriaEvidence` sends single haiku call instead of per-criterion keyword matching; falls back to `Search-CriterionEvidence` when CLI unavailable |
+| 2026-02-04 | Feat: Ralph evidence threshold gate — stories rejected when <90% of acceptance criteria have verifiable evidence; previously exit code 0 alone was sufficient to pass regardless of actual evidence |
+| 2026-02-04 | Fix: Ralph queue not advancing — TrueAutoLoop and AdaptiveOvernightLoop missing `Update-QueueProgress` after sprint completion, causing infinite re-sprints on same focus area |
+| 2026-02-04 | Fix: Ralph early exit code override — `taskkill /T /F` produces exit code 1, causing false "story failed" → FAST-FAIL abort; now overrides to 0 when `storyCompletionDetected` is true |
+| 2026-02-04 | Feat: Ralph story completion early exit — when prd.json shows `passes:true`, kill Claude after 15s grace period instead of waiting for stall timeout (was up to 45min for quality focus area) |
+| 2026-02-04 | Fix: Bot-abort tests use `stats.field` attribute access (not `stats['field']`) after `SegmentDownloadStats` dataclass migration |
+| 2026-02-04 | Fix: Ralph `Invoke-ClaudeWithInfiniteRetry` timeout/exception returns missing `ExecutionStart`/`ExecutionEnd` — caused `Cannot convert null to System.DateTime` crash in `Log-ClaudeInvocation` |
+| 2026-02-04 | Fix: Ralph monitoring loop freeze — disable Console Quick Edit Mode at startup (Rule 36) |
+| 2026-02-02 | Removed project_config.yaml auto-merge — use `--config` flag for per-project settings |
+| 2026-02-01 | Caption-first always on, removed `--caption-first` flag, cookie rotation in caption fetcher, removed max_keywords param, fixed LLM text response format |
+| 2026-01-29 | Streamlined CLAUDE.md: consolidated rules, reduced verbosity |
+| 2026-01-29 | Fix: Download timeout — `_download_by_ids` now downloads one-at-a-time (Rule 28) |
+| 2026-01-28 | Feat: Ralph Loop self-healing — T1/T2/T3 health checks, sprint freeze |
+| 2026-01-28 | Fix: Ralph's Choice queue auto-sync |
+| 2026-01-27 | Fix: SABR anti-stall — resume-on-retry, stall detector |
+
+*Full history in [CHANGELOG.md](CHANGELOG.md#session-history-archive)*
