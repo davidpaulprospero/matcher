@@ -64,3 +64,5 @@ class KeywordConfig:
     def __post_init__(self):
         if self.list_detection is None:
             self.list_detection = ListDetectionConfig()
+        elif isinstance(self.list_detection, dict):
+            self.list_detection = ListDetectionConfig(**self.list_detection)
