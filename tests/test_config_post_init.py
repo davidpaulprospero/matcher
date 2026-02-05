@@ -4,6 +4,7 @@ Tests for __post_init__ dict-to-dataclass conversions in config sections.
 Targets:
 - src/config/sections/llm.py: Lines 96, 100, 102, 104, 106, 108 (dict conversions)
 - src/config/sections/download.py: Lines 281, 283, 285, 287 (dict conversions)
+- src/config/sections/keywords.py: KeywordConfig.list_detection dict conversion (US-69-003)
 """
 
 import pytest
@@ -25,6 +26,8 @@ from src.config.sections.download import (
     ZeroDownloadRemixConfig,
     SpeechScreeningConfig,
 )
+
+from src.config.sections.keywords import KeywordConfig, ListDetectionConfig
 
 
 class TestLLMConfigPostInit:
@@ -380,3 +383,33 @@ class TestCaptionFirstConfigDefaults:
         assert config.cache_captions == False
         assert config.cache_dir == "/custom/cache/path"
         assert config.max_cache_age_days == 7
+
+
+class TestKeywordConfigPostInit:
+    """Test KeywordConfig.__post_init__ dict-to-dataclass conversion (US-69-003)."""
+
+    @pytest.mark.fast
+    def test_list_detection_dict_converted_to_dataclass(self):
+        """When list_detection is a dict (from YAML), convert to ListDetectionConfig."""
+        config = KeywordConfig(list_detection={'enabled': False})
+        assert isinstance(config.list_detection, ListDetectionConfig)
+        assert config.list_detection.enabled is False
+        # Other fields should use defaults
+        assert config.list_detection.download_first is True
+        assert config.list_detection.skip_if_entity_covered is True
+        assert config.list_detection.keyword_suffix == "footage"
+
+    @pytest.mark.fast
+    def test_list_detection_none_creates_default(self):
+        """When list_detection is None, a default ListDetectionConfig is created."""
+        config = KeywordConfig(list_detection=None)
+        assert isinstance(config.list_detection, ListDetectionConfig)
+        assert config.list_detection.enabled is True
+
+    @pytest.mark.fast
+    def test_list_detection_dataclass_passes_through(self):
+        """When list_detection is already a ListDetectionConfig, pass through unchanged."""
+        original = ListDetectionConfig(enabled=False)
+        config = KeywordConfig(list_detection=original)
+        assert config.list_detection is original
+        assert config.list_detection.enabled is False
