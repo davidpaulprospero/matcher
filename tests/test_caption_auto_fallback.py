@@ -523,3 +523,111 @@ class TestAutoFallbackMetrics:
 
                     # Verify no auto_fallback recorded (fallback was disabled)
                     assert metrics.auto_fallback_count == 0
+
+
+@pytest.mark.fast
+class TestAutoSubCacheKeySuffix:
+    """Tests for US-67-012: Auto-generated captions use '_autosub' cache key suffix."""
+
+    def test_manual_caption_cache_key_no_suffix(self):
+        """Manual captions use standard cache key without '_autosub' suffix.
+
+        AC: Auto-generated captions are cached with a distinct cache key suffix
+        '_autosub' to avoid confusion with manual captions.
+        """
+        from src.caption.cache import CaptionCache
+        cache = CaptionCache()
+        key = cache._make_cache_key("dQw4w9WgXcQ", "en", is_auto_generated=False)
+        assert key == "dQw4w9WgXcQ_en"
+        assert "_autosub" not in key
+
+    def test_auto_generated_caption_cache_key_has_autosub_suffix(self):
+        """Auto-generated captions use '_autosub' suffix in cache key.
+
+        AC: Auto-generated captions are cached with a distinct cache key suffix
+        '_autosub' to avoid confusion with manual captions.
+        """
+        from src.caption.cache import CaptionCache
+        cache = CaptionCache()
+        key = cache._make_cache_key("dQw4w9WgXcQ", "en", is_auto_generated=True)
+        assert key == "dQw4w9WgXcQ_en_autosub"
+
+    def test_store_auto_generated_uses_autosub_key(self):
+        """Storing auto-generated caption result uses '_autosub' key.
+
+        AC: Auto-generated captions are cached with a distinct cache key suffix
+        '_autosub' to avoid confusion with manual captions.
+        """
+        from src.caption.cache import CaptionCache
+        cache = CaptionCache()
+
+        auto_result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=[CaptionSegment(index=0, start_time=0.0, end_time=1.0, text="Hello")],
+            language="en",
+            is_auto_generated=True,
+            format_source="vtt",
+        )
+
+        with patch.object(cache, 'set') as mock_set:
+            cache.store(auto_result)
+            # Verify the key passed to set() has '_autosub' suffix
+            call_args = mock_set.call_args
+            assert call_args is not None
+            stored_key = call_args[0][0]
+            assert stored_key == "dQw4w9WgXcQ_en_autosub"
+
+    def test_store_manual_caption_uses_standard_key(self):
+        """Storing manual caption result uses standard key without suffix.
+
+        AC: Auto-generated captions are cached with a distinct cache key suffix
+        '_autosub' to avoid confusion with manual captions.
+        """
+        from src.caption.cache import CaptionCache
+        cache = CaptionCache()
+
+        manual_result = CaptionResult(
+            video_id="dQw4w9WgXcQ",
+            segments=[CaptionSegment(index=0, start_time=0.0, end_time=1.0, text="Hello")],
+            language="en",
+            is_auto_generated=False,
+            format_source="vtt",
+        )
+
+        with patch.object(cache, 'set') as mock_set:
+            cache.store(manual_result)
+            call_args = mock_set.call_args
+            assert call_args is not None
+            stored_key = call_args[0][0]
+            assert stored_key == "dQw4w9WgXcQ_en"
+            assert "_autosub" not in stored_key
+
+    def test_get_caption_with_auto_generated_true_uses_autosub_key(self):
+        """Looking up with auto_generated=True uses '_autosub' key.
+
+        AC: Auto-generated captions are cached with a distinct cache key suffix
+        '_autosub' to avoid confusion with manual captions.
+        """
+        from src.caption.cache import CaptionCache
+        cache = CaptionCache()
+
+        with patch.object(cache, 'get', return_value=None) as mock_get:
+            cache.get_caption("dQw4w9WgXcQ", "en", auto_generated=True)
+            mock_get.assert_called_once_with("dQw4w9WgXcQ_en_autosub")
+
+    def test_get_caption_default_tries_both_keys(self):
+        """Default get_caption (auto_generated=None) tries manual then auto key.
+
+        AC: Auto-generated captions are cached with a distinct cache key suffix
+        '_autosub' to avoid confusion with manual captions.
+        """
+        from src.caption.cache import CaptionCache
+        cache = CaptionCache()
+
+        with patch.object(cache, 'get', return_value=None) as mock_get:
+            cache.get_caption("dQw4w9WgXcQ", "en")
+            # Should try manual key first, then auto key
+            assert mock_get.call_count == 2
+            calls = [c[0][0] for c in mock_get.call_args_list]
+            assert calls[0] == "dQw4w9WgXcQ_en"
+            assert calls[1] == "dQw4w9WgXcQ_en_autosub"
