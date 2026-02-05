@@ -21,6 +21,7 @@ from src.otio.xml_export import (
     _build_segment_lookup,
     _resolve_video_segment,
     _get_segment_file_duration,
+    _is_unresolved_path,
 )
 from src.stages.output import OutputStage, SegmentInfo
 from src.utils import Match, MatchResult, SRTSegment, AlternativeMatch
@@ -520,3 +521,219 @@ class TestTimecodeExtentClamping:
                 assert in_val < dur or dur == 0, (
                     f"Clip '{name}': in({in_val}) >= duration({dur})"
                 )
+
+
+# ============================================================================
+# Bug 4: Nearest-segment fallback (2026-02-05)
+# ============================================================================
+
+class TestNearestSegmentFallback:
+    """_resolve_video_segment must find the nearest segment, not just segments[0]."""
+
+    @pytest.mark.fast
+    def test_resolve_picks_nearest_segment_not_first(self):
+        """When source_start falls between segments, pick the closest one."""
+        lookup = {
+            'abc123': [
+                {'file': '/v/abc123_10_30.mp4', 'start': 10, 'end': 30},
+                {'file': '/v/abc123_100_120.mp4', 'start': 100, 'end': 120},
+            ]
+        }
+        # source_start=95 is 65s from seg[0].end=30 but only 5s from seg[1].start=100
+        resolved, adjusted = _resolve_video_segment('abc123', 95.0, lookup)
+        assert resolved == '/v/abc123_100_120.mp4', "Should pick nearest segment, not first"
+        assert adjusted == 0.0  # Clamped: 95-100 = -5 → max(0, -5) = 0
+
+    @pytest.mark.fast
+    def test_resolve_exact_match_preferred_over_nearest(self):
+        """Exact containment still takes priority over nearest-distance."""
+        lookup = {
+            'vid1': [
+                {'file': '/v/vid1_0_50.mp4', 'start': 0, 'end': 50},
+                {'file': '/v/vid1_80_120.mp4', 'start': 80, 'end': 120},
+            ]
+        }
+        resolved, adjusted = _resolve_video_segment('vid1', 25.0, lookup)
+        assert resolved == '/v/vid1_0_50.mp4'
+        assert adjusted == 25.0
+
+    @pytest.mark.fast
+    def test_resolve_beyond_60s_tolerance_returns_original(self):
+        """When nearest segment is >60s away, return original path."""
+        lookup = {
+            'vid2': [
+                {'file': '/v/vid2_200_220.mp4', 'start': 200, 'end': 220},
+            ]
+        }
+        resolved, adjusted = _resolve_video_segment('vid2', 10.0, lookup)
+        # Distance = 200 - 10 = 190 > 60, should not resolve
+        assert resolved == 'vid2'
+        assert adjusted == 10.0
+
+    @pytest.mark.fast
+    def test_resolve_clamps_adjusted_start_to_segment_duration(self):
+        """adjusted_start must not exceed segment duration."""
+        lookup = {
+            'vid3': [
+                {'file': '/v/vid3_100_115.mp4', 'start': 100, 'end': 115},
+            ]
+        }
+        # source_start=90, nearest seg starts at 100, dist=10 (within 60s)
+        # adjusted = max(0, 90 - 100) = 0, but without clamping it could be negative
+        resolved, adjusted = _resolve_video_segment('vid3', 90.0, lookup)
+        assert resolved == '/v/vid3_100_115.mp4'
+        assert 0.0 <= adjusted <= 15.0  # Can't exceed segment length (15s)
+
+    @pytest.mark.fast
+    def test_resolve_with_three_segments_picks_closest(self):
+        """With 3 segments, pick the one with minimum distance."""
+        lookup = {
+            'vid4': [
+                {'file': '/v/vid4_0_20.mp4', 'start': 0, 'end': 20},
+                {'file': '/v/vid4_50_70.mp4', 'start': 50, 'end': 70},
+                {'file': '/v/vid4_200_220.mp4', 'start': 200, 'end': 220},
+            ]
+        }
+        # source_start=45, nearest is seg[1] at 50 (dist=5)
+        resolved, adjusted = _resolve_video_segment('vid4', 45.0, lookup)
+        assert resolved == '/v/vid4_50_70.mp4'
+
+    @pytest.mark.fast
+    def test_resolve_empty_lookup_returns_original(self):
+        """Empty segment_lookup returns the original source_file."""
+        resolved, adjusted = _resolve_video_segment('abc123', 50.0, {})
+        assert resolved == 'abc123'
+        assert adjusted == 50.0
+
+    @pytest.mark.fast
+    def test_resolve_video_id_not_in_lookup(self):
+        """Video ID not present in lookup returns original."""
+        lookup = {'other_vid': [{'file': '/v/other.mp4', 'start': 0, 'end': 30}]}
+        resolved, adjusted = _resolve_video_segment('missing_vid', 10.0, lookup)
+        assert resolved == 'missing_vid'
+
+
+# ============================================================================
+# Bug 5: Unresolved path detection and gap insertion (2026-02-05)
+# ============================================================================
+
+class TestIsUnresolvedPath:
+    """_is_unresolved_path must detect bare video IDs that failed resolution."""
+
+    @pytest.mark.fast
+    def test_bare_video_id_unchanged_is_unresolved(self):
+        assert _is_unresolved_path('abc123', 'abc123') is True
+
+    @pytest.mark.fast
+    def test_resolved_path_differs_is_not_unresolved(self):
+        assert _is_unresolved_path('/v/abc123_10_30.mp4', 'abc123') is False
+
+    @pytest.mark.fast
+    def test_path_with_extension_is_not_unresolved(self):
+        assert _is_unresolved_path('abc123.mp4', 'abc123.mp4') is False
+
+    @pytest.mark.fast
+    def test_path_with_separators_is_not_unresolved(self):
+        assert _is_unresolved_path('/some/path/abc123', '/some/path/abc123') is False
+
+    @pytest.mark.fast
+    def test_video_id_with_dash_is_unresolved(self):
+        assert _is_unresolved_path('-_eFxXuRBFI', '-_eFxXuRBFI') is True
+
+    @pytest.mark.fast
+    def test_video_id_with_underscore_is_unresolved(self):
+        assert _is_unresolved_path('YUFbwzJulEY', 'YUFbwzJulEY') is True
+
+
+class TestUnresolvedClipGapping:
+    """Unresolved clips must become gaps in XML, not broken file references."""
+
+    @pytest.fixture
+    def matches_with_unresolved_alt(self):
+        """Create matches where alt has a video ID that won't resolve."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=5.0,
+            text="Test segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=15.0,
+            text="Primary clip", source_file="/videos/primary.mp4"
+        )
+        # Alt with a bare video ID that won't be in segment_lookup
+        alt_seg = SRTSegment(
+            index=1, start_time=500.0, end_time=510.0,
+            text="Unresolvable alt", source_file="UNRESOLVABLE_VID"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning="Test"
+        )
+        alt_match = AlternativeMatch(
+            video_segment=alt_seg, video_scene=None,
+            confidence=0.7, reasoning="Alt", diversity_score=0.3
+        )
+        return [MatchResult(
+            primary_match=match,
+            alternatives=[alt_match],
+            secondary_matches=[],
+            strategy_matches=[]
+        )]
+
+    @pytest.mark.fast
+    def test_unresolved_path_detected_after_failed_resolution(self):
+        """When resolution fails, _is_unresolved_path catches the bare ID."""
+        lookup = {'other': [{'file': '/v/other_0_30.mp4', 'start': 0, 'end': 30}]}
+        resolved, _ = _resolve_video_segment('UNRESOLVABLE_VID', 500.0, lookup)
+        # Resolution failed — returned original
+        assert resolved == 'UNRESOLVABLE_VID'
+        assert _is_unresolved_path(resolved, 'UNRESOLVABLE_VID') is True
+
+    @pytest.mark.fast
+    def test_project_xml_bins_exclude_unresolved(self, matches_with_unresolved_alt, tmp_path):
+        """Project XML media bins must not include bare video ID entries."""
+        segments = [SegmentInfo(
+            video_id='primary', file='/videos/primary.mp4',
+            original_start=10.0, original_end=15.0
+        )]
+        output_path = str(tmp_path / "proj.xml")
+        paths = generate_resolve_xml_with_bins(
+            matches_with_unresolved_alt, output_path,
+            frame_rate=30.0, downloaded_segments=segments
+        )
+        for p in paths:
+            tree = ET.parse(p)
+            root = tree.getroot()
+            for name_el in root.iter('name'):
+                text = name_el.text or ''
+                assert 'UNRESOLVABLE_VID' not in text or 'voiceover' in text.lower(), (
+                    f"Bare video ID found in bin: {text}"
+                )
+
+
+class TestIsMissingFile:
+    """_is_missing_file must detect bare video IDs as missing."""
+
+    @pytest.mark.fast
+    def test_bare_video_id_is_missing(self):
+        from src.otio.timeline import _is_missing_file
+        assert _is_missing_file('YUFbwzJulEY') is True
+
+    @pytest.mark.fast
+    def test_video_id_with_dash_is_missing(self):
+        from src.otio.timeline import _is_missing_file
+        assert _is_missing_file('-_eFxXuRBFI') is True
+
+    @pytest.mark.fast
+    def test_url_is_not_missing(self):
+        from src.otio.timeline import _is_missing_file
+        assert _is_missing_file('https://example.com/video.mp4') is False
+
+    @pytest.mark.fast
+    def test_path_with_extension_no_sep_is_not_missing(self):
+        from src.otio.timeline import _is_missing_file
+        assert _is_missing_file('video.mp4') is False
+
+    @pytest.mark.fast
+    def test_file_url_is_not_missing(self):
+        from src.otio.timeline import _is_missing_file
+        assert _is_missing_file('file:///E:/v/video.mp4') is False
