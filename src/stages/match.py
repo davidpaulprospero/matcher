@@ -142,6 +142,7 @@ class MatchStage(Stage):
                 calculate_match_quality_metrics, log_quality_summary,
                 log_confidence_histogram, compute_diversity_metrics,
                 log_diversity_metrics,
+                calculate_confidence_trend, log_trend_summary,
             )
             quality_metrics = calculate_match_quality_metrics(
                 matches=matches,
@@ -156,6 +157,10 @@ class MatchStage(Stage):
             # Compute and log diversity metrics (US-53-005)
             diversity_report = compute_diversity_metrics(matches)
             log_diversity_metrics(diversity_report)
+
+            # US-63-010: Calculate and log confidence trend across voiceover chunks
+            confidence_trend = calculate_confidence_trend(matches)
+            log_trend_summary(confidence_trend)
 
             # US-53-009: Log multimodal scoring summary
             multimodal_tracker.log_summary()
@@ -183,6 +188,7 @@ class MatchStage(Stage):
                 'matches': serialized_matches,  # Essential match data for validation
                 'quality_metrics': quality_metrics.to_dict(),  # Quality metrics for analysis
                 'diversity_metrics': diversity_report.to_dict(),  # US-53-005: Source diversity per track
+                'trend_data': confidence_trend.to_dict(),  # US-63-010: Confidence trend for post-run analysis
             }
 
             return StageResult.ok(checkpoint_data, warnings)
