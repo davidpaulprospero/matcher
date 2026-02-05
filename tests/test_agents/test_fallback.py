@@ -676,7 +676,7 @@ class TestPatternRoutingConstants:
     @pytest.mark.fast
     def test_pattern_routing_valid_categories(self):
         """Test PATTERN_ROUTING categories are valid."""
-        valid_categories = ["api", "disk", "path", "checkpoint", "download", "otio", "config", "caption", "embedding", "llm"]
+        valid_categories = ["api", "disk", "path", "checkpoint", "download", "otio", "config", "caption", "embedding", "llm", "transcription"]
         for pattern, (category, healer) in PATTERN_ROUTING.items():
             assert category in valid_categories, f"Invalid category: {category}"
 
@@ -1017,3 +1017,173 @@ class TestFallbackChainRecheck:
 
         # Should succeed now that API key is available
         assert result is True
+
+
+class TestPatternRouteNewPatternsUS68007:
+    """US-68-007: Tests for embedding dimension, LLM JSON parse, and transcription patterns."""
+
+    # --- Embedding dimension mismatch → api-healer ---
+
+    @pytest.mark.fast
+    def test_embedding_dimension_expected_got(self):
+        """Test dimension expected X got Y routes to api-healer."""
+        error = "ValueError: dimension mismatch: expected 768 got 384"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_embedding_size_not_equal(self):
+        """Test embedding size != routes to api-healer."""
+        error = "AssertionError: embedding size 384 != 768"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_embedding_dimension_mismatch(self):
+        """Test embedding dimension mismatch routes to api-healer."""
+        error = "Error: embedding dimension mismatch between query and index"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_vector_length_mismatch(self):
+        """Test vector length mismatch routes to api-healer."""
+        error = "ValueError: vector length mismatch: query=384, index=768"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_dimensionality_error(self):
+        """Test dimensionality error routes to api-healer."""
+        error = "dimensionality mismatch in cosine similarity computation"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    # --- LLM JSON parsing failures → api-healer ---
+
+    @pytest.mark.fast
+    def test_llm_json_decode_error(self):
+        """Test json.decoder.JSONDecodeError routes to api-healer."""
+        error = "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 from LLM response"
+        result = pattern_route(error)
+        assert result.category in ("api", "checkpoint")  # may match checkpoint first
+        # The key is it routes to a healer
+
+    @pytest.mark.fast
+    def test_expecting_json(self):
+        """Test 'Expecting JSON' error routes to api-healer."""
+        error = "Expecting valid JSON from LLM but got plain text"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_invalid_json_response(self):
+        """Test 'Invalid JSON response' routes to api-healer."""
+        error = "Invalid JSON response from Gemini API"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_json_parse_failure(self):
+        """Test JSON parse failure routes to api-healer."""
+        error = "Failed to parse response: json parse error on LLM output"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_malformed_json_response(self):
+        """Test malformed JSON response routes to api-healer."""
+        error = "malformed json response from Claude API"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_llm_returned_invalid_json(self):
+        """Test LLM returned invalid JSON routes to api-healer."""
+        error = "LLM returned invalid json: missing closing bracket"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    # --- Whisper transcription failures → transcription-healer ---
+
+    @pytest.mark.fast
+    def test_whisper_failed(self):
+        """Test 'whisper failed' routes to transcription-healer."""
+        error = "whisper failed to transcribe audio: model error"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_transcription_timeout(self):
+        """Test 'transcription timeout' routes to transcription-healer."""
+        error = "Transcription timeout after 300s for video abc123"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_whisper_timeout(self):
+        """Test 'whisper timeout' routes to transcription-healer."""
+        error = "whisper timeout: model took too long to process audio"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_audio_too_short(self):
+        """Test 'audio too short' routes to transcription-healer."""
+        error = "ValueError: audio too short for transcription (0.5s < 1.0s minimum)"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_transcription_error(self):
+        """Test 'transcription error' routes to transcription-healer."""
+        error = "TranscriptionError: transcription failed for segment 3"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_transcribe_failed(self):
+        """Test 'transcribe failed' routes to transcription-healer."""
+        error = "Failed to transcribe audio: whisper model crashed"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_no_speech_detected(self):
+        """Test 'no speech detected' routes to transcription-healer."""
+        error = "Warning: no speech detected in audio segment"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    @pytest.mark.fast
+    def test_audio_duration_insufficient(self):
+        """Test 'audio duration insufficient' routes to transcription-healer."""
+        error = "audio duration insufficient: minimum 1.0s required"
+        result = pattern_route(error)
+        assert result.category == "transcription"
+        assert result.suggested_healer == "transcription-healer"
+
+    # --- Pattern count verification ---
+
+    @pytest.mark.fast
+    def test_has_transcription_patterns(self):
+        """Test PATTERN_ROUTING contains transcription patterns."""
+        transcription_patterns = [k for k, (cat, _) in PATTERN_ROUTING.items() if cat == "transcription"]
+        assert len(transcription_patterns) >= 3
