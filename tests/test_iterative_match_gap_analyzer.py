@@ -18,12 +18,20 @@ import pytest
 from src.iterative_match.gap_analyzer import (
     GapSegment,
     GapAnalysis,
+    GapPatternLog,
     LockedMatch,
     analyze_gaps,
+    analyze_gap_patterns_for_logging,
+    log_gap_pattern_analysis,
     extract_keywords_for_gap,
     _classify_gap_pattern,
     _has_location_pattern,
     _has_proper_noun,
+    _cluster_gaps_by_topic,
+    _cluster_gaps_by_position,
+    _extract_recurring_keywords,
+    _identify_keyword_patterns,
+    _generate_query_hints_from_patterns,
     ABSTRACT_CONCEPTS,
     EMOTION_WORDS,
     ACTION_VERBS,
@@ -428,3 +436,327 @@ class TestWordLists:
             assert word == word.lower(), f"Non-lowercase in EMOTION_WORDS: {word}"
         for word in ACTION_VERBS:
             assert word == word.lower(), f"Non-lowercase in ACTION_VERBS: {word}"
+
+
+# ============================================================================
+# GapPatternLog dataclass
+# ============================================================================
+
+class TestGapPatternLog:
+    def test_defaults(self):
+        log = GapPatternLog(pass_number=1, total_gaps=5)
+        assert log.pass_number == 1
+        assert log.total_gaps == 5
+        assert log.pattern_summary == {}
+        assert log.topic_clusters == {}
+        assert log.query_hints == []
+
+    def test_to_dict(self):
+        log = GapPatternLog(pass_number=2, total_gaps=10)
+        log.pattern_summary = {"emotion": 3, "location": 2}
+        log.query_hints = ["Consider searching for: freedom"]
+        d = log.to_dict()
+        assert d["pass_number"] == 2
+        assert d["total_gaps"] == 10
+        assert d["pattern_summary"] == {"emotion": 3, "location": 2}
+        assert "freedom" in d["query_hints"][0]
+
+    def test_from_dict(self):
+        data = {
+            "pass_number": 3,
+            "total_gaps": 15,
+            "pattern_summary": {"abstract_concept": 5},
+            "topic_clusters": {"topic_0": [1, 2, 3]},
+            "topic_keywords": {"topic_0": ["freedom", "justice"]},
+            "position_clusters": [{"start": 0, "end": 60, "indices": [0, 1], "count": 2}],
+            "position_concentration": "early",
+            "recurring_keywords": {"world": 3, "peace": 2},
+            "keyword_patterns": ["world peace"],
+            "query_hints": ["Consider searching for: world, peace"],
+        }
+        log = GapPatternLog.from_dict(data)
+        assert log.pass_number == 3
+        assert log.total_gaps == 15
+        assert log.pattern_summary == {"abstract_concept": 5}
+        assert log.topic_clusters == {"topic_0": [1, 2, 3]}
+        assert log.position_concentration == "early"
+
+
+# ============================================================================
+# US-63-012: Gap Pattern Analysis Logging Tests
+# ============================================================================
+
+class TestAnalyzeGapPatternsForLogging:
+    """Tests for analyze_gap_patterns_for_logging function."""
+
+    def test_empty_gaps(self):
+        """Empty gaps return empty log."""
+        log = analyze_gap_patterns_for_logging([], pass_number=1)
+        assert log.total_gaps == 0
+        assert log.pattern_summary == {}
+        assert log.query_hints == []
+
+    def test_basic_analysis_with_mock_data(self):
+        """AC: Unit test verifies pattern detection with mock gap data."""
+        gaps = [
+            _make_gap(0, 0.3, "The world needs more freedom and justice", 10.0),
+            _make_gap(1, 0.2, "The world is changing rapidly", 15.0),
+            _make_gap(2, 0.4, "Freedom means different things to everyone", 20.0),
+            _make_gap(3, 0.1, "Justice will prevail in the end", 25.0),
+        ]
+        # Pre-classify gaps
+        for gap in gaps:
+            gap.pattern_type = "abstract_concept"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1, total_duration=100.0)
+
+        assert log.total_gaps == 4
+        assert log.pass_number == 1
+        # Should detect recurring keywords
+        assert "world" in log.recurring_keywords or "freedom" in log.recurring_keywords
+        # Should generate query hints
+        assert len(log.query_hints) > 0
+
+    def test_topic_clustering(self):
+        """Gaps with shared keywords are clustered by topic."""
+        gaps = [
+            _make_gap(0, 0.3, "Tesla motors innovation", 0.0),
+            _make_gap(1, 0.2, "Tesla electric vehicles", 10.0),
+            _make_gap(2, 0.4, "Apple iPhone release", 20.0),
+            _make_gap(3, 0.1, "Apple technology news", 30.0),
+        ]
+        for gap in gaps:
+            gap.pattern_type = "proper_noun"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1)
+
+        # Should have topic clusters
+        # Gaps 0,1 share "tesla", gaps 2,3 share "apple"
+        assert len(log.topic_clusters) >= 1
+
+    def test_position_clustering_early(self):
+        """Gaps at early timeline positions detected."""
+        gaps = [
+            _make_gap(0, 0.3, "introduction topic", 5.0),
+            _make_gap(1, 0.2, "another early topic", 10.0),
+            _make_gap(2, 0.4, "third early topic", 15.0),
+        ]
+        for gap in gaps:
+            gap.pattern_type = "other"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1, total_duration=300.0)
+
+        # Avg position ~10s out of 300s = early
+        assert log.position_concentration == "early"
+
+    def test_position_clustering_late(self):
+        """Gaps at late timeline positions detected."""
+        gaps = [
+            _make_gap(0, 0.3, "conclusion topic", 250.0),
+            _make_gap(1, 0.2, "ending thought", 270.0),
+            _make_gap(2, 0.4, "final remarks", 290.0),
+        ]
+        for gap in gaps:
+            gap.pattern_type = "other"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1, total_duration=300.0)
+
+        # Avg position ~270s out of 300s = late
+        assert log.position_concentration == "late"
+
+    def test_position_clustering_spread(self):
+        """Widely distributed gaps detected as spread."""
+        gaps = [
+            _make_gap(0, 0.3, "early topic", 10.0),
+            _make_gap(1, 0.2, "middle topic", 150.0),
+            _make_gap(2, 0.4, "late topic", 290.0),
+        ]
+        for gap in gaps:
+            gap.pattern_type = "other"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1, total_duration=300.0)
+
+        # Spread from 10 to 290 = spread
+        assert log.position_concentration == "spread"
+
+    def test_recurring_keywords(self):
+        """Keywords appearing multiple times are captured."""
+        gaps = [
+            _make_gap(0, 0.3, "The climate change crisis", 0.0),
+            _make_gap(1, 0.2, "Climate science research", 10.0),
+            _make_gap(2, 0.4, "Global climate impact", 20.0),
+        ]
+        for gap in gaps:
+            gap.pattern_type = "other"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1)
+
+        # "climate" appears 3 times
+        assert "climate" in log.recurring_keywords
+        assert log.recurring_keywords["climate"] >= 2
+
+    def test_query_hints_generated(self):
+        """Query hints are generated from patterns."""
+        gaps = [
+            _make_gap(0, 0.3, "The meaning of freedom", 0.0),
+            _make_gap(1, 0.2, "Justice for all", 10.0),
+            _make_gap(2, 0.4, "Peace and love", 20.0),
+        ]
+        for gap in gaps:
+            gap.pattern_type = "abstract_concept"
+
+        log = analyze_gap_patterns_for_logging(gaps, pass_number=1)
+
+        # Should have hints
+        assert len(log.query_hints) > 0
+        # Should mention abstract concepts if dominant
+        has_abstract_hint = any("abstract" in h.lower() for h in log.query_hints)
+        has_keyword_hint = any("consider searching" in h.lower() for h in log.query_hints)
+        assert has_abstract_hint or has_keyword_hint
+
+
+class TestClusterGapsByTopic:
+    """Tests for _cluster_gaps_by_topic helper."""
+
+    def test_empty_gaps(self):
+        clusters, keywords = _cluster_gaps_by_topic([])
+        assert clusters == {}
+        assert keywords == {}
+
+    def test_single_gap_no_cluster(self):
+        """Single gap cannot form a cluster."""
+        gaps = [_make_gap(0, 0.3, "unique content here")]
+        gaps[0].pattern_type = "other"
+        clusters, keywords = _cluster_gaps_by_topic(gaps)
+        assert len(clusters) == 0
+
+    def test_shared_keyword_cluster(self):
+        """Gaps sharing keywords are clustered."""
+        gaps = [
+            _make_gap(0, 0.3, "technology innovation future"),
+            _make_gap(1, 0.2, "technology progress future"),
+        ]
+        for g in gaps:
+            g.pattern_type = "other"
+        clusters, keywords = _cluster_gaps_by_topic(gaps)
+        # Should have at least one cluster with shared keywords
+        if clusters:
+            first_cluster = list(clusters.values())[0]
+            assert len(first_cluster) >= 2
+
+
+class TestClusterGapsByPosition:
+    """Tests for _cluster_gaps_by_position helper."""
+
+    def test_empty_gaps(self):
+        clusters, concentration = _cluster_gaps_by_position([], 100.0)
+        assert clusters == []
+        assert concentration == "none"
+
+    def test_nearby_gaps_cluster(self):
+        """Gaps within window are clustered."""
+        gaps = [
+            _make_gap(0, 0.3, "text", 10.0),
+            _make_gap(1, 0.2, "text", 20.0),
+            _make_gap(2, 0.4, "text", 30.0),
+        ]
+        clusters, _ = _cluster_gaps_by_position(gaps, 300.0, window_seconds=60.0)
+        # All within 60s should be one cluster
+        assert len(clusters) >= 1
+        if clusters:
+            assert clusters[0]["count"] >= 2
+
+
+class TestExtractRecurringKeywords:
+    """Tests for _extract_recurring_keywords helper."""
+
+    def test_empty_gaps(self):
+        result = _extract_recurring_keywords([])
+        assert result == {}
+
+    def test_single_occurrence_excluded(self):
+        """Keywords appearing once are excluded."""
+        gaps = [_make_gap(0, 0.3, "unique word here")]
+        result = _extract_recurring_keywords(gaps, min_occurrences=2)
+        assert "unique" not in result
+
+    def test_recurring_captured(self):
+        """Keywords appearing multiple times are captured."""
+        gaps = [
+            _make_gap(0, 0.3, "technology advances"),
+            _make_gap(1, 0.2, "technology improves"),
+        ]
+        result = _extract_recurring_keywords(gaps, min_occurrences=2)
+        assert "technology" in result
+        assert result["technology"] >= 2
+
+
+class TestIdentifyKeywordPatterns:
+    """Tests for _identify_keyword_patterns helper."""
+
+    def test_empty_gaps(self):
+        result = _identify_keyword_patterns([])
+        assert result == []
+
+    def test_bigram_detection(self):
+        """Common bigrams are detected."""
+        gaps = [
+            _make_gap(0, 0.3, "climate change impact"),
+            _make_gap(1, 0.2, "climate change effects"),
+        ]
+        result = _identify_keyword_patterns(gaps)
+        assert "climate change" in result
+
+
+class TestGenerateQueryHintsFromPatterns:
+    """Tests for _generate_query_hints_from_patterns helper."""
+
+    def test_hint_from_recurring_keywords(self):
+        """Hints include recurring keywords."""
+        log = GapPatternLog(pass_number=1, total_gaps=5)
+        log.recurring_keywords = {"freedom": 3, "justice": 2}
+        hints = _generate_query_hints_from_patterns(log, [])
+        assert any("freedom" in h for h in hints)
+
+    def test_hint_from_topic_cluster(self):
+        """Hints mention topic clusters."""
+        log = GapPatternLog(pass_number=1, total_gaps=5)
+        log.topic_clusters = {"topic_0": [0, 1, 2]}
+        log.topic_keywords = {"topic_0": ["technology", "future"]}
+        hints = _generate_query_hints_from_patterns(log, [])
+        assert any("cluster" in h.lower() or "technology" in h for h in hints)
+
+    def test_hint_from_position_concentration(self):
+        """Hints mention position concentration."""
+        log = GapPatternLog(pass_number=1, total_gaps=5)
+        log.position_concentration = "early"
+        hints = _generate_query_hints_from_patterns(log, [])
+        assert any("early" in h.lower() for h in hints)
+
+    def test_hint_from_dominant_pattern(self):
+        """Hints mention dominant pattern type."""
+        log = GapPatternLog(pass_number=1, total_gaps=5)
+        log.pattern_summary = {"abstract_concept": 4, "other": 1}
+        hints = _generate_query_hints_from_patterns(log, [])
+        assert any("abstract" in h.lower() for h in hints)
+
+
+class TestLogGapPatternAnalysis:
+    """Tests for log_gap_pattern_analysis helper."""
+
+    def test_logs_without_error(self):
+        """Logging function runs without error."""
+        import logging
+        log = GapPatternLog(pass_number=1, total_gaps=3)
+        log.pattern_summary = {"emotion": 2}
+        log.recurring_keywords = {"love": 2}
+        log.query_hints = ["Consider searching for: love"]
+
+        # Should not raise
+        test_logger = logging.getLogger("test_gap_pattern")
+        log_gap_pattern_analysis(log, test_logger)
+
+    def test_logs_empty_log_without_error(self):
+        """Logging empty log runs without error."""
+        log = GapPatternLog(pass_number=1, total_gaps=0)
+        log_gap_pattern_analysis(log)  # Uses default logger

@@ -371,7 +371,12 @@ matching:
   # Keyword/entity boosting
   keyword_boost: 0.05
   entity_boost: 0.08
-  
+
+  # US-63-011: Named entity match boost
+  # When voiceover text contains named entities (people, places, organizations)
+  # and video caption contains matching entity, apply this confidence boost
+  entity_match_boost: 0.1  # Default boost for entity matches
+
   # LLM providers (tiered: primary → secondary → local)
   # Chain-of-thought: Fallback chain ensures reliability
   # Reasoning: Gemini fast/cheap, Claude for ambiguous, Ollama offline

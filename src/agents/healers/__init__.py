@@ -9,6 +9,7 @@ from .download import DownloadHealer
 from .disk import DiskHealer
 from .path import PathHealer
 from .llm_healer import LLMHealer
+from .caption import CaptionHealer
 
 __all__ = [
     'OTIOHealer',
@@ -18,6 +19,7 @@ __all__ = [
     'DiskHealer',
     'PathHealer',
     'LLMHealer',
+    'CaptionHealer',
 ]
 
 # Registry of all available healers (order matters - first match wins)
@@ -26,6 +28,7 @@ __all__ = [
 HEALER_REGISTRY = [
     CheckpointHealer,  # Try checkpoint recovery first
     APIHealer,         # API rate limits
+    CaptionHealer,     # Caption format discovery and fallback
     DownloadHealer,    # Download failures
     DiskHealer,        # Disk space issues
     PathHealer,        # Path length issues

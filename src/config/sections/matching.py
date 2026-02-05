@@ -238,6 +238,11 @@ class MatchingConfig:
     keyword_boost: float = 0.05
     entity_boost: float = 0.08
 
+    # US-63-011: Named entity match boost
+    # When voiceover text contains named entities (people, places, organizations)
+    # and video caption contains matching entity, apply this confidence boost
+    entity_match_boost: float = 0.1  # Default boost for entity matches
+
     # LLM providers (tiered: primary → secondary → local)
     primary_provider: str = "gemini"
     secondary_provider: str = "anthropic"
