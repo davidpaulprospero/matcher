@@ -1058,18 +1058,16 @@ output:
             assert len(candidate_errors) > 0
 
     @pytest.mark.parametrize("threshold,expected_valid", [
-        (0.0, True),     # Zero threshold - valid edge case
         (0.5, True),     # Normal value
         (1.0, True),     # Max threshold
         (27.0, True),    # Default value
-        (100.0, False),  # Beyond valid range (100 is boundary)
     ])
     @pytest.mark.fast
     def test_scene_detection_threshold_bounds(self, threshold, expected_valid):
         """Test SceneDetectionConfig threshold boundary values."""
         config = SceneDetectionConfig(threshold=threshold)
-        # Threshold should be 0 < threshold < 100
-        is_valid = 0 <= config.threshold < 100
+        # Threshold should be > 0
+        is_valid = config.threshold > 0
         assert is_valid == expected_valid
 
     @pytest.mark.parametrize("temperature", [
@@ -1085,19 +1083,19 @@ output:
         config = LLMConfig(temperature=temperature)
         assert config.temperature == temperature
 
-    @pytest.mark.parametrize("min_scene_len,expected_valid", [
-        (1, True),      # Minimum valid
-        (15, True),     # Default value
-        (60, True),     # Large value
-        (0, False),     # Zero - invalid (must be positive)
-        (-1, False),    # Negative - invalid
-    ])
+    @pytest.mark.parametrize("min_scene_len", [1, 15, 60])
     @pytest.mark.fast
-    def test_min_scene_len_bounds(self, min_scene_len, expected_valid):
-        """Test SceneDetectionConfig min_scene_len boundary values."""
+    def test_min_scene_len_bounds_valid(self, min_scene_len):
+        """Test SceneDetectionConfig min_scene_len accepts valid values."""
         config = SceneDetectionConfig(min_scene_len=min_scene_len)
-        is_valid = config.min_scene_len > 0
-        assert is_valid == expected_valid
+        assert config.min_scene_len > 0
+
+    @pytest.mark.parametrize("min_scene_len", [0, -1])
+    @pytest.mark.fast
+    def test_min_scene_len_bounds_invalid(self, min_scene_len):
+        """Test SceneDetectionConfig min_scene_len rejects invalid values."""
+        with pytest.raises(ValueError, match="min_scene_len"):
+            SceneDetectionConfig(min_scene_len=min_scene_len)
 
 
 @pytest.mark.fast
@@ -1561,6 +1559,76 @@ class TestDeduplicationConfigValueErrorValidation:
         config = DeduplicationConfig(hash_threshold=64, frame_timeout=30)
         assert config.hash_threshold == 64
         assert config.frame_timeout == 30
+
+
+@pytest.mark.fast
+class TestVisionConfigValueErrorValidation:
+    """Test VisionConfig raises ValueError for invalid values."""
+
+    def test_coverage_threshold_above_one_raises_valueerror(self):
+        """Test coverage_threshold=1.5 raises ValueError."""
+        with pytest.raises(ValueError, match="coverage_threshold"):
+            VisionConfig(coverage_threshold=1.5)
+
+    def test_coverage_threshold_negative_raises_valueerror(self):
+        """Test coverage_threshold=-0.1 raises ValueError."""
+        with pytest.raises(ValueError, match="coverage_threshold"):
+            VisionConfig(coverage_threshold=-0.1)
+
+    def test_max_api_calls_zero_raises_valueerror(self):
+        """Test max_api_calls_per_run=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_api_calls_per_run"):
+            VisionConfig(max_api_calls_per_run=0)
+
+    def test_max_api_calls_negative_raises_valueerror(self):
+        """Test max_api_calls_per_run=-5 raises ValueError."""
+        with pytest.raises(ValueError, match="max_api_calls_per_run"):
+            VisionConfig(max_api_calls_per_run=-5)
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = VisionConfig(coverage_threshold=0.0, max_api_calls_per_run=1)
+        assert config.coverage_threshold == 0.0
+        assert config.max_api_calls_per_run == 1
+
+        config = VisionConfig(coverage_threshold=1.0, max_api_calls_per_run=100)
+        assert config.coverage_threshold == 1.0
+        assert config.max_api_calls_per_run == 100
+
+
+@pytest.mark.fast
+class TestSceneDetectionConfigValueErrorValidation:
+    """Test SceneDetectionConfig raises ValueError for invalid values."""
+
+    def test_negative_threshold_raises_valueerror(self):
+        """Test threshold=-1 raises ValueError."""
+        with pytest.raises(ValueError, match="threshold"):
+            SceneDetectionConfig(threshold=-1)
+
+    def test_zero_threshold_raises_valueerror(self):
+        """Test threshold=0 raises ValueError."""
+        with pytest.raises(ValueError, match="threshold"):
+            SceneDetectionConfig(threshold=0)
+
+    def test_negative_min_scene_len_raises_valueerror(self):
+        """Test min_scene_len=-5 raises ValueError."""
+        with pytest.raises(ValueError, match="min_scene_len"):
+            SceneDetectionConfig(min_scene_len=-5)
+
+    def test_zero_min_scene_len_raises_valueerror(self):
+        """Test min_scene_len=0 raises ValueError."""
+        with pytest.raises(ValueError, match="min_scene_len"):
+            SceneDetectionConfig(min_scene_len=0)
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = SceneDetectionConfig(threshold=0.1, min_scene_len=1)
+        assert config.threshold == 0.1
+        assert config.min_scene_len == 1
+
+        config = SceneDetectionConfig(threshold=27.0, min_scene_len=15)
+        assert config.threshold == 27.0
+        assert config.min_scene_len == 15
 
 
 if __name__ == "__main__":
