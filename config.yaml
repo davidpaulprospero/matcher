@@ -561,6 +561,9 @@ matching:
     use_llm_disambiguation: true  # Use LLM to resolve ambiguous locations (Paris FR vs TX)
     cache_dir: ".cache/locations"  # Cache geocoding results
 
+  # Negative matching rules are defined in the top-level 'negative_matching:' section below.
+  # See NegativeMatchingConfig in src/config/sections/matching.py for the dataclass definition.
+
 # -----------------------------------------------------------------------------
 # KEYWORD EXTRACTION
 # -----------------------------------------------------------------------------
@@ -1951,6 +1954,8 @@ iterative_matching:
   # === Caption settings ===
   fetch_captions_for_new_videos: true
   caption_timeout: 30              # Seconds per caption fetch
+  caption_batch_size: 10           # Fetch captions in batches to avoid overwhelming the pipeline
+  caption_fetch_delay: 0.5         # Delay between caption fetches to avoid rate limiting (seconds)
 
   # === Logging ===
   log_pass_summaries: true         # Log summary after each pass
