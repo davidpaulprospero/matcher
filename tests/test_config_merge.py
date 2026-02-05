@@ -826,5 +826,141 @@ class TestSharedFixturesIntegration:
         assert checkpoint['version'] == "3.0"
 
 
+class TestPostMergeRevalidation:
+    """
+    US-65-008: Tests that merge_config() re-validates config sections
+    by calling __post_init__() after applying overrides.
+    """
+
+    @pytest.mark.fast
+    def test_duration_tier_merge_triggers_post_init_validation(self, caplog):
+        """Test that merging an invalid duration tier (min > max) triggers
+        __post_init__ warning after merge."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        config = load_config()
+        # Merge an override where min > max - should trigger __post_init__ warning
+        overrides = {
+            'duration_tiers': {
+                'short': {'min_seconds': 500, 'max_seconds': 100}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # The values should be applied
+        assert merged.duration_tiers.short.min_seconds == 500
+        assert merged.duration_tiers.short.max_seconds == 100
+        # __post_init__ should have run and logged a warning about min >= max
+        assert any(
+            "min >= max" in record.message and "short" in record.message
+            for record in caplog.records
+        ), f"Expected min >= max warning for 'short' tier, got: {[r.message for r in caplog.records]}"
+
+    @pytest.mark.fast
+    def test_healing_config_merge_triggers_post_init(self):
+        """Test that merging a dict into healing.watcher triggers
+        __post_init__ to convert it back to WatcherConfig."""
+        from src.config.sections.infrastructure import WatcherConfig
+
+        config = load_config()
+        # Override watcher with a raw dict - without revalidation this
+        # would leave it as a plain dict
+        overrides = {
+            'healing': {
+                'watcher': {'enabled': False, 'timeout': 15.0}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # __post_init__ should have converted the dict back to WatcherConfig
+        assert isinstance(merged.healing.watcher, WatcherConfig)
+        assert merged.healing.watcher.enabled is False
+        assert merged.healing.watcher.timeout == 15.0
+
+    @pytest.mark.fast
+    def test_healing_config_merge_converts_llm_healer_dict(self):
+        """Test that merging a dict into healing.llm_healer triggers
+        __post_init__ to convert it to LLMHealerConfig."""
+        from src.config.sections.infrastructure import LLMHealerConfig
+
+        config = load_config()
+        overrides = {
+            'healing': {
+                'llm_healer': {'enabled': False, 'max_tokens': 2048}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert isinstance(merged.healing.llm_healer, LLMHealerConfig)
+        assert merged.healing.llm_healer.enabled is False
+        assert merged.healing.llm_healer.max_tokens == 2048
+
+    @pytest.mark.fast
+    def test_valid_overrides_preserved_after_revalidation(self):
+        """Test that valid overrides are preserved after __post_init__ runs."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'long': {'min_seconds': 600, 'max_seconds': 1500, 'videos_per_keyword': 3}
+            },
+            'download': {'quality': '720p'},
+            'matching': {'min_confidence': 0.8},
+        }
+        merged = merge_config(config, overrides)
+
+        # Duration tier values preserved
+        assert merged.duration_tiers.long.min_seconds == 600
+        assert merged.duration_tiers.long.max_seconds == 1500
+        assert merged.duration_tiers.long.videos_per_keyword == 3
+        # Other sections preserved
+        assert merged.download.quality == '720p'
+        assert merged.matching.min_confidence == 0.8
+
+    @pytest.mark.fast
+    def test_revalidation_preserves_unmodified_sections(self):
+        """Test that sections NOT in overrides are untouched by revalidation."""
+        config = load_config()
+        original_matching_confidence = config.matching.min_confidence
+        original_transcription_model = config.transcription.model
+
+        # Only modify download
+        overrides = {
+            'download': {'quality': 'best'}
+        }
+        merged = merge_config(config, overrides)
+
+        # Unmodified sections should be identical
+        assert merged.matching.min_confidence == original_matching_confidence
+        assert merged.transcription.model == original_transcription_model
+
+    @pytest.mark.fast
+    def test_duration_tiers_post_init_called_via_legacy_path(self, caplog):
+        """Test that duration_tiers __post_init__ runs even when overrides
+        come through the legacy download.tier_config path."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        config = load_config()
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'medium': {'min': 800, 'max': 200}  # invalid: min > max
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Values applied
+        assert merged.duration_tiers.medium.min_seconds == 800
+        assert merged.duration_tiers.medium.max_seconds == 200
+        # Warning from __post_init__
+        assert any(
+            "min >= max" in record.message and "medium" in record.message
+            for record in caplog.records
+        ), f"Expected min >= max warning for 'medium' tier via legacy path"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
