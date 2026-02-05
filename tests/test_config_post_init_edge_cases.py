@@ -41,7 +41,7 @@ from src.config.sections.matching import (
     LocationMatchingConfig,
     ChapterDetectionConfig,
 )
-from src.config.sections.core import EmbeddingConfig
+from src.config.sections.core import EmbeddingConfig, TranscriptionConfig
 
 
 # ─── IterativeMatchingConfig boundary values ─────────────────────────────
@@ -1046,3 +1046,150 @@ class TestEmbeddingConfigPostInitValidation:
         assert config.batch_size == 100
         assert config.max_retries == 3
         assert config.max_workers == 4
+
+
+# ─── TranscriptionConfig __post_init__ validation (US-66-008) ──────────────
+
+
+class TestTranscriptionConfigModelValidation:
+    """Test TranscriptionConfig validates model names against known Whisper models."""
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("model", [
+        "tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
+    ])
+    def test_valid_model_names_accepted(self, model):
+        """All known Whisper model names are accepted."""
+        config = TranscriptionConfig(model=model)
+        assert config.model == model
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("invalid_model", [
+        "huge", "xlarge", "whisper-base", "gpt4", "", "BASE", "Large",
+    ])
+    def test_invalid_model_names_raise_valueerror(self, invalid_model):
+        """Invalid model names raise ValueError with descriptive message."""
+        with pytest.raises(ValueError, match="not a known Whisper model"):
+            TranscriptionConfig(model=invalid_model)
+
+
+class TestTranscriptionConfigComputeTypeValidation:
+    """Test TranscriptionConfig validates compute_type values."""
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("compute_type", [
+        "auto", "float16", "int8", "float32", "int8_float16",
+    ])
+    def test_valid_compute_types_accepted(self, compute_type):
+        """All known compute types are accepted."""
+        config = TranscriptionConfig(compute_type=compute_type)
+        assert config.compute_type == compute_type
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("invalid_type", [
+        "float64", "bfloat16", "fp16", "", "AUTO", "Float16",
+    ])
+    def test_invalid_compute_types_raise_valueerror(self, invalid_type):
+        """Invalid compute types raise ValueError with descriptive message."""
+        with pytest.raises(ValueError, match="compute_type.*is not valid"):
+            TranscriptionConfig(compute_type=invalid_type)
+
+
+class TestTranscriptionConfigGpuMemoryValidation:
+    """Test TranscriptionConfig validates minimum_gpu_memory_mb >= 100."""
+
+    @pytest.mark.fast
+    def test_gpu_memory_below_100_raises(self):
+        """minimum_gpu_memory_mb < 100 raises ValueError."""
+        with pytest.raises(ValueError, match="minimum_gpu_memory_mb.*must be >= 100"):
+            TranscriptionConfig(minimum_gpu_memory_mb=50)
+
+    @pytest.mark.fast
+    def test_gpu_memory_zero_raises(self):
+        """minimum_gpu_memory_mb=0 raises ValueError."""
+        with pytest.raises(ValueError, match="minimum_gpu_memory_mb.*must be >= 100"):
+            TranscriptionConfig(minimum_gpu_memory_mb=0)
+
+    @pytest.mark.fast
+    def test_gpu_memory_negative_raises(self):
+        """Negative minimum_gpu_memory_mb raises ValueError."""
+        with pytest.raises(ValueError, match="minimum_gpu_memory_mb.*must be >= 100"):
+            TranscriptionConfig(minimum_gpu_memory_mb=-500)
+
+    @pytest.mark.fast
+    def test_gpu_memory_99_raises(self):
+        """minimum_gpu_memory_mb=99 (just below threshold) raises ValueError."""
+        with pytest.raises(ValueError, match="minimum_gpu_memory_mb.*must be >= 100"):
+            TranscriptionConfig(minimum_gpu_memory_mb=99)
+
+    @pytest.mark.fast
+    def test_gpu_memory_100_accepted(self):
+        """minimum_gpu_memory_mb=100 (boundary) is accepted."""
+        config = TranscriptionConfig(minimum_gpu_memory_mb=100)
+        assert config.minimum_gpu_memory_mb == 100
+
+    @pytest.mark.fast
+    def test_gpu_memory_default_accepted(self):
+        """Default minimum_gpu_memory_mb (2000) is accepted."""
+        config = TranscriptionConfig()
+        assert config.minimum_gpu_memory_mb == 2000
+
+
+class TestTranscriptionConfigWorkersAndBatchValidation:
+    """Test TranscriptionConfig validates max_workers >= 1 and batch_size >= 1."""
+
+    @pytest.mark.fast
+    def test_max_workers_zero_raises(self):
+        """max_workers=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers.*must be >= 1"):
+            TranscriptionConfig(max_workers=0)
+
+    @pytest.mark.fast
+    def test_max_workers_negative_raises(self):
+        """Negative max_workers raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers.*must be >= 1"):
+            TranscriptionConfig(max_workers=-3)
+
+    @pytest.mark.fast
+    def test_max_workers_one_accepted(self):
+        """max_workers=1 (boundary) is accepted."""
+        config = TranscriptionConfig(max_workers=1)
+        assert config.max_workers == 1
+
+    @pytest.mark.fast
+    def test_batch_size_zero_raises(self):
+        """batch_size=0 raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size.*must be >= 1"):
+            TranscriptionConfig(batch_size=0)
+
+    @pytest.mark.fast
+    def test_batch_size_negative_raises(self):
+        """Negative batch_size raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size.*must be >= 1"):
+            TranscriptionConfig(batch_size=-5)
+
+    @pytest.mark.fast
+    def test_batch_size_one_accepted(self):
+        """batch_size=1 (boundary) is accepted."""
+        config = TranscriptionConfig(batch_size=1)
+        assert config.batch_size == 1
+
+
+class TestTranscriptionConfigDefaultPassesValidation:
+    """Test that default TranscriptionConfig passes all validation without error."""
+
+    @pytest.mark.fast
+    def test_default_config_valid(self):
+        """Default TranscriptionConfig passes validation without error."""
+        config = TranscriptionConfig()
+        assert config.model == "base"
+        assert config.compute_type == "auto"
+        assert config.minimum_gpu_memory_mb == 2000
+        assert config.max_workers == 4
+        assert config.batch_size == 10
+
+    @pytest.mark.fast
+    def test_valueerror_includes_config_path_hint(self):
+        """ValueError messages include config.yaml path hints for debugging."""
+        with pytest.raises(ValueError, match="config.yaml"):
+            TranscriptionConfig(model="invalid_model")

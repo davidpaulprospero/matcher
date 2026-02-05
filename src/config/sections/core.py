@@ -108,9 +108,51 @@ class TranscriptionConfig:
     # FFmpeg subprocess killed if extraction exceeds this limit
     audio_extraction_timeout: int = 60
 
+    # Known Whisper model names
+    KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
+    # Known compute types for faster-whisper
+    KNOWN_COMPUTE_TYPES = {'auto', 'float16', 'int8', 'float32', 'int8_float16'}
+
     def __post_init__(self):
         if self.pause_split is None:
             self.pause_split = PauseSplitConfig()
+
+        # Validate model name (US-66-008)
+        if self.model not in self.KNOWN_MODELS:
+            raise ValueError(
+                f"TranscriptionConfig.model='{self.model}' is not a known Whisper model. "
+                f"Valid models: {sorted(self.KNOWN_MODELS)}. "
+                f"Check transcription.model in config.yaml"
+            )
+
+        # Validate compute_type (US-66-008)
+        if self.compute_type not in self.KNOWN_COMPUTE_TYPES:
+            raise ValueError(
+                f"TranscriptionConfig.compute_type='{self.compute_type}' is not valid. "
+                f"Valid types: {sorted(self.KNOWN_COMPUTE_TYPES)}. "
+                f"Check transcription.compute_type in config.yaml"
+            )
+
+        # Validate minimum_gpu_memory_mb >= 100 (US-66-008)
+        if self.minimum_gpu_memory_mb < 100:
+            raise ValueError(
+                f"TranscriptionConfig.minimum_gpu_memory_mb={self.minimum_gpu_memory_mb} "
+                f"must be >= 100. Check transcription.minimum_gpu_memory_mb in config.yaml"
+            )
+
+        # Validate max_workers >= 1 (US-66-008)
+        if self.max_workers < 1:
+            raise ValueError(
+                f"TranscriptionConfig.max_workers={self.max_workers} must be >= 1. "
+                f"Check transcription.max_workers in config.yaml"
+            )
+
+        # Validate batch_size >= 1 (US-66-008)
+        if self.batch_size < 1:
+            raise ValueError(
+                f"TranscriptionConfig.batch_size={self.batch_size} must be >= 1. "
+                f"Check transcription.batch_size in config.yaml"
+            )
 
         # Validate and set audio_extraction_workers (US-60-010)
         cpu_count = os.cpu_count() or 4  # Fallback to 4 if cpu_count() returns None
