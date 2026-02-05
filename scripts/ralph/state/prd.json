@@ -62,7 +62,7 @@
                             "id":  "US-67-004",
                             "title":  "Audit and fix all subprocess calls missing encoding parameters",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Every subprocess.run and subprocess.Popen call with text=True also has encoding=\u0027utf-8\u0027 and errors=\u0027replace\u0027",
                                                        "Files audited: src/downloader/audio_first.py, src/downloader/title_filter.py, src/downloader/vpn_manager.py, src/downloader/speech_screening.py, src/caption_fetcher.py",
@@ -70,13 +70,13 @@
                                                        "Unit test in tests/test_subprocess_encoding.py uses ast module to parse all Python files in src/ and assert every subprocess.run/Popen call with text=True also has encoding kwarg",
                                                        "No functional behavior changes beyond encoding parameter addition"
                                                    ],
-                            "notes":  "Tier: P0 bug fix (Rule 27 compliance). Files: src/downloader/audio_first.py (~lines 347, 594, 784, 900), src/downloader/title_filter.py (~line 179), src/downloader/vpn_manager.py (~lines 172, 226), src/downloader/speech_screening.py (~line 66). Several subprocess calls are missing encoding=\u0027utf-8\u0027, errors=\u0027replace\u0027 which causes crashes on non-UTF8 yt-dlp output in Windows environments. The mullvad_vpn.py file already has correct encoding as a reference pattern."
+                            "notes":  "All 40 subprocess calls in src/ already had encoding='utf-8'. Fixed title_filter.py errors='ignore' to errors='replace' for consistency. Added AST-based audit test in tests/test_subprocess_encoding.py that parses all .py files and asserts Rule 27 compliance."
                         },
                         {
                             "id":  "US-67-005",
                             "title":  "Cache caption preflight discovery results to avoid repeated list-subs calls",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Caption preflight results (available formats per video ID) are cached in caption_fetcher_cache with 1-hour TTL",
                                                        "On cache hit, _check_captions_preflight skips the yt-dlp --list-subs subprocess call entirely",
@@ -84,13 +84,13 @@
                                                        "Unit test verifies second call for same video_id does not spawn subprocess (mock subprocess, check call count)",
                                                        "Unit test verifies cache entry expires after TTL and triggers fresh --list-subs call"
                                                    ],
-                            "notes":  "Tier: P1 performance. Files: src/caption_fetcher.py (lines ~2598-2750 _check_captions_preflight), src/caption_fetcher_cache.py. Currently every call to _check_captions_preflight runs yt-dlp --list-subs even if the same video was checked seconds ago. In batch processing with retries, this can duplicate 100+ subprocess calls. Cache results using existing caption_fetcher_cache infrastructure with a distinct key prefix."
+                            "notes":  "Implemented preflight cache in EnhancedCaptionCache with {video_id}_preflight key format and 1-hour TTL. Added get_preflight/store_preflight methods. Wired into CaptionFetcher.list_available_languages() - checks preflight cache before ListSubsCache before subprocess. 13 tests passing in test_preflight_cache.py covering cache hit/miss, TTL expiry, empty results, and integration."
                         },
                         {
                             "id":  "US-67-006",
                             "title":  "Persist adaptive caption format ordering across pipeline runs",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Adaptive format order (success rates per format) is saved to .cache/caption_format_stats.json at end of caption stage",
                                                        "On next pipeline run, saved format order is loaded and used as initial preferred_formats list",
@@ -98,7 +98,7 @@
                                                        "Unit test verifies round-trip: compute order from stats, save to file, load from file, confirm order matches",
                                                        "Stale entries (older than 7 days) are excluded from ordering calculation"
                                                    ],
-                            "notes":  "Tier: P2 performance optimization. Files: src/caption_fetcher.py (lines ~2500-2537 apply_adaptive_format_order), src/stages/caption_stage.py. Currently adaptive format ordering is computed per-run based on in-memory success rates. Every pipeline run re-learns that e.g. vtt succeeds more often than json3. Persisting the stats file eliminates the re-learning phase and immediately uses the optimal format order."
+                            "notes":  "Implemented FormatStatsFile in src/caption/format_stats.py with save/load/compute_order methods. JSON file at .cache/caption_format_stats.json stores {format: {successes, failures, last_updated}}. 7-day stale filtering via _is_stale(). Wired into caption_stage.py: loads persisted order at startup (line ~390), saves at end (line ~1295). 21 tests in test_format_stats_persistence.py covering round-trip, stale filtering, compute_order, edge cases."
                         },
                         {
                             "id":  "US-67-007",
