@@ -76,7 +76,7 @@
                             "id":  "US-65-005",
                             "title":  "Replace silent config loading fallback with explicit error logging",
                             "priority":  "high",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
                                                        "The _build_dataclass method in src/config/base.py logs a warning that includes the specific field names that failed when falling back to empty defaults",
                                                        "Critical config sections (download, matching, output) raise ConfigError instead of silently returning empty defaults when construction fails",
@@ -84,13 +84,13 @@
                                                        "Add a CRITICAL_SECTIONS list or similar marker in base.py that distinguishes critical from optional sections",
                                                        "Add test that attempts to load a malformed critical section and verifies ConfigError is raised with a descriptive message"
                                                    ],
-                            "notes":  "Implementation complete. ConfigError class and CRITICAL_SECTIONS frozenset in base.py (lines 126-138). _build_dataclass raises ConfigError for critical sections, logs debug for optional sections (lines 463-480). 29 tests in test_config_build_dataclass_errors.py all pass, covering all 5 acceptance criteria."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-65-006",
                             "title":  "Add missing config.yaml sections for broll, iterative_matching, and negative_matching",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "config.yaml contains a documented broll section with all fields from BrollConfig in src/config/sections/broll.py and their defaults",
                                                        "config.yaml contains a documented iterative_matching section with all fields from IterativeMatchingConfig in src/config/sections/iterative_matching.py and their defaults",
@@ -98,7 +98,7 @@
                                                        "Each new section has inline YAML comments explaining the purpose of each field",
                                                        "Loading config.yaml with python still produces a valid Config object (python -m py_compile src/config/base.py passes)"
                                                    ],
-                            "notes":  "Tier: T2 (documentation/completeness). Source files: config.yaml (currently missing these sections entirely), src/config/sections/broll.py (BrollConfig at ~line 89), src/config/sections/iterative_matching.py (IterativeMatchingConfig at ~line 95), src/config/sections/matching.py (NegativeMatchingConfig). Follow existing config.yaml patterns with inline comments. CLAUDE.md Rule 1: Update BOTH config.yaml AND dataclasses (dataclasses already exist)."
+                            "notes":  "All three sections already existed in config.yaml. broll (line 1849) and iterative_matching (line 1914) had all fields with comments. negative_matching (line 588) is a top-level section (matches code architecture). Added 2 missing fields to iterative_matching: caption_batch_size and caption_fetch_delay. Added cross-reference comment under matching section pointing to negative_matching. Config loads successfully with all fields verified."
                         },
                         {
                             "id":  "US-65-007",
