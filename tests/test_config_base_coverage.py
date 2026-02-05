@@ -1087,3 +1087,85 @@ class TestTypeErrorHandling:
         with pytest.raises(TypeError):
             # This tests the error path where even the default fallback fails
             Config._build_dataclass(RequiredFieldConfig, {})
+
+
+@pytest.mark.fast
+class TestMissingSectionMappingEntries:
+    """Test that broll, global_cache, and silent_video sections load from YAML.
+
+    These sections had Config dataclass fields but were missing from section_mapping,
+    so YAML values were silently ignored (US-69-002).
+    """
+
+    def test_broll_section_loads_from_yaml(self, tmp_path):
+        """Test that broll YAML values populate BrollConfig fields."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+broll:
+  enabled: false
+  downloads_per_term: 5
+  max_total_downloads: 50
+  min_words_threshold: 20
+  min_match_score: 0.5
+""")
+        config = Config.from_yaml(str(config_file))
+
+        assert config.broll.enabled is False
+        assert config.broll.downloads_per_term == 5
+        assert config.broll.max_total_downloads == 50
+        assert config.broll.min_words_threshold == 20
+        assert config.broll.min_match_score == 0.5
+
+    def test_global_cache_section_loads_from_yaml(self, tmp_path):
+        """Test that global_cache YAML values populate GlobalCacheConfig fields."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+global_cache:
+  enabled: false
+  cache_dir: "/tmp/test_cache"
+  check_before_download: false
+  min_keyword_similarity: 0.6
+  max_reuse_videos: 25
+""")
+        config = Config.from_yaml(str(config_file))
+
+        assert config.global_cache.enabled is False
+        assert config.global_cache.cache_dir == "/tmp/test_cache"
+        assert config.global_cache.check_before_download is False
+        assert config.global_cache.min_keyword_similarity == 0.6
+        assert config.global_cache.max_reuse_videos == 25
+
+    def test_silent_video_section_loads_from_yaml(self, tmp_path):
+        """Test that silent_video YAML values populate SilentVideoConfig fields."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+silent_video:
+  enabled: false
+  min_words_threshold: 15
+  use_vision_api: false
+  use_llm_fallback: false
+  cache_descriptions: false
+""")
+        config = Config.from_yaml(str(config_file))
+
+        assert config.silent_video.enabled is False
+        assert config.silent_video.min_words_threshold == 15
+        assert config.silent_video.use_vision_api is False
+        assert config.silent_video.use_llm_fallback is False
+        assert config.silent_video.cache_descriptions is False
+
+    def test_sections_use_defaults_without_yaml(self):
+        """Test that missing YAML sections still use dataclass defaults."""
+        config = Config()
+
+        # Defaults from BrollConfig
+        assert config.broll.enabled is True
+        assert config.broll.downloads_per_term == 3
+
+        # Defaults from GlobalCacheConfig
+        assert config.global_cache.enabled is True
+        assert config.global_cache.cache_dir == "~/.matcher_global_cache"
+
+        # Defaults from SilentVideoConfig
+        assert config.silent_video.enabled is True
+        assert config.silent_video.min_words_threshold == 10

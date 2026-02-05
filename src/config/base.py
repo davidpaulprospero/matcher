@@ -407,6 +407,9 @@ class Config:
             'healing': (HealingConfig, 'healing'),
             'iterative_matching': (IterativeMatchingConfig, 'iterative_matching'),
             'rate_limit': (RateLimitConfig, 'rate_limit'),
+            'broll': (BrollConfig, 'broll'),
+            'global_cache': (GlobalCacheConfig, 'global_cache'),
+            'silent_video': (SilentVideoConfig, 'silent_video'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():
