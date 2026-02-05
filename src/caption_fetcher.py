@@ -4527,6 +4527,11 @@ class CaptionFetcher:
                 result = self._fetch_subtitle_formats(
                     video_url, video_id, temp_dir, language, True
                 )
+                # US-62-005: Record auto-generated fallback in metrics
+                if result is not None:
+                    metrics_ref = getattr(self, '_active_metrics', None)
+                    if metrics_ref is not None:
+                        metrics_ref.record_auto_fallback(video_id, language)
                 return result
             raise
 

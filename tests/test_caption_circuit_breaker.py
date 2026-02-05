@@ -837,3 +837,157 @@ class TestStateTransitionSerialization:
         # Empty dict should not change state
         breaker.from_checkpoint_dict({})
         assert breaker.state.consecutive_failures == 1
+
+
+# ============================================================================
+# US-62-006: Circuit Breaker Integration with Retry Budget
+# ============================================================================
+
+
+class TestCaptionCircuitBreakerRetryBudgetIntegration:
+    """Test circuit breaker integration with CaptionRetryBudget (US-62-006)."""
+
+    def test_retry_budget_circuit_breaker_reference_observable(self):
+        """Test that circuit breaker can be referenced from retry budget for observability."""
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        config = CaptionCircuitBreakerConfig(threshold=5, pause_seconds=10.0)
+        breaker = CaptionCircuitBreaker(config)
+        budget = CaptionRetryBudget()
+
+        # Link circuit breaker to retry budget (US-40-011 / US-62-006)
+        budget.circuit_breaker = breaker
+
+        # Verify reference is set
+        assert budget.circuit_breaker is breaker
+        assert budget.circuit_breaker.config.threshold == 5
+
+    def test_retry_budget_summary_includes_circuit_breaker_state(self):
+        """Test that retry budget summary includes circuit breaker state when linked."""
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        config = CaptionCircuitBreakerConfig(threshold=2, pause_seconds=10.0)
+        breaker = CaptionCircuitBreaker(config)
+        budget = CaptionRetryBudget()
+        budget.circuit_breaker = breaker
+
+        # Initially closed
+        summary = budget.get_summary()
+        assert summary['circuit_breaker_state'] == 'closed'
+
+        # Trip the breaker
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is True
+
+        # Summary should now show open
+        summary = budget.get_summary()
+        assert summary['circuit_breaker_state'] == 'open'
+
+    def test_retry_budget_formatted_summary_includes_circuit_breaker(self):
+        """Test that formatted summary includes circuit breaker state."""
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        config = CaptionCircuitBreakerConfig(threshold=2, pause_seconds=10.0)
+        breaker = CaptionCircuitBreaker(config)
+        budget = CaptionRetryBudget()
+        budget.circuit_breaker = breaker
+
+        formatted = budget.get_formatted_summary()
+        assert 'circuit_breaker=closed' in formatted
+
+        # Trip the breaker
+        breaker.record_failure()
+        breaker.record_failure()
+
+        formatted = budget.get_formatted_summary()
+        assert 'circuit_breaker=open' in formatted
+
+    def test_retry_budget_without_circuit_breaker_returns_none(self):
+        """Test that retry budget without circuit breaker returns None for state."""
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        budget = CaptionRetryBudget()
+        # No circuit breaker linked
+
+        summary = budget.get_summary()
+        assert summary['circuit_breaker_state'] is None
+
+        # Formatted summary should not include circuit_breaker suffix
+        formatted = budget.get_formatted_summary()
+        assert 'circuit_breaker=' not in formatted
+
+
+class TestCaptionCircuitBreakerTripsAtConfiguredThreshold:
+    """Test that circuit trips exactly at configured threshold (US-62-006 AC)."""
+
+    def test_circuit_trips_at_5_failures_with_threshold_5(self):
+        """Verify circuit trips after exactly 5 consecutive failures when threshold=5."""
+        config = CaptionCircuitBreakerConfig(threshold=5, pause_seconds=60.0)
+        breaker = CaptionCircuitBreaker(config)
+
+        # 4 failures - should NOT trip
+        for i in range(4):
+            tripped = breaker.record_failure()
+            assert tripped is False, f"Should not trip after {i+1} failures"
+            assert breaker.is_open is False
+
+        # 5th failure - SHOULD trip
+        tripped = breaker.record_failure()
+        assert tripped is True, "Should trip after 5 failures"
+        assert breaker.is_open is True
+        assert breaker.state.total_trips == 1
+
+    def test_circuit_blocks_fetches_during_cooldown(self):
+        """Verify circuit breaker blocks fetches during cooldown period."""
+        config = CaptionCircuitBreakerConfig(threshold=1, pause_seconds=0.1)
+        breaker = CaptionCircuitBreaker(config)
+
+        # Trip the circuit
+        breaker.record_failure()
+        assert breaker.is_open is True
+
+        # Remaining pause time should be > 0
+        remaining = breaker.get_remaining_pause_time()
+        assert remaining > 0
+
+    def test_successful_probe_closes_circuit(self):
+        """Verify successful probe after half-open closes circuit."""
+        config = CaptionCircuitBreakerConfig(threshold=2, pause_seconds=0.05)
+        breaker = CaptionCircuitBreaker(config)
+
+        # Trip the circuit
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is True
+
+        # Wait for cooldown and transition to half-open
+        time.sleep(0.06)
+        breaker.check_and_wait()
+        assert breaker.is_open is False  # Half-open state
+
+        # Success should fully close
+        breaker.record_success()
+        assert breaker.state.consecutive_failures == 0
+        assert breaker.is_open is False
+
+    def test_failed_probe_reopens_circuit(self):
+        """Verify failed probe in half-open state re-opens circuit."""
+        config = CaptionCircuitBreakerConfig(threshold=2, pause_seconds=0.05)
+        breaker = CaptionCircuitBreaker(config)
+
+        # Trip the circuit
+        breaker.record_failure()
+        breaker.record_failure()
+        initial_trips = breaker.state.total_trips
+
+        # Wait for cooldown and transition to half-open
+        time.sleep(0.06)
+        breaker.check_and_wait()
+        assert breaker.is_open is False  # Half-open
+
+        # Failure in half-open should re-trip
+        breaker.record_failure()
+        # Now at 3 consecutive failures (2 from before + 1 new) > threshold of 2
+        assert breaker.is_open is True
+        assert breaker.state.total_trips == initial_trips + 1
