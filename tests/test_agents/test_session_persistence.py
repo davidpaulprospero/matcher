@@ -538,3 +538,170 @@ class TestCrashRecoverySimulation:
 
         # But the file still exists (in case we need it)
         assert orchestrator._get_session_path().exists()
+
+
+class TestStaleSessionSkip:
+    """Test that stale sessions (>24h) are not loaded (US-68-009)."""
+
+    @pytest.mark.fast
+    def test_load_returns_false_for_stale_session(self, mock_config, project_dir):
+        """Sessions older than 24 hours should not be loaded."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.current_stage = "MATCH"
+        orchestrator.metrics.record_heal("api-healer", "MATCH", True, 100.0)
+        orchestrator.save_session()
+
+        # Tamper with the timestamp to make it 25 hours old
+        session_path = orchestrator._get_session_path()
+        data = json.loads(session_path.read_text(encoding="utf-8"))
+        data["timestamp"] = time.time() - (25 * 60 * 60)  # 25 hours ago
+        session_path.write_text(json.dumps(data), encoding="utf-8")
+
+        # Fresh orchestrator should refuse to load stale session
+        orch2 = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        assert orch2.load_session() is False
+        assert orch2.metrics.total_heals == 0
+        assert orch2.current_stage is None
+
+    @pytest.mark.fast
+    def test_load_succeeds_for_fresh_session(self, mock_config, project_dir):
+        """Sessions within the TTL should load normally."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.current_stage = "CAPTION"
+        orchestrator.save_session()
+
+        # Session just saved - should load fine
+        orch2 = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        assert orch2.load_session() is True
+        assert orch2.current_stage == "CAPTION"
+
+    @pytest.mark.fast
+    def test_load_returns_false_at_exactly_ttl_boundary(self, mock_config, project_dir):
+        """Session at exactly TTL + 1 second should not load."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.save_session()
+
+        session_path = orchestrator._get_session_path()
+        data = json.loads(session_path.read_text(encoding="utf-8"))
+        # Set to exactly 1 second past the TTL
+        data["timestamp"] = time.time() - HealingOrchestrator.SESSION_TTL_SECONDS - 1
+        session_path.write_text(json.dumps(data), encoding="utf-8")
+
+        orch2 = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        assert orch2.load_session() is False
+
+
+class TestSessionCleanupAfterCompletion:
+    """Test that recovery files are cleaned up after successful completion (US-68-009)."""
+
+    @pytest.mark.fast
+    def test_cleanup_deletes_session_file(self, mock_config, project_dir):
+        """cleanup_session_file() removes the recovery file."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.save_session()
+        session_path = orchestrator._get_session_path()
+        assert session_path.exists()
+
+        result = orchestrator.cleanup_session_file()
+        assert result is True
+        assert not session_path.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_returns_true_when_no_file(self, mock_config, project_dir):
+        """cleanup_session_file() succeeds when file doesn't exist."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        assert not orchestrator._get_session_path().exists()
+        assert orchestrator.cleanup_session_file() is True
+
+    @pytest.mark.fast
+    def test_cleanup_stale_removes_old_file(self, mock_config, project_dir):
+        """_cleanup_stale_sessions() removes files older than TTL."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.save_session()
+
+        # Make the session file stale
+        session_path = orchestrator._get_session_path()
+        data = json.loads(session_path.read_text(encoding="utf-8"))
+        data["timestamp"] = time.time() - (25 * 60 * 60)
+        session_path.write_text(json.dumps(data), encoding="utf-8")
+
+        removed = orchestrator._cleanup_stale_sessions()
+        assert removed == 1
+        assert not session_path.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_stale_preserves_fresh_file(self, mock_config, project_dir):
+        """_cleanup_stale_sessions() keeps files within TTL."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.save_session()
+
+        removed = orchestrator._cleanup_stale_sessions()
+        assert removed == 0
+        assert orchestrator._get_session_path().exists()
+
+    @pytest.mark.fast
+    def test_cleanup_stale_custom_ttl(self, mock_config, project_dir):
+        """_cleanup_stale_sessions() respects custom TTL parameter."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        orchestrator.save_session()
+
+        # Make the session file 2 hours old
+        session_path = orchestrator._get_session_path()
+        data = json.loads(session_path.read_text(encoding="utf-8"))
+        data["timestamp"] = time.time() - (2 * 60 * 60)
+        session_path.write_text(json.dumps(data), encoding="utf-8")
+
+        # Default TTL (24h) - should not remove
+        assert orchestrator._cleanup_stale_sessions() == 0
+
+        # Custom TTL (1h) - should remove
+        assert orchestrator._cleanup_stale_sessions(ttl_seconds=3600) == 1
+        assert not session_path.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_stale_removes_corrupt_file(self, mock_config, project_dir):
+        """_cleanup_stale_sessions() removes corrupt session files."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.minimal()
+        )
+        session_path = orchestrator._get_session_path()
+        session_path.write_text("not valid json{{{", encoding="utf-8")
+
+        removed = orchestrator._cleanup_stale_sessions()
+        assert removed == 1
+        assert not session_path.exists()
+
+    @pytest.mark.fast
+    def test_cleanup_called_during_preflight(self, mock_config, project_dir):
+        """_cleanup_stale_sessions() is called during run_preflight()."""
+        orchestrator = HealingOrchestrator(
+            mock_config, project_dir, strategy=HealingStrategy.conservative()
+        )
+        state = Mock()
+        state.matches = []
+
+        with patch.object(orchestrator, '_cleanup_stale_sessions') as mock_cleanup:
+            orchestrator.run_preflight(state)
+            mock_cleanup.assert_called_once()

@@ -180,6 +180,10 @@ class ResilientRunner:
 
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
 
+        # Clean up session recovery file after successful completion (US-68-009)
+        if self.orchestrator:
+            self.orchestrator.cleanup_session_file()
+
         return True
 
     def run_stage(
