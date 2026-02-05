@@ -1365,5 +1365,248 @@ class TestTieredMatcherPopulatesBreakdown:
         assert breakdown[0]['adjustment'] == round(0.75000002 - 0.80000001, 4)
 
 
+# ============================================================================
+# Test Consecutive Source Penalty (US-63-009)
+# ============================================================================
+
+class TestConsecutiveSourcePenalty:
+    """Test consecutive same-source matching penalty (US-63-009).
+
+    Verifies that using the same video source in consecutive segments
+    applies a stacking penalty to encourage visual variety.
+    """
+
+    @pytest.fixture
+    def mock_match(self):
+        """Create a mock Match object for testing."""
+        def _make_match(source_file: str):
+            match = Mock()
+            match.video_segment = Mock()
+            match.video_segment.source_file = source_file
+            return match
+        return _make_match
+
+    @pytest.fixture
+    def mock_config_with_consecutive(self):
+        """Mock config with consecutive source penalty settings."""
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        config.matching = matching
+        return config
+
+    @pytest.mark.fast
+    def test_no_penalty_when_no_recent_matches(self, sample_video_segment, mock_config_with_consecutive):
+        """No penalty should be applied when there are no recent matches."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            recent_matches=[],
+            config=mock_config_with_consecutive
+        )
+
+        assert confidence == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_penalty_when_different_source(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """No penalty when previous match is from different source."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        # Previous match from different source
+        recent_matches = [mock_match("/videos/other_video.mp4")]
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.8,
+            video_segment=sample_video_segment,  # source_file="/videos/tokyo.mp4"
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        assert confidence == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_single_consecutive_penalty(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """Single consecutive match applies 1x penalty."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        # Previous match from same source
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [mock_match("/videos/tokyo.mp4")]
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Should apply 0.1 penalty (1 * 0.1)
+        assert confidence == pytest.approx(0.7, abs=0.001)
+        assert "consecutive_source_penalty" in reason
+        assert "-0.10" in reason
+        assert "1 consecutive" in reason
+
+    @pytest.mark.fast
+    def test_stacking_penalty_two_consecutive(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """Two consecutive matches apply 2x penalty."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [
+            mock_match("/videos/tokyo.mp4"),
+            mock_match("/videos/tokyo.mp4"),
+        ]
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Should apply 0.2 penalty (2 * 0.1)
+        assert confidence == pytest.approx(0.6, abs=0.001)
+        assert "2 consecutive" in reason
+
+    @pytest.mark.fast
+    def test_stacking_penalty_three_consecutive(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """Three consecutive matches apply 3x penalty."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [
+            mock_match("/videos/tokyo.mp4"),
+            mock_match("/videos/tokyo.mp4"),
+            mock_match("/videos/tokyo.mp4"),
+        ]
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Should apply 0.3 penalty (3 * 0.1)
+        assert confidence == pytest.approx(0.5, abs=0.001)
+        assert "3 consecutive" in reason
+
+    @pytest.mark.fast
+    def test_stops_counting_at_different_source(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """Consecutive count stops when a different source is encountered."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [
+            mock_match("/videos/tokyo.mp4"),  # 1 consecutive
+            mock_match("/videos/other.mp4"),  # Different source - stops here
+            mock_match("/videos/tokyo.mp4"),  # Should not count
+        ]
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.8,
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Should only apply 0.1 penalty (1 consecutive, stopped at 'other.mp4')
+        assert confidence == pytest.approx(0.7, abs=0.001)
+        assert "1 consecutive" in reason
+
+    @pytest.mark.fast
+    def test_penalty_does_not_go_negative(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """Penalty should not reduce confidence below 0.0."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        # Create many consecutive matches to potentially exceed confidence
+        recent_matches = [mock_match("/videos/tokyo.mp4") for _ in range(10)]
+
+        confidence, reason = apply_consecutive_source_penalty(
+            confidence=0.5,  # Low initial confidence
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Should be clamped to 0.0
+        assert confidence >= 0.0
+
+    @pytest.mark.fast
+    def test_hard_cap_check(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """check_consecutive_source_hard_cap returns True when at max."""
+        from src.matching.scoring import check_consecutive_source_hard_cap
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [
+            mock_match("/videos/tokyo.mp4"),
+            mock_match("/videos/tokyo.mp4"),
+            mock_match("/videos/tokyo.mp4"),  # 3 consecutive - at max
+        ]
+
+        should_block, count = check_consecutive_source_hard_cap(
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # At max (3), should block
+        assert should_block is True
+        assert count == 3
+
+    @pytest.mark.fast
+    def test_hard_cap_check_under_limit(self, sample_video_segment, mock_config_with_consecutive, mock_match):
+        """check_consecutive_source_hard_cap returns False when under max."""
+        from src.matching.scoring import check_consecutive_source_hard_cap
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [
+            mock_match("/videos/tokyo.mp4"),
+            mock_match("/videos/tokyo.mp4"),  # 2 consecutive - under max
+        ]
+
+        should_block, count = check_consecutive_source_hard_cap(
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Under max (2 < 3), should not block
+        assert should_block is False
+        assert count == 2
+
+    @pytest.mark.fast
+    def test_penalty_records_in_confidence_breakdown(self, sample_video_segment, sample_vo_segment, mock_config_with_consecutive, mock_match):
+        """The penalty should be recorded in confidence_breakdown (depends on US-63-007)."""
+        from src.matching.tiered_matcher import _record_breakdown
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        sample_video_segment.source_file = "/videos/tokyo.mp4"
+        recent_matches = [mock_match("/videos/tokyo.mp4")]
+
+        prev = 0.8
+        adjusted, reason = apply_consecutive_source_penalty(
+            confidence=prev,
+            video_segment=sample_video_segment,
+            recent_matches=recent_matches,
+            config=mock_config_with_consecutive
+        )
+
+        # Record breakdown like TieredMatcher does
+        breakdown = []
+        _record_breakdown(breakdown, 'consecutive_source_penalty', prev, adjusted, reason)
+
+        assert len(breakdown) == 1
+        assert breakdown[0]['component'] == 'consecutive_source_penalty'
+        assert breakdown[0]['adjustment'] == pytest.approx(-0.1, abs=0.0001)
+        assert "consecutive" in breakdown[0]['reason']
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

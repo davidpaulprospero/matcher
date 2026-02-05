@@ -37,6 +37,8 @@ from .scoring import (
     apply_caption_quality_adjustment,  # US-007
     apply_timing_penalty,  # US-008 Sprint 7
     apply_current_project_boost,
+    apply_consecutive_source_penalty,  # US-63-009
+    check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
     compute_multimodal_score,
@@ -206,6 +208,11 @@ class TieredMatcher:
             config=self.config,
             location_matcher=self.location_matcher
         )
+
+        # US-63-009: Track recent matches for consecutive source penalty
+        # Stores the most recent N matches (most recent first) for diversity checking
+        self._recent_matches: List[Match] = []
+        self._max_recent_matches = getattr(mc, 'max_consecutive_same_source', 3) + 1
 
     def _init_providers(self):
         """Initialize LLM providers based on config"""
@@ -564,6 +571,26 @@ class TieredMatcher:
 
     # Note: _get_cache_key, _get_cached_response, _cache_response moved to LLMReranker
 
+    def _update_recent_matches(self, match: Match) -> None:
+        """
+        Update recent matches list after a successful match (US-63-009).
+
+        Keeps the most recent N matches for consecutive source penalty calculation.
+        Most recent match is at index 0.
+        """
+        self._recent_matches.insert(0, match)
+        # Trim to max size
+        if len(self._recent_matches) > self._max_recent_matches:
+            self._recent_matches = self._recent_matches[:self._max_recent_matches]
+
+    def reset_recent_matches(self) -> None:
+        """
+        Reset recent matches list (US-63-009).
+
+        Call this at the start of a new matching session to clear state.
+        """
+        self._recent_matches = []
+
     def _get_scene_for_segment(
         self,
         segment: SRTSegment,
@@ -733,6 +760,13 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
+            # US-63-009: Apply consecutive source penalty
+            prev = adjusted_confidence
+            adjusted_confidence, consecutive_reason = apply_consecutive_source_penalty(
+                adjusted_confidence, best_seg, self._recent_matches, self.config
+            )
+            _record_breakdown(confidence_breakdown, 'consecutive_source_penalty', prev, adjusted_confidence, consecutive_reason)
+
             # Ensure we don't drop below minimum confidence after adjustments
             min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
             adjusted_confidence = max(adjusted_confidence, min_confidence)
@@ -748,6 +782,8 @@ class TieredMatcher:
                 final_reasoning += f" [{timing_penalty_reason}]"
             if project_reason:
                 final_reasoning += f" [{project_reason}]"
+            if consecutive_reason:
+                final_reasoning += f" [{consecutive_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -783,6 +819,9 @@ class TieredMatcher:
             if confidence_breakdown:
                 parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
                 logger.debug(f"US-63-007 confidence breakdown: {boosted_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+
+            # US-63-009: Update recent matches for consecutive source tracking
+            self._update_recent_matches(match)
 
             return MatchResult(
                 primary_match=match,
@@ -836,6 +875,13 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
+            # US-63-009: Apply consecutive source penalty
+            prev = adjusted_confidence
+            adjusted_confidence, consecutive_reason = apply_consecutive_source_penalty(
+                adjusted_confidence, best_seg, self._recent_matches, self.config
+            )
+            _record_breakdown(confidence_breakdown, 'consecutive_source_penalty', prev, adjusted_confidence, consecutive_reason)
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
@@ -847,6 +893,8 @@ class TieredMatcher:
                 reasoning += f" [{timing_penalty_reason}]"
             if project_reason:
                 reasoning += f" [{project_reason}]"
+            if consecutive_reason:
+                reasoning += f" [{consecutive_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -886,6 +934,9 @@ class TieredMatcher:
             if confidence_breakdown:
                 parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
                 logger.debug(f"US-63-007 confidence breakdown: {top_similarity:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+
+            # US-63-009: Update recent matches for consecutive source tracking
+            self._update_recent_matches(match)
 
             return MatchResult(
                 primary_match=match,
@@ -991,6 +1042,13 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
+        # US-63-009: Apply consecutive source penalty
+        prev = adjusted_confidence
+        adjusted_confidence, consecutive_reason = apply_consecutive_source_penalty(
+            adjusted_confidence, best_seg, self._recent_matches, self.config
+        )
+        _record_breakdown(confidence_breakdown, 'consecutive_source_penalty', prev, adjusted_confidence, consecutive_reason)
+
         final_reasoning = reasoning
         if multimodal_enabled:
             final_reasoning += f" [{multimodal_reason}]"
@@ -1004,6 +1062,8 @@ class TieredMatcher:
             final_reasoning += f" [{timing_penalty_reason}]"
         if project_reason:
             final_reasoning += f" [{project_reason}]"
+        if consecutive_reason:
+            final_reasoning += f" [{consecutive_reason}]"
 
         # US-63-007: Store confidence breakdown on Match object
         match = Match(
@@ -1081,6 +1141,9 @@ class TieredMatcher:
         if confidence_breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
             logger.debug(f"US-63-007 confidence breakdown: {base_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+
+        # US-63-009: Update recent matches for consecutive source tracking
+        self._update_recent_matches(match)
 
         return MatchResult(
             primary_match=match,
