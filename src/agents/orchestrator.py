@@ -22,7 +22,15 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
-from .base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData
+from .base import (
+    Healer,
+    HealerResult,
+    HealerAction,
+    HealerEvent,
+    HealerEventData,
+    SupportsBackoff,
+    SupportsPreflight,
+)
 from .strategy import (
     HealingStrategy,
     HealingMode,
@@ -189,7 +197,7 @@ class HealingOrchestrator:
         """
         for healer in self.healers:
             # Healers with backoff subscribe to config changes
-            if hasattr(healer, 'reset_backoff'):
+            if isinstance(healer, SupportsBackoff):
                 self.subscribe_event(HealerEvent.CONFIG_CHANGED, healer.name)
 
             # Checkpoint healer needs to know about cache clearing
@@ -401,7 +409,7 @@ class HealingOrchestrator:
 
         # Run healer-specific preflight checks
         for healer in self.healers:
-            if hasattr(healer, 'preflight_check'):
+            if isinstance(healer, SupportsPreflight):
                 healer_issues = healer.preflight_check(state)
                 for issue_msg in healer_issues:
                     issues.append(PreflightIssue(
@@ -1697,7 +1705,7 @@ class HealingOrchestrator:
 
         # Reset healers
         for healer in self.healers:
-            if hasattr(healer, 'reset_backoff'):
+            if isinstance(healer, SupportsBackoff):
                 healer.reset_backoff()
 
     # =========================================================================
@@ -1776,9 +1784,8 @@ class HealingOrchestrator:
         for healer in self.healers:
             state = {}
             # Capture backoff state if present
-            if hasattr(healer, 'backoff_time'):
+            if isinstance(healer, SupportsBackoff):
                 state['backoff_time'] = healer.backoff_time
-            if hasattr(healer, 'retry_count'):
                 state['retry_count'] = healer.retry_count
             if hasattr(healer, 'cache_was_cleaned'):
                 state['cache_was_cleaned'] = healer.cache_was_cleaned
@@ -1870,10 +1877,11 @@ class HealingOrchestrator:
             state = states.get(healer.name, {})
             if not state:
                 continue
-            if 'backoff_time' in state and hasattr(healer, 'backoff_time'):
-                healer.backoff_time = state['backoff_time']
-            if 'retry_count' in state and hasattr(healer, 'retry_count'):
-                healer.retry_count = state['retry_count']
+            if isinstance(healer, SupportsBackoff):
+                if 'backoff_time' in state:
+                    healer.backoff_time = state['backoff_time']
+                if 'retry_count' in state:
+                    healer.retry_count = state['retry_count']
             if 'cache_was_cleaned' in state and hasattr(healer, 'cache_was_cleaned'):
                 healer.cache_was_cleaned = state['cache_was_cleaned']
 

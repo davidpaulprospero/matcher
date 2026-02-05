@@ -11,13 +11,56 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, runtime_checkable, Protocol
 
 if TYPE_CHECKING:
     from ..config import Config
     from ..state import PipelineState
 
 logger = logging.getLogger(__name__)
+
+
+class HealerEvent(Enum):
+    """Events for cross-healer coordination."""
+    CONFIG_CHANGED = "config_changed"       # A healer modified pipeline config
+    CACHE_CLEARED = "cache_cleared"         # Cache was cleaned/invalidated
+    RATE_LIMITED = "rate_limited"            # Rate limiting detected
+    PROVIDER_SWITCHED = "provider_switched"  # LLM/API provider was switched
+
+
+@dataclass
+class HealerEventData:
+    """Data payload for a healer event."""
+    event: HealerEvent
+    source_healer: str
+    details: Dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class SupportsBackoff(Protocol):
+    """Protocol for healers that support backoff/retry state.
+
+    Healers implementing this protocol have exponential backoff with
+    reset capability. Used by orchestrator for event subscriptions
+    and session persistence.
+
+    Implementors must also have `backoff_time: float` and `retry_count: int`
+    instance attributes (set in __init__).
+    """
+
+    def reset_backoff(self) -> None: ...
+
+
+@runtime_checkable
+class SupportsPreflight(Protocol):
+    """Protocol for healers that provide preflight checks.
+
+    Healers implementing this return a list of warning messages
+    during orchestrator preflight.
+    """
+
+    def preflight_check(self, state: Any) -> List[str]: ...
+
 
 
 class HealerAction(Enum):
@@ -125,6 +168,17 @@ class Healer(ABC):
 
         Returns:
             HealerResult indicating success/failure and action to take
+        """
+        pass
+
+    def handle_event(self, event_data: HealerEventData) -> None:
+        """Handle a cross-healer coordination event.
+
+        Override in subclasses to react to events from other healers.
+        Default implementation is a no-op.
+
+        Args:
+            event_data: The event data including type, source, and details
         """
         pass
 

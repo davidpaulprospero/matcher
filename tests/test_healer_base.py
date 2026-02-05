@@ -440,3 +440,82 @@ class TestHealerResultDefaults:
             message="Test"
         )
         assert result.modified_config is False
+
+
+class TestHealerProtocols:
+    """Test healer protocol satisfaction (US-68-002)."""
+
+    @pytest.mark.fast
+    def test_api_healer_supports_backoff(self):
+        """APIHealer satisfies SupportsBackoff protocol."""
+        from src.agents.base import SupportsBackoff
+        from src.agents.healers.api import APIHealer
+        config = MagicMock()
+        healer = APIHealer(config, "/tmp/project")
+        assert isinstance(healer, SupportsBackoff)
+        assert hasattr(healer, 'backoff_time')
+        assert hasattr(healer, 'retry_count')
+
+    @pytest.mark.fast
+    def test_download_healer_supports_backoff(self):
+        """DownloadHealer satisfies SupportsBackoff protocol."""
+        from src.agents.base import SupportsBackoff
+        from src.agents.healers.download import DownloadHealer
+        config = MagicMock()
+        healer = DownloadHealer(config, "/tmp/project")
+        assert isinstance(healer, SupportsBackoff)
+        assert hasattr(healer, 'backoff_time')
+        assert hasattr(healer, 'retry_count')
+
+    @pytest.mark.fast
+    def test_otio_healer_supports_preflight(self):
+        """OTIOHealer satisfies SupportsPreflight protocol."""
+        from src.agents.base import SupportsPreflight
+        from src.agents.healers.otio import OTIOHealer
+        config = MagicMock()
+        healer = OTIOHealer(config, "/tmp/project")
+        assert isinstance(healer, SupportsPreflight)
+
+    @pytest.mark.fast
+    def test_checkpoint_healer_has_cache_tracking(self):
+        """CheckpointHealer has cache_was_cleaned attribute."""
+        from src.agents.healers.checkpoint import CheckpointHealer
+        config = MagicMock()
+        healer = CheckpointHealer(config, "/tmp/project")
+        assert hasattr(healer, 'cache_was_cleaned')
+        assert healer.cache_was_cleaned is False
+
+    @pytest.mark.fast
+    def test_healers_without_backoff_do_not_satisfy_protocol(self):
+        """Healers without reset_backoff do not satisfy SupportsBackoff."""
+        from src.agents.base import SupportsBackoff
+        from src.agents.healers.checkpoint import CheckpointHealer
+        from src.agents.healers.disk import DiskHealer
+        from src.agents.healers.path import PathHealer
+        config = MagicMock()
+        for cls in [CheckpointHealer, DiskHealer, PathHealer]:
+            healer = cls(config, "/tmp/project")
+            assert not isinstance(healer, SupportsBackoff), f"{cls.__name__} should not satisfy SupportsBackoff"
+
+    @pytest.mark.fast
+    def test_healers_without_preflight_do_not_satisfy_protocol(self):
+        """Healers without preflight_check do not satisfy SupportsPreflight."""
+        from src.agents.base import SupportsPreflight
+        from src.agents.healers.api import APIHealer
+        from src.agents.healers.checkpoint import CheckpointHealer
+        from src.agents.healers.disk import DiskHealer
+        config = MagicMock()
+        for cls in [APIHealer, CheckpointHealer, DiskHealer]:
+            healer = cls(config, "/tmp/project")
+            assert not isinstance(healer, SupportsPreflight), f"{cls.__name__} should not satisfy SupportsPreflight"
+
+    @pytest.mark.fast
+    def test_all_registry_healers_instantiate(self):
+        """All healers in HEALER_REGISTRY can be instantiated."""
+        from src.agents.healers import HEALER_REGISTRY
+        config = MagicMock()
+        # CaptionHealer needs numeric config values
+        config.download.caption_first.negative_cache_ttl_seconds = 300
+        for cls in HEALER_REGISTRY:
+            healer = cls(config, "/tmp/project")
+            assert healer.name, f"{cls.__name__} missing name"
