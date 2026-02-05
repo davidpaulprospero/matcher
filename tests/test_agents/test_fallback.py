@@ -427,6 +427,207 @@ class TestPatternRouteEdgeCasesUS005:
         assert "pattern" in result.reasoning.lower()
 
 
+class TestPatternRouteNewPatternsUS64008:
+    """US-64-008: Tests for new pattern categories added in Sprint 64."""
+
+    # --- Caption-specific patterns ---
+
+    @pytest.mark.fast
+    def test_pattern_route_caption_no_subtitles(self):
+        """Test pattern_route() matches 'no subtitles' error."""
+        error = "ERROR: There are no subtitles for the requested languages"
+        result = pattern_route(error)
+        assert result.category == "caption"
+        assert result.suggested_healer == "caption-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_caption_unavailable(self):
+        """Test pattern_route() matches caption unavailable error."""
+        error = "Caption unavailable for video xyz123"
+        result = pattern_route(error)
+        assert result.category == "caption"
+        assert result.suggested_healer == "caption-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_caption_format_not_available(self):
+        """Test pattern_route() matches 'Requested format is not available' from user interviews."""
+        error = "ERROR: Requested format is not available"
+        result = pattern_route(error)
+        assert result.category == "caption"
+        assert result.suggested_healer == "caption-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_caption_format_unavailable(self):
+        """Test pattern_route() matches format unavailable error."""
+        error = "Subtitle format unavailable: json3 not found"
+        result = pattern_route(error)
+        assert result.category == "caption"
+        assert result.suggested_healer == "caption-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_caption_subtitle_not_found(self):
+        """Test pattern_route() matches subtitle not found error."""
+        error = "Subtitle not found for video abc123"
+        result = pattern_route(error)
+        assert result.category == "caption"
+        assert result.suggested_healer == "caption-healer"
+
+    # --- Embedding-related patterns ---
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_shape_mismatch(self):
+        """Test pattern_route() matches numpy shape mismatch error."""
+        error = "ValueError: shape mismatch: objects cannot be broadcast to a single shape"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_shapes_not_aligned(self):
+        """Test pattern_route() matches shapes not aligned error."""
+        error = "numpy.core._exceptions.UFuncTypeError: shapes (10,) and (20,) not aligned"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_empty_array(self):
+        """Test pattern_route() matches empty array error."""
+        error = "ValueError: cannot compute cosine similarity on empty array"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_zero_length_array(self):
+        """Test pattern_route() matches zero length array error."""
+        error = "IndexError: zero length array is not valid"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_numpy_error(self):
+        """Test pattern_route() matches generic numpy error."""
+        error = "numpy.linalg.LinAlgError: Singular matrix"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_generation_failed(self):
+        """Test pattern_route() matches embedding generation failed error."""
+        error = "Embedding generation failed for batch: timeout"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_embedding_incompatible_shapes(self):
+        """Test pattern_route() matches incompatible shapes error."""
+        error = "ValueError: incompatible shapes for dot product"
+        result = pattern_route(error)
+        assert result.category == "embedding"
+        assert result.suggested_healer == "embedding-healer"
+
+    # --- LLM provider-specific patterns ---
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_gemini_quota(self):
+        """Test pattern_route() matches Gemini quota as API error (rate limits are API errors)."""
+        # Note: Gemini quota errors match API rate limit pattern first (429/quota), which is correct
+        error = "google.api_core.exceptions.ResourceExhausted: Gemini quota exceeded"
+        result = pattern_route(error)
+        # API pattern matches first due to "quota exceeded" - this is correct behavior
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_gemini_limit(self):
+        """Test pattern_route() matches Gemini rate limit as API error."""
+        # Note: Rate limit errors match API pattern first, which is correct
+        error = "Gemini API: rate limit reached, please wait"
+        result = pattern_route(error)
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_anthropic_overloaded(self):
+        """Test pattern_route() matches Anthropic overloaded error."""
+        error = "anthropic.APIStatusError: Anthropic API is overloaded, please retry"
+        result = pattern_route(error)
+        assert result.category == "llm"
+        assert result.suggested_healer == "llm-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_anthropic_capacity(self):
+        """Test pattern_route() matches Anthropic capacity error."""
+        error = "Anthropic servers at capacity, request failed"
+        result = pattern_route(error)
+        assert result.category == "llm"
+        assert result.suggested_healer == "llm-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_claude_overloaded(self):
+        """Test pattern_route() matches Claude overloaded error."""
+        error = "Claude overloaded: service temporarily unavailable"
+        result = pattern_route(error)
+        assert result.category == "llm"
+        assert result.suggested_healer == "llm-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_claude_api_error(self):
+        """Test pattern_route() matches Claude API error."""
+        error = "Claude API error: internal server error"
+        result = pattern_route(error)
+        assert result.category == "llm"
+        assert result.suggested_healer == "llm-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_ollama_not_running(self):
+        """Test pattern_route() matches Ollama not running error."""
+        error = "OllamaError: ollama not running, start the service first"
+        result = pattern_route(error)
+        assert result.category == "llm"
+        assert result.suggested_healer == "llm-healer"
+
+    @pytest.mark.fast
+    def test_pattern_route_llm_ollama_connection_refused(self):
+        """Test pattern_route() matches Ollama connection refused as API error."""
+        # Note: Connection refused matches API pattern first, which is correct for network errors
+        error = "ollama: connection refused on localhost:11434"
+        result = pattern_route(error)
+        # API pattern matches first due to "connection refused" - this is correct behavior
+        assert result.category == "api"
+        assert result.suggested_healer == "api-healer"
+
+    # --- False positive prevention tests ---
+
+    @pytest.mark.fast
+    def test_pattern_route_no_false_positive_format_file(self):
+        """Test pattern_route() doesn't match 'format' in file context."""
+        error = "Processing file in mp4 format successfully"
+        result = pattern_route(error)
+        # Should NOT match caption pattern for generic format mention
+        assert result.category != "caption" or "format" not in result.reasoning.lower()
+
+    @pytest.mark.fast
+    def test_pattern_route_no_false_positive_shape_geometry(self):
+        """Test pattern_route() doesn't match 'shape' in geometry context."""
+        error = "Drawing shape completed with 4 vertices"
+        result = pattern_route(error)
+        # Should NOT match embedding pattern for generic shape mention
+        assert result.category != "embedding"
+
+    @pytest.mark.fast
+    def test_pattern_route_no_false_positive_limit_success(self):
+        """Test pattern_route() doesn't match 'limit' in success context."""
+        error = "Processed 100 items within time limit successfully"
+        result = pattern_route(error)
+        # Should NOT match LLM quota pattern for success message
+        assert result.category == "unknown" or "limit" not in error.lower()
+
+
 class TestPatternRoutingConstants:
     """Tests for PATTERN_ROUTING dictionary."""
 
@@ -475,9 +676,27 @@ class TestPatternRoutingConstants:
     @pytest.mark.fast
     def test_pattern_routing_valid_categories(self):
         """Test PATTERN_ROUTING categories are valid."""
-        valid_categories = ["api", "disk", "path", "checkpoint", "download", "otio", "config"]
+        valid_categories = ["api", "disk", "path", "checkpoint", "download", "otio", "config", "caption", "embedding", "llm"]
         for pattern, (category, healer) in PATTERN_ROUTING.items():
             assert category in valid_categories, f"Invalid category: {category}"
+
+    @pytest.mark.fast
+    def test_pattern_routing_has_caption_patterns(self):
+        """Test PATTERN_ROUTING contains caption error patterns."""
+        caption_patterns = [k for k, (cat, _) in PATTERN_ROUTING.items() if cat == "caption"]
+        assert len(caption_patterns) >= 4  # Multiple caption patterns
+
+    @pytest.mark.fast
+    def test_pattern_routing_has_embedding_patterns(self):
+        """Test PATTERN_ROUTING contains embedding error patterns."""
+        embedding_patterns = [k for k, (cat, _) in PATTERN_ROUTING.items() if cat == "embedding"]
+        assert len(embedding_patterns) >= 3  # shape mismatch, empty array, numpy error
+
+    @pytest.mark.fast
+    def test_pattern_routing_has_llm_patterns(self):
+        """Test PATTERN_ROUTING contains LLM provider error patterns."""
+        llm_patterns = [k for k, (cat, _) in PATTERN_ROUTING.items() if cat == "llm"]
+        assert len(llm_patterns) >= 3  # gemini, anthropic, ollama patterns
 
 
 class TestFallbackChainInit:
