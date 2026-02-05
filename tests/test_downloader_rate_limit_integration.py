@@ -789,3 +789,102 @@ class TestGlobalRateLimitCoordinatorIntegration:
         c2 = GlobalRateLimitCoordinator()
 
         assert c1 is c2, "Should return same instance"
+
+
+# =============================================================================
+# Test: Rate limit backoff config extraction (US-66-006)
+# =============================================================================
+
+
+class TestRateLimitBackoffConfigExtraction:
+    """Test that RateLimitState/RateLimitTracker accept configurable backoff params."""
+
+    def test_rate_limit_state_custom_base_backoff(self):
+        """RateLimitState uses custom base_backoff_seconds for delay calculation."""
+        from src.caption.timeout import RateLimitState
+
+        state = RateLimitState(base_backoff_seconds=10.0, max_backoff_seconds=600.0, max_history=5)
+        delay = state.record_rate_limit("vid1")
+        # First rate limit: base * 2^0 = 10.0
+        assert delay == 10.0
+        assert state.max_backoff_seconds == 600.0
+        assert state.max_history == 5
+
+    def test_rate_limit_state_custom_max_backoff(self):
+        """RateLimitState respects custom max_backoff_seconds cap."""
+        from src.caption.timeout import RateLimitState
+
+        state = RateLimitState(base_backoff_seconds=100.0, max_backoff_seconds=150.0)
+        # 1st: min(100*1, 150) = 100
+        state.record_rate_limit("v1")
+        # 2nd: min(100*2, 150) = 150
+        delay = state.record_rate_limit("v2")
+        assert delay == 150.0
+        # 3rd: min(100*4, 150) = 150 (capped)
+        delay = state.record_rate_limit("v3")
+        assert delay == 150.0
+
+    def test_rate_limit_state_custom_max_history(self):
+        """RateLimitState trims history to custom max_history."""
+        from src.caption.timeout import RateLimitState
+
+        state = RateLimitState(max_history=3)
+        for i in range(5):
+            state.record_rate_limit(f"v{i}")
+            state.record_success()  # reset consecutive for predictable delays
+        assert len(state.rate_limit_history) == 3
+
+    def test_tracker_passes_config_to_state(self):
+        """RateLimitTracker passes custom params to its internal RateLimitState."""
+        from src.caption.timeout import RateLimitTracker
+
+        # Reset singleton to allow fresh init with custom params
+        RateLimitTracker._instance = None
+        try:
+            tracker = RateLimitTracker(
+                base_backoff_seconds=20.0,
+                max_backoff_seconds=100.0,
+                max_history=3,
+            )
+            assert tracker._state.base_backoff_seconds == 20.0
+            assert tracker._state.max_backoff_seconds == 100.0
+            assert tracker._state.max_history == 3
+        finally:
+            # Reset singleton so other tests are unaffected
+            RateLimitTracker._instance = None
+
+    def test_caption_first_config_has_rate_limit_fields(self):
+        """CaptionFirstConfig exposes rate limit backoff fields with correct defaults."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        cfg = CaptionFirstConfig()
+        assert cfg.rate_limit_base_backoff_seconds == 5.0
+        assert cfg.rate_limit_max_backoff_seconds == 300.0
+        assert cfg.rate_limit_max_history == 10
+
+    def test_caption_first_config_custom_rate_limit_values(self):
+        """CaptionFirstConfig accepts custom rate limit backoff values."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        cfg = CaptionFirstConfig(
+            rate_limit_base_backoff_seconds=15.0,
+            rate_limit_max_backoff_seconds=600.0,
+            rate_limit_max_history=20,
+        )
+        assert cfg.rate_limit_base_backoff_seconds == 15.0
+        assert cfg.rate_limit_max_backoff_seconds == 600.0
+        assert cfg.rate_limit_max_history == 20
+
+    def test_caption_first_config_dict_construction(self):
+        """CaptionFirstConfig works when constructed from dict (YAML loading)."""
+        from src.config.sections.download import CaptionFirstConfig
+
+        data = {
+            'rate_limit_base_backoff_seconds': 8.0,
+            'rate_limit_max_backoff_seconds': 120.0,
+            'rate_limit_max_history': 5,
+        }
+        cfg = CaptionFirstConfig(**data)
+        assert cfg.rate_limit_base_backoff_seconds == 8.0
+        assert cfg.rate_limit_max_backoff_seconds == 120.0
+        assert cfg.rate_limit_max_history == 5

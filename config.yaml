@@ -1160,6 +1160,13 @@ download:
     # When this fraction of a rolling window of recent videos lack captions,
     # switch remaining videos to preflight-only mode (lighter check).
     unavailable_threshold: 0.8        # Switch at 80% unavailable in window (default: 0.8)
+    # Rate limit backoff parameters (US-66-006)
+    # Controls exponential backoff for rate-limited caption fetches.
+    # Used by RateLimitState/RateLimitTracker in src/caption/timeout.py.
+    rate_limit_base_backoff_seconds: 5.0    # Initial backoff delay (1st: 5s, 2nd: 10s, 3rd: 20s...)
+    rate_limit_max_backoff_seconds: 300.0   # Maximum backoff cap (5 minutes)
+    rate_limit_max_history: 10              # Recent rate limit events to track
+
     # Worker progress tracking (US-008 Sprint 8)
     # Time threshold for considering a worker "stuck" on a video.
     # Workers exceeding this threshold are reported in progress callbacks.
