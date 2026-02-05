@@ -336,3 +336,141 @@ class TestOrchestratorPrintReport:
         assert "Total heals: 0" in captured.out
         # Dashboard header should not appear
         assert "HEALING DASHBOARD" not in captured.out
+
+
+class TestExportMetricsJson:
+    """Test export_metrics_json() for healing metrics persistence (US-68-004)."""
+
+    def _create_orchestrator(self, project_dir) -> HealingOrchestrator:
+        """Create orchestrator with mocked config."""
+        config = MagicMock()
+        config.healing = None
+        strategy = HealingStrategy()
+        orchestrator = HealingOrchestrator(
+            config, project_dir, strategy=strategy, healers=[NoopHealer]
+        )
+        return orchestrator
+
+    @pytest.mark.fast
+    def test_export_creates_valid_json_with_all_fields(self, tmp_path):
+        """Test that export_metrics_json creates valid JSON with all required fields."""
+        import json
+
+        orchestrator = self._create_orchestrator(tmp_path)
+
+        # Populate some metrics
+        orchestrator.metrics.record_heal("api-healer", "DOWNLOAD", True, 120.0)
+        orchestrator.metrics.record_heal("disk-healer", "OUTPUT", False, 80.0)
+        orchestrator.metrics.record_error_category("api")
+        orchestrator.metrics.record_error_category("disk")
+        orchestrator.metrics.preflight_issues_found = 3
+        orchestrator.metrics.rollbacks_performed = 1
+
+        path = orchestrator.export_metrics_json()
+
+        assert path.exists()
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        # Verify all required fields from acceptance criteria
+        assert "success_rate" in data
+        assert "total_heals" in data
+        assert "heals_by_stage" in data
+        assert "heals_by_healer" in data
+        assert "error_category_distribution" in data
+        assert "average_heal_time_ms" in data
+        assert "preflight_issues_found" in data
+        assert "rollback_count" in data
+
+        # Verify values
+        assert data["total_heals"] == 2
+        assert data["success_rate"] == 50.0
+        assert data["heals_by_stage"] == {"DOWNLOAD": 1, "OUTPUT": 1}
+        assert data["heals_by_healer"] == {"api-healer": 1, "disk-healer": 1}
+        assert data["error_category_distribution"] == {"api": 1, "disk": 1}
+        assert data["average_heal_time_ms"] == 100.0
+        assert data["preflight_issues_found"] == 3
+        assert data["rollback_count"] == 1
+        assert "timestamp" in data
+
+    @pytest.mark.fast
+    def test_export_default_path(self, tmp_path):
+        """Test that export writes to <project>/healing_metrics.json by default."""
+        orchestrator = self._create_orchestrator(tmp_path)
+
+        path = orchestrator.export_metrics_json()
+
+        assert path == tmp_path / "healing_metrics.json"
+        assert path.exists()
+
+    @pytest.mark.fast
+    def test_export_custom_path(self, tmp_path):
+        """Test that export can write to a custom path."""
+        orchestrator = self._create_orchestrator(tmp_path)
+        custom_path = tmp_path / "custom" / "metrics.json"
+        custom_path.parent.mkdir(parents=True)
+
+        path = orchestrator.export_metrics_json(output_path=custom_path)
+
+        assert path == custom_path
+        assert path.exists()
+
+    @pytest.mark.fast
+    def test_export_empty_metrics(self, tmp_path):
+        """Test export with no healing activity produces valid JSON."""
+        import json
+
+        orchestrator = self._create_orchestrator(tmp_path)
+
+        path = orchestrator.export_metrics_json()
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["total_heals"] == 0
+        assert data["success_rate"] == 0.0
+        assert data["heals_by_stage"] == {}
+        assert data["heals_by_healer"] == {}
+        assert data["error_category_distribution"] == {}
+        assert data["average_heal_time_ms"] == 0.0
+        assert data["preflight_issues_found"] == 0
+        assert data["rollback_count"] == 0
+
+    @pytest.mark.fast
+    def test_metrics_accumulate_across_multiple_heal_attempts(self, tmp_path):
+        """Test metrics accumulate correctly across multiple heal attempts."""
+        import json
+
+        orchestrator = self._create_orchestrator(tmp_path)
+
+        # Simulate multiple heal attempts across different stages and healers
+        orchestrator.metrics.record_heal("api-healer", "DOWNLOAD", True, 100.0)
+        orchestrator.metrics.record_heal("api-healer", "DOWNLOAD", False, 200.0)
+        orchestrator.metrics.record_heal("api-healer", "MATCH", True, 150.0)
+        orchestrator.metrics.record_heal("disk-healer", "OUTPUT", True, 50.0)
+        orchestrator.metrics.record_heal("checkpoint-healer", "DOWNLOAD", True, 75.0)
+        orchestrator.metrics.record_error_category("api")
+        orchestrator.metrics.record_error_category("api")
+        orchestrator.metrics.record_error_category("disk")
+        orchestrator.metrics.preflight_issues_found = 5
+        orchestrator.metrics.rollbacks_performed = 2
+
+        path = orchestrator.export_metrics_json()
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        # Verify accumulation
+        assert data["total_heals"] == 5
+        # 4 successes out of 5 = 80%
+        assert data["success_rate"] == 80.0
+        # Heals by stage: DOWNLOAD=3, MATCH=1, OUTPUT=1
+        assert data["heals_by_stage"]["DOWNLOAD"] == 3
+        assert data["heals_by_stage"]["MATCH"] == 1
+        assert data["heals_by_stage"]["OUTPUT"] == 1
+        # Heals by healer: api-healer=3, disk-healer=1, checkpoint-healer=1
+        assert data["heals_by_healer"]["api-healer"] == 3
+        assert data["heals_by_healer"]["disk-healer"] == 1
+        assert data["heals_by_healer"]["checkpoint-healer"] == 1
+        # Error categories accumulated
+        assert data["error_category_distribution"]["api"] == 2
+        assert data["error_category_distribution"]["disk"] == 1
+        # Average heal time: (100+200+150+50+75)/5 = 115.0
+        assert data["average_heal_time_ms"] == 115.0
+        assert data["preflight_issues_found"] == 5
+        assert data["rollback_count"] == 2

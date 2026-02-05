@@ -1320,6 +1320,48 @@ class HealingOrchestrator:
             'rollbacks': self.metrics.rollbacks_performed,
         }
 
+    def export_metrics_json(self, output_path: Optional[Path] = None) -> Path:
+        """Export healing metrics to a JSON file for trend analysis across runs.
+
+        Writes metrics to <project>/healing_metrics.json (or custom path).
+        Includes all dashboard metrics plus timestamp for cross-run comparison.
+
+        Args:
+            output_path: Optional custom output path. Defaults to
+                        <project_dir>/healing_metrics.json.
+
+        Returns:
+            Path to the written JSON file.
+        """
+        path = output_path or (self.project_dir / "healing_metrics.json")
+        dashboard = self.get_dashboard_metrics()
+
+        export_data = {
+            "timestamp": time.time(),
+            "success_rate": dashboard["success_rate"],
+            "total_heals": dashboard["total_heals"],
+            "heals_by_stage": dashboard["heals_by_stage"],
+            "heals_by_healer": {
+                name: util["total_attempts"]
+                for name, util in dashboard["healer_utilization"].items()
+            },
+            "error_category_distribution": dashboard["error_categories"],
+            "average_heal_time_ms": dashboard["average_heal_time_ms"],
+            "preflight_issues_found": dashboard["preflight_issues"]["found"],
+            "rollback_count": dashboard["rollbacks"],
+        }
+
+        try:
+            path.write_text(
+                json.dumps(export_data, indent=2),
+                encoding="utf-8",
+            )
+            logger.info(f"[orchestrator] Exported healing metrics to {path}")
+        except Exception as e:
+            logger.warning(f"[orchestrator] Failed to export metrics: {e}")
+
+        return path
+
     def format_dashboard(self) -> str:
         """Format healing dashboard for human-readable console output (US-64-005).
 

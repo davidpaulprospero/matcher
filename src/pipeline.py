@@ -1184,6 +1184,7 @@ def run_pipeline_with_healing(
         healing_config = getattr(config, 'healing', None)
         if orchestrator and getattr(healing_config, 'print_report', True):
             orchestrator.print_report()
+            orchestrator.export_metrics_json()
 
         return success
     else:
