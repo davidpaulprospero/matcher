@@ -29,6 +29,7 @@ from .base import (
     get_config_metrics,
     log_hardcoded_warning,
 )
+from .utils import safe_get_config_value
 
 # Re-export section configs for backward compatibility
 from .sections import (
@@ -98,6 +99,7 @@ __all__ = [
     'get_api_key',
     'get_config_metrics',
     'log_hardcoded_warning',
+    'safe_get_config_value',
     # Infrastructure
     'LoggingConfig',
     'CacheConfig',

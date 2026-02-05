@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..config import Config
 
+from ..config.utils import safe_get_config_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ def validate_root_directories(config: 'Config') -> None:
     errors = []
 
     # Check download.root_dir
-    download_root = getattr(config.download, 'root_dir', None)
+    download_root = safe_get_config_value(config.download, 'root_dir')
     if download_root:
         root_path = Path(download_root)
         if not root_path.is_absolute():
@@ -46,7 +48,7 @@ def validate_root_directories(config: 'Config') -> None:
             print(f"  ✓ Videos root directory: {root_path}")
 
     # Check image_search.root_dir
-    image_root = getattr(config.image_search, 'root_dir', None)
+    image_root = safe_get_config_value(config.image_search, 'root_dir')
     if image_root:
         root_path = Path(image_root)
         if not root_path.is_absolute():

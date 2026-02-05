@@ -13,15 +13,16 @@ The orchestrator manages:
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
-from .base import Healer, HealerResult, HealerAction
+from .base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData
 from .strategy import (
     HealingStrategy,
     HealingMode,
@@ -128,6 +129,11 @@ class HealingOrchestrator:
         # Cross-healer state
         self._healer_state: Dict[str, Any] = {}
 
+        # Event subscription registry: event_type -> list of healer names
+        self._event_subscriptions: Dict[HealerEvent, List[str]] = {
+            event: [] for event in HealerEvent
+        }
+
         # Thread safety for recent errors tracking
         self._errors_lock = threading.Lock()
         self.recent_errors: Dict[str, int] = {}
@@ -148,6 +154,9 @@ class HealingOrchestrator:
 
         # Initialize two-tier LLM system if enabled
         self._init_llm_delegation()
+
+        # Auto-subscribe healers to relevant events (US-64-011)
+        self._init_event_subscriptions()
 
     def _init_healer_cache(self) -> HealerResultCache:
         """Initialize healer result cache from config (US-64-007).
@@ -170,6 +179,32 @@ class HealingOrchestrator:
         cache = HealerResultCache(cache_config)
         logger.debug(f"[orchestrator] Healer cache initialized: {cache}")
         return cache
+
+    def _init_event_subscriptions(self):
+        """Auto-subscribe healers to relevant events based on their capabilities.
+
+        Healers with reset_backoff() subscribe to CONFIG_CHANGED.
+        Checkpoint healer subscribes to CACHE_CLEARED.
+        API healer subscribes to RATE_LIMITED and PROVIDER_SWITCHED.
+        """
+        for healer in self.healers:
+            # Healers with backoff subscribe to config changes
+            if hasattr(healer, 'reset_backoff'):
+                self.subscribe_event(HealerEvent.CONFIG_CHANGED, healer.name)
+
+            # Checkpoint healer needs to know about cache clearing
+            if healer.name == "checkpoint-healer":
+                self.subscribe_event(HealerEvent.CACHE_CLEARED, healer.name)
+
+            # API healer cares about rate limits and provider switches
+            if healer.name == "api-healer":
+                self.subscribe_event(HealerEvent.RATE_LIMITED, healer.name)
+                self.subscribe_event(HealerEvent.PROVIDER_SWITCHED, healer.name)
+
+            # Download healer cares about rate limits
+            if healer.name == "download-healer":
+                self.subscribe_event(HealerEvent.RATE_LIMITED, healer.name)
+                self.subscribe_event(HealerEvent.PROVIDER_SWITCHED, healer.name)
 
     def _init_llm_delegation(self):
         """Initialize two-tier LLM delegation system (watcher + LLM healer)."""
@@ -652,6 +687,10 @@ class HealingOrchestrator:
                     pass
 
         self.config_snapshots.append(snapshot)
+
+        # US-64-012: Auto-save after stage snapshot (stage completion)
+        self._auto_save_session(f"stage_snapshot:{stage_name}")
+
         return snapshot
 
     def rollback_config(self, to_stage: str = None) -> bool:
@@ -796,6 +835,8 @@ class HealingOrchestrator:
                 # Invalidate cache if config was modified
                 if result.modified_config:
                     self._healer_cache.invalidate_on_config_change()
+            # US-64-012: Auto-save after successful heal
+            self._auto_save_session(f"heal_success:{stage_name}")
             return result
 
         # Step 3: Escalate to LLM healer if needed
@@ -807,6 +848,8 @@ class HealingOrchestrator:
                 self._healer_cache.store(error, stage_name, llm_result, "llm_healer")
                 if llm_result.modified_config:
                     self._healer_cache.invalidate_on_config_change()
+                # US-64-012: Auto-save after LLM heal
+                self._auto_save_session(f"llm_heal:{stage_name}")
                 return llm_result
 
         # All healers failed
@@ -814,7 +857,10 @@ class HealingOrchestrator:
 
         # Escalate in interactive mode
         if self.strategy.mode == HealingMode.INTERACTIVE:
-            return self._escalate_to_user(error, stage_name)
+            escalation_result = self._escalate_to_user(error, stage_name)
+            # US-64-012: Auto-save after escalation
+            self._auto_save_session(f"escalation:{stage_name}")
+            return escalation_result
 
         return HealerResult.failed(f"All healers failed for: {type(error).__name__}")
 
@@ -1090,28 +1136,73 @@ class HealingOrchestrator:
 
         return True
 
+    def subscribe_event(self, event: HealerEvent, healer_name: str) -> None:
+        """Subscribe a healer to receive a specific event type.
+
+        Args:
+            event: The event type to subscribe to
+            healer_name: Name of the healer to notify
+        """
+        if healer_name not in self._event_subscriptions[event]:
+            self._event_subscriptions[event].append(healer_name)
+            logger.debug(f"Healer '{healer_name}' subscribed to {event.value}")
+
+    def publish_event(self, event: HealerEvent, source_healer: str, **details) -> None:
+        """Publish an event to all subscribed healers.
+
+        Args:
+            event: The event type being published
+            source_healer: Name of the healer that triggered the event
+            **details: Additional event-specific data
+        """
+        event_data = HealerEventData(
+            event=event,
+            source_healer=source_healer,
+            details=details,
+        )
+
+        subscribers = self._event_subscriptions.get(event, [])
+        for healer_name in subscribers:
+            if healer_name == source_healer:
+                continue  # Don't notify the source healer of its own event
+            healer = self._healer_instances.get(healer_name)
+            if healer:
+                try:
+                    healer.handle_event(event_data)
+                except Exception as e:
+                    logger.warning(
+                        f"Healer '{healer_name}' failed handling {event.value}: {e}"
+                    )
+
+        logger.debug(
+            f"Published {event.value} from '{source_healer}' to "
+            f"{len(subscribers)} subscriber(s)"
+        )
+
     def _notify_healers(self, source_healer: str, result: HealerResult):
         """
         Notify healers of changes made by another healer.
 
-        Enables cross-healer coordination.
+        Uses the event system for cross-healer coordination.
         """
         # Store in shared state
         self._healer_state[f"{source_healer}_last_result"] = result
 
-        # Specific notifications
+        # Publish CONFIG_CHANGED event when config was modified
         if result.modified_config:
-            # If config was modified, reset backoff states
-            for healer in self.healers:
-                if hasattr(healer, 'reset_backoff'):
-                    healer.reset_backoff()
+            self.publish_event(
+                HealerEvent.CONFIG_CHANGED,
+                source_healer,
+                result_message=result.message,
+            )
 
-        # If disk healer cleaned cache, checkpoint healer needs to know
+        # Publish CACHE_CLEARED event when disk healer cleans cache
         if source_healer == "disk-healer":
-            if "checkpoint-healer" in self._healer_instances:
-                ch = self._healer_instances["checkpoint-healer"]
-                if hasattr(ch, 'cache_was_cleaned'):
-                    ch.cache_was_cleaned = True
+            self.publish_event(
+                HealerEvent.CACHE_CLEARED,
+                source_healer,
+                result_message=result.message,
+            )
 
     def _escalate_to_user(
         self,
@@ -1608,6 +1699,198 @@ class HealingOrchestrator:
         for healer in self.healers:
             if hasattr(healer, 'reset_backoff'):
                 healer.reset_backoff()
+
+    # =========================================================================
+    # SESSION PERSISTENCE (US-64-012)
+    # =========================================================================
+
+    SESSION_FILENAME = "healing_session.json"
+
+    def _get_session_path(self) -> Path:
+        """Get path to session persistence file."""
+        return self.project_dir / self.SESSION_FILENAME
+
+    def save_session(self) -> Path:
+        """Persist current orchestrator state to JSON for crash recovery.
+
+        Saves heal history, metrics, config snapshots, healer states, and
+        current stage to a JSON file in the project directory.
+
+        Returns:
+            Path to the saved session file.
+        """
+        session_data = {
+            "version": 1,
+            "timestamp": time.time(),
+            "current_stage": self.current_stage,
+            "metrics": {
+                "total_heals": self.metrics.total_heals,
+                "successful_heals": self.metrics.successful_heals,
+                "failed_heals": self.metrics.failed_heals,
+                "heals_by_stage": dict(self.metrics.heals_by_stage),
+                "heals_by_healer": dict(self.metrics.heals_by_healer),
+                "successful_heals_by_healer": dict(self.metrics.successful_heals_by_healer),
+                "heal_times_by_healer": {
+                    k: list(v) for k, v in self.metrics.heal_times_by_healer.items()
+                },
+                "error_categories": dict(self.metrics.error_categories),
+                "time_spent_healing": self.metrics.time_spent_healing,
+                "preflight_issues_found": self.metrics.preflight_issues_found,
+                "preflight_issues_fixed": self.metrics.preflight_issues_fixed,
+                "rollbacks_performed": self.metrics.rollbacks_performed,
+                "user_escalations": self.metrics.user_escalations,
+                "errors_encountered": list(self.metrics.errors_encountered),
+            },
+            "config_snapshots": [
+                {
+                    "stage_name": snap.stage_name,
+                    "timestamp": snap.timestamp,
+                    "config_values": snap.config_values,
+                }
+                for snap in self.config_snapshots
+            ],
+            "healer_states": self._serialize_healer_states(),
+            "strategy": {
+                "mode": self.strategy.mode.value,
+                "max_attempts_per_stage": self.strategy.max_attempts_per_stage,
+                "max_total_heals": self.strategy.max_total_heals,
+                "heal_delay": self.strategy.heal_delay,
+            },
+        }
+
+        session_path = self._get_session_path()
+        try:
+            session_path.write_text(
+                json.dumps(session_data, indent=2),
+                encoding="utf-8"
+            )
+            logger.debug(f"[orchestrator] Session saved to {session_path}")
+        except Exception as e:
+            logger.warning(f"[orchestrator] Failed to save session: {e}")
+
+        return session_path
+
+    def _serialize_healer_states(self) -> Dict[str, Any]:
+        """Serialize healer-specific states for session persistence."""
+        states = {}
+        for healer in self.healers:
+            state = {}
+            # Capture backoff state if present
+            if hasattr(healer, 'backoff_time'):
+                state['backoff_time'] = healer.backoff_time
+            if hasattr(healer, 'retry_count'):
+                state['retry_count'] = healer.retry_count
+            if hasattr(healer, 'cache_was_cleaned'):
+                state['cache_was_cleaned'] = healer.cache_was_cleaned
+            if state:
+                states[healer.name] = state
+        return states
+
+    def load_session(self) -> bool:
+        """Restore orchestrator state from persisted session file.
+
+        Loads heal history, metrics, config snapshots, and healer states
+        from the session file created by save_session().
+
+        Returns:
+            True if session was successfully loaded, False otherwise.
+        """
+        session_path = self._get_session_path()
+        if not session_path.exists():
+            logger.debug("[orchestrator] No session file found for recovery")
+            return False
+
+        try:
+            session_data = json.loads(
+                session_path.read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"[orchestrator] Failed to read session file: {e}")
+            return False
+
+        # Version check
+        version = session_data.get("version", 0)
+        if version != 1:
+            logger.warning(f"[orchestrator] Unknown session version: {version}")
+            return False
+
+        try:
+            # Restore current stage
+            self.current_stage = session_data.get("current_stage")
+
+            # Restore metrics
+            metrics_data = session_data.get("metrics", {})
+            self.metrics.total_heals = metrics_data.get("total_heals", 0)
+            self.metrics.successful_heals = metrics_data.get("successful_heals", 0)
+            self.metrics.failed_heals = metrics_data.get("failed_heals", 0)
+            self.metrics.heals_by_stage = metrics_data.get("heals_by_stage", {})
+            self.metrics.heals_by_healer = metrics_data.get("heals_by_healer", {})
+            self.metrics.successful_heals_by_healer = metrics_data.get(
+                "successful_heals_by_healer", {}
+            )
+            self.metrics.heal_times_by_healer = {
+                k: list(v) for k, v
+                in metrics_data.get("heal_times_by_healer", {}).items()
+            }
+            self.metrics.error_categories = metrics_data.get("error_categories", {})
+            self.metrics.time_spent_healing = metrics_data.get("time_spent_healing", 0.0)
+            self.metrics.preflight_issues_found = metrics_data.get("preflight_issues_found", 0)
+            self.metrics.preflight_issues_fixed = metrics_data.get("preflight_issues_fixed", 0)
+            self.metrics.rollbacks_performed = metrics_data.get("rollbacks_performed", 0)
+            self.metrics.user_escalations = metrics_data.get("user_escalations", 0)
+            self.metrics.errors_encountered = metrics_data.get("errors_encountered", [])
+
+            # Restore config snapshots
+            self.config_snapshots = [
+                ConfigSnapshot(
+                    stage_name=snap["stage_name"],
+                    timestamp=snap["timestamp"],
+                    config_values=snap.get("config_values", {}),
+                )
+                for snap in session_data.get("config_snapshots", [])
+            ]
+
+            # Restore healer states
+            self._restore_healer_states(session_data.get("healer_states", {}))
+
+            logger.info(
+                f"[orchestrator] Session restored: "
+                f"{self.metrics.total_heals} heals, "
+                f"stage={self.current_stage}"
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(f"[orchestrator] Failed to restore session: {e}")
+            return False
+
+    def _restore_healer_states(self, states: Dict[str, Any]) -> None:
+        """Restore healer-specific states from session data."""
+        for healer in self.healers:
+            state = states.get(healer.name, {})
+            if not state:
+                continue
+            if 'backoff_time' in state and hasattr(healer, 'backoff_time'):
+                healer.backoff_time = state['backoff_time']
+            if 'retry_count' in state and hasattr(healer, 'retry_count'):
+                healer.retry_count = state['retry_count']
+            if 'cache_was_cleaned' in state and hasattr(healer, 'cache_was_cleaned'):
+                healer.cache_was_cleaned = state['cache_was_cleaned']
+
+    def _auto_save_session(self, event: str) -> None:
+        """Auto-save session after significant events.
+
+        Called internally after heal success, stage completion, and escalation.
+
+        Args:
+            event: Description of the triggering event for logging.
+        """
+        try:
+            self.save_session()
+            logger.debug(f"[orchestrator] Auto-saved session after: {event}")
+        except Exception as e:
+            # Never let auto-save failure disrupt the pipeline
+            logger.debug(f"[orchestrator] Auto-save failed after {event}: {e}")
 
 
 def create_orchestrated_pipeline(

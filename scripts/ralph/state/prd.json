@@ -1,199 +1,188 @@
-﻿{
-    "sprintNumber":  64,
-    "focusArea":  "agents",
-    "branchName":  "ralph/sprint-64",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-64-001",
-                            "title":  "Generate sprint stories for agents focus area",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027agents\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027agents\u0027",
-                                                       "Add stories US-64-002 through US-64-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-64-NNN to be unique across sprints",
-                                                       "Mark this story (US-64-001) as passes: true when done"
-                                                   ],
-                            "notes":  "Planning story completed. Generated 11 stories (US-64-002 through US-64-012) covering: caption healer for format discovery, negative caption caching, healer timeout configuration, orchestrator metrics dashboard, caption circuit breaker integration, healer result caching, pattern routing coverage expansion, preflight check extensibility, healing strategy presets, cross-healer coordination events, and healing session persistence. Analysis focused on user interview context about caption fetching inefficiency and broader agent system improvements."
-                        },
-                        {
-                            "id":  "US-64-002",
-                            "title":  "Add CaptionHealer for intelligent caption format discovery",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Create new CaptionHealer class in src/agents/healers/caption.py extending Healer base class",
-                                                       "Implement can_handle() to detect caption-related errors (format unavailable, no captions, yt-dlp subtitle errors)",
-                                                       "Implement fix() that invokes yt-dlp --list-subs to discover available subtitle formats before attempting download",
-                                                       "Add auto-generated caption fallback (--write-auto-sub) when manual captions unavailable",
-                                                       "Register CaptionHealer in HEALER_REGISTRY in src/agents/healers/__init__.py",
-                                                       "Add tests in tests/test_caption_healer.py verifying format discovery and fallback logic"
-                                                   ],
-                            "notes":  "Evidence gate: 5/6 criteria verified (83%). Minimum: 90%."
-                        },
-                        {
-                            "id":  "US-64-003",
-                            "title":  "Add negative caption caching to prevent repeated failed lookups",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Extend CaptionHealer or create CaptionNegativeCache to cache \u0027no captions available\u0027 results",
-                                                       "Set configurable TTL for negative cache entries (default 1 hour) in healing config",
-                                                       "Add cache check before attempting caption fetch in CaptionHealer.fix()",
-                                                       "Propagate structured \u0027no captions\u0027 status that downstream stages can handle gracefully",
-                                                       "Add tests verifying negative cache prevents repeated failed caption attempts",
-                                                       "Add test verifying TTL expiration allows retry after configured interval"
-                                                   ],
-                            "notes":  "Completed. Integrated CaptionHealer with existing CaptionCache negative cache functionality. Added NoCaptionsStatus dataclass for structured status propagation. CaptionHealer.fix() now checks is_caption_unavailable() before format discovery, and stores unavailable results via store_unavailable(). Uses existing negative_cache_ttl_seconds config (default 3600s = 1 hour). Added 18 new tests covering negative cache prevention, TTL expiration, and NoCaptionsStatus serialization. Files: src/agents/healers/caption.py (extended), src/agents/healers/__init__.py (exports), tests/test_caption_healer.py (tests)."
-                        },
-                        {
-                            "id":  "US-64-004",
-                            "title":  "Add configurable healer timeout and retry limits per healer type",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add per-healer timeout configuration to HealingStrategy dataclass in src/agents/strategy.py",
-                                                       "Add healer_timeouts: Dict[str, float] field with default timeouts per healer name",
-                                                       "Modify HealingOrchestrator._try_healer() to respect per-healer timeout from strategy",
-                                                       "Add per-healer max_attempts configuration separate from global max_attempts_per_stage",
-                                                       "Add tests verifying healer-specific timeout is enforced",
-                                                       "Add test verifying default timeout used when healer not in healer_timeouts dict"
-                                                   ],
-                            "notes":  "Completed. Added healer_timeouts and healer_max_attempts dicts to HealingStrategy with sensible defaults (api-healer: 120s/5 attempts, disk-healer: 10s/1 attempt, etc.). Added DEFAULT_HEALER_TIMEOUT=30s fallback. Modified _try_healer() to use ThreadPoolExecutor with per-healer timeout. Added _get_healer_timeout() and _get_healer_max_attempts() helper methods. Created tests/test_healer_timeout.py with 21 tests covering: strategy config, orchestrator timeout enforcement, default fallback behavior, metrics recording on timeout. Files: src/agents/strategy.py, src/agents/orchestrator.py, tests/test_healer_timeout.py."
-                        },
-                        {
-                            "id":  "US-64-005",
-                            "title":  "Add healing metrics dashboard with real-time statistics",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add get_dashboard_metrics() method to HealingOrchestrator returning structured metrics dict",
-                                                       "Include heal success rate, average heal time, healer utilization breakdown",
-                                                       "Include error category distribution from watcher classifications",
-                                                       "Add format_dashboard() method for human-readable console output",
-                                                       "Integrate dashboard output into print_report() in src/agents/orchestrator.py",
-                                                       "Add tests verifying dashboard metrics accuracy with mock heal events"
-                                                   ],
-                            "notes":  "Completed. Implementation includes: (1) get_dashboard_metrics() returns structured dict with success_rate, average_heal_time_ms, total_heals, successful_heals, failed_heals, healer_utilization (per-healer breakdown with attempts/success/rate/avg_time), error_categories, heals_by_stage, time_spent_healing, preflight_issues, user_escalations, rollbacks. (2) HealingMetrics enhanced with record_error_category(), get_heal_success_rate(), get_average_heal_time_ms(), get_healer_success_rate(), get_healer_average_time_ms(). (3) format_dashboard() produces human-readable console output with sections for overall stats, healer utilization breakdown, error categories (sorted by count), heals by stage, preflight issues, escalations, and rollbacks. (4) print_report() shows dashboard when total_heals \u003e 0, otherwise shows summary. (5) Error category tracking integrated into _classify_error() for both watcher and pattern classifications. Files: src/agents/strategy.py (HealingMetrics), src/agents/orchestrator.py (dashboard methods), tests/test_healing_dashboard.py (22 tests). All 22 tests pass."
-                        },
-                        {
-                            "id":  "US-64-006",
-                            "title":  "Integrate caption fetcher with circuit breaker pattern",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Create CaptionCircuitBreaker class in src/agents/healers/caption.py or src/caption/ using circuit breaker pattern",
-                                                       "Configure trip threshold for consecutive caption failures (default: 5 failures)",
-                                                       "Configure reset timeout after circuit trips (default: 60 seconds)",
-                                                       "Wire circuit breaker into caption fetcher error handling path",
-                                                       "Add circuit breaker state to orchestrator metrics for monitoring",
-                                                       "Add tests for circuit breaker trip, reset, and half-open states"
-                                                   ],
-                            "notes":  "Completed. CaptionCircuitBreaker already existed at src/caption/circuit_breaker.py with full circuit breaker pattern implementation. Updated defaults to match story requirements: threshold=5 (was 10), pause_seconds=60 (was 120). Integration already in place: caption_fetcher.py uses circuit breaker in error handling path (lines 3758-3955), orchestrator.py includes circuit_breaker in metrics (line 1310). Added circuit_breaker config section to config.yaml under caption_first. Updated tests to match new defaults. Files modified: src/caption/circuit_breaker.py, src/config/sections/download.py, config.yaml, tests/test_caption_circuit_breaker.py. All 54 circuit breaker tests + 26 cascade tests pass."
-                        },
-                        {
-                            "id":  "US-64-007",
-                            "title":  "Add healer result caching for idempotent healing actions",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add HealerResultCache class to cache successful healing actions",
-                                                       "Cache key based on error signature (type + message hash + stage)",
-                                                       "Skip redundant healing attempts if identical error was recently healed",
-                                                       "Add configurable cache TTL (default: 5 minutes)",
-                                                       "Add cache invalidation when config changes (via config_modified flag)",
-                                                       "Add tests verifying cache hit prevents redundant heal attempts"
-                                                   ],
-                            "notes":  "Completed. Created HealerResultCache class in src/agents/healer_cache.py with: (1) error signature based on type + MD5 hash of message + stage, (2) configurable TTL (default 300s = 5 min), (3) config hash invalidation via set_config_hash() and invalidate_on_config_change(), (4) max_entries limit with LRU eviction. Integrated into HealingOrchestrator: cache check at start of coordinate_heal() before attempting healing, cache store after successful heal (both standard healers and LLM healer), cache invalidation when result.modified_config is True. Modified _try_healers_with_classification() to return tuple (result, healer_name) for cache storage. Added 33 tests in tests/test_healer_cache.py covering: config defaults, signature generation, store/get operations, TTL expiration, config invalidation, disabled cache behavior, max_entries enforcement, statistics, and integration test verifying cache hit prevents redundant heal. Files: src/agents/healer_cache.py (new), src/agents/orchestrator.py (modified), tests/test_healer_cache.py (new). All 33 tests pass."
-                        },
-                        {
-                            "id":  "US-64-008",
-                            "title":  "Expand pattern routing coverage for common error categories",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add caption-specific patterns to PATTERN_ROUTING in src/agents/fallback.py",
-                                                       "Include patterns for: \u0027no subtitles\u0027, \u0027caption unavailable\u0027, \u0027format not available\u0027 (subtitle context)",
-                                                       "Add patterns for embedding-related errors (numpy shape mismatch, empty array)",
-                                                       "Add patterns for LLM provider errors (gemini quota, anthropic overloaded)",
-                                                       "Update pattern_route() tests to cover new patterns",
-                                                       "Verify no false positive matches with existing test cases"
-                                                   ],
-                            "notes":  "Completed. Added 14 new patterns to PATTERN_ROUTING: (1) Caption patterns: \u0027Requested format is not available\u0027 from user interviews. (2) Embedding patterns: shape_mismatch, shapes_not_aligned, broadcast, incompatible_shapes, empty_array, zero_length_array, numpy.*Error, embedding/vector fail/error. (3) LLM provider patterns: gemini quota/limit/exceeded, anthropic overloaded/capacity/unavailable, claude api_error/overloaded, ollama not_running/unavailable. Updated valid_categories to include \u0027caption\u0027, \u0027embedding\u0027, \u0027llm\u0027. Added TestPatternRouteNewPatternsUS64008 class with 23 new tests covering all patterns plus 3 false positive prevention tests. Note: Gemini quota and Ollama connection_refused correctly route to \u0027api\u0027 category due to pattern priority (rate limit/connection errors are API errors). All 93 tests in test_fallback.py pass, plus 97 tests in test_agent_internals.py pass. Files: src/agents/fallback.py, tests/test_agents/test_fallback.py."
-                        },
-                        {
-                            "id":  "US-64-009",
-                            "title":  "Add preflight check extensibility for custom validators",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add register_preflight_check() method to HealingOrchestrator",
-                                                       "Accept callable validators with signature (state: PipelineState) -\u003e List[PreflightIssue]",
-                                                       "Execute registered validators in run_preflight() alongside built-in checks",
-                                                       "Add unregister_preflight_check() for cleanup",
-                                                       "Add test verifying custom validators are called during preflight",
-                                                       "Add test verifying custom validator issues are included in preflight results"
-                                                   ],
-                            "notes":  "HARD STORY: Phantom success - exits 0 but never sets passes: true"
-                        },
-                        {
-                            "id":  "US-64-010",
-                            "title":  "Add healing strategy presets for common use cases",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add HealingStrategy.overnight() preset optimized for unattended batch processing",
-                                                       "Add HealingStrategy.development() preset with verbose logging and fast failures",
-                                                       "Add HealingStrategy.production() preset balancing resilience and efficiency",
-                                                       "Document preset differences in strategy docstrings",
-                                                       "Add config.yaml option to select strategy preset by name",
-                                                       "Add tests verifying each preset has expected configuration values"
-                                                   ],
-                            "notes":  "Completed. All 3 presets implemented in src/agents/strategy.py: (1) overnight() at line 171 - AGGRESSIVE mode, 8 attempts/stage, 100 total heals, 5s delay for unattended batch processing. (2) development() at line 192 - MINIMAL mode, 1 attempt, 3 total heals, 0s delay, no auto-fix for fast debugging. (3) production() at line 213 - CONSERVATIVE mode, 4 attempts/stage, 30 total heals, 3s delay for balanced resilience. Each preset has detailed docstrings documenting differences. config.yaml updated at line 1785 with all preset names (overnight, development, production). 5 new tests in tests/test_agents/test_strategy.py: test_overnight_factory, test_development_factory, test_production_factory, test_overnight_more_resilient_than_aggressive, test_development_faster_than_minimal. All 24 strategy tests pass (0.67s)."
-                        },
-                        {
-                            "id":  "US-64-011",
-                            "title":  "Add cross-healer coordination events for state sharing",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Define HealerEvent enum with event types (CONFIG_CHANGED, CACHE_CLEARED, RATE_LIMITED, PROVIDER_SWITCHED)",
-                                                       "Add subscribe_event() and publish_event() methods to HealingOrchestrator",
-                                                       "Modify _notify_healers() to use event system instead of direct method calls",
-                                                       "Add event handlers in healers that need cross-healer awareness",
-                                                       "Add test verifying event subscription and delivery",
-                                                       "Add test verifying healers receive relevant events from other healers"
-                                                   ],
-                            "notes":  "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (_notify_healers at lines 881-902), src/agents/base.py (add event handling to Healer base class). Current cross-healer notification is ad-hoc; event system enables cleaner decoupling."
-                        },
-                        {
-                            "id":  "US-64-012",
-                            "title":  "Add healing session persistence for crash recovery",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add save_session() method to HealingOrchestrator that persists current state to JSON",
-                                                       "Add load_session() method to restore orchestrator state from persisted file",
-                                                       "Include heal history, metrics, config snapshots, and healer states in persisted data",
-                                                       "Auto-save session on significant events (heal success, stage completion, escalation)",
-                                                       "Add session recovery logic to create_orchestrated_pipeline() factory",
-                                                       "Add tests for session save/load roundtrip and recovery after simulated crash"
-                                                   ],
-                            "notes":  "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (add after reset() at line 1268), src/agents/runner.py (create_orchestrated_pipeline at lines 435-456). Currently healing state is lost on crash; persistence enables resume with full healing context intact."
-                        }
-                    ]
+{
+    "sprintNumber": 65,
+    "focusArea": "config",
+    "branchName": "ralph/sprint-65",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-65-001",
+            "title": "Generate sprint stories for config focus area",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'config' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'config'",
+                "Add stories US-65-002 through US-65-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-65-NNN to be unique across sprints",
+                "Mark this story (US-65-001) as passes: true when done"
+            ],
+            "notes": "Seed story completed. Generated 11 config improvement stories (US-65-002 through US-65-012) covering validation, utilities, error handling, type safety, and config documentation."
+        },
+        {
+            "id": "US-65-002",
+            "title": "Add safe_get_config_value utility to eliminate scattered dict/object dual-access",
+            "priority": "high",
+            "passes": true,
+            "acceptanceCriteria": [
+                "Create safe_get_config_value(obj, key, default=None) function in src/config/utils.py that handles both dict .get() and dataclass getattr() access patterns",
+                "Function returns obj.get(key, default) when obj is a dict, and getattr(obj, key, default) when obj is a dataclass or object",
+                "Replace at least 5 scattered isinstance(x, dict)/getattr patterns in src/config/base.py with calls to safe_get_config_value",
+                "Replace dict/object dual-access patterns in src/cli/config_utils.py with calls to safe_get_config_value",
+                "Add unit tests in tests/test_config.py verifying safe_get_config_value works for dict input, dataclass input, and missing key with default"
+            ],
+            "notes": "Completed. Created src/config/utils.py with safe_get_config_value(). Replaced 11 patterns in base.py (_validate_enums, _validate_constraints, get_nested) and 2 in config_utils.py (validate_root_directories). Added 7 unit tests in TestSafeGetConfigValue class. Exported from src/config/__init__.py. All 297 config tests pass."
+        },
+        {
+            "id": "US-65-003",
+            "title": "Add __post_init__ to CaptionFirstConfig for nested dict-to-dataclass conversion",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add __post_init__ method to CaptionFirstConfig in src/config/sections/download.py that converts nested dict fields to their proper dataclass types",
+                "The __post_init__ converts retry_budget field from dict to CaptionRetryBudgetConfig if it arrives as a dict",
+                "Loading config.yaml with caption_first section containing nested retry_budget as a dict produces a properly typed CaptionRetryBudgetConfig instance",
+                "Add test in tests/test_config.py that constructs CaptionFirstConfig with retry_budget as a raw dict and verifies it becomes CaptionRetryBudgetConfig after init",
+                "Existing tests in tests/test_caption_circuit_breaker.py continue to pass"
+            ],
+            "notes": "Tier: T1 (bug prevention). Implements CLAUDE.md Rule 2. Source file: src/config/sections/download.py (CaptionFirstConfig at ~line 265 has no __post_init__). Follow pattern from HealingConfig.__post_init__ in src/config/sections/infrastructure.py (~line 249) and IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (~line 95)."
+        },
+        {
+            "id": "US-65-004",
+            "title": "Expand Config.validate() with constraint validation for numeric ranges and threshold ordering",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Config.validate() in src/config/base.py validates that matching confidence thresholds are ordered: low_confidence_threshold <= ambiguous_threshold <= min_confidence <= high_confidence_threshold",
+                "Config.validate() validates that output.frame_rate > 0 and output.time_scale_factor > 0 when those fields exist",
+                "Config.validate() validates that duration tier min <= max for all configured duration tiers",
+                "Validation failures are collected and logged as warnings (not exceptions) consistent with existing validate() pattern",
+                "Add tests that create Config objects with invalid threshold ordering and verify warnings are generated"
+            ],
+            "notes": "Tier: T2 (robustness). Source file: src/config/base.py validate() method at lines ~537-602. Currently only validates API keys, a few value ranges, and 2-3 enum fields. Duration tiers are in src/config/sections/duration.py, matching thresholds in src/config/sections/matching.py (lines ~175-180), output fields in src/config/sections/output.py (~line 120). Sprint 44 US-44-003 already added pipeline-level validation; this expands the Config-level validate()."
+        },
+        {
+            "id": "US-65-005",
+            "title": "Replace silent config loading fallback with explicit error logging",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "The _build_dataclass method in src/config/base.py logs a warning that includes the specific field names that failed when falling back to empty defaults",
+                "Critical config sections (download, matching, output) raise ConfigError instead of silently returning empty defaults when construction fails",
+                "Optional config sections (broll, entity, media) continue to use silent fallback with a debug-level log message",
+                "Add a CRITICAL_SECTIONS list or similar marker in base.py that distinguishes critical from optional sections",
+                "Add test that attempts to load a malformed critical section and verifies ConfigError is raised with a descriptive message"
+            ],
+            "notes": "Tier: T2 (error handling). Source file: src/config/base.py _build_dataclass() at lines ~437-441. Current code catches TypeError and returns empty dataclass_type() silently. The fix should differentiate critical sections (download, matching, output, infrastructure) from optional (broll, entity, media, keywords). Pattern: check if section name is in CRITICAL_SECTIONS before deciding error vs warning."
+        },
+        {
+            "id": "US-65-006",
+            "title": "Add missing config.yaml sections for broll, iterative_matching, and negative_matching",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "config.yaml contains a documented broll section with all fields from BrollConfig in src/config/sections/broll.py and their defaults",
+                "config.yaml contains a documented iterative_matching section with all fields from IterativeMatchingConfig in src/config/sections/iterative_matching.py and their defaults",
+                "config.yaml contains a documented negative_matching subsection under matching with all fields from NegativeMatchingConfig in src/config/sections/matching.py",
+                "Each new section has inline YAML comments explaining the purpose of each field",
+                "Loading config.yaml with python still produces a valid Config object (python -m py_compile src/config/base.py passes)"
+            ],
+            "notes": "Tier: T2 (documentation/completeness). Source files: config.yaml (currently missing these sections entirely), src/config/sections/broll.py (BrollConfig at ~line 89), src/config/sections/iterative_matching.py (IterativeMatchingConfig at ~line 95), src/config/sections/matching.py (NegativeMatchingConfig). Follow existing config.yaml patterns with inline comments. CLAUDE.md Rule 1: Update BOTH config.yaml AND dataclasses (dataclasses already exist)."
+        },
+        {
+            "id": "US-65-007",
+            "title": "Add type hints for bare dict fields in matching and download config dataclasses",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "caption_quality_weights field in MatchingConfig (src/config/sections/matching.py) uses Optional[Dict[str, float]] instead of bare dict",
+                "multimodal_weights field in MatchingConfig uses Optional[Dict[str, float]] instead of bare dict",
+                "Any other bare dict fields in matching.py and download.py are updated to use properly typed Dict[str, T] annotations",
+                "Import Dict and Optional from typing are added where needed",
+                "python -m py_compile src/config/sections/matching.py and python -m py_compile src/config/sections/download.py both pass"
+            ],
+            "notes": "Tier: T1 (type safety). Source files: src/config/sections/matching.py (lines ~300-364 have dict = None fields), src/config/sections/download.py (check for bare dict fields). The fix is mechanical: replace 'dict' with 'Optional[Dict[str, float]]' or appropriate typed Dict. Follow existing patterns where Dict is already used (e.g., download.py line ~403 retry_budgets: Dict[str, int])."
+        },
+        {
+            "id": "US-65-008",
+            "title": "Re-validate config sections after CLI merge overrides are applied",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "After merge_config() in src/cli/config_utils.py applies all overrides, __post_init__() is called on each modified config section that has one",
+                "Duration tier merges trigger DurationTiersConfig.__post_init__() to re-validate min <= max constraints",
+                "Healing config merges trigger HealingConfig.__post_init__() to re-convert nested dicts",
+                "Add test that merges an invalid duration tier override (min > max) and verifies the post-merge validation catches it",
+                "Existing merge behavior is preserved for valid overrides (no regressions in config loading)"
+            ],
+            "notes": "Tier: T2 (correctness). Source files: src/cli/config_utils.py merge_config() at lines ~235-292, specifically lines ~276-282 for duration tier merges. Currently merges raw values without re-validating. The fix: after _merge_single_tier() calls, invoke __post_init__() on the parent config section. Check which sections have __post_init__: duration.py, infrastructure.py, matching.py, iterative_matching.py, keywords.py, llm.py, broll.py."
+        },
+        {
+            "id": "US-65-009",
+            "title": "Unify path resolution between base.py and cli/config_utils.py into single implementation",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Path resolution logic exists in exactly one location (src/config/base.py _resolve_paths or a new shared function)",
+                "src/cli/config_utils.py make_paths_project_relative() delegates to the shared path resolution instead of reimplementing",
+                "Project-relative paths are only resolved once during config loading (no double-resolution)",
+                "Paths containing forward slashes, backslashes, and mixed separators all resolve correctly on Windows",
+                "Add test that loads config with relative paths and verifies they resolve to absolute project-relative paths exactly once"
+            ],
+            "notes": "Tier: T2 (deduplication). Source files: src/config/base.py _resolve_paths() at lines ~245-283, src/cli/config_utils.py make_paths_project_relative() at lines ~71-100. Both functions try to resolve paths but with different logic. The unified function should handle: download.root_dir, download.download_dir, transcription.cache_dir, image_search.root_dir. CLAUDE.md Rule 14 (OTIO paths use file:/// URLs) should be preserved."
+        },
+        {
+            "id": "US-65-010",
+            "title": "Add MatchingConfig __post_init__ validation for confidence threshold ranges",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "MatchingConfig in src/config/sections/matching.py has a __post_init__ method that validates all float confidence fields are in range 0.0-1.0",
+                "Fields validated include: min_confidence, high_confidence_threshold, low_confidence_threshold, ambiguous_threshold, skip_llm_threshold, confidence_threshold",
+                "Out-of-range values are clamped to 0.0-1.0 with a logger.warning message (consistent with IterativeMatchingConfig pattern)",
+                "Integer fields (max_videos_per_segment, max_results, min_results) are validated as positive with logger.warning if <= 0",
+                "Add test constructing MatchingConfig with out-of-range confidence (e.g., 1.5) and verify it is clamped to 1.0"
+            ],
+            "notes": "Tier: T2 (validation). Source file: src/config/sections/matching.py. MatchingConfig has 50+ fields but NO __post_init__ validation. Follow clamping pattern from IterativeMatchingConfig.__post_init__ in src/config/sections/iterative_matching.py (lines ~95-107). The existing __post_init__ in matching.py only handles nested dataclass conversion for location_matching, chapter_detection, scoring - it does not validate numeric ranges."
+        },
+        {
+            "id": "US-65-011",
+            "title": "Add EmbeddingConfig __post_init__ validation for batch_size and model settings",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "EmbeddingConfig in src/config/sections/core.py has a __post_init__ method that validates batch_size >= 1",
+                "The __post_init__ validates that provider field is one of the known providers ('sentence-transformers', 'openai', etc.) or logs a warning for unknown providers",
+                "Invalid batch_size values (0 or negative) are corrected to 1 with a logger.warning",
+                "Add test constructing EmbeddingConfig with batch_size=0 and verifying it becomes 1 after init",
+                "python -m py_compile src/config/sections/core.py passes"
+            ],
+            "notes": "Tier: T1 (validation). Source file: src/config/sections/core.py (EmbeddingConfig class, no existing __post_init__). Follow the clamping+warning pattern from TranscriptionConfig.__post_init__ in the same file (~line 107). Known providers can be found by grepping for embedding provider references in src/transcription/ and src/embeddings.py."
+        },
+        {
+            "id": "US-65-012",
+            "title": "Extract hardcoded project name truncation length to config",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "ProjectConfig in src/config/sections/core.py has a max_name_display_length field defaulting to 15",
+                "src/config/base.py uses config.project.max_name_display_length instead of hardcoded 15 for project name truncation",
+                "config.yaml project section documents the max_name_display_length field with a comment explaining its purpose",
+                "Default behavior is unchanged (truncation at 15 chars) unless explicitly overridden in config",
+                "Add test verifying that project names longer than max_name_display_length are truncated to that length"
+            ],
+            "notes": "Tier: T1 (configurability). Source files: src/config/base.py (line ~260 has project_name = project_name[:15] hardcoded), src/config/sections/core.py (ProjectConfig class). The fix adds one field to ProjectConfig and replaces the hardcoded [:15] slice with [:config_value]. config.yaml needs a comment under the project section."
+        }
+    ]
 }
