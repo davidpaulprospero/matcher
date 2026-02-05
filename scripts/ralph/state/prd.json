@@ -93,7 +93,7 @@
             "id": "US-63-006",
             "title": "Propagate structured no-caption status to caption_stage",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Add 'status' field to CaptionResult with values: 'success', 'no_captions', 'error', 'cached_unavailable'",
                 "In CaptionStage.run(), handle 'no_captions' status without treating it as an error",
@@ -102,7 +102,7 @@
                 "Add unit test that verifies pipeline continues when some videos have no captions",
                 "Update checkpoint data to track no_captions_count metric"
             ],
-            "notes": "Tier: P1 (graceful degradation). Target files: src/caption_fetcher.py (CaptionResult), src/stages/caption_stage.py. Currently no-caption scenarios may be treated as errors. Pipeline should gracefully continue and mark videos for transcription fallback."
+            "notes": "IMPLEMENTED: (1) Added CaptionStatus enum to src/caption/enums.py with values: SUCCESS, NO_CAPTIONS, ERROR, CACHED_UNAVAILABLE; (2) Added status field to CaptionResult in caption_fetcher.py and caption/models.py with default=CaptionStatus.SUCCESS; (3) Updated fetch_captions_batch error handlers to set status field in error dicts; (4) caption_stage.py now uses status field for counting success/no_captions/error; (5) Added INFO log with US-63-006 tag listing count of videos with no captions; (6) Videos with no_captions/cached_unavailable/error status added to needs_transcription; (7) Added 5 new tests in TestCaptionStatusField class verifying status field handling; (8) no_captions_count already tracked in checkpoint_data. All 18 tests in test_caption_stage.py pass."
         },
         {
             "id": "US-63-007",

@@ -1174,5 +1174,196 @@ class TestMatchResultConfidenceBreakdownField:
         assert result.confidence_breakdown[0]['component'] == 'broll_boost'
 
 
+# ============================================================================
+# Test Match.confidence_breakdown Field (US-63-007)
+# ============================================================================
+
+class TestMatchConfidenceBreakdownField:
+    """Test Match dataclass has confidence_breakdown field for scoring transparency."""
+
+    @pytest.mark.fast
+    def test_match_has_confidence_breakdown_field(self):
+        """Match dataclass has confidence_breakdown field."""
+        from dataclasses import fields as dataclass_fields
+        from src.utils import Match
+        field_map = {f.name: f for f in dataclass_fields(Match)}
+        assert 'confidence_breakdown' in field_map
+
+    @pytest.mark.fast
+    def test_match_confidence_breakdown_default_empty(self):
+        """Match defaults to empty confidence_breakdown list."""
+        from src.utils import Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.8, reasoning="test")
+        assert m.confidence_breakdown == []
+
+    @pytest.mark.fast
+    def test_match_accepts_confidence_breakdown(self):
+        """Match can be constructed with a confidence_breakdown list."""
+        from src.utils import Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        breakdown = [
+            {'component': 'broll_boost', 'adjustment': 0.1, 'reason': 'B-roll boost: +0.10'},
+            {'component': 'timing_penalty', 'adjustment': -0.05, 'reason': 'Timing penalty: -0.05'},
+        ]
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.85, reasoning="test", confidence_breakdown=breakdown)
+        assert len(m.confidence_breakdown) == 2
+        assert m.confidence_breakdown[0]['component'] == 'broll_boost'
+        assert m.confidence_breakdown[1]['component'] == 'timing_penalty'
+
+    @pytest.mark.fast
+    def test_match_to_dict_includes_breakdown(self):
+        """Match.to_dict includes confidence_breakdown when present."""
+        from src.utils import Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        breakdown = [{'component': 'topic_penalty', 'adjustment': -0.15, 'reason': 'Topic mismatch'}]
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.7, reasoning="test", confidence_breakdown=breakdown)
+
+        d = m.to_dict()
+        assert 'confidence_breakdown' in d
+        assert d['confidence_breakdown'] == breakdown
+
+    @pytest.mark.fast
+    def test_match_to_dict_omits_empty_breakdown(self):
+        """Match.to_dict omits confidence_breakdown when empty."""
+        from src.utils import Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.8, reasoning="test")
+
+        d = m.to_dict()
+        # Empty breakdown should not be serialized (cleaner JSON)
+        assert 'confidence_breakdown' not in d
+
+    @pytest.mark.fast
+    def test_match_from_dict_restores_breakdown(self):
+        """Match.from_dict restores confidence_breakdown from dict."""
+        from src.utils import Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        breakdown = [
+            {'component': 'caption_quality', 'adjustment': 0.05, 'reason': 'High caption quality'},
+            {'component': 'project_boost', 'adjustment': 0.1, 'reason': 'Current project boost'},
+        ]
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.95, reasoning="test", confidence_breakdown=breakdown)
+
+        d = m.to_dict()
+        restored = Match.from_dict(d)
+
+        assert restored.confidence_breakdown == breakdown
+        assert len(restored.confidence_breakdown) == 2
+
+    @pytest.mark.fast
+    def test_match_from_dict_without_breakdown(self):
+        """Match.from_dict handles dicts without confidence_breakdown (backward compat)."""
+        from src.utils import Match, SRTSegment
+        # Old format dict without breakdown
+        d = {
+            'voiceover_segment': {'index': 0, 'start_time': 0.0, 'end_time': 5.0, 'text': 'test'},
+            'video_segment': {'index': 0, 'start_time': 0.0, 'end_time': 5.0, 'text': 'test', 'source_file': 'vid.mp4'},
+            'video_scene': None,
+            'confidence': 0.8,
+            'reasoning': 'test',
+        }
+
+        restored = Match.from_dict(d)
+        assert restored.confidence_breakdown == []
+
+    @pytest.mark.fast
+    def test_match_breakdown_round_trip_json(self):
+        """Match confidence_breakdown survives JSON round-trip via to_dict/from_dict."""
+        import json
+        from src.utils import Match, SRTSegment
+        vo = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test")
+        vid = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="vid.mp4")
+        breakdown = [
+            {'component': 'duration_penalty', 'adjustment': -0.08, 'reason': 'Duration mismatch: -0.08'},
+            {'component': 'broll_boost', 'adjustment': 0.12, 'reason': 'B-roll segment: +0.12'},
+        ]
+        m = Match(voiceover_segment=vo, video_segment=vid, video_scene=None,
+                  confidence=0.84, reasoning="test", confidence_breakdown=breakdown)
+
+        # Round-trip through JSON
+        json_str = json.dumps(m.to_dict())
+        restored = Match.from_dict(json.loads(json_str))
+
+        assert restored.confidence_breakdown == breakdown
+
+
+class TestTieredMatcherPopulatesBreakdown:
+    """Test that TieredMatcher populates confidence_breakdown on Match objects (US-63-007)."""
+
+    @pytest.mark.fast
+    def test_breakdown_captures_all_adjustments(self, mock_config):
+        """
+        US-63-007: Verify breakdown captures adjustments from:
+        - duration penalty
+        - topic penalty
+        - broll boost
+        - caption quality
+        - timing penalty
+        """
+        from src.matching.tiered_matcher import _record_breakdown
+
+        breakdown = []
+
+        # Simulate multiple adjustments
+        prev = 0.8
+        _record_breakdown(breakdown, 'topic_penalty', prev, 0.65, 'Topic mismatch: -0.15')
+        prev = 0.65
+        _record_breakdown(breakdown, 'broll_boost', prev, 0.75, 'B-roll boost: +0.10')
+        prev = 0.75
+        _record_breakdown(breakdown, 'caption_quality', prev, 0.80, 'High quality: +0.05')
+        prev = 0.80
+        _record_breakdown(breakdown, 'timing_penalty', prev, 0.76, 'Timing issue: -0.04')
+        prev = 0.76
+        _record_breakdown(breakdown, 'project_boost', prev, 0.86, 'Current project: +0.10')
+
+        assert len(breakdown) == 5
+        components = [b['component'] for b in breakdown]
+        assert 'topic_penalty' in components
+        assert 'broll_boost' in components
+        assert 'caption_quality' in components
+        assert 'timing_penalty' in components
+        assert 'project_boost' in components
+
+        # Verify adjustment values are captured
+        topic_entry = next(b for b in breakdown if b['component'] == 'topic_penalty')
+        assert abs(topic_entry['adjustment'] - (-0.15)) < 0.001
+
+        broll_entry = next(b for b in breakdown if b['component'] == 'broll_boost')
+        assert abs(broll_entry['adjustment'] - 0.10) < 0.001
+
+    @pytest.mark.fast
+    def test_record_breakdown_skips_empty_reason(self):
+        """_record_breakdown skips entries when reason is empty (no adjustment)."""
+        from src.matching.tiered_matcher import _record_breakdown
+
+        breakdown = []
+        _record_breakdown(breakdown, 'broll_boost', 0.8, 0.8, '')  # No change, empty reason
+        _record_breakdown(breakdown, 'timing_penalty', 0.8, 0.75, 'Penalty applied')  # Has change
+
+        assert len(breakdown) == 1
+        assert breakdown[0]['component'] == 'timing_penalty'
+
+    @pytest.mark.fast
+    def test_record_breakdown_rounds_adjustment(self):
+        """_record_breakdown rounds adjustment to 4 decimal places."""
+        from src.matching.tiered_matcher import _record_breakdown
+
+        breakdown = []
+        _record_breakdown(breakdown, 'test', 0.80000001, 0.75000002, 'Test reason')
+
+        assert breakdown[0]['adjustment'] == round(0.75000002 - 0.80000001, 4)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
