@@ -1016,7 +1016,8 @@ class HealingOrchestrator:
                         f"{healer.name} timed out after {healer_timeout}s"
                     )
                     result = HealerResult.failed(
-                        f"Healer timed out after {healer_timeout}s"
+                        f"Healer timed out after {healer_timeout}s",
+                        reason='timeout'
                     )
                     # Record timeout as failed heal
                     self.metrics.record_heal(healer.name, stage_name, False)
@@ -1083,7 +1084,11 @@ class HealingOrchestrator:
         state: 'PipelineState',
         stage_name: str
     ) -> Optional[HealerResult]:
-        """Try LLM healer for complex issues."""
+        """Try LLM healer for complex issues.
+
+        Wraps the LLM healer fix() call with per-healer timeout enforcement
+        using ThreadPoolExecutor, consistent with _try_healer().
+        """
         if not self.llm_healer:
             return None
 
@@ -1092,14 +1097,45 @@ class HealingOrchestrator:
                 stage_name, error, "Standard healers failed, escalating to LLM healer"
             )
 
-        logger.info("[orchestrator] Escalating to LLM healer")
+        healer_timeout = self._get_healer_timeout("llm-healer")
+        logger.info(f"[orchestrator] Escalating to LLM healer (timeout: {healer_timeout}s)")
+        start_time = time.time()
 
         try:
-            # Pass the pre-captured stack trace for accurate context
-            result = self.llm_healer.fix(
-                error, state, stage_name,
-                error_stack_trace=getattr(self, '_current_error_stack', None)
-            )
+            # Run LLM healer with timeout enforcement (same pattern as _try_healer)
+            executor = ThreadPoolExecutor(max_workers=1)
+            try:
+                future = executor.submit(
+                    self.llm_healer.fix,
+                    error, state, stage_name,
+                    error_stack_trace=getattr(self, '_current_error_stack', None)
+                )
+                try:
+                    result = future.result(timeout=healer_timeout)
+                except FuturesTimeoutError:
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    logger.warning(
+                        f"LLM healer timed out after {healer_timeout}s"
+                    )
+                    self.metrics.errors_encountered.append(
+                        f"llm-healer timed out after {healer_timeout}s"
+                    )
+                    self.metrics.record_heal("llm-healer", stage_name, False)
+                    if self.healing_logger:
+                        timeout_result = HealerResult.failed(
+                            f"Healer timed out after {healer_timeout}s",
+                            reason='timeout'
+                        )
+                        self.healing_logger.log_healer_attempt(
+                            stage_name, "llm-healer", error, timeout_result, elapsed_ms
+                        )
+                    self.llm_healer.clear_failed_healers()
+                    return HealerResult.failed(
+                        f"Healer timed out after {healer_timeout}s",
+                        reason='timeout'
+                    )
+            finally:
+                executor.shutdown(wait=False)
 
             self.metrics.record_heal("llm-healer", stage_name, result.success)
 
