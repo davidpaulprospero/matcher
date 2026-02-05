@@ -1001,6 +1001,48 @@ def create_match_only_pipeline(
     return pipeline
 
 
+def create_output_only_pipeline(
+    config: 'Config',
+    project_dir: Path
+) -> PipelineOrchestrator:
+    """
+    Create a pipeline that only re-runs the OUTPUT stage.
+
+    Used when user wants to regenerate OTIO/EDL/XML with different output
+    config without re-matching or re-downloading.
+
+    All stages are added for state restoration (skipped via checkpoint).
+    Caller must reset checkpoint to DOWNLOAD_SEGMENTS.
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+
+    Returns:
+        Configured PipelineOrchestrator for output-only mode
+    """
+    pipeline = PipelineOrchestrator(config, project_dir)
+
+    from .stages.analyze import AnalyzeStage
+    from .stages.video_search import VideoSearchStage
+    from .stages.caption_stage import CaptionStage
+    from .stages.match import MatchStage
+    from .stages.iterative_match import IterativeMatchStage
+    from .stages.download_segments import DownloadVideoSegmentsStage
+    from .stages.output import OutputStage
+
+    # All stages needed for state restoration (skipped via checkpoint)
+    pipeline.add_stage(AnalyzeStage())
+    pipeline.add_stage(VideoSearchStage())
+    pipeline.add_stage(CaptionStage())
+    pipeline.add_stage(MatchStage())
+    pipeline.add_stage(IterativeMatchStage())
+    pipeline.add_stage(DownloadVideoSegmentsStage())
+    pipeline.add_stage(OutputStage())  # Only this stage runs
+
+    return pipeline
+
+
 def create_healing_pipeline(
     config: 'Config',
     project_dir: Path,

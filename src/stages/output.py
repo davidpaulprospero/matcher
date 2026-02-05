@@ -251,9 +251,9 @@ class OutputStage(Stage):
                             sec.video_segment.source_file = new_path
                             resolved_count += 1
 
-            # Resolve strategy alternatives
-            if hasattr(match_result, 'strategy_alternatives'):
-                for strat in match_result.strategy_alternatives or []:
+            # Resolve strategy matches
+            if hasattr(match_result, 'strategy_matches'):
+                for strat in match_result.strategy_matches or []:
                     if hasattr(strat, 'video_segment') and strat.video_segment:
                         old_path = strat.video_segment.source_file
                         new_path = hash_mapping.resolve(old_path)

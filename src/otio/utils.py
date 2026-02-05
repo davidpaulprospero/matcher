@@ -24,6 +24,16 @@ AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
 NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
 
 
+def seg_start(seg) -> float:
+    """Get start time from SRTSegment (.start_time) or VoiceoverSegment (.start)."""
+    return getattr(seg, 'start_time', None) or getattr(seg, 'start', 0.0)
+
+
+def seg_end(seg) -> float:
+    """Get end time from SRTSegment (.end_time) or VoiceoverSegment (.end)."""
+    return getattr(seg, 'end_time', None) or getattr(seg, 'end', 0.0)
+
+
 def _is_audio_only(file_path: str) -> bool:
     """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
     ext = Path(file_path).suffix.lower()

@@ -449,8 +449,12 @@ class IterativeMatchStage(Stage):
             print(f"  Total time: {total_duration:.1f}s")
 
             # Serialize matches for checkpoint (preserves iterative improvements)
+            # Carry forward multi-track data (V2-V8) from _raw_match_dicts since
+            # flat Match objects don't store alternatives/secondary/strategy data
+            raw_match_dicts = getattr(state, '_raw_match_dicts', None) or []
             serialized_matches = []
             empty_video_file_count = 0
+            multi_track_carried = 0
             for i, match in enumerate(state.matches):
                 try:
                     if is_empty_source(match, i):
@@ -460,13 +464,29 @@ class IterativeMatchStage(Stage):
                         )
                         empty_video_file_count += 1
 
-                    serialized_matches.append(serialize_match_for_iterative_stage(match, i))
+                    serialized = serialize_match_for_iterative_stage(match, i)
+
+                    # If serialization produced empty multi-track data but we have
+                    # raw dicts from a prior stage, carry forward the multi-track data
+                    if (i < len(raw_match_dicts)
+                            and not serialized.get('alternatives')
+                            and not serialized.get('secondary_matches')):
+                        raw = raw_match_dicts[i]
+                        for key in ('alternatives', 'secondary_matches', 'strategy_matches',
+                                    'has_gap', 'gap_reason'):
+                            if key in raw and raw[key]:
+                                serialized[key] = raw[key]
+                        if raw.get('alternatives') or raw.get('secondary_matches'):
+                            multi_track_carried += 1
+
+                    serialized_matches.append(serialized)
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
 
             logger.info(
                 f"Serialized {len(serialized_matches)} matches, "
-                f"{empty_video_file_count} had empty video_file (skipped)"
+                f"{empty_video_file_count} had empty video_file (skipped), "
+                f"{multi_track_carried} carried forward multi-track data from prior stage"
             )
 
             # Build checkpoint data
@@ -554,6 +574,34 @@ class IterativeMatchStage(Stage):
 
                 if restored_matches:
                     state.matches = restored_matches
+
+                    # Merge multi-track data from MATCH checkpoint if iterative
+                    # checkpoint has empty multi-track (legacy checkpoints before
+                    # carry-forward fix didn't preserve V2-V8 data)
+                    has_multi_track = any(
+                        m.get('alternatives') or m.get('secondary_matches')
+                        for m in matches_data[:5]  # Check first few
+                    )
+                    if not has_multi_track:
+                        match_stage_data = checkpoint.get_stage_data('MATCH')
+                        if match_stage_data and isinstance(match_stage_data, dict):
+                            match_dicts = match_stage_data.get('matches', [])
+                            if match_dicts and len(match_dicts) == len(matches_data):
+                                # Merge multi-track keys from MATCH into iterative dicts
+                                merged_count = 0
+                                for iter_d, match_d in zip(matches_data, match_dicts):
+                                    for key in ('alternatives', 'secondary_matches',
+                                                'strategy_matches', 'has_gap', 'gap_reason'):
+                                        if key in match_d and match_d[key] and not iter_d.get(key):
+                                            iter_d[key] = match_d[key]
+                                    if match_d.get('alternatives') or match_d.get('secondary_matches'):
+                                        merged_count += 1
+                                if merged_count:
+                                    logger.info(
+                                        f"Merged multi-track data from MATCH checkpoint "
+                                        f"into {merged_count} iterative matches"
+                                    )
+
                     state._raw_match_dicts = matches_data
                     logger.info(
                         f"Restored {self.name}: {len(restored_matches)} matches, "
