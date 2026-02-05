@@ -1,174 +1,198 @@
-﻿{
-    "sprintNumber":  61,
-    "focusArea":  "download",
-    "branchName":  "ralph/sprint-61",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-61-001",
-                            "title":  "Generate sprint stories for download focus area",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027download\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027download\u0027",
-                                                       "Add stories US-61-002 through US-61-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-61-NNN to be unique across sprints",
-                                                       "Mark this story (US-61-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Generated 10 stories (US-61-002 through US-61-011) for download focus area based on user interview notes about caption format fallback issues and codebase analysis of yt-dlp integration, circuit breaker, escalation manager, cookie rotation, and VPN fallback systems."
-                        },
-                        {
-                            "id":  "US-61-002",
-                            "title":  "Add subtitle availability pre-check before caption format cycling",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "In CaptionFetcher._fetch_subtitle(), add call to list_available_subtitles() before trying format fallback loop",
-                                                       "If no subtitles available (has_any_subtitles=False), return CaptionUnavailableError immediately without cycling formats",
-                                                       "Log the fast-fail path at DEBUG level with \u0027Caption fast-fail: no subtitles for {video_id}\u0027",
-                                                       "Reduce worst-case time from ~40s (4 format attempts) to ~10s (1 list-subs call) for captionless videos",
-                                                       "Add test verifying captionless video triggers fast-fail path and only invokes 1 subprocess"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Pre-flight list-subs check was implemented in US-59-002 and US-60-005. Added DEBUG log line \u0027Caption fast-fail: no subtitles for {video_id}\u0027 at line 4483. Test test_no_captions_triggers_single_ytdlp_call verifies only 1 subprocess call. All 12 tests in test_caption_preflight.py pass."
-                        },
-                        {
-                            "id":  "US-61-003",
-                            "title":  "Add caption circuit breaker integration with download circuit breaker",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "Add shared CircuitBreakerState reference between CaptionCircuitBreaker and download CircuitBreaker",
-                                                       "When caption circuit breaker trips, increment shared failure counter to speed download circuit breaker trip",
-                                                       "When download circuit breaker trips on 403/429, propagate pause state to caption fetcher",
-                                                       "Add circuit_breaker_cascade config option to enable/disable this behavior (default: true)",
-                                                       "Add test verifying caption CB trip affects download CB state and vice versa"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Implementation in src/caption/circuit_breaker.py and src/downloader/circuit_breaker.py with set_download_circuit_breaker()/set_caption_circuit_breaker() linking, _cascade_failure_to_*() and _cascade_trip_to_*() propagation methods. Config sections updated with circuit_breaker_cascade option. Comprehensive tests in tests/test_circuit_breaker_cascade.py (26 tests) verifying bidirectional failure/trip propagation, config options, and edge cases. All tests pass."
-                        },
-                        {
-                            "id":  "US-61-004",
-                            "title":  "Add per-video download speed tracking for adaptive timeout",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Track bytes/second download speed in DownloadSpeedTracker for each video",
-                                                       "Calculate running average speed across last N downloads (configurable, default 10)",
-                                                       "Add adaptive_timeout calculation: estimated_size / avg_speed * safety_factor (default 1.5)",
-                                                       "Replace static DEFAULT_SEGMENT_TIMEOUT with adaptive timeout when speed data available",
-                                                       "Add test verifying timeout scales with observed download speed"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Added calculate_adaptive_timeout() method to DownloadSpeedTracker using formula: estimated_size / avg_speed * safety_factor. Updated window_size default to 10 for running average. Added safety_factor config (default 1.5). Wired adaptive timeout into download_video_segments in audio_first.py. Added 10 comprehensive tests in TestCalculateAdaptiveTimeout class including test_timeout_scales_with_observed_speed verifying fast networks get shorter timeouts and slow networks get proportionally longer timeouts."
-                        },
-                        {
-                            "id":  "US-61-005",
-                            "title":  "Add impersonation target success rate tracking",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "In ImpersonationStats, add success_count and failure_count per target",
-                                                       "Add record_success(target) and record_failure(target) methods",
-                                                       "Calculate success_rate per target: success / (success + failure)",
-                                                       "In get_next_target(), optionally skip targets with success_rate \u003c threshold (default 0.2)",
-                                                       "Add test verifying low-success targets are deprioritized in rotation"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Added success_count/failure_count dicts to ImpersonationStats with record_success/record_failure/get_success_rate methods. get_next_target() now skips targets below min_success_rate threshold (default 0.2) via enable_success_filtering flag. Added TestSuccessRateFiltering class with 10 tests including test_low_success_targets_deprioritized. All 44 tests pass."
-                        },
-                        {
-                            "id":  "US-61-006",
-                            "title":  "Add escalation tier de-escalation on sustained success",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Add consecutive_successes counter to EscalationState dataclass",
-                                                       "In record_success(), increment consecutive_successes and check de-escalation threshold",
-                                                       "If consecutive_successes \u003e= de_escalation_threshold (default 5), decrease tier by 1",
-                                                       "Add de_escalation_enabled config option (default: true)",
-                                                       "Add test verifying 5 consecutive successes at Tier 3 drops to Tier 2"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Added consecutive_successes to EscalationState in types.py. Updated record_success() to track successes and de-escalate when threshold reached. Added de_escalation_enabled/de_escalation_threshold to ExtractorArgsConfig. EscalationManager.record_success() now reads config and logs de-escalation. Added TestDeEscalation class with 5 tests including test_five_consecutive_successes_at_tier_3_drops_to_tier_2. All 124 tests pass."
-                        },
-                        {
-                            "id":  "US-61-007",
-                            "title":  "Add caption fetch error category metrics",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "Add error_counts dict to CaptionMetrics tracking counts per CaptionErrorCategory",
-                                                       "In categorize_caption_error(), increment the appropriate category counter",
-                                                       "Add summary logging at batch end: \u0027Caption errors by category: RATE_LIMIT=5, UNAVAILABLE=12...\u0027",
-                                                       "Expose error_counts in get_performance_summary() for dashboard integration",
-                                                       "Add test verifying error categorization increments correct counter"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Added error_counts to get_performance_summary() in metrics.py. Added record_error_category() calls in batch_processor.py for both CaptionUnavailableError and other errors. Added batch end summary log showing \u0027Caption errors by category: RATE_LIMIT=5, UNAVAILABLE=12...\u0027. Added TestErrorCategoryCounterIncrement class with 4 tests verifying counter increments, integration with categorize_caption_error(), exposure in get_performance_summary(), and get_error_category_summary() statistics. All 72 tests in test_caption_error_patterns.py pass."
-                        },
-                        {
-                            "id":  "US-61-008",
-                            "title":  "Add cookie rotation on caption 403 errors",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "In CaptionFetcher, accept optional CookieRotator instance in constructor",
-                                                       "On caption 403/rate-limit error, call cookie_rotator.should_rotate() and rotate if true",
-                                                       "Pass rotated cookie path to yt-dlp subprocess via --cookies flag",
-                                                       "Log cookie rotation attempts: \u0027Caption fetch rotating cookie after 403\u0027",
-                                                       "Add test verifying 403 error triggers cookie rotation and retry"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-61-009",
-                            "title":  "Add download segment progress callback",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "Add progress_callback parameter to AudioFirstPipeline.download_segment()",
-                                                       "Parse yt-dlp progress output (% complete, bytes downloaded, speed) from stderr",
-                                                       "Call progress_callback(video_id, percent, bytes_downloaded, speed) on each progress line",
-                                                       "Add default no-op callback to maintain backward compatibility",
-                                                       "Add test verifying progress callback receives expected values during download"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Complete. Added SegmentDownloadProgress dataclass and parse_ytdlp_progress() function to types.py. Added segment_progress_callback parameter to download_video_segments() in audio_first.py. Modified _wait_for_process_with_progress() to parse yt-dlp progress lines and call callback. Added 18 tests in test_segment_progress_hook.py covering parsing, dataclass, and integration. All 38 tests pass."
-                        },
-                        {
-                            "id":  "US-61-010",
-                            "title":  "Add rate limit budget summary to download completion log",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "At end of download_all(), log RateLimitBudget summary: rotations used, VPN switches, total backoff time",
-                                                       "Include percentage of budget consumed: \u0027Budget used: rotations 3/10 (30%), backoff 45s/300s (15%)\u0027",
-                                                       "Log keywords that triggered rate limit events from keywords_rate_limited list",
-                                                       "Add budget_summary() method to RateLimitBudget returning formatted string",
-                                                       "Add test verifying budget summary reflects actual usage"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier 3 (observability). Files: src/downloader/rate_limit_budget.py (RateLimitBudget class), src/downloader/core.py (download_all). Currently budget state is tracked internally but not summarized at completion for user visibility."
-                        },
-                        {
-                            "id":  "US-61-011",
-                            "title":  "Add VPN rotation trigger on caption budget exhaustion",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "When CaptionRetryBudget exhausts with \u003e50% RATE_LIMIT errors, trigger MullvadVPN rotation",
-                                                       "After VPN rotation, reset caption retry budget and retry remaining videos",
-                                                       "Add vpn_rotation_on_caption_exhaustion config option (default: false, requires mullvad.enabled)",
-                                                       "Log VPN rotation: \u0027Caption budget exhausted (80% rate-limited), rotating VPN and retrying\u0027",
-                                                       "Add test verifying VPN rotation triggers on caption budget exhaustion with rate limits"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier 2 (integration). Files: src/caption_fetcher.py, src/caption/retry_budget.py (BatchRetryBudget), src/downloader/mullvad_vpn.py, src/config/sections/download.py. Currently caption budget exhaustion just skips remaining videos - it should try VPN rotation first if rate-limited."
-                        }
-                    ]
+{
+    "sprintNumber": 62,
+    "focusArea": "rate-limiting",
+    "branchName": "ralph/sprint-62",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-62-001",
+            "title": "Generate sprint stories for rate-limiting focus area",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'rate-limiting' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'rate-limiting'",
+                "Add stories US-62-002 through US-62-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-62-NNN to be unique across sprints",
+                "Mark this story (US-62-001) as passes: true when done"
+            ],
+            "passes": true,
+            "notes": "Generated 11 stories (US-62-002 through US-62-012) for rate-limiting focus area based on user interview notes about caption format fallback inefficiency and codebase analysis of retry budget, circuit breaker, and escalation patterns."
+        },
+        {
+            "id": "US-62-002",
+            "title": "Add pre-flight --list-subs check before caption format iteration",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "fetch_captions method calls _get_available_languages before iterating formats",
+                "_get_available_languages is cached per-video to avoid redundant yt-dlp calls",
+                "When --list-subs returns empty, method returns immediately with 'no captions' status",
+                "Logging shows 'Pre-flight: no captions available' when skipping format iteration",
+                "Test verifies single yt-dlp call for videos with no captions (was 4+ calls)",
+                "Test verifies format iteration proceeds normally when captions ARE available"
+            ],
+            "passes": true,
+            "notes": "Pre-implemented: fetch_captions calls list_available_languages (line 4281), cached via ListSubsCache (line 2541-2554) and _preflight_lang_cache (line 4472-4475). Empty list-subs returns 'no captions' immediately (line 4286-4298). Log message at line 4498. Tests in test_caption_preflight.py and test_listsubs_cache.py (22 tests passing)."
+        },
+        {
+            "id": "US-62-003",
+            "title": "Remove duplicate json3 format retry in caption fallback sequence",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "_preferred_formats list does not contain duplicate entries",
+                "Caption format fallback sequence is json3->vtt->srt (no trailing json3)",
+                "Test verifies exactly 3 format attempts for videos where all formats fail",
+                "Test verifies _preferred_formats is a list/tuple without duplicates",
+                "Logging shows 'All formats exhausted' after srt fails (not after json3 retry)"
+            ],
+            "passes": true,
+            "notes": "Pre-implemented: _preferred_formats=['json3','vtt','srt'] with no duplicates (line 2361). Added 'All formats exhausted' debug log (line 4602). Tests verify: no duplicates (test_no_duplicate_formats_in_preferred_list), exactly 3 attempts (test_each_format_tried_once_on_format_unavailable), sequence is json3->vtt->srt (test_format_sequence_no_repeat_json3), exhausted log appears (test_all_formats_exhausted_logged_after_srt_fails). 27 tests passing in test_caption_format_unavailable.py."
+        },
+        {
+            "id": "US-62-004",
+            "title": "Add negative cache entry for videos with no captions available",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "When --list-subs returns empty, store negative cache entry with video_id",
+                "Negative cache entries use configurable TTL (default 1 hour)",
+                "Subsequent requests for same video_id check negative cache before network call",
+                "Negative cache hit logs 'Negative cache hit: no captions' and returns immediately",
+                "Test verifies 0 yt-dlp calls for negative-cached video",
+                "Test verifies negative cache expires after TTL"
+            ],
+            "passes": false,
+            "notes": "Tier 1 - Uses existing infrastructure. Target files: src/caption_fetcher.py (CaptionFetcherCache class ~line 5891), src/caption_fetcher_cache.py. Existing negative_cache_ttl_hours config at line 5916 suggests partial implementation exists - verify and complete."
+        },
+        {
+            "id": "US-62-005",
+            "title": "Add auto-generated caption fallback when manual captions unavailable",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "When manual captions unavailable, try --write-auto-sub as fallback",
+                "Auto-generated fallback is configurable via config.download.caption_first.use_auto_generated",
+                "Selection reason logged as 'auto-generated fallback' in metrics",
+                "Test verifies auto-generated captions fetched when manual unavailable",
+                "Test verifies auto-generated fallback disabled when config is false",
+                "Metrics track count of videos using auto-generated vs manual captions"
+            ],
+            "passes": false,
+            "notes": "Tier 2 - Feature addition. Target files: src/caption_fetcher.py (_is_auto_fallback_allowed ~line 4533, _fetch_subtitle ~line 4433), src/config/sections/download.py. US-59-007 partially implemented this - verify completeness and add metrics tracking."
+        },
+        {
+            "id": "US-62-006",
+            "title": "Add caption circuit breaker to prevent retry loops on systemic failures",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "CaptionCircuitBreaker class tracks consecutive failures across videos",
+                "Circuit opens after 5 consecutive failures, blocking further fetches for cooldown period",
+                "Circuit half-opens after cooldown, allowing single probe request",
+                "Successful probe closes circuit; failed probe re-opens it",
+                "CaptionRetryBudget.circuit_breaker reference set for observability (US-40-011)",
+                "Test verifies circuit trips after threshold failures"
+            ],
+            "passes": false,
+            "notes": "Tier 2 - Mirrors download circuit breaker pattern. Target files: src/caption_fetcher.py (new CaptionCircuitBreaker class), src/downloader/circuit_breaker.py (reference implementation). CaptionRetryBudget already has circuit_breaker field (line 144) waiting for integration."
+        },
+        {
+            "id": "US-62-007",
+            "title": "Add structured 'no captions' status propagation to caption stage",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "CaptionResult dataclass includes 'no_captions_available' boolean field",
+                "Caption stage handles no_captions_available without treating as error",
+                "Videos with no_captions_available marked for transcription fallback cleanly",
+                "Stage summary includes count of 'no_captions' vs 'fetch_failed' vs 'succeeded'",
+                "Test verifies pipeline continues when video has no captions",
+                "Test verifies transcription fallback triggered for no_captions videos"
+            ],
+            "passes": false,
+            "notes": "Tier 2 - Pipeline integration. Target files: src/caption_fetcher.py (CaptionResult dataclass), src/stages/caption_stage.py. Currently 'no captions' may be conflated with errors - need clean status propagation."
+        },
+        {
+            "id": "US-62-008",
+            "title": "Add per-format exhaustion tracking to caption retry budget",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "CaptionRetryBudget.format_attempts tracks attempts/failures/successes per format",
+                "is_format_exhausted returns true when format exceeds max_format_failures threshold",
+                "budget_exhausted accepts optional format parameter for per-format check",
+                "When format exhausted, skip that format in future attempts (try next in sequence)",
+                "Test verifies format skipped after max_format_failures failures",
+                "Summary includes format-level stats in get_summary output"
+            ],
+            "passes": false,
+            "notes": "Tier 2 - Extends existing budget infrastructure. Target files: src/caption/retry_budget.py (format_attempts field exists at line 156, is_format_exhausted at line 373, budget_exhausted at line 404). US-59-010 added fields - verify logic completeness."
+        },
+        {
+            "id": "US-62-009",
+            "title": "Add impersonation rotation for caption fetching yt-dlp calls",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Caption fetcher yt-dlp subprocess calls include --impersonate flag",
+                "ImpersonationManager.get_next_target() called for each caption yt-dlp call",
+                "Impersonation target rotates on 403/rate-limit errors",
+                "Test verifies --impersonate flag present in caption yt-dlp command",
+                "Test verifies impersonation rotation after 403 error",
+                "Logging includes impersonation target used for each caption fetch"
+            ],
+            "passes": false,
+            "notes": "Tier 2 - Applies download pattern to captions. Target files: src/caption_fetcher.py (yt-dlp subprocess calls ~line 2563, 4607), src/downloader/impersonation.py (ImpersonationManager). Per prompt.md, caption_fetcher.py line 2966 is one of 8 yt-dlp call sites needing impersonation."
+        },
+        {
+            "id": "US-62-010",
+            "title": "Add error category metrics to caption retry budget summary",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "CaptionRetryBudget.error_counts populated on each failure with category",
+                "get_top_errors returns sorted list of (category, count) tuples",
+                "get_rate_limit_error_percentage calculates % of failures that are rate-limits",
+                "get_formatted_summary includes error breakdown in output",
+                "Log at INFO level when >50% of errors are same category (indicates pattern)",
+                "Test verifies error category tracking across multiple failures"
+            ],
+            "passes": false,
+            "notes": "Tier 3 - Observability enhancement. Target files: src/caption/retry_budget.py (error_counts field at line 112, get_top_errors at line 471, get_rate_limit_error_percentage at line 523). US-37-006 added fields - verify they're populated in caption fetcher."
+        },
+        {
+            "id": "US-62-011",
+            "title": "Add caption fetch timeout budget to prevent unbounded waiting",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "CaptionRetryBudget.max_backoff_time enforces total wait time limit",
+                "Each backoff delay recorded via record_backoff method",
+                "budget_exhausted returns true when backoff_time_spent >= max_backoff_time",
+                "Remaining backoff time available via backoff_time_remaining method",
+                "Test verifies budget exhaustion triggers when backoff limit exceeded",
+                "Test verifies can_backoff returns false when limit would be exceeded"
+            ],
+            "passes": false,
+            "notes": "Tier 3 - Budget completeness. Target files: src/caption/retry_budget.py (max_backoff_time field at line 116, record_backoff at line 298, can_backoff at line 846). Methods exist - verify they're called from caption_fetcher.py retry logic."
+        },
+        {
+            "id": "US-62-012",
+            "title": "Add caption stage completion log with retry budget summary",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Caption stage logs budget summary at INFO level on completion",
+                "Summary includes: attempts/max, successes, failures, skipped, error breakdown",
+                "Log uses get_formatted_summary for consistent format",
+                "Summary logged even when stage exits early due to budget exhaustion",
+                "Test verifies summary logged at stage completion",
+                "Summary format matches: 'CaptionRetryBudget summary: X/Y attempts, ...'"
+            ],
+            "passes": false,
+            "notes": "Tier 3 - Logging improvement. Target files: src/stages/caption_stage.py (run method completion), src/caption/retry_budget.py (get_formatted_summary at line 921). US-39-005 added get_formatted_summary - verify it's called at stage completion."
+        }
+    ]
 }

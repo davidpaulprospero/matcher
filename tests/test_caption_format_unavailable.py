@@ -534,3 +534,41 @@ class TestFormatOnlyTriedOnce:
         auto_formats = [fmt for fmt, _ in auto_calls]
         assert auto_formats == ['json3', 'vtt', 'srt'], \
             f"Auto pass expected ['json3', 'vtt', 'srt'], got {auto_formats}"
+
+    def test_all_formats_exhausted_logged_after_srt_fails(self, caplog):
+        """AC: Logging shows 'All formats exhausted' after srt fails (US-62-003)."""
+        import logging
+        from src.caption_fetcher import CaptionFetcher
+        from unittest.mock import patch
+        from pathlib import Path
+        import tempfile
+
+        fetcher = CaptionFetcher()
+        call_log = []
+
+        def mock_format(video_url, video_id, temp_dir, language, auto_gen, fmt, fallback_level=0):
+            call_log.append(fmt)
+            raise CaptionFormatUnavailableError(video_id, fmt, "Requested format is not available")
+
+        with caplog.at_level(logging.DEBUG):
+            with patch.object(fetcher, '_fetch_subtitle_with_format', side_effect=mock_format):
+                with tempfile.TemporaryDirectory() as td:
+                    with pytest.raises(CaptionFormatUnavailableError):
+                        fetcher._fetch_subtitle_formats(
+                            "https://www.youtube.com/watch?v=test123",
+                            "test123",
+                            Path(td),
+                            "en",
+                            False,
+                        )
+
+        # Verify log message appears after all formats exhausted
+        log_messages = [r.message for r in caplog.records]
+        exhausted_msgs = [m for m in log_messages if 'All formats exhausted' in m]
+        assert len(exhausted_msgs) == 1, f"Expected 1 'All formats exhausted' log, got {len(exhausted_msgs)}"
+        assert 'test123' in exhausted_msgs[0], "Log should contain video ID"
+        assert '3 attempts' in exhausted_msgs[0], "Log should show 3 format attempts"
+
+        # Verify the log appears after srt (last format) failed
+        # The call_log should be json3->vtt->srt, and exhaust log comes after
+        assert call_log == ['json3', 'vtt', 'srt'], f"Unexpected format order: {call_log}"
