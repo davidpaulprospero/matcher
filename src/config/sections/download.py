@@ -1068,6 +1068,12 @@ class MullvadConfig:
     # Falls back to generic ping verification if verification times out
     verification_timeout: int = 10
 
+    # Initial delay before first rotation (seconds) - base for exponential backoff
+    initial_rotation_delay_seconds: float = 5.0
+
+    # Maximum rotation delay cap (seconds) - exponential backoff won't exceed this
+    max_rotation_delay_seconds: float = 60.0
+
     # Wait time after rotation for connection to stabilize (seconds)
     rotation_delay_seconds: int = 5
 
