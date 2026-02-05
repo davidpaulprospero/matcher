@@ -74,3 +74,20 @@ class StockFootageConfig:
     min_height: int = 720
     prefer_landscape: bool = True
     request_interval: float = 0.5
+
+    def __post_init__(self):
+        if self.min_duration <= 0:
+            raise ValueError(
+                f"StockFootageConfig.min_duration must be positive "
+                f"(seconds), got {self.min_duration}"
+            )
+        if self.max_duration <= 0:
+            raise ValueError(
+                f"StockFootageConfig.max_duration must be positive "
+                f"(seconds), got {self.max_duration}"
+            )
+        if self.min_duration > self.max_duration:
+            raise ValueError(
+                f"StockFootageConfig.min_duration must be <= max_duration, "
+                f"got min_duration={self.min_duration} > max_duration={self.max_duration}"
+            )
