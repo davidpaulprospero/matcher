@@ -1048,6 +1048,9 @@ def create_healing_pipeline(
         'conservative': HealingStrategy.conservative,
         'interactive': HealingStrategy.interactive,
         'minimal': HealingStrategy.minimal,
+        'overnight': HealingStrategy.overnight,
+        'development': HealingStrategy.development,
+        'production': HealingStrategy.production,
     }
     strategy_factory = strategy_map.get(strategy_name, HealingStrategy.conservative)
     strategy = strategy_factory()

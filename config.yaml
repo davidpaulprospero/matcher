@@ -1153,6 +1153,21 @@ download:
     # Workers exceeding this threshold are reported in progress callbacks.
     stuck_worker_threshold: 60.0      # Seconds before worker is considered slow (default: 60s)
 
+    # Caption circuit breaker (US-64-006): pause caption fetching after consecutive failures
+    # Implements the circuit breaker pattern to prevent hammering YouTube API
+    # when captions are genuinely unavailable or rate-limited.
+    #
+    # How it works:
+    #   1. Tracks consecutive caption fetch failures
+    #   2. After threshold failures, "trips" and pauses for pause_seconds
+    #   3. On first successful fetch after pause, resets to normal
+    circuit_breaker:
+      enabled: true                     # Enable caption circuit breaker
+      threshold: 5                      # Consecutive failures before tripping (default: 5)
+      pause_seconds: 60.0               # Seconds to pause after tripping (default: 60)
+      max_pause_seconds: 300.0          # Maximum pause cap (5 min)
+      circuit_breaker_cascade: true     # Propagate trips to download circuit breaker
+
     # Batch retry budget (US-33-010, US-37-004, US-37-008, US-61-011)
     # Global limits for caption fetch attempts across entire batch.
     # When limits are exceeded, remaining videos fall back to transcription.
@@ -1753,6 +1768,9 @@ pipeline:
 #   - conservative: Safe fixes only, preserve config (default, 3 attempts)
 #   - interactive: Ask user before major changes
 #   - minimal: Only critical fixes, fail fast (1 attempt)
+#   - overnight: Unattended batch processing, max resilience (8 attempts/stage)
+#   - development: Fast failures, no auto-fix, verbose debugging (1 attempt)
+#   - production: Balanced resilience + efficiency (4 attempts/stage)
 #
 # Healers:
 #   - CheckpointHealer: Corrupt checkpoint recovery
@@ -1764,7 +1782,7 @@ pipeline:
 
 healing:
   enabled: true              # Enable self-healing pipeline
-  strategy: "conservative"   # aggressive, conservative, interactive, minimal
+  strategy: "conservative"   # aggressive, conservative, interactive, minimal, overnight, development, production
   max_attempts_per_stage: 3  # Max heal attempts per stage
   max_total_heals: 20        # Max total heals before giving up
   heal_delay: 2.0            # Seconds between heal attempts
