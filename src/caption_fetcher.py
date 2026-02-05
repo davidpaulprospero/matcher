@@ -4599,7 +4599,10 @@ class CaptionFetcher:
                 )
                 continue
 
-        # All formats exhausted
+        # All formats exhausted (US-62-003)
+        logger.debug(
+            f"Caption {video_id}: All formats exhausted after {len(self._preferred_formats)} attempts"
+        )
         if last_error:
             raise last_error
         return None
