@@ -235,6 +235,7 @@ class IterativeMatchStage(Stage):
 
             # Run iterative passes
             all_pass_metrics = []
+            all_gap_pattern_logs = []  # US-63-012: Track gap patterns across passes
             total_start = time.time()
             gap_analysis = None  # Initialize before loop for early break case
 
@@ -275,8 +276,14 @@ class IterativeMatchStage(Stage):
 
                 # 3. Analyze gap patterns
                 gap_analysis = None
+                gap_pattern_log = None
                 if getattr(iter_config, 'analyze_gap_patterns', True):
-                    from ..iterative_match import analyze_gaps, GapSegment as GapSeg
+                    from ..iterative_match import (
+                        analyze_gaps,
+                        GapSegment as GapSeg,
+                        analyze_gap_patterns_for_logging,
+                        log_gap_pattern_analysis,
+                    )
                     gap_segments = [
                         GapSeg(
                             segment_index=g.segment_index,
@@ -293,6 +300,28 @@ class IterativeMatchStage(Stage):
                     )
                     dominant = gap_analysis.get_dominant_pattern()
                     print(f"    Dominant gap pattern: {dominant}")
+
+                    # US-63-012: Detailed gap pattern analysis logging
+                    total_duration = 0.0
+                    if state.voiceover_segments:
+                        # Get total duration from last segment
+                        last_seg = state.voiceover_segments[-1]
+                        total_duration = getattr(last_seg, 'end', 0.0) or getattr(last_seg, 'end_time', 0.0)
+
+                    gap_pattern_log = analyze_gap_patterns_for_logging(
+                        gap_segments,
+                        pass_num,
+                        total_duration
+                    )
+                    log_gap_pattern_analysis(gap_pattern_log, logger)
+
+                    # Print query hints to console
+                    if gap_pattern_log.query_hints:
+                        for hint in gap_pattern_log.query_hints[:3]:  # Limit to 3 hints
+                            print(f"    💡 {hint}")
+
+                    # US-63-012: Track gap pattern log for checkpoint storage
+                    all_gap_pattern_logs.append(gap_pattern_log)
 
                 # 4. Generate search queries
                 queries = self._generate_multi_strategy_queries(
@@ -462,6 +491,12 @@ class IterativeMatchStage(Stage):
             # Add gap analysis if available
             if gap_analysis:
                 checkpoint_data['gap_analysis'] = gap_analysis.to_dict()
+
+            # US-63-012: Store gap pattern logs for cross-run learning
+            if all_gap_pattern_logs:
+                checkpoint_data['gap_pattern_history'] = [
+                    log.to_dict() for log in all_gap_pattern_logs
+                ]
 
             # Stage metrics
             metrics = StageMetrics(

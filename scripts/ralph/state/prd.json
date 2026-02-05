@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 63,
-    "focusArea": "quality",
-    "branchName": "ralph/sprint-63",
+    "sprintNumber": 64,
+    "focusArea": "agents",
+    "branchName": "ralph/sprint-64",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,185 +11,189 @@
     },
     "userStories": [
         {
-            "id": "US-63-001",
-            "title": "Generate sprint stories for quality focus area",
+            "id": "US-64-001",
+            "title": "Generate sprint stories for agents focus area",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'agents' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'quality'",
-                "Add stories US-63-002 through US-63-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'agents'",
+                "Add stories US-64-002 through US-64-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-63-NNN to be unique across sprints",
-                "Mark this story (US-63-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-64-NNN to be unique across sprints",
+                "Mark this story (US-64-001) as passes: true when done"
             ],
-            "notes": "Story generation complete. Generated 11 stories (US-63-002 through US-63-012) addressing caption format discovery, negative caching, match confidence breakdown, LLM reranker improvements, and quality metrics enhancements."
+            "notes": "Planning story completed. Generated 11 stories (US-64-002 through US-64-012) covering: caption healer for format discovery, negative caption caching, healer timeout configuration, orchestrator metrics dashboard, caption circuit breaker integration, healer result caching, pattern routing coverage expansion, preflight check extensibility, healing strategy presets, cross-healer coordination events, and healing session persistence. Analysis focused on user interview context about caption fetching inefficiency and broader agent system improvements."
         },
         {
-            "id": "US-63-002",
-            "title": "Add pre-flight caption availability check using --list-subs",
+            "id": "US-64-002",
+            "title": "Add CaptionHealer for intelligent caption format discovery",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Add _check_subtitle_availability(video_id) method to CaptionFetcher that runs 'yt-dlp --list-subs <video_id>' and parses available subtitle tracks",
-                "Method returns a dict with keys: 'has_manual', 'has_auto', 'available_formats', 'available_languages'",
-                "Call _check_subtitle_availability() before attempting any caption downloads in fetch_captions()",
-                "If no subtitles exist (has_manual=False and has_auto=False), return early with CaptionUnavailableError without cycling through formats",
-                "Add unit test that mocks yt-dlp output and verifies fast-fail behavior saves ~40 seconds vs current format cycling",
-                "Log the availability check result at DEBUG level for observability"
+                "Create new CaptionHealer class in src/agents/healers/caption.py extending Healer base class",
+                "Implement can_handle() to detect caption-related errors (format unavailable, no captions, yt-dlp subtitle errors)",
+                "Implement fix() that invokes yt-dlp --list-subs to discover available subtitle formats before attempting download",
+                "Add auto-generated caption fallback (--write-auto-sub) when manual captions unavailable",
+                "Register CaptionHealer in HEALER_REGISTRY in src/agents/healers/__init__.py",
+                "Add tests in tests/test_caption_healer.py verifying format discovery and fallback logic"
             ],
-            "notes": "ALREADY IMPLEMENTED (US-59-002, US-60-002, US-60-005): list_available_languages() runs --list-subs (line 2560-2630), list_available_subtitles() returns structured SubtitleAvailabilityResult (lines 2718-2759) with available_manual_languages, available_auto_languages, has_any_subtitles. fetch_captions() calls this FIRST (line 4326) and returns early with CaptionUnavailableError when no subs (lines 4331-4343). Tests in tests/test_caption_preflight.py verify fast-fail saves ~40s. DEBUG logging at line 2715."
+            "notes": "Tier 1 (New Feature). COMPLETED: Created CaptionHealer with format discovery via yt-dlp --list-subs, auto-generated caption fallback, format preference ordering (json3 > srv3 > srv2 > srv1 > vtt > ttml), and comprehensive test suite (30 tests passing). Registered in HEALER_REGISTRY and added caption patterns to PATTERN_ROUTING in fallback.py."
         },
         {
-            "id": "US-63-003",
-            "title": "Remove duplicate json3 format from caption fallback sequence",
+            "id": "US-64-003",
+            "title": "Add negative caption caching to prevent repeated failed lookups",
             "priority": "high",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "Locate the CAPTION_FORMATS or equivalent fallback sequence in src/caption_fetcher.py",
-                "Remove the duplicate 'json3' entry that appears at the end of the fallback sequence",
-                "Ensure the fallback order is json3→vtt→srt (no repetition)",
-                "Add unit test that verifies the format list has no duplicates",
-                "Verify existing caption fetch tests still pass with the reduced format list"
+                "Extend CaptionHealer or create CaptionNegativeCache to cache 'no captions available' results",
+                "Set configurable TTL for negative cache entries (default 1 hour) in healing config",
+                "Add cache check before attempting caption fetch in CaptionHealer.fix()",
+                "Propagate structured 'no captions' status that downstream stages can handle gracefully",
+                "Add tests verifying negative cache prevents repeated failed caption attempts",
+                "Add test verifying TTL expiration allows retry after configured interval"
             ],
-            "notes": "ALREADY IMPLEMENTED: The fallback sequence at line 2365 is correctly ['json3', 'vtt', 'srt'] with no duplicates. Test class TestFormatOnlyTriedOnce in tests/test_caption_format_unavailable.py (lines 367-536) verifies: (1) test_no_duplicate_formats_in_preferred_list confirms no duplicates in _preferred_formats; (2) test_format_sequence_no_repeat_json3 confirms sequence is json3→vtt→srt; (3) test_real_fetcher_format_loop_no_duplicates_single_pass integration test; (4) test_all_formats_exhausted_logged_after_srt_fails confirms US-62-003 logging. All 6 tests pass."
+            "notes": "Tier 1 (New Feature). Source files: src/agents/healers/caption.py (extend from US-64-002), src/config/sections/healing.py (add negative_cache_ttl_seconds config). Integration point: src/caption_fetcher_cache.py has existing cache patterns to follow. The negative cache prevents the ~40-second failure cycle documented in user interview from repeating for same video ID."
         },
         {
-            "id": "US-63-004",
-            "title": "Add auto-generated caption fallback with --write-auto-sub",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "After manual caption formats fail, attempt auto-generated captions using --write-auto-sub flag",
-                "Parse auto-generated caption result and mark is_auto_generated=True in CaptionResult",
-                "Integrate with existing determine_caption_quality() function to set quality='medium' for auto-generated",
-                "Add config option caption_first.allow_auto_generated (default: true) to enable/disable this fallback",
-                "Add unit test that verifies auto-generated captions are fetched when manual unavailable",
-                "Log when falling back to auto-generated captions at INFO level"
-            ],
-            "notes": "ALREADY IMPLEMENTED (US-59-007): All acceptance criteria met. (1) _fetch_subtitle() catches CaptionUnavailableError/CaptionFormatUnavailableError and retries with auto_generated=True (lines 4564-4580); (2) _fetch_subtitle_with_format() uses '--write-auto-subs' flag (line 4700) and sets is_auto_generated=auto_generated in CaptionResult (line 4807); (3) determine_caption_quality() in src/caption/quality.py sets quality='medium' for is_auto_generated=True (lines 68-73); (4) Config field 'allow_auto_generated: bool = True' in CaptionFirstConfig (line 504) and config.yaml (line 1060), checked via _is_auto_fallback_allowed() (lines 4583-4590); (5) tests/test_caption_auto_fallback.py has 15 tests covering all cases (all pass); (6) logger.info() at lines 4568-4570 logs 'Manual captions unavailable, falling back to auto-generated'."
-        },
-        {
-            "id": "US-63-005",
-            "title": "Add negative caching for videos without captions",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add 'no_captions_available' result type to CaptionCache with configurable TTL (default: 3600 seconds)",
-                "When caption fetch fails due to unavailability, store negative result in cache",
-                "On cache lookup, return early with CaptionUnavailableError if negative cache hit",
-                "Add config option caption_first.negative_cache_ttl_seconds (default: 3600)",
-                "Add unit test that verifies second request for same captionless video returns immediately from cache",
-                "Log cache hit/miss for negative results at DEBUG level"
-            ],
-            "notes": "IMPLEMENTED (building on US-59-003/US-60-004): (1) 'unavailable=True' field on CachedCaption marks no-caption entries with TTL via negative_cache_ttl_seconds (default 3600s = 1 hour); (2) store_unavailable() called in fetch_captions when CaptionUnavailableError; (3) is_caption_unavailable() checked at start of fetch_captions(), returns early with CaptionUnavailableError mentioning 'Negative cache'; (4) Added caption_first.negative_cache_ttl_seconds config option to config.yaml and CaptionFirstConfig; (5) test_second_fetch_hits_negative_cache_zero_ytdlp_calls verifies immediate cache return; (6) Changed log level to DEBUG for negative cache hits (was INFO). All 20 tests in test_negative_cache.py pass."
-        },
-        {
-            "id": "US-63-006",
-            "title": "Propagate structured no-caption status to caption_stage",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add 'status' field to CaptionResult with values: 'success', 'no_captions', 'error', 'cached_unavailable'",
-                "In CaptionStage.run(), handle 'no_captions' status without treating it as an error",
-                "Videos with no_captions status should be marked for transcription fallback in state.videos_needing_transcription",
-                "Add log message at INFO level listing count of videos with no captions available",
-                "Add unit test that verifies pipeline continues when some videos have no captions",
-                "Update checkpoint data to track no_captions_count metric"
-            ],
-            "notes": "IMPLEMENTED: (1) Added CaptionStatus enum to src/caption/enums.py with values: SUCCESS, NO_CAPTIONS, ERROR, CACHED_UNAVAILABLE; (2) Added status field to CaptionResult in caption_fetcher.py and caption/models.py with default=CaptionStatus.SUCCESS; (3) Updated fetch_captions_batch error handlers to set status field in error dicts; (4) caption_stage.py now uses status field for counting success/no_captions/error; (5) Added INFO log with US-63-006 tag listing count of videos with no captions; (6) Videos with no_captions/cached_unavailable/error status added to needs_transcription; (7) Added 5 new tests in TestCaptionStatusField class verifying status field handling; (8) no_captions_count already tracked in checkpoint_data. All 18 tests in test_caption_stage.py pass."
-        },
-        {
-            "id": "US-63-007",
-            "title": "Add confidence score breakdown to Match objects",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add 'confidence_breakdown' field to Match dataclass as List[Dict] with keys: component, adjustment, reason",
-                "Populate breakdown during TieredMatcher scoring with adjustments from: duration penalty, topic penalty, broll boost, caption quality, timing penalty",
-                "Include breakdown in Match serialization for checkpoint storage",
-                "Add unit test that verifies breakdown captures all applied adjustments",
-                "Log confidence breakdown at DEBUG level when verbose matching enabled"
-            ],
-            "notes": "IMPLEMENTED: (1) Added 'confidence_breakdown: List[Dict[str, Any]]' field to Match dataclass in src/utils.py with default_factory=list; (2) Populated breakdown in all 3 TieredMatcher Match creation paths (obvious match @752, high embedding @851, LLM reranking @1008) using _record_breakdown helper; (3) Match.to_dict() includes breakdown when non-empty, Match.from_dict() restores it (backward-compatible); (4) Added 11 unit tests in TestMatchConfidenceBreakdownField (8 tests) and TestTieredMatcherPopulatesBreakdown (3 tests); (5) Changed DEBUG log tag to 'US-63-007 confidence breakdown' in all 3 paths. All 11 new tests pass."
-        },
-        {
-            "id": "US-63-008",
-            "title": "Add LLM reranker confidence calibration based on candidate spread",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "In LLMReranker.rerank(), calculate score spread between top-2 candidates",
-                "If spread < 0.05 (very close), apply confidence reduction factor (e.g., 0.9x)",
-                "If spread > 0.20 (clear winner), apply confidence boost factor (e.g., 1.1x, capped at 1.0)",
-                "Add config options: llm_reranker.close_spread_threshold, llm_reranker.clear_winner_threshold",
-                "Add unit test with mocked LLM that verifies confidence adjustments based on spread",
-                "Log spread and adjustment at DEBUG level"
-            ],
-            "notes": "IMPLEMENTED: (1) Added _apply_spread_calibration() method to LLMReranker that calculates spread between top-2 candidate similarities and applies adjustment; (2) Close spread (< 0.05) multiplies confidence by 0.9x factor; (3) Clear winner (> 0.20) multiplies confidence by 1.1x factor, capped at 1.0; (4) Added config options to LLMRerankerConfig: close_spread_threshold=0.05, clear_winner_threshold=0.20, close_spread_factor=0.9, clear_winner_factor=1.1; (5) Added matching config fields llm_reranker_* to MatchingConfig for config.yaml access; (6) Factory method from_matching_config() reads spread calibration config; (7) Added 9 unit tests in TestLLMRerankerSpreadCalibration class covering all cases; (8) DEBUG logging via logger.debug() with 'US-63-008 spread calibration' tag. All 20 tests in test_matching_llm_reranker.py pass."
-        },
-        {
-            "id": "US-63-009",
-            "title": "Add diversity penalty for consecutive same-source matches",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "In TieredMatcher.match_segment(), check if previous N matches used same video source",
-                "Apply configurable penalty (default: 0.1) per consecutive same-source match",
-                "Add config option: matching.consecutive_source_penalty (default: 0.1)",
-                "Add config option: matching.max_consecutive_same_source (default: 3) - hard cap",
-                "Add unit test that verifies penalty is applied and stacks for multiple consecutive",
-                "Record penalty in confidence_breakdown (depends on US-63-007)"
-            ],
-            "notes": "IMPLEMENTED: (1) Added _recent_matches list and _update_recent_matches() method to TieredMatcher to track previous matches for consecutive source checking; (2) Added apply_consecutive_source_penalty() and check_consecutive_source_hard_cap() functions to src/matching/scoring.py - penalty stacks at 0.1 per consecutive match; (3) Added config options matching.consecutive_source_penalty (default: 0.1) and matching.max_consecutive_same_source (default: 3) to MatchingConfig in src/config/sections/matching.py; (4) Applied penalty in all 3 Match creation paths in TieredMatcher.match_segment() (obvious match, high similarity, LLM rerank) with _record_breakdown for confidence_breakdown; (5) Added 10 unit tests in TestConsecutiveSourcePenalty class verifying: no penalty when no recent matches, no penalty when different source, 1x/2x/3x stacking penalties, stops counting at different source, does not go negative, hard cap check pass/fail, penalty recorded in breakdown. All 10 tests pass."
-        },
-        {
-            "id": "US-63-010",
-            "title": "Add match quality trend logging across voiceover chunks",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "After matching each 10% chunk of voiceover segments, log rolling average confidence",
-                "Identify and log segments where confidence dropped significantly (>0.2 below running average)",
-                "Add summary at end of MATCH stage showing confidence trend: improving, stable, or degrading",
-                "Add unit test that verifies trend calculation with mock match results",
-                "Store trend data in checkpoint for post-run analysis"
-            ],
-            "notes": "IMPLEMENTED: (1) Added ChunkTrendMetrics and MatchQualityTrend dataclasses to src/matching/metrics.py with rolling_avg_confidence, chunk_avg_confidence, low_confidence_segments fields; (2) calculate_confidence_trend() divides matches into 10% chunks, identifies segments >0.2 below rolling avg (stored in low_confidence_segments list); (3) log_trend_summary() logs IMPROVING/STABLE/DEGRADING based on linear regression slope of chunk averages (threshold: ±0.02); (4) Added 30 unit tests in tests/test_match_quality_trend.py covering: dataclass fields, serialization roundtrip, trend detection (improving/degrading/stable), low-confidence segment identification, slope calculation; (5) trend_data stored in checkpoint via confidence_trend.to_dict() in match.py checkpoint_data. All 30 tests pass."
-        },
-        {
-            "id": "US-63-011",
-            "title": "Add entity match boost for named entities in voiceover",
+            "id": "US-64-004",
+            "title": "Add configurable healer timeout and retry limits per healer type",
             "priority": "medium",
             "passes": false,
             "acceptanceCriteria": [
-                "Extract named entities (people, places, organizations) from voiceover segment text",
-                "If video caption contains matching named entity, apply configurable boost (default: 0.1)",
-                "Add config option: matching.entity_match_boost (default: 0.1)",
-                "Integrate with existing calculate_entity_match_score in scoring.py",
-                "Add unit test with voiceover containing 'New York' matching video about NYC",
-                "Log entity matches found at DEBUG level"
+                "Add per-healer timeout configuration to HealingStrategy dataclass in src/agents/strategy.py",
+                "Add healer_timeouts: Dict[str, float] field with default timeouts per healer name",
+                "Modify HealingOrchestrator._try_healer() to respect per-healer timeout from strategy",
+                "Add per-healer max_attempts configuration separate from global max_attempts_per_stage",
+                "Add tests verifying healer-specific timeout is enforced",
+                "Add test verifying default timeout used when healer not in healer_timeouts dict"
             ],
-            "notes": "Tier: P2 (semantic quality). Target files: src/matching/scoring.py (calculate_entity_match_score exists at ~line 44), src/matching/tiered_matcher.py. Named entity matching improves semantic relevance. Function exists but may not be fully integrated into scoring flow."
+            "notes": "Tier 2 (Enhancement). Source files: src/agents/strategy.py (lines 30-88, HealingStrategy dataclass), src/agents/orchestrator.py (lines 750-783, _try_healer method). Different healers have different runtime characteristics - API healer may need longer timeout for rate limit waits, while disk healer should fail fast."
         },
         {
-            "id": "US-63-012",
-            "title": "Add gap pattern analysis logging for iterative match optimization",
+            "id": "US-64-005",
+            "title": "Add healing metrics dashboard with real-time statistics",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add get_dashboard_metrics() method to HealingOrchestrator returning structured metrics dict",
+                "Include heal success rate, average heal time, healer utilization breakdown",
+                "Include error category distribution from watcher classifications",
+                "Add format_dashboard() method for human-readable console output",
+                "Integrate dashboard output into print_report() in src/agents/orchestrator.py",
+                "Add tests verifying dashboard metrics accuracy with mock heal events"
+            ],
+            "notes": "Tier 2 (Enhancement). Source files: src/agents/orchestrator.py (add after line ~1055, print_report method), src/agents/strategy.py (HealingMetrics dataclass at lines 170-218). The existing print_report shows rate limiting metrics but lacks healer-specific utilization data."
+        },
+        {
+            "id": "US-64-006",
+            "title": "Integrate caption fetcher with circuit breaker pattern",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Create CaptionCircuitBreaker class in src/agents/healers/caption.py or src/caption/ using circuit breaker pattern",
+                "Configure trip threshold for consecutive caption failures (default: 5 failures)",
+                "Configure reset timeout after circuit trips (default: 60 seconds)",
+                "Wire circuit breaker into caption fetcher error handling path",
+                "Add circuit breaker state to orchestrator metrics for monitoring",
+                "Add tests for circuit breaker trip, reset, and half-open states"
+            ],
+            "notes": "Tier 2 (Enhancement). Source files: src/agents/healers/caption.py, src/downloader/circuit_breaker.py (existing pattern to follow at lines 1-150). The user interview shows repeated caption failures for same video - circuit breaker prevents hammering YouTube API when captions genuinely unavailable."
+        },
+        {
+            "id": "US-64-007",
+            "title": "Add healer result caching for idempotent healing actions",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add HealerResultCache class to cache successful healing actions",
+                "Cache key based on error signature (type + message hash + stage)",
+                "Skip redundant healing attempts if identical error was recently healed",
+                "Add configurable cache TTL (default: 5 minutes)",
+                "Add cache invalidation when config changes (via config_modified flag)",
+                "Add tests verifying cache hit prevents redundant heal attempts"
+            ],
+            "notes": "Tier 2 (Enhancement). Source files: src/agents/orchestrator.py (integrate at lines 618-678, coordinate_heal method), new src/agents/healer_cache.py. The orchestrator tracks recent_errors (line 851-879) but only for loop detection, not for caching successful resolutions."
+        },
+        {
+            "id": "US-64-008",
+            "title": "Expand pattern routing coverage for common error categories",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add caption-specific patterns to PATTERN_ROUTING in src/agents/fallback.py",
+                "Include patterns for: 'no subtitles', 'caption unavailable', 'format not available' (subtitle context)",
+                "Add patterns for embedding-related errors (numpy shape mismatch, empty array)",
+                "Add patterns for LLM provider errors (gemini quota, anthropic overloaded)",
+                "Update pattern_route() tests to cover new patterns",
+                "Verify no false positive matches with existing test cases"
+            ],
+            "notes": "Tier 2 (Enhancement). Source files: src/agents/fallback.py (PATTERN_ROUTING dict at lines 31-64). Current patterns don't cover caption-specific errors from user interview ('Requested format is not available' for subtitles). Also missing embedding/numpy errors and LLM provider-specific errors."
+        },
+        {
+            "id": "US-64-009",
+            "title": "Add preflight check extensibility for custom validators",
             "priority": "low",
             "passes": false,
             "acceptanceCriteria": [
-                "In IterativeMatchStage, analyze gap segments after each pass for common patterns",
-                "Identify and log: gaps with similar voiceover topics, gaps at similar timeline positions, gaps with specific keyword patterns",
-                "Generate query hints based on gap patterns (e.g., 'Consider searching for: [extracted common terms]')",
-                "Add unit test that verifies pattern detection with mock gap data",
-                "Store gap analysis in checkpoint for cross-run learning"
+                "Add register_preflight_check() method to HealingOrchestrator",
+                "Accept callable validators with signature (state: PipelineState) -> List[PreflightIssue]",
+                "Execute registered validators in run_preflight() alongside built-in checks",
+                "Add unregister_preflight_check() for cleanup",
+                "Add test verifying custom validators are called during preflight",
+                "Add test verifying custom validator issues are included in preflight results"
             ],
-            "notes": "Tier: P3 (intelligence). Target file: src/stages/iterative_match.py. Gap pattern analysis helps identify systematic matching failures. Query learning database exists but doesn't analyze gap clustering. This enables smarter query generation in subsequent passes."
+            "notes": "Tier 3 (Extensibility). Source files: src/agents/orchestrator.py (run_preflight at lines 233-303). Current preflight checks are hardcoded; this allows pipeline stages or external code to register domain-specific validation without modifying orchestrator source."
+        },
+        {
+            "id": "US-64-010",
+            "title": "Add healing strategy presets for common use cases",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add HealingStrategy.overnight() preset optimized for unattended batch processing",
+                "Add HealingStrategy.development() preset with verbose logging and fast failures",
+                "Add HealingStrategy.production() preset balancing resilience and efficiency",
+                "Document preset differences in strategy docstrings",
+                "Add config.yaml option to select strategy preset by name",
+                "Add tests verifying each preset has expected configuration values"
+            ],
+            "notes": "Tier 3 (Enhancement). Source files: src/agents/strategy.py (add after line 139, alongside existing aggressive/conservative/interactive/minimal presets), src/config/sections/healing.py (add strategy_preset field). Current presets don't cover overnight/batch processing or dev/debug scenarios."
+        },
+        {
+            "id": "US-64-011",
+            "title": "Add cross-healer coordination events for state sharing",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Define HealerEvent enum with event types (CONFIG_CHANGED, CACHE_CLEARED, RATE_LIMITED, PROVIDER_SWITCHED)",
+                "Add subscribe_event() and publish_event() methods to HealingOrchestrator",
+                "Modify _notify_healers() to use event system instead of direct method calls",
+                "Add event handlers in healers that need cross-healer awareness",
+                "Add test verifying event subscription and delivery",
+                "Add test verifying healers receive relevant events from other healers"
+            ],
+            "notes": "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (_notify_healers at lines 881-902), src/agents/base.py (add event handling to Healer base class). Current cross-healer notification is ad-hoc; event system enables cleaner decoupling."
+        },
+        {
+            "id": "US-64-012",
+            "title": "Add healing session persistence for crash recovery",
+            "priority": "low",
+            "passes": false,
+            "acceptanceCriteria": [
+                "Add save_session() method to HealingOrchestrator that persists current state to JSON",
+                "Add load_session() method to restore orchestrator state from persisted file",
+                "Include heal history, metrics, config snapshots, and healer states in persisted data",
+                "Auto-save session on significant events (heal success, stage completion, escalation)",
+                "Add session recovery logic to create_orchestrated_pipeline() factory",
+                "Add tests for session save/load roundtrip and recovery after simulated crash"
+            ],
+            "notes": "Tier 3 (Enhancement). Source files: src/agents/orchestrator.py (add after reset() at line 1268), src/agents/runner.py (create_orchestrated_pipeline at lines 435-456). Currently healing state is lost on crash; persistence enables resume with full healing context intact."
         }
     ]
 }

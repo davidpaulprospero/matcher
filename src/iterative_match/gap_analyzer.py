@@ -364,3 +364,449 @@ def extract_keywords_for_gap(gap: GapSegment, max_keywords: int = 5) -> List[str
             unique_keywords.append(kw)
 
     return unique_keywords[:max_keywords]
+
+
+@dataclass
+class GapPatternLog:
+    """Log entry for gap pattern analysis.
+
+    Stores detailed analysis of gap patterns for logging and cross-run learning.
+    """
+    pass_number: int
+    total_gaps: int
+    pattern_summary: Dict[str, int] = field(default_factory=dict)
+
+    # Topic clustering
+    topic_clusters: Dict[str, List[int]] = field(default_factory=dict)  # common_topic -> gap indices
+    topic_keywords: Dict[str, List[str]] = field(default_factory=dict)  # common_topic -> keywords
+
+    # Timeline position clustering
+    position_clusters: List[Dict[str, Any]] = field(default_factory=list)  # [{start, end, indices}]
+    position_concentration: str = ""  # 'early', 'middle', 'late', 'spread'
+
+    # Keyword patterns
+    recurring_keywords: Dict[str, int] = field(default_factory=dict)  # keyword -> occurrence count
+    keyword_patterns: List[str] = field(default_factory=list)  # Common keyword combinations
+
+    # Query hints generated from patterns
+    query_hints: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'pass_number': self.pass_number,
+            'total_gaps': self.total_gaps,
+            'pattern_summary': self.pattern_summary,
+            'topic_clusters': self.topic_clusters,
+            'topic_keywords': self.topic_keywords,
+            'position_clusters': self.position_clusters,
+            'position_concentration': self.position_concentration,
+            'recurring_keywords': dict(self.recurring_keywords),
+            'keyword_patterns': self.keyword_patterns,
+            'query_hints': self.query_hints,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'GapPatternLog':
+        """Create from dictionary."""
+        log = cls(
+            pass_number=data.get('pass_number', 0),
+            total_gaps=data.get('total_gaps', 0),
+        )
+        log.pattern_summary = data.get('pattern_summary', {})
+        log.topic_clusters = data.get('topic_clusters', {})
+        log.topic_keywords = data.get('topic_keywords', {})
+        log.position_clusters = data.get('position_clusters', [])
+        log.position_concentration = data.get('position_concentration', '')
+        log.recurring_keywords = data.get('recurring_keywords', {})
+        log.keyword_patterns = data.get('keyword_patterns', [])
+        log.query_hints = data.get('query_hints', [])
+        return log
+
+
+def analyze_gap_patterns_for_logging(
+    gaps: List[GapSegment],
+    pass_number: int,
+    total_duration: float = 0.0,
+) -> GapPatternLog:
+    """
+    Analyze gaps for detailed pattern logging and query hint generation.
+
+    This function identifies:
+    - Gaps with similar voiceover topics (clustering by keywords)
+    - Gaps at similar timeline positions (temporal clustering)
+    - Recurring keyword patterns across gaps
+
+    Args:
+        gaps: List of GapSegment objects to analyze
+        pass_number: Current iteration pass number
+        total_duration: Total timeline duration for position analysis
+
+    Returns:
+        GapPatternLog with detailed analysis and query hints
+    """
+    log = GapPatternLog(pass_number=pass_number, total_gaps=len(gaps))
+
+    if not gaps:
+        return log
+
+    # 1. Pattern summary (count by pattern type)
+    for gap in gaps:
+        pattern = gap.pattern_type or 'unclassified'
+        log.pattern_summary[pattern] = log.pattern_summary.get(pattern, 0) + 1
+
+    # 2. Topic clustering - group gaps by shared keywords
+    log.topic_clusters, log.topic_keywords = _cluster_gaps_by_topic(gaps)
+
+    # 3. Timeline position clustering
+    log.position_clusters, log.position_concentration = _cluster_gaps_by_position(
+        gaps, total_duration
+    )
+
+    # 4. Extract recurring keywords
+    log.recurring_keywords = _extract_recurring_keywords(gaps)
+
+    # 5. Identify keyword patterns (common combinations)
+    log.keyword_patterns = _identify_keyword_patterns(gaps)
+
+    # 6. Generate query hints based on all analyses
+    log.query_hints = _generate_query_hints_from_patterns(log, gaps)
+
+    return log
+
+
+def _cluster_gaps_by_topic(
+    gaps: List[GapSegment],
+    min_cluster_size: int = 2,
+) -> Tuple[Dict[str, List[int]], Dict[str, List[str]]]:
+    """
+    Cluster gaps by shared keywords/topics.
+
+    Groups gaps that share significant content words.
+
+    Args:
+        gaps: Gaps to cluster
+        min_cluster_size: Minimum gaps to form a cluster
+
+    Returns:
+        Tuple of (topic -> gap indices, topic -> keywords)
+    """
+    # Extract keywords for each gap
+    gap_keywords: Dict[int, Set[str]] = {}
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
+    }
+
+    for gap in gaps:
+        words = gap.voiceover_text.lower().split()
+        words = [w.strip('.,!?;:"\'-()[]') for w in words]
+        keywords = {w for w in words if len(w) > 3 and w not in stop_words}
+        gap_keywords[gap.segment_index] = keywords
+
+    # Find keyword overlap between gaps
+    topic_clusters: Dict[str, List[int]] = defaultdict(list)
+    topic_keywords: Dict[str, List[str]] = defaultdict(list)
+
+    # Track which keywords appear in multiple gaps
+    keyword_gaps: Dict[str, Set[int]] = defaultdict(set)
+    for idx, keywords in gap_keywords.items():
+        for kw in keywords:
+            keyword_gaps[kw].add(idx)
+
+    # Group by significant shared keywords
+    processed_indices: Set[int] = set()
+    cluster_id = 0
+
+    for keyword, indices in sorted(keyword_gaps.items(), key=lambda x: -len(x[1])):
+        if len(indices) < min_cluster_size:
+            continue
+
+        # Find gaps sharing this keyword that aren't already clustered
+        new_cluster_indices = [i for i in indices if i not in processed_indices]
+        if len(new_cluster_indices) < min_cluster_size:
+            continue
+
+        # Find common keywords among these gaps
+        if new_cluster_indices:
+            common_keywords = gap_keywords[new_cluster_indices[0]].copy()
+            for idx in new_cluster_indices[1:]:
+                common_keywords &= gap_keywords[idx]
+
+            if common_keywords:
+                topic_name = f"topic_{cluster_id}"
+                topic_clusters[topic_name] = new_cluster_indices
+                topic_keywords[topic_name] = list(common_keywords)[:5]  # Limit keywords
+                processed_indices.update(new_cluster_indices)
+                cluster_id += 1
+
+    return dict(topic_clusters), dict(topic_keywords)
+
+
+def _cluster_gaps_by_position(
+    gaps: List[GapSegment],
+    total_duration: float,
+    window_seconds: float = 60.0,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Cluster gaps by timeline position.
+
+    Identifies temporal patterns where gaps cluster together.
+
+    Args:
+        gaps: Gaps to analyze
+        total_duration: Total timeline duration
+        window_seconds: Time window for clustering
+
+    Returns:
+        Tuple of (position clusters, concentration description)
+    """
+    if not gaps:
+        return [], 'none'
+
+    # Sort gaps by position
+    sorted_gaps = sorted(gaps, key=lambda g: g.position)
+    positions = [g.position for g in sorted_gaps]
+
+    # Find clusters using simple windowing
+    clusters: List[Dict[str, Any]] = []
+    current_cluster_indices: List[int] = []
+    current_cluster_start = positions[0] if positions else 0
+
+    for gap in sorted_gaps:
+        if not current_cluster_indices:
+            current_cluster_indices = [gap.segment_index]
+            current_cluster_start = gap.position
+        elif gap.position - current_cluster_start <= window_seconds:
+            current_cluster_indices.append(gap.segment_index)
+        else:
+            # Save current cluster if significant
+            if len(current_cluster_indices) >= 2:
+                clusters.append({
+                    'start': current_cluster_start,
+                    'end': current_cluster_start + window_seconds,
+                    'indices': current_cluster_indices,
+                    'count': len(current_cluster_indices),
+                })
+            # Start new cluster
+            current_cluster_indices = [gap.segment_index]
+            current_cluster_start = gap.position
+
+    # Don't forget last cluster
+    if len(current_cluster_indices) >= 2:
+        clusters.append({
+            'start': current_cluster_start,
+            'end': current_cluster_start + window_seconds,
+            'indices': current_cluster_indices,
+            'count': len(current_cluster_indices),
+        })
+
+    # Determine concentration
+    if total_duration <= 0 or not positions:
+        concentration = 'unknown'
+    else:
+        avg_position = sum(positions) / len(positions)
+        relative_position = avg_position / total_duration
+
+        if relative_position < 0.33:
+            concentration = 'early'
+        elif relative_position > 0.67:
+            concentration = 'late'
+        else:
+            concentration = 'middle'
+
+        # Check for spread distribution
+        spread = (max(positions) - min(positions)) / total_duration if total_duration > 0 else 0
+        if spread > 0.7:
+            concentration = 'spread'
+
+    return clusters, concentration
+
+
+def _extract_recurring_keywords(
+    gaps: List[GapSegment],
+    min_occurrences: int = 2,
+) -> Dict[str, int]:
+    """
+    Extract keywords that appear across multiple gaps.
+
+    Args:
+        gaps: Gaps to analyze
+        min_occurrences: Minimum occurrences to be considered recurring
+
+    Returns:
+        Dict of keyword -> occurrence count
+    """
+    keyword_counts: Dict[str, int] = defaultdict(int)
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
+    }
+
+    for gap in gaps:
+        words = gap.voiceover_text.lower().split()
+        words = [w.strip('.,!?;:"\'-()[]') for w in words]
+        for word in words:
+            if len(word) > 3 and word not in stop_words:
+                keyword_counts[word] += 1
+
+    # Filter to recurring keywords
+    recurring = {k: v for k, v in keyword_counts.items() if v >= min_occurrences}
+    # Sort by count descending
+    return dict(sorted(recurring.items(), key=lambda x: -x[1]))
+
+
+def _identify_keyword_patterns(
+    gaps: List[GapSegment],
+    max_patterns: int = 5,
+) -> List[str]:
+    """
+    Identify common keyword combinations across gaps.
+
+    Looks for bigrams and trigrams that appear frequently.
+
+    Args:
+        gaps: Gaps to analyze
+        max_patterns: Maximum patterns to return
+
+    Returns:
+        List of common keyword pattern strings
+    """
+    bigram_counts: Dict[str, int] = defaultdict(int)
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were',
+    }
+
+    for gap in gaps:
+        words = gap.voiceover_text.lower().split()
+        words = [w.strip('.,!?;:"\'-()[]') for w in words]
+        content_words = [w for w in words if len(w) > 2 and w not in stop_words]
+
+        # Count bigrams
+        for i in range(len(content_words) - 1):
+            bigram = f"{content_words[i]} {content_words[i+1]}"
+            bigram_counts[bigram] += 1
+
+    # Filter to patterns appearing multiple times
+    patterns = [p for p, count in bigram_counts.items() if count >= 2]
+    # Sort by frequency
+    patterns.sort(key=lambda p: -bigram_counts[p])
+
+    return patterns[:max_patterns]
+
+
+def _generate_query_hints_from_patterns(
+    log: GapPatternLog,
+    gaps: List[GapSegment],
+) -> List[str]:
+    """
+    Generate search query hints based on gap pattern analysis.
+
+    Creates actionable suggestions for improving gap coverage.
+
+    Args:
+        log: Current GapPatternLog with analysis results
+        gaps: Original gaps for additional context
+
+    Returns:
+        List of query hint strings
+    """
+    hints: List[str] = []
+
+    # 1. Hints from recurring keywords
+    top_keywords = list(log.recurring_keywords.keys())[:5]
+    if top_keywords:
+        hints.append(f"Consider searching for: {', '.join(top_keywords)}")
+
+    # 2. Hints from topic clusters
+    for topic, keywords in log.topic_keywords.items():
+        cluster_size = len(log.topic_clusters.get(topic, []))
+        if cluster_size >= 3 and keywords:
+            hints.append(f"Cluster of {cluster_size} gaps share terms: {', '.join(keywords[:3])}")
+
+    # 3. Hints from position concentration
+    if log.position_concentration == 'early':
+        hints.append("Gaps concentrated in early timeline - consider intro/setup footage")
+    elif log.position_concentration == 'late':
+        hints.append("Gaps concentrated in late timeline - consider conclusion/wrap-up footage")
+
+    # 4. Hints from pattern types
+    if log.pattern_summary:
+        dominant = max(log.pattern_summary.items(), key=lambda x: x[1])
+        pattern_type, count = dominant
+        if count >= 3:
+            if pattern_type == 'abstract_concept':
+                hints.append(f"{count} gaps are abstract concepts - try metaphorical/symbolic footage")
+            elif pattern_type == 'action_verb':
+                hints.append(f"{count} gaps describe actions - search for action/activity footage")
+            elif pattern_type == 'location':
+                hints.append(f"{count} gaps reference locations - search for geographic/place footage")
+            elif pattern_type == 'proper_noun':
+                hints.append(f"{count} gaps mention specific names - search for named entity footage")
+            elif pattern_type == 'emotion':
+                hints.append(f"{count} gaps are emotional content - search for expressive/mood footage")
+
+    # 5. Hints from keyword patterns
+    if log.keyword_patterns:
+        hints.append(f"Common word pairs: {', '.join(log.keyword_patterns[:3])}")
+
+    return hints
+
+
+def log_gap_pattern_analysis(
+    log: GapPatternLog,
+    logger_instance: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Log gap pattern analysis at DEBUG level.
+
+    Writes detailed pattern information to the logger for optimization insights.
+
+    Args:
+        log: GapPatternLog to output
+        logger_instance: Logger to use (defaults to module logger)
+    """
+    log_fn = logger_instance or logger
+
+    log_fn.debug(f"=== Gap Pattern Analysis (Pass {log.pass_number}) ===")
+    log_fn.debug(f"Total gaps: {log.total_gaps}")
+
+    # Pattern summary
+    if log.pattern_summary:
+        pattern_str = ", ".join(f"{k}={v}" for k, v in log.pattern_summary.items())
+        log_fn.debug(f"Pattern distribution: {pattern_str}")
+
+    # Topic clusters
+    if log.topic_clusters:
+        log_fn.debug(f"Found {len(log.topic_clusters)} topic clusters:")
+        for topic, indices in log.topic_clusters.items():
+            keywords = log.topic_keywords.get(topic, [])
+            log_fn.debug(f"  {topic}: {len(indices)} gaps, keywords={keywords}")
+
+    # Position clustering
+    if log.position_clusters:
+        log_fn.debug(f"Found {len(log.position_clusters)} position clusters:")
+        for cluster in log.position_clusters:
+            log_fn.debug(
+                f"  Time {cluster['start']:.1f}s-{cluster['end']:.1f}s: "
+                f"{cluster['count']} gaps"
+            )
+    if log.position_concentration:
+        log_fn.debug(f"Position concentration: {log.position_concentration}")
+
+    # Recurring keywords
+    if log.recurring_keywords:
+        top_5 = list(log.recurring_keywords.items())[:5]
+        keywords_str = ", ".join(f"{k}({v})" for k, v in top_5)
+        log_fn.debug(f"Recurring keywords: {keywords_str}")
+
+    # Query hints
+    if log.query_hints:
+        log_fn.debug("Query hints:")
+        for hint in log.query_hints:
+            log_fn.debug(f"  → {hint}")

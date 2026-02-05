@@ -50,6 +50,12 @@ PATTERN_ROUTING: Dict[str, Tuple[str, str]] = {
     r"\bJSONDecodeError\b|json\.(decoder\.)?JSONDecodeError|Expecting[_\s]value": ("checkpoint", "checkpoint-healer"),
     r"\b(checkpoint|json)[_\s-]?(file)?[_\s-]?(corrupt|malformed)\b": ("checkpoint", "checkpoint-healer"),
 
+    # Caption errors - format discovery and subtitle issues
+    r"\b(caption|subtitle)s?[_\s-]?(unavailable|not[_\s-]?found|error|failed)\b": ("caption", "caption-healer"),
+    r"\bformat[_\s-]?(unavailable|not[_\s-]?available)\b|\bjson3\b|\bsrv[123]\b": ("caption", "caption-healer"),
+    r"\bno[_\s-]?(caption|subtitle)s?\b|\bthere[_\s-]?are[_\s-]?no[_\s-]?subtitles\b": ("caption", "caption-healer"),
+    r"\b(write[_\s-]?auto[_\s-]?sub|auto[_\s-]?generated[_\s-]?caption)\b": ("caption", "caption-healer"),
+
     # Download errors - YouTube/video specific
     r"\byoutube\b|\byt-?dlp\b.*\b(error|fail)": ("download", "download-healer"),
     r"\bvideo[_\s-]?(unavailable|not[_\s-]?found|removed|deleted|private)\b": ("download", "download-healer"),

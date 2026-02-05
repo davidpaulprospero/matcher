@@ -679,15 +679,20 @@ def apply_entity_match_boost(
     video-voiceover matching. A video mentioning the same person or place
     as the voiceover is highly relevant.
 
-    Graduated boost values:
+    US-63-011: Entity boost is now configurable via matching.entity_match_boost.
+
+    Graduated boost values (when using legacy config):
     - 1 matching entity: +0.05
     - 2 matching entities: +0.08
     - 3+ matching entities: +0.12
+
+    New mode: If entity_match_boost is set in config, uses that fixed boost value.
 
     Args:
         confidence: Original confidence score
         vo_segment: Voiceover segment (may have entities from analysis)
         video_segment: Video segment being considered
+        config: Config with matching.entity_match_boost setting
 
     Returns:
         Tuple of (boosted_confidence, boost_reason, matched_entities)
@@ -695,12 +700,18 @@ def apply_entity_match_boost(
     # Extract entity texts from voiceover segment
     vo_entities = _extract_entity_texts(vo_segment)
     if not vo_entities:
+        logger.debug("No entities found in voiceover segment")
         return confidence, "", []
 
     # Extract entity texts from video segment
     video_entities = _extract_entity_texts(video_segment)
     if not video_entities:
+        logger.debug("No entities found in video segment")
         return confidence, "", []
+
+    # Log extracted entities at DEBUG level (US-63-011)
+    logger.debug(f"Voiceover entities extracted: {vo_entities}")
+    logger.debug(f"Video entities extracted: {video_entities}")
 
     # Find matching entities (case-insensitive)
     vo_lower = {e.lower() for e in vo_entities}
@@ -708,32 +719,52 @@ def apply_entity_match_boost(
     matching = vo_lower & video_lower
 
     if not matching:
+        logger.debug(f"No entity matches found between voiceover and video")
         return confidence, "", []
-
-    # Graduated boost based on match count (configurable via scoring config)
-    sc = _get_scoring_config(config)
-    boosts = getattr(sc, 'entity_match_boosts', None) if sc else None
-    match_count = len(matching)
-    if boosts:
-        if match_count >= 3:
-            boost = boosts.get('3+', 0.12)
-        elif match_count == 2:
-            boost = boosts.get('2', 0.08)
-        else:
-            boost = boosts.get('1', 0.05)
-    else:
-        if match_count >= 3:
-            boost = 0.12
-        elif match_count == 2:
-            boost = 0.08
-        else:
-            boost = 0.05
-
-    # Apply boost (cap at 1.0)
-    boosted = min(1.0, confidence + boost)
 
     # Get original-case matched entity names for return
     matched_entities = [e for e in vo_entities if e.lower() in matching]
+    match_count = len(matching)
+
+    # Log entity matches at DEBUG level (US-63-011)
+    logger.debug(
+        f"Entity matches found: {matched_entities} "
+        f"(count: {match_count})"
+    )
+
+    # US-63-011: Check for configurable entity_match_boost first
+    mc = getattr(config, 'matching', None) if config else None
+    entity_match_boost = getattr(mc, 'entity_match_boost', None) if mc else None
+
+    if entity_match_boost is not None and entity_match_boost > 0:
+        # Use fixed configurable boost (US-63-011)
+        boost = entity_match_boost
+        logger.debug(
+            f"Using configurable entity_match_boost: {boost:.2f} "
+            f"for {match_count} matching entities"
+        )
+    else:
+        # Graduated boost based on match count (configurable via scoring config)
+        sc = _get_scoring_config(config)
+        boosts = getattr(sc, 'entity_match_boosts', None) if sc else None
+
+        if boosts:
+            if match_count >= 3:
+                boost = boosts.get('3+', 0.12)
+            elif match_count == 2:
+                boost = boosts.get('2', 0.08)
+            else:
+                boost = boosts.get('1', 0.05)
+        else:
+            if match_count >= 3:
+                boost = 0.12
+            elif match_count == 2:
+                boost = 0.08
+            else:
+                boost = 0.05
+
+    # Apply boost (cap at 1.0)
+    boosted = min(1.0, confidence + boost)
 
     reason = f"entity match: +{boost:.2f} ({match_count} entities: {', '.join(matched_entities[:3])})"
 
@@ -748,6 +779,7 @@ def _extract_entity_texts(segment: SRTSegment) -> List[str]:
 
     Entities are stored as dicts with 'text', 'type', and 'context' keys.
     Also checks keywords list for entity-like entries.
+    US-63-011: Also extracts named entities from segment text using heuristic NER.
 
     Args:
         segment: SRTSegment to extract entities from
@@ -756,6 +788,7 @@ def _extract_entity_texts(segment: SRTSegment) -> List[str]:
         List of entity text values (names)
     """
     entities = []
+    seen_lower = set()  # Track seen entities to avoid duplicates
 
     # Get entities from the entities field
     segment_entities = getattr(segment, 'entities', []) or []
@@ -763,18 +796,32 @@ def _extract_entity_texts(segment: SRTSegment) -> List[str]:
         if isinstance(entity, dict):
             text = entity.get('text', '')
             if text and len(text) >= 2:  # Skip very short entities
-                entities.append(text)
+                if text.lower() not in seen_lower:
+                    entities.append(text)
+                    seen_lower.add(text.lower())
         elif isinstance(entity, str):
             if entity and len(entity) >= 2:
-                entities.append(entity)
+                if entity.lower() not in seen_lower:
+                    entities.append(entity)
+                    seen_lower.add(entity.lower())
 
     # Also check keywords for entity-like entries (proper nouns, capitalized words)
     keywords = getattr(segment, 'keywords', []) or []
     for kw in keywords:
         if kw and len(kw) >= 2:
             # Check if it looks like a proper noun (capitalized, multi-word)
-            if _looks_like_entity(kw):
+            if _looks_like_entity(kw) and kw.lower() not in seen_lower:
                 entities.append(kw)
+                seen_lower.add(kw.lower())
+
+    # US-63-011: Extract named entities from segment text if we have text
+    segment_text = getattr(segment, 'text', '') or ''
+    if segment_text:
+        text_entities = extract_named_entities_from_text(segment_text)
+        for entity in text_entities:
+            if entity.lower() not in seen_lower:
+                entities.append(entity)
+                seen_lower.add(entity.lower())
 
     return entities
 
@@ -824,6 +871,164 @@ def _looks_like_entity(text: str) -> bool:
     }
 
     return text not in common_words
+
+
+def extract_named_entities_from_text(text: str) -> List[str]:
+    """
+    Extract named entities (people, places, organizations) from raw text.
+
+    Uses heuristic-based NER without requiring external libraries.
+    Looks for:
+    - Capitalized multi-word phrases (e.g., "New York", "Elon Musk")
+    - Known geographic patterns (e.g., "City", "State", "Country" suffixes)
+    - Organization patterns (e.g., "Inc", "Corp", "LLC", "University")
+
+    Args:
+        text: Raw text to extract entities from
+
+    Returns:
+        List of entity strings found in the text
+
+    US-63-011: Entity match boost for named entities in voiceover
+    """
+    if not text:
+        return []
+
+    entities = []
+
+    # Common words that shouldn't be entities (expanded list)
+    stopwords = {
+        'the', 'a', 'an', 'this', 'that', 'these', 'those',
+        'it', 'they', 'we', 'he', 'she', 'you', 'i', 'me', 'my',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did',
+        'will', 'would', 'could', 'should', 'may', 'might',
+        'can', 'must', 'shall', 'but', 'and', 'or', 'if', 'so',
+        'for', 'with', 'to', 'from', 'of', 'on', 'in', 'at', 'by',
+        'about', 'after', 'before', 'during', 'through', 'between',
+        'just', 'then', 'now', 'here', 'there', 'where', 'when',
+        'what', 'which', 'who', 'how', 'why', 'all', 'each', 'every',
+        'some', 'any', 'no', 'not', 'only', 'same', 'other', 'such',
+        'more', 'most', 'many', 'much', 'very', 'too', 'also',
+        # Sentence starters that aren't entities
+        'however', 'therefore', 'furthermore', 'meanwhile',
+        'although', 'because', 'since', 'while', 'until',
+        'today', 'yesterday', 'tomorrow', 'now', 'then',
+    }
+
+    # Geographic suffixes that indicate place names
+    geo_suffixes = {
+        'city', 'county', 'state', 'province', 'country',
+        'island', 'islands', 'mountain', 'mountains', 'river', 'lake',
+        'bay', 'valley', 'beach', 'park', 'forest',
+        'street', 'avenue', 'boulevard', 'road', 'highway'
+    }
+
+    # Organization suffixes
+    org_suffixes = {
+        'inc', 'inc.', 'corp', 'corp.', 'corporation',
+        'llc', 'ltd', 'ltd.', 'limited',
+        'co', 'co.', 'company', 'companies',
+        'university', 'college', 'institute', 'school',
+        'hospital', 'foundation', 'association', 'organization',
+        'bank', 'group', 'international'
+    }
+
+    # Well-known place name patterns to extract
+    city_patterns = {
+        'new york', 'los angeles', 'san francisco', 'san diego', 'las vegas',
+        'new orleans', 'hong kong', 'buenos aires', 'rio de janeiro',
+        'sao paulo', 'el paso', 'santa fe', 'santa barbara', 'st louis',
+        'st. louis', 'new delhi', 'tel aviv', 'kuala lumpur'
+    }
+
+    # Normalize text for pattern matching
+    text_lower = text.lower()
+
+    # Extract known multi-word city names first
+    for pattern in city_patterns:
+        if pattern in text_lower:
+            # Find the original case version
+            start_idx = text_lower.find(pattern)
+            end_idx = start_idx + len(pattern)
+            original = text[start_idx:end_idx]
+            entities.append(original.strip())
+
+    # Tokenize preserving case
+    words = text.split()
+
+    # Look for capitalized sequences (potential named entities)
+    i = 0
+    while i < len(words):
+        word = words[i].strip('.,!?:;"\'()[]{}')
+
+        if not word:
+            i += 1
+            continue
+
+        # Check if word starts with capital
+        if word[0].isupper() and len(word) >= 2:
+            # Check if it's a stopword
+            if word.lower() in stopwords:
+                i += 1
+                continue
+
+            # Collect consecutive capitalized words
+            entity_words = [word]
+            j = i + 1
+
+            while j < len(words):
+                next_word = words[j].strip('.,!?:;"\'()[]{}')
+                if not next_word:
+                    j += 1
+                    continue
+
+                # Check if next word is capitalized or is a connector
+                if next_word[0].isupper() and len(next_word) >= 2:
+                    entity_words.append(next_word)
+                    j += 1
+                elif next_word.lower() in {'of', 'the', 'and', 'de', 'la', 'el'}:
+                    # Connectors in multi-word entities
+                    if j + 1 < len(words):
+                        following = words[j + 1].strip('.,!?:;"\'()[]{}')
+                        if following and following[0].isupper():
+                            entity_words.append(next_word)
+                            j += 1
+                            continue
+                    break
+                else:
+                    break
+
+            # Create entity from collected words
+            if entity_words:
+                entity = ' '.join(entity_words)
+
+                # Check if it's a valid entity (not just a sentence starter)
+                is_valid = False
+                entity_lower = entity.lower()
+
+                # Multi-word capitalized phrases are likely entities
+                if len(entity_words) > 1:
+                    is_valid = True
+                # Single words with geo/org suffixes
+                elif any(entity_lower.endswith(suffix) for suffix in geo_suffixes | org_suffixes):
+                    is_valid = True
+                # Single capitalized word not a stopword and not at sentence start
+                elif i > 0:
+                    # Not at sentence start
+                    prev_word = words[i - 1].strip()
+                    if prev_word and not prev_word.endswith(('.', '!', '?', ':')):
+                        is_valid = True
+
+                if is_valid and entity not in entities:
+                    entities.append(entity)
+                    logger.debug(f"Extracted entity from text: '{entity}'")
+
+            i = j
+        else:
+            i += 1
+
+    return entities
 
 
 # Transcript quality scoring thresholds
