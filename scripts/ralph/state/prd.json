@@ -134,7 +134,7 @@
       "id": "US-66-009",
       "title": "Add thread safety to BatchCaptionCheckpoint.update_progress",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "BatchCaptionCheckpoint has a threading.RLock (or uses its existing _lock if present)",
         "update_progress() method (src/caption_fetcher.py line ~950) acquires lock before modifying results, counts, remaining_video_ids, and updated_at",
@@ -142,13 +142,13 @@
         "At least 2 tests verify thread safety: concurrent update_progress calls from multiple threads produce correct counts",
         "No deadlocks when calling update_progress from within a locked context"
       ],
-      "notes": "Tier: bug fix (thread safety). Files: src/caption_fetcher.py (BatchCaptionCheckpoint class, lines ~936-1027). The update_progress method modifies results dict, success_count, error_count, remaining_video_ids, and updated_at without holding a lock. CaptionMetrics (line ~649) correctly uses _lock for all mutations \u00e2\u20ac\u201d BatchCaptionCheckpoint should follow the same pattern. Note: the batch processor runs workers concurrently, so this is a real race condition."
+      "notes": "Added threading.RLock field to CaptionBatchCheckpoint dataclass. Protected update(), mark_aborted(), and to_dict() with lock acquisition. 8 tests in test_batch_checkpoint_thread_safety.py: concurrent updates (10/100 threads), mixed success/error, concurrent mark_aborted, interleaved update+abort, and 3 RLock re-entrancy tests confirming no deadlocks."
     },
     {
       "id": "US-66-010",
       "title": "Add deprecation warning for legacy transcripts/ cache directory",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "TranscriptionCache.__init__ logs a WARNING when alt_cache_dir (transcripts/) contains cached files",
         "Warning message includes migration guidance: 'Move files from transcripts/ to transcriptions/ and delete transcripts/'",
@@ -156,7 +156,7 @@
         "Migration only runs once per session (guard flag prevents repeated migration)",
         "At least 3 tests verify: (1) no warning when only transcriptions/ exists, (2) warning logged when transcripts/ has files, (3) migration copies files correctly"
       ],
-      "notes": "Tier: maintenance. Files: src/transcription/cache.py (lines 43-47). Currently checks both transcriptions/ and transcripts/ silently with no indication which is primary or that transcripts/ is legacy. Users may have stale cache in the wrong directory without knowing."
+      "notes": "Added _check_legacy_cache() and _migrate_legacy_cache() methods. _check_legacy_cache warns with file count and migration guidance when transcripts/ has .json files. _migrate_legacy_cache uses shutil.copy2 to copy missing files, guarded by _legacy_migrated flag. 8 tests in test_transcript_cache_legacy_migration.py: no-warning (primary only + empty legacy), warning logged with guidance text, warning includes count, migration copies missing files, skips existing, runs once per session, and multiple files."
     },
     {
       "id": "US-66-011",
