@@ -16,6 +16,7 @@ import copy
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Type
@@ -681,6 +682,7 @@ class HealingOrchestrator:
         """Classify error using watcher or pattern routing.
 
         Returns ErrorClassification or PatternClassification.
+        Also records error category in metrics for dashboard (US-64-005).
         """
         context = {'stage': stage_name, 'stage_name': stage_name}
 
@@ -688,10 +690,20 @@ class HealingOrchestrator:
         if self.watcher and self.fallback_chain and self.fallback_chain.check_watcher_available():
             classification = self.watcher.classify_error(error, context)
             if classification:
+                # Record error category for dashboard metrics (US-64-005)
+                category = getattr(classification, 'category', 'unknown')
+                self.metrics.record_error_category(category)
                 return classification
 
         # Fallback to pattern routing
-        return pattern_route(str(error))
+        classification = pattern_route(str(error))
+
+        # Record error category from pattern classification (US-64-005)
+        if classification:
+            category = getattr(classification, 'category', 'unknown')
+            self.metrics.record_error_category(category)
+
+        return classification
 
     def _try_healers_with_classification(
         self,
@@ -747,6 +759,28 @@ class HealingOrchestrator:
 
         return HealerResult.failed("Standard healers exhausted")
 
+    def _get_healer_timeout(self, healer_name: str) -> float:
+        """Get timeout for a specific healer.
+
+        Returns the per-healer timeout from strategy.healer_timeouts dict,
+        or DEFAULT_HEALER_TIMEOUT if healer not configured.
+        """
+        return self.strategy.healer_timeouts.get(
+            healer_name,
+            self.strategy.DEFAULT_HEALER_TIMEOUT
+        )
+
+    def _get_healer_max_attempts(self, healer_name: str) -> int:
+        """Get max attempts for a specific healer.
+
+        Returns the per-healer max_attempts from strategy.healer_max_attempts dict,
+        or max_attempts_per_stage if healer not configured.
+        """
+        return self.strategy.healer_max_attempts.get(
+            healer_name,
+            self.strategy.max_attempts_per_stage
+        )
+
     def _try_healer(
         self,
         healer: Healer,
@@ -754,16 +788,49 @@ class HealingOrchestrator:
         state: 'PipelineState',
         stage_name: str
     ) -> HealerResult:
-        """Try a single healer and record metrics."""
-        logger.info(f"Trying healer: {healer.name}")
+        """Try a single healer and record metrics.
+
+        Respects per-healer timeout from strategy.healer_timeouts.
+        """
+        healer_timeout = self._get_healer_timeout(healer.name)
+        logger.info(f"Trying healer: {healer.name} (timeout: {healer_timeout}s)")
         start_time = time.time()
 
         try:
-            result = healer.fix(error, state, stage_name)
+            # Run healer with timeout
+            # Note: Using shutdown(wait=False) allows us to return immediately
+            # on timeout without waiting for the thread to complete
+            executor = ThreadPoolExecutor(max_workers=1)
+            try:
+                future = executor.submit(healer.fix, error, state, stage_name)
+                try:
+                    result = future.result(timeout=healer_timeout)
+                except FuturesTimeoutError:
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    logger.warning(
+                        f"Healer {healer.name} timed out after {healer_timeout}s"
+                    )
+                    self.metrics.errors_encountered.append(
+                        f"{healer.name} timed out after {healer_timeout}s"
+                    )
+                    result = HealerResult.failed(
+                        f"Healer timed out after {healer_timeout}s"
+                    )
+                    # Record timeout as failed heal
+                    self.metrics.record_heal(healer.name, stage_name, False)
+                    if self.healing_logger:
+                        self.healing_logger.log_healer_attempt(
+                            stage_name, healer.name, error, result, elapsed_ms
+                        )
+                    return result
+            finally:
+                # Don't wait for the thread to finish on timeout
+                executor.shutdown(wait=False)
+
             elapsed_ms = (time.time() - start_time) * 1000
 
-            # Record metrics
-            self.metrics.record_heal(healer.name, stage_name, result.success)
+            # Record metrics with heal time (US-64-005)
+            self.metrics.record_heal(healer.name, stage_name, result.success, elapsed_ms)
 
             # Log to healing logger
             if self.healing_logger:
@@ -966,6 +1033,118 @@ class HealingOrchestrator:
         """Get current healing metrics."""
         return self.metrics
 
+    def get_dashboard_metrics(self) -> Dict[str, Any]:
+        """Get structured metrics for healing dashboard (US-64-005).
+
+        Returns a dictionary containing:
+        - success_rate: Overall heal success rate (0-100)
+        - average_heal_time_ms: Average heal time in milliseconds
+        - total_heals: Total number of healing attempts
+        - successful_heals: Number of successful heals
+        - failed_heals: Number of failed heals
+        - healer_utilization: Dict mapping healer name to utilization metrics
+        - error_categories: Dict mapping error category to count
+        - time_spent_healing: Total time spent healing in seconds
+        - preflight_issues: Dict with found and fixed counts
+        - user_escalations: Number of user escalations
+        - rollbacks: Number of rollbacks performed
+        """
+        healer_utilization = {}
+        for healer_name, total_attempts in self.metrics.heals_by_healer.items():
+            healer_utilization[healer_name] = {
+                'total_attempts': total_attempts,
+                'successful_heals': self.metrics.successful_heals_by_healer.get(healer_name, 0),
+                'success_rate': self.metrics.get_healer_success_rate(healer_name),
+                'average_time_ms': self.metrics.get_healer_average_time_ms(healer_name),
+            }
+
+        return {
+            'success_rate': self.metrics.get_heal_success_rate(),
+            'average_heal_time_ms': self.metrics.get_average_heal_time_ms(),
+            'total_heals': self.metrics.total_heals,
+            'successful_heals': self.metrics.successful_heals,
+            'failed_heals': self.metrics.failed_heals,
+            'healer_utilization': healer_utilization,
+            'error_categories': dict(self.metrics.error_categories),
+            'heals_by_stage': dict(self.metrics.heals_by_stage),
+            'time_spent_healing': self.metrics.time_spent_healing,
+            'preflight_issues': {
+                'found': self.metrics.preflight_issues_found,
+                'fixed': self.metrics.preflight_issues_fixed,
+            },
+            'user_escalations': self.metrics.user_escalations,
+            'rollbacks': self.metrics.rollbacks_performed,
+        }
+
+    def format_dashboard(self) -> str:
+        """Format healing dashboard for human-readable console output (US-64-005).
+
+        Returns a formatted string suitable for printing to console.
+        """
+        metrics = self.get_dashboard_metrics()
+        lines = []
+
+        # Header
+        lines.append("HEALING DASHBOARD")
+        lines.append("-" * 50)
+
+        # Overall stats
+        success_rate = metrics['success_rate']
+        avg_time = metrics['average_heal_time_ms']
+        lines.append(f"Success Rate: {success_rate:.1f}%")
+        lines.append(f"Average Heal Time: {avg_time:.0f}ms")
+        lines.append(f"Total Heals: {metrics['total_heals']} "
+                     f"({metrics['successful_heals']} successful, {metrics['failed_heals']} failed)")
+        lines.append(f"Time Spent Healing: {metrics['time_spent_healing']:.1f}s")
+
+        # Healer utilization breakdown
+        if metrics['healer_utilization']:
+            lines.append("")
+            lines.append("Healer Utilization:")
+            for healer_name, util in sorted(metrics['healer_utilization'].items()):
+                rate = util['success_rate']
+                avg_ms = util['average_time_ms']
+                attempts = util['total_attempts']
+                success = util['successful_heals']
+                lines.append(f"  {healer_name}:")
+                lines.append(f"    Attempts: {attempts} ({success} successful)")
+                lines.append(f"    Success Rate: {rate:.1f}%")
+                if avg_ms > 0:
+                    lines.append(f"    Avg Time: {avg_ms:.0f}ms")
+
+        # Error category distribution
+        if metrics['error_categories']:
+            lines.append("")
+            lines.append("Error Categories:")
+            sorted_cats = sorted(
+                metrics['error_categories'].items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            for category, count in sorted_cats:
+                lines.append(f"  {category}: {count}")
+
+        # Heals by stage
+        if metrics['heals_by_stage']:
+            lines.append("")
+            lines.append("Heals by Stage:")
+            for stage, count in sorted(metrics['heals_by_stage'].items()):
+                lines.append(f"  {stage}: {count}")
+
+        # Preflight issues
+        preflight = metrics['preflight_issues']
+        if preflight['found'] > 0:
+            lines.append("")
+            lines.append(f"Preflight Issues: {preflight['fixed']}/{preflight['found']} fixed")
+
+        # Escalations and rollbacks
+        if metrics['user_escalations'] > 0:
+            lines.append(f"User Escalations: {metrics['user_escalations']}")
+        if metrics['rollbacks'] > 0:
+            lines.append(f"Rollbacks: {metrics['rollbacks']}")
+
+        return "\n".join(lines)
+
     def set_rate_limit_metrics(self, metrics) -> None:
         """Set rate limit metrics from download stage for inclusion in report.
 
@@ -1061,7 +1240,12 @@ class HealingOrchestrator:
         print(f"\nStrategy: {self.strategy.mode.value}")
         print(f"Healers active: {len(self.healers)}")
 
-        print(f"\n{self.metrics.summary()}")
+        # US-64-005: Print healing dashboard if there was healing activity
+        if self.metrics.total_heals > 0:
+            print("\n" + "-" * 60)
+            print(self.format_dashboard())
+        else:
+            print(f"\n{self.metrics.summary()}")
 
         if self.metrics.errors_encountered:
             print(f"\nErrors encountered: {len(self.metrics.errors_encountered)}")

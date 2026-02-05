@@ -9,7 +9,7 @@ from .download import DownloadHealer
 from .disk import DiskHealer
 from .path import PathHealer
 from .llm_healer import LLMHealer
-from .caption import CaptionHealer
+from .caption import CaptionHealer, NoCaptionsStatus, SubtitleInfo
 
 __all__ = [
     'OTIOHealer',
@@ -20,6 +20,8 @@ __all__ = [
     'PathHealer',
     'LLMHealer',
     'CaptionHealer',
+    'NoCaptionsStatus',
+    'SubtitleInfo',
 ]
 
 # Registry of all available healers (order matters - first match wins)

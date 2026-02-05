@@ -86,6 +86,35 @@ class HealingStrategy:
         "secret",
     })
 
+    # Per-healer timeout configuration (seconds)
+    # If a healer is not in this dict, DEFAULT_HEALER_TIMEOUT is used
+    healer_timeouts: Dict[str, float] = field(default_factory=lambda: {
+        "api-healer": 120.0,       # API healer may wait for rate limits
+        "download-healer": 60.0,  # Download retries need time
+        "checkpoint-healer": 30.0,
+        "disk-healer": 10.0,      # Disk checks should be fast
+        "path-healer": 10.0,      # Path fixes should be fast
+        "otio-healer": 30.0,
+        "caption-healer": 60.0,   # Caption fetching may retry
+        "llm-healer": 180.0,      # LLM analysis takes longer
+    })
+
+    # Per-healer max attempts (separate from global max_attempts_per_stage)
+    # If a healer is not in this dict, max_attempts_per_stage is used
+    healer_max_attempts: Dict[str, int] = field(default_factory=lambda: {
+        "api-healer": 5,          # API healer can retry more (rate limit waits)
+        "download-healer": 4,     # Downloads worth retrying
+        "checkpoint-healer": 2,   # Checkpoint recovery rarely needs more
+        "disk-healer": 1,         # Disk issues usually need user intervention
+        "path-healer": 2,
+        "otio-healer": 2,
+        "caption-healer": 3,
+        "llm-healer": 2,          # LLM analysis is expensive
+    })
+
+    # Default timeout for healers not in healer_timeouts dict
+    DEFAULT_HEALER_TIMEOUT: float = 30.0
+
     @classmethod
     def aggressive(cls) -> 'HealingStrategy':
         """Create aggressive healing strategy."""
@@ -178,6 +207,15 @@ class HealingMetrics:
     heals_by_stage: Dict[str, int] = field(default_factory=dict)
     heals_by_healer: Dict[str, int] = field(default_factory=dict)
 
+    # US-64-005: Track successful heals per healer for utilization
+    successful_heals_by_healer: Dict[str, int] = field(default_factory=dict)
+
+    # US-64-005: Track heal times per healer for average calculation
+    heal_times_by_healer: Dict[str, List[float]] = field(default_factory=dict)
+
+    # US-64-005: Track error categories from watcher classifications
+    error_categories: Dict[str, int] = field(default_factory=dict)
+
     time_spent_healing: float = 0.0
 
     preflight_issues_found: int = 0
@@ -188,16 +226,94 @@ class HealingMetrics:
 
     errors_encountered: List[str] = field(default_factory=list)
 
-    def record_heal(self, healer_name: str, stage_name: str, success: bool):
-        """Record a healing attempt."""
+    def record_heal(self, healer_name: str, stage_name: str, success: bool,
+                    heal_time_ms: float = 0.0):
+        """Record a healing attempt.
+
+        Args:
+            healer_name: Name of the healer
+            stage_name: Name of the stage
+            success: Whether the heal was successful
+            heal_time_ms: Time taken in milliseconds (US-64-005)
+        """
         self.total_heals += 1
         if success:
             self.successful_heals += 1
+            # Track successful heals per healer
+            self.successful_heals_by_healer[healer_name] = (
+                self.successful_heals_by_healer.get(healer_name, 0) + 1
+            )
         else:
             self.failed_heals += 1
 
         self.heals_by_stage[stage_name] = self.heals_by_stage.get(stage_name, 0) + 1
         self.heals_by_healer[healer_name] = self.heals_by_healer.get(healer_name, 0) + 1
+
+        # Track heal times for average calculation
+        if heal_time_ms > 0:
+            if healer_name not in self.heal_times_by_healer:
+                self.heal_times_by_healer[healer_name] = []
+            self.heal_times_by_healer[healer_name].append(heal_time_ms)
+
+    def record_error_category(self, category: str):
+        """Record an error category from watcher classification (US-64-005).
+
+        Args:
+            category: Error category (api, disk, path, checkpoint, download, etc.)
+        """
+        self.error_categories[category] = self.error_categories.get(category, 0) + 1
+
+    def get_heal_success_rate(self) -> float:
+        """Get overall heal success rate (US-64-005).
+
+        Returns:
+            Success rate as percentage (0.0 - 100.0)
+        """
+        if self.total_heals == 0:
+            return 0.0
+        return (self.successful_heals / self.total_heals) * 100.0
+
+    def get_average_heal_time_ms(self) -> float:
+        """Get average heal time across all healers (US-64-005).
+
+        Returns:
+            Average heal time in milliseconds
+        """
+        all_times = []
+        for times in self.heal_times_by_healer.values():
+            all_times.extend(times)
+        if not all_times:
+            return 0.0
+        return sum(all_times) / len(all_times)
+
+    def get_healer_success_rate(self, healer_name: str) -> float:
+        """Get success rate for a specific healer (US-64-005).
+
+        Args:
+            healer_name: Name of the healer
+
+        Returns:
+            Success rate as percentage (0.0 - 100.0)
+        """
+        total = self.heals_by_healer.get(healer_name, 0)
+        if total == 0:
+            return 0.0
+        successful = self.successful_heals_by_healer.get(healer_name, 0)
+        return (successful / total) * 100.0
+
+    def get_healer_average_time_ms(self, healer_name: str) -> float:
+        """Get average heal time for a specific healer (US-64-005).
+
+        Args:
+            healer_name: Name of the healer
+
+        Returns:
+            Average heal time in milliseconds
+        """
+        times = self.heal_times_by_healer.get(healer_name, [])
+        if not times:
+            return 0.0
+        return sum(times) / len(times)
 
     def summary(self) -> str:
         """Get summary string."""
