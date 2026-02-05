@@ -786,3 +786,319 @@ class TestCaptionStageTranscriptionFallback:
         assert len(state.videos_needing_transcription) == 0, (
             "state.videos_needing_transcription should be empty when all succeed"
         )
+
+
+# =============================================================================
+# US-62-007: Structured 'no captions' Status Propagation Tests
+# =============================================================================
+
+
+class TestCaptionStageNoCaptionsStatusPropagation:
+    """Test structured status propagation for 'no captions' vs 'fetch failed'.
+
+    US-62-007: Ensures clean distinction between videos with no captions available
+    (not an error, triggers transcription fallback) and actual fetch failures (errors).
+    """
+
+    @pytest.mark.fast
+    def test_caption_result_has_no_captions_available_field(self):
+        """Test that CaptionResult dataclass includes no_captions_available field.
+
+        AC1: CaptionResult dataclass includes 'no_captions_available' boolean field
+        """
+        from src.caption_fetcher import CaptionResult
+
+        # Create a CaptionResult with no_captions_available=True
+        result = CaptionResult(
+            video_id="test123xxxxx",
+            no_captions_available=True,
+        )
+        assert hasattr(result, 'no_captions_available'), (
+            "CaptionResult should have no_captions_available field"
+        )
+        assert result.no_captions_available is True
+
+        # Default should be False
+        result_default = CaptionResult(video_id="test456xxxxx")
+        assert result_default.no_captions_available is False, (
+            "no_captions_available should default to False"
+        )
+
+    @pytest.mark.fast
+    def test_caption_result_has_fetch_error_field(self):
+        """Test that CaptionResult dataclass includes fetch_error field.
+
+        AC1: CaptionResult includes fetch_error for actual errors
+        """
+        from src.caption_fetcher import CaptionResult
+
+        # Create a CaptionResult with fetch_error
+        result = CaptionResult(
+            video_id="test123xxxxx",
+            fetch_error="Connection timeout",
+        )
+        assert hasattr(result, 'fetch_error'), (
+            "CaptionResult should have fetch_error field"
+        )
+        assert result.fetch_error == "Connection timeout"
+
+        # Default should be None
+        result_default = CaptionResult(video_id="test456xxxxx")
+        assert result_default.fetch_error is None, (
+            "fetch_error should default to None"
+        )
+
+    @pytest.mark.integration
+    def test_stage_summary_shows_separate_no_captions_and_fetch_failed_counts(self):
+        """Test that stage summary includes separate counts for no_captions vs fetch_failed.
+
+        AC4: Stage summary includes count of 'no_captions' vs 'fetch_failed' vs 'succeeded'
+        """
+        video_ids = [f"vid{i:04d}xxxx" for i in range(12)]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in video_ids
+            ],
+        )
+
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 200,
+                'auto_scale': True,
+                'attempts_per_video': 2.0,
+            }
+        )
+
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            """Simulate mixed results: success, no_captions, and errors."""
+            results = {}
+            for i, vid in enumerate(video_ids):
+                if i % 4 == 0:
+                    # Every 4th video has no captions (indices 0, 4, 8) = 3 videos
+                    results[vid] = {
+                        'video_id': vid,
+                        'unavailable': True,
+                        'reason': 'no_captions_available',
+                        'caption_quality': 'low',
+                        'no_captions_available': True,
+                    }
+                elif i % 4 == 1:
+                    # Every 4th+1 video has an error (indices 1, 5, 9) = 3 videos
+                    results[vid] = {
+                        'video_id': vid,
+                        'error': True,
+                        'reason': 'fetch_timeout',
+                        'caption_quality': 'low',
+                    }
+                else:
+                    # Others succeed (indices 2, 3, 6, 7, 10, 11) = 6 videos
+                    results[vid] = {
+                        'video_id': vid,
+                        'segments': [{'text': 'test', 'start': 0, 'end': 1}],
+                        'segment_count': 1,
+                        'language': 'en',
+                        'is_auto_generated': False,
+                        'caption_quality': 'high',
+                    }
+            return results
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        # Verify success
+        assert result.success is True, f"Stage should succeed: {result.error}"
+
+        # AC4: Verify checkpoint data has separate counts
+        assert 'no_captions_count' in result.data, (
+            "Checkpoint data should include no_captions_count"
+        )
+        assert 'fetch_failed_count' in result.data, (
+            "Checkpoint data should include fetch_failed_count"
+        )
+
+        # Expected counts:
+        # - no_captions: 3 (indices 0, 4, 8)
+        # - fetch_failed: 3 (indices 1, 5, 9)
+        # - success: 6 (indices 2, 3, 6, 7, 10, 11)
+        assert result.data['no_captions_count'] == 3, (
+            f"Expected no_captions_count=3, got {result.data['no_captions_count']}"
+        )
+        assert result.data['fetch_failed_count'] == 3, (
+            f"Expected fetch_failed_count=3, got {result.data['fetch_failed_count']}"
+        )
+        assert result.data['success_count'] == 6, (
+            f"Expected success_count=6, got {result.data['success_count']}"
+        )
+
+        # fail_count should be sum of no_captions + fetch_failed for backwards compat
+        assert result.data['fail_count'] == 6, (
+            f"Expected fail_count=6 (3+3), got {result.data['fail_count']}"
+        )
+
+    @pytest.mark.integration
+    def test_no_captions_videos_marked_for_transcription_cleanly(self):
+        """Test that videos with no_captions_available are cleanly marked for transcription.
+
+        AC3: Videos with no_captions_available marked for transcription fallback cleanly
+        AC5: Test verifies pipeline continues when video has no captions
+        """
+        video_ids = [f"vid{i:04d}xxxx" for i in range(6)]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in video_ids
+            ],
+        )
+
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 200,
+                'auto_scale': True,
+                'attempts_per_video': 2.0,
+            }
+        )
+
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        # Every other video has no captions
+        no_caption_ids = [f"vid{i:04d}xxxx" for i in range(6) if i % 2 == 0]
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            results = {}
+            for vid in video_ids:
+                if vid in no_caption_ids:
+                    results[vid] = {
+                        'video_id': vid,
+                        'unavailable': True,
+                        'reason': 'no_captions_available',
+                        'caption_quality': 'low',
+                    }
+                else:
+                    results[vid] = {
+                        'video_id': vid,
+                        'segments': [{'text': 'test', 'start': 0, 'end': 1}],
+                        'segment_count': 1,
+                        'language': 'en',
+                        'is_auto_generated': False,
+                        'caption_quality': 'high',
+                    }
+            return results
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        # AC5: Pipeline continues successfully
+        assert result.success is True, (
+            f"Pipeline should continue when videos have no captions: {result.error}"
+        )
+
+        # AC3: Videos with no_captions are in needs_transcription
+        for vid in no_caption_ids:
+            assert vid in stage.needs_transcription, (
+                f"Video {vid} with no captions should be in needs_transcription"
+            )
+
+        # Verify videos with captions are NOT in needs_transcription
+        success_ids = [f"vid{i:04d}xxxx" for i in range(6) if i % 2 != 0]
+        for vid in success_ids:
+            assert vid not in stage.needs_transcription, (
+                f"Video {vid} with captions should NOT be in needs_transcription"
+            )
+
+    @pytest.mark.integration
+    def test_no_captions_not_treated_as_error(self):
+        """Test that no_captions_available is handled without treating as error.
+
+        AC2: Caption stage handles no_captions_available without treating as error
+        AC6: Test verifies transcription fallback triggered for no_captions videos
+        """
+        video_ids = [f"vid{i:04d}xxxx" for i in range(3)]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[
+                MockVideoSearchResult(vid, 120.0) for vid in video_ids
+            ],
+        )
+
+        config = make_mock_config(
+            retry_budget_config={
+                'enabled': True,
+                'max_attempts': 200,
+                'auto_scale': True,
+                'attempts_per_video': 2.0,
+            }
+        )
+
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            """All videos have no captions available."""
+            return {
+                vid: {
+                    'video_id': vid,
+                    'unavailable': True,
+                    'reason': 'no_captions_available',
+                    'caption_quality': 'low',
+                    'no_captions_available': True,
+                }
+                for vid in video_ids
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            result = stage.run(state, config, checkpoint)
+
+        # AC2: Stage should succeed (no_captions is not an error)
+        assert result.success is True, (
+            f"Stage should succeed even when all videos have no captions: {result.error}"
+        )
+
+        # AC6: All videos should be in needs_transcription for fallback
+        assert len(stage.needs_transcription) == 3, (
+            f"All 3 videos should need transcription, got {len(stage.needs_transcription)}"
+        )
+        for vid in video_ids:
+            assert vid in stage.needs_transcription, (
+                f"Video {vid} should trigger transcription fallback"
+            )
+
+        # Verify no_captions_count is correct
+        assert result.data['no_captions_count'] == 3, (
+            f"Expected no_captions_count=3, got {result.data.get('no_captions_count')}"
+        )
+
+        # Verify fetch_failed_count is 0 (no actual errors)
+        assert result.data['fetch_failed_count'] == 0, (
+            f"Expected fetch_failed_count=0 (no errors), got {result.data.get('fetch_failed_count')}"
+        )

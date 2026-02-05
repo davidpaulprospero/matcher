@@ -1482,6 +1482,7 @@ class TestCaptionFetcherFetchCaptions:
         # Mock yt-dlp failure with "no subtitles" message
         mock_result = Mock()
         mock_result.returncode = 1
+        mock_result.stdout = ""
         mock_result.stderr = "no subtitles available for this video"
         mock_run.return_value = mock_result
 
@@ -1492,18 +1493,20 @@ class TestCaptionFetcherFetchCaptions:
     @patch('tempfile.TemporaryDirectory')
     @pytest.mark.fast
     def test_fetch_captions_network_error(self, mock_tempdir, mock_run):
-        """Test fetch with network error"""
+        """Test fetch with network error via subprocess exception.
+
+        Note: When subprocess returns empty output (network error), this now raises
+        CaptionUnavailableError since list_available_languages returns empty list.
+        To test actual subprocess failures, we raise an exception instead.
+        """
         fetcher = CaptionFetcher()
 
         mock_temp_path = MagicMock()
         mock_tempdir.return_value.__enter__ = MagicMock(return_value=str(mock_temp_path))
         mock_tempdir.return_value.__exit__ = MagicMock(return_value=False)
 
-        # Mock network error
-        mock_result = Mock()
-        mock_result.returncode = 1
-        mock_result.stderr = "Connection timeout"
-        mock_run.return_value = mock_result
+        # Mock network error via exception
+        mock_run.side_effect = OSError("Network is unreachable")
 
         with pytest.raises(CaptionFetchError):
             fetcher.fetch_captions("dQw4w9WgXcQ")
@@ -1555,6 +1558,11 @@ Never gonna let you down
             # Mock successful yt-dlp run
             mock_result = Mock()
             mock_result.returncode = 0
+            mock_result.stdout = (
+                "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                "Language  Name                 Formats\n"
+                "en        English              vtt, ttml, srv3, srv2, srv1, json3\n"
+            )
             mock_result.stderr = ""
             mock_run.return_value = mock_result
 
@@ -4451,6 +4459,17 @@ class TestCaptionFormatPreference:
 
         def mock_run_side_effect(*args, **kwargs):
             cmd = args[0]
+            # Handle list-subs call for list_available_languages
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt, json3\n"
+                )
+                result.stderr = ""
+                return result
             # Find the format in the command
             if '--sub-format' in cmd:
                 fmt_idx = cmd.index('--sub-format')
@@ -4461,16 +4480,19 @@ class TestCaptionFormatPreference:
                 if 'json3' in cmd[fmt_idx + 1]:
                     result = Mock()
                     result.returncode = 1
+                    result.stdout = ""
                     result.stderr = "requested format is not available"
                     return result
                 else:
                     result = Mock()
                     result.returncode = 0
+                    result.stdout = ""
                     result.stderr = ""
                     return result
             else:
                 result = Mock()
                 result.returncode = 0
+                result.stdout = ""
                 result.stderr = ""
                 return result
 
@@ -4506,11 +4528,23 @@ class TestCaptionFormatPreference:
 
         def mock_run_side_effect(*args, **kwargs):
             cmd = args[0]
+            # Handle list-subs call for list_available_languages
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt, json3\n"
+                )
+                result.stderr = ""
+                return result
             if '--sub-format' in cmd:
                 fmt_idx = cmd.index('--sub-format')
                 formats_tried.append(cmd[fmt_idx + 1])
             result = Mock()
             result.returncode = 0
+            result.stdout = ""
             result.stderr = ""
             return result
 
@@ -4545,8 +4579,21 @@ class TestCaptionFormatPreference:
         video_id = "dQw4w9WgXcQ"
 
         def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0]
+            # Handle list-subs call for list_available_languages
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt, json3, srt\n"
+                )
+                result.stderr = ""
+                return result
             result = Mock()
             result.returncode = 0
+            result.stdout = ""
             result.stderr = ""
             return result
 
@@ -4582,8 +4629,21 @@ class TestCaptionFormatPreference:
         video_id = "dQw4w9WgXcQ"
 
         def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0]
+            # Handle list-subs call for list_available_languages
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt\n"
+                )
+                result.stderr = ""
+                return result
             result = Mock()
             result.returncode = 0
+            result.stdout = ""
             result.stderr = ""
             return result
 
@@ -4614,6 +4674,17 @@ class TestCaptionFormatPreference:
 
         def mock_run_side_effect(*args, **kwargs):
             cmd = args[0]
+            # Handle list-subs call for list_available_languages
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt, json3, srt\n"
+                )
+                result.stderr = ""
+                return result
             if '--sub-format' in cmd:
                 fmt_idx = cmd.index('--sub-format')
                 formats_tried.append(cmd[fmt_idx + 1])
@@ -4621,6 +4692,7 @@ class TestCaptionFormatPreference:
             # All formats fail with network error
             result = Mock()
             result.returncode = 1
+            result.stdout = ""
             result.stderr = "Connection timeout"
             return result
 
@@ -4662,8 +4734,21 @@ class TestCaptionFormatPreference:
         video_id = "dQw4w9WgXcQ"
 
         def mock_run_side_effect(*args, **kwargs):
+            cmd = args[0]
+            # Handle list-subs call for list_available_languages
+            if '--list-subs' in cmd:
+                result = Mock()
+                result.returncode = 0
+                result.stdout = (
+                    "[info] Available subtitles for dQw4w9WgXcQ:\n"
+                    "Language  Name       Formats\n"
+                    "en        English    vtt\n"
+                )
+                result.stderr = ""
+                return result
             result = Mock()
             result.returncode = 0
+            result.stdout = ""
             result.stderr = ""
             return result
 

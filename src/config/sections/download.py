@@ -197,11 +197,12 @@ class CaptionRetryBudgetConfig:
     # Only scales UP when batch > max_attempts / attempts_per_video
     attempts_per_video: float = 2.0
 
-    # VPN rotation on rate limit exhaustion (US-37-008)
+    # VPN rotation on rate limit exhaustion (US-37-008, US-61-011)
     # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
     # This resets the budget and retries remaining videos with a new IP
     # Only works if Mullvad VPN is enabled (download.mullvad.enabled: true)
-    trigger_vpn_rotation_on_rate_limit: bool = True
+    # Default: false - VPN rotation is opt-in behavior
+    vpn_rotation_on_caption_exhaustion: bool = False
 
     # Maximum VPN-triggered budget resets per session (US-37-008)
     # Prevents infinite loops if VPN rotation doesn't help

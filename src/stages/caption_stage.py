@@ -1035,15 +1035,30 @@ class CaptionStage(Stage):
                         caption_results[video_id] = result
 
             # Count results
+            # US-62-007: Distinguish between no_captions_available and fetch_failed
             success_count = sum(
                 1 for r in caption_results.values()
                 if not r.get('unavailable') and not r.get('error') and not r.get('skipped')
+                and not r.get('no_captions_available')  # US-62-007
                 and r.get('segment_count', 0) > 0
             ) - skip_count  # Don't double-count cached entries
-            fail_count = sum(
+
+            # US-62-007: Count videos with no captions available (not an error, triggers transcription)
+            no_captions_count = sum(
                 1 for r in caption_results.values()
-                if r.get('unavailable') or r.get('error')
+                if r.get('unavailable') and r.get('reason') == 'no_captions_available'
+                or r.get('no_captions_available')  # Direct flag from CaptionResult
             )
+
+            # US-62-007: Count actual fetch failures (errors, not including no_captions_available)
+            fetch_failed_count = sum(
+                1 for r in caption_results.values()
+                if (r.get('error') or (r.get('unavailable') and r.get('reason') != 'no_captions_available'))
+                and not r.get('no_captions_available')  # Exclude videos marked as no_captions
+            )
+
+            # Legacy fail_count for backwards compatibility (includes both no_captions and errors)
+            fail_count = no_captions_count + fetch_failed_count
 
             # US-60-006: Add videos that failed caption fetch to transcription fallback list
             # This catches failures from the batch fetch (not pre-check or live stream filtering)
@@ -1063,9 +1078,10 @@ class CaptionStage(Stage):
                 if r.get('skipped') and r.get('reason') != 'queued_upcoming'
             )
             # Log batch summary
+            # US-62-007: Include no_captions vs fetch_failed in summary
             logger.info(
                 f"US-59-011: Caption batch summary: {videos_with_captions}/{total_videos_in_batch} "
-                f"videos have captions, {videos_without_captions} fell back to unavailable/skipped"
+                f"videos have captions, {no_captions_count} no captions, {fetch_failed_count} fetch errors"
             )
 
             # US-59-011: Set state flag when >50% of videos have no captions
@@ -1133,13 +1149,15 @@ class CaptionStage(Stage):
                             and not r.get('error') and not r.get('skipped'))
 
             # Summary
+            # US-62-007: Show distinct counts for no_captions vs fetch_failed vs succeeded
             print(f"\n  + Caption fetch complete:")
-            print(f"    - Success: {success_count} videos (new), {skip_count} videos (cached)")
-            print(f"    - Unavailable/Error: {fail_count} videos")
+            print(f"    - Succeeded: {success_count} videos (new), {skip_count} videos (cached)")
+            print(f"    - No captions: {no_captions_count} videos (will use transcription)")
+            print(f"    - Fetch failed: {fetch_failed_count} videos (errors)")
             # US-002: Report skipped live streams
             if skipped_live_count > 0:
                 print(f"    - Skipped live streams: {skipped_live_count} videos")
-            # US-008: Report pre-check filtered videos
+            # US-008: Report pre-check filtered videos (subset of no_captions_count)
             if pre_check_unavailable_count > 0:
                 print(f"    - Pre-check filtered: {pre_check_unavailable_count} videos (no captions)")
             # US-007: Report caption quality distribution
@@ -1237,6 +1255,9 @@ class CaptionStage(Stage):
                 'success_count': success_count,
                 'skip_count': skip_count,
                 'fail_count': fail_count,
+                # US-62-007: Separate counts for no_captions vs fetch_failed
+                'no_captions_count': no_captions_count,
+                'fetch_failed_count': fetch_failed_count,
                 'skipped_live_count': skipped_live_count,  # US-002
                 'pre_check_unavailable_count': pre_check_unavailable_count,  # US-008
                 'total_segments': sum(

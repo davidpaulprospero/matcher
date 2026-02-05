@@ -1938,6 +1938,8 @@ class CaptionResult:
         skipped_segments: List of (index, reason) tuples for skipped segments (US-001 Sprint 7).
         partial_recovery: True when segments were skipped but result is still usable (US-001 Sprint 7).
         timing_validated: Result of timing validation, or None if not validated (US-007).
+        no_captions_available: True when video has no captions (not an error, triggers transcription fallback) (US-62-007).
+        fetch_error: Error message when fetch failed due to error (distinct from no_captions_available) (US-62-007).
     """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
@@ -1948,6 +1950,8 @@ class CaptionResult:
     skipped_segments: List[tuple] = field(default_factory=list)  # US-001: (index, reason) tuples
     partial_recovery: bool = False  # US-001: True when segments skipped but result usable
     timing_validated: Optional[TimingValidationResult] = None  # US-007: Timing validation result
+    no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
+    fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
 
     @property
     def skipped_segments_count(self) -> int:
@@ -2405,24 +2409,53 @@ class CaptionFetcher:
         # multiple times for the same video (e.g., different language/auto combos)
         self._preflight_lang_cache: Dict[str, List[AvailableLanguage]] = {}
 
-    def _add_bypass_args_to_cmd(self, cmd: list, video_id: str) -> None:
+        # US-62-009: Track last impersonation target for success/failure recording
+        self._last_impersonation_target: Optional[str] = None
+
+    def _add_bypass_args_to_cmd(self, cmd: list, video_id: str) -> Optional[str]:
         """Add escalation or impersonation args to a yt-dlp command.
 
-        Uses EscalationManager when available for 3-tier bypass. Falls back to
+        Uses EscalationManager when available for 4-tier bypass. Falls back to
         direct ImpersonationManager when escalation is not configured.
+
+        US-62-009: Logs impersonation target used for each caption fetch.
 
         Args:
             cmd: The yt-dlp command list to extend in-place.
             video_id: The video ID for per-keyword escalation tracking.
+
+        Returns:
+            The impersonation target string used (for success/failure tracking),
+            or None if no impersonation was applied.
         """
+        impersonation_target = None
+
         if self.escalation_manager:
             esc_result = self.escalation_manager.get_escalation_args(video_id)
             if esc_result.args:
                 cmd.extend(esc_result.args)
+                # Extract impersonation target from args (--impersonate TARGET)
+                for i, arg in enumerate(esc_result.args):
+                    if arg == '--impersonate' and i + 1 < len(esc_result.args):
+                        impersonation_target = esc_result.args[i + 1]
+                        break
+                logger.debug(
+                    f"Caption {video_id}: Using escalation tier {esc_result.tier.name}, "
+                    f"impersonate={impersonation_target}"
+                )
         elif self.impersonation_manager:
-            imp_args = self.impersonation_manager.get_impersonate_args()
-            if imp_args:
-                cmd.extend(imp_args)
+            # Get next target directly for tracking
+            impersonation_target = self.impersonation_manager.get_next_target()
+            if impersonation_target:
+                cmd.extend(['--impersonate', impersonation_target])
+                logger.debug(
+                    f"Caption {video_id}: Using impersonation target {impersonation_target}"
+                )
+
+        # US-62-009: Track for success/failure recording after subprocess completes
+        self._last_impersonation_target = impersonation_target
+
+        return impersonation_target
 
     def apply_adaptive_format_order(
         self,
@@ -3280,6 +3313,8 @@ class CaptionFetcher:
                         f"Caption {operation} succeeded on attempt {attempt + 1} "
                         f"for video {video_id}"
                     )
+                # US-62-009: Record impersonation success
+                self._handle_impersonation_success(video_id, self._last_impersonation_target)
                 return result
 
             except CaptionUnavailableError as e:
@@ -3340,6 +3375,11 @@ class CaptionFetcher:
                     if self._handle_cookie_rotation(error_str):
                         logger.info(f"Caption fetch rotating cookie after 403")
                         wait_time = 1.0  # Shorter wait after cookie rotation
+
+                # US-62-009: Record impersonation failure for 403/rate-limit errors
+                self._handle_impersonation_failure(
+                    video_id, error_str, self._last_impersonation_target
+                )
 
                 logger.warning(
                     f"Caption {operation} failed for video {video_id}: "
@@ -3627,6 +3667,9 @@ class CaptionFetcher:
 
         # US-59-009: Store metrics reference for subprocess timing in _fetch_subtitle_with_format
         self._active_metrics = metrics
+
+        # US-62-008: Store retry_budget reference for per-format exhaustion checks
+        self._active_retry_budget = retry_budget
 
         # US-59-008: Extract channel IDs from video_search_results metadata if available
         # and set_video_channel_map hasn't been called yet
@@ -4139,6 +4182,8 @@ class CaptionFetcher:
         self._channel_cache_lock = None
         # US-59-009: Clean up per-batch metrics reference
         self._active_metrics = None
+        # US-62-008: Clean up per-batch retry_budget reference
+        self._active_retry_budget = None
 
         logger.info(
             f"Batch caption fetch complete: {len(results)} processed, "
@@ -4573,7 +4618,19 @@ class CaptionFetcher:
         """
         # Try each format in preference order (US-006)
         last_error = None
+        formats_skipped = 0
+        retry_budget = getattr(self, '_active_retry_budget', None)
+
         for fallback_level, fmt in enumerate(self._preferred_formats):
+            # US-62-008: Skip exhausted formats
+            if retry_budget and retry_budget.is_format_exhausted(fmt):
+                logger.debug(
+                    f"Caption {video_id}: Skipping exhausted format '{fmt}' "
+                    f"(exceeded max_format_failures threshold)"
+                )
+                formats_skipped += 1
+                continue
+
             try:
                 result = self._fetch_subtitle_with_format(
                     video_url, video_id, temp_dir, language, auto_generated, fmt,
@@ -4605,8 +4662,10 @@ class CaptionFetcher:
                 continue
 
         # All formats exhausted (US-62-003)
+        formats_tried = len(self._preferred_formats) - formats_skipped
         logger.debug(
-            f"Caption {video_id}: All formats exhausted after {len(self._preferred_formats)} attempts"
+            f"Caption {video_id}: All formats exhausted after {formats_tried} attempts "
+            f"({formats_skipped} skipped due to exhaustion)"
         )
         if last_error:
             raise last_error
@@ -5165,6 +5224,69 @@ class CaptionFetcher:
                 return False
 
         return False
+
+    def _handle_impersonation_failure(
+        self, video_id: str, error_message: str, impersonation_target: Optional[str]
+    ) -> None:
+        """Record impersonation failure to trigger rotation on next call.
+
+        US-62-009: Records failure to ImpersonationManager/EscalationManager
+        when 403/rate-limit errors occur, enabling target rotation for retry.
+
+        Args:
+            video_id: The video ID that failed.
+            error_message: Error string from yt-dlp.
+            impersonation_target: The impersonation target that was used (may be None).
+        """
+        is_403_or_rate_limit = (
+            '403' in error_message or
+            'forbidden' in error_message.lower() or
+            '429' in error_message or
+            'rate' in error_message.lower()
+        )
+
+        if not is_403_or_rate_limit:
+            return
+
+        # Record failure to escalation manager (handles tier progression)
+        if self.escalation_manager:
+            self.escalation_manager.record_failure(video_id, error_message)
+            logger.debug(
+                f"Caption {video_id}: Recorded escalation failure for {impersonation_target or 'unknown'}"
+            )
+
+        # Record failure to impersonation manager (for success rate tracking)
+        elif self.impersonation_manager and impersonation_target:
+            self.impersonation_manager.record_failure(impersonation_target)
+            logger.debug(
+                f"Caption {video_id}: Recorded impersonation failure for {impersonation_target}"
+            )
+
+    def _handle_impersonation_success(
+        self, video_id: str, impersonation_target: Optional[str]
+    ) -> None:
+        """Record impersonation success for success rate tracking.
+
+        US-62-009: Records success to ImpersonationManager/EscalationManager
+        to improve success rate-based target selection.
+
+        Args:
+            video_id: The video ID that succeeded.
+            impersonation_target: The impersonation target that was used (may be None).
+        """
+        # Record success to escalation manager
+        if self.escalation_manager:
+            self.escalation_manager.record_success(video_id)
+            logger.debug(
+                f"Caption {video_id}: Recorded escalation success for {impersonation_target or 'unknown'}"
+            )
+
+        # Record success to impersonation manager (for success rate tracking)
+        elif self.impersonation_manager and impersonation_target:
+            self.impersonation_manager.record_success(impersonation_target)
+            logger.debug(
+                f"Caption {video_id}: Recorded impersonation success for {impersonation_target}"
+            )
 
     def _is_valid_video_id(self, video_id: str) -> bool:
         """Validate YouTube video ID format.
