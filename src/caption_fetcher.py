@@ -2600,6 +2600,7 @@ class CaptionFetcher:
             '--ignore-config',
             video_url,
             '--skip-download',
+            '--ignore-no-formats-error',  # Continue to list-subs even if video format resolution fails
             '--list-subs',
             '--no-playlist',
             '--no-warnings',
@@ -4716,6 +4717,7 @@ class CaptionFetcher:
             '--ignore-config',
             video_url,
             '--skip-download',  # Don't download video
+            '--ignore-no-formats-error',  # Continue to subtitles even if video format resolution fails
             sub_flag,
             '--sub-lang', language,
             '--sub-format', subtitle_format,  # Request specific format (US-006)
