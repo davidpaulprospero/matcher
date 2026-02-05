@@ -4709,8 +4709,13 @@ class TestCaptionFormatPreference:
             assert "json3" in formats_tried
             assert "vtt" in formats_tried
             assert "srt" in formats_tried
-            # Error message should indicate timeout
-            assert "Connection timeout" in str(exc_info.value)
+            # US-67-002: Now raises CaptionFormatExhaustedError with last_error
+            from src.caption.exceptions import CaptionFormatExhaustedError
+            if isinstance(exc_info.value, CaptionFormatExhaustedError):
+                assert exc_info.value.last_error is not None
+                assert "Connection timeout" in str(exc_info.value.last_error)
+            else:
+                assert "Connection timeout" in str(exc_info.value)
 
     @pytest.mark.fast
     def test_custom_format_order(self):

@@ -137,6 +137,35 @@ class ErrorPatternAbortError(CaptionError):
         super().__init__(message)
 
 
+class CaptionFormatExhaustedError(CaptionFetchError):
+    """Raised when all unique caption formats have been tried and failed (US-67-002).
+
+    Unlike CaptionFormatUnavailableError (single format not available) or
+    CaptionUnavailableError (no captions at all), this error means every
+    format in the preference list was attempted exactly once and none succeeded.
+
+    Attributes:
+        formats_tried: List of format names that were attempted.
+        formats_skipped: Number of formats skipped (e.g., due to budget exhaustion).
+        last_error: The last error encountered during format attempts.
+    """
+    def __init__(
+        self,
+        video_id: str,
+        formats_tried: Optional[list] = None,
+        formats_skipped: int = 0,
+        reason: str = "",
+        last_error: Optional[Exception] = None
+    ):
+        self.formats_tried = formats_tried or []
+        self.formats_skipped = formats_skipped
+        self.last_error = last_error
+        detail = f"All {len(self.formats_tried)} formats exhausted: {self.formats_tried}"
+        if formats_skipped:
+            detail += f" ({formats_skipped} skipped)"
+        super().__init__(video_id, reason or detail)
+
+
 class CaptionNormalizationError(CaptionError):
     """Raised when caption normalization fails.
 
