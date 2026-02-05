@@ -152,7 +152,7 @@
             "id": "US-63-010",
             "title": "Add match quality trend logging across voiceover chunks",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "After matching each 10% chunk of voiceover segments, log rolling average confidence",
                 "Identify and log segments where confidence dropped significantly (>0.2 below running average)",
@@ -160,7 +160,7 @@
                 "Add unit test that verifies trend calculation with mock match results",
                 "Store trend data in checkpoint for post-run analysis"
             ],
-            "notes": "Tier: P3 (analytics). Target files: src/stages/match.py, src/matching/metrics.py. Helps identify problematic voiceover sections (e.g., technical jargon, abstract concepts) that consistently match poorly. Enables targeted query refinement in ITERATIVE_MATCH."
+            "notes": "IMPLEMENTED: (1) Added ChunkTrendMetrics and MatchQualityTrend dataclasses to src/matching/metrics.py with rolling_avg_confidence, chunk_avg_confidence, low_confidence_segments fields; (2) calculate_confidence_trend() divides matches into 10% chunks, identifies segments >0.2 below rolling avg (stored in low_confidence_segments list); (3) log_trend_summary() logs IMPROVING/STABLE/DEGRADING based on linear regression slope of chunk averages (threshold: ±0.02); (4) Added 30 unit tests in tests/test_match_quality_trend.py covering: dataclass fields, serialization roundtrip, trend detection (improving/degrading/stable), low-confidence segment identification, slope calculation; (5) trend_data stored in checkpoint via confidence_trend.to_dict() in match.py checkpoint_data. All 30 tests pass."
         },
         {
             "id": "US-63-011",

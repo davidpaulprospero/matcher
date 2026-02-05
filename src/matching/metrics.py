@@ -479,3 +479,301 @@ def log_diversity_metrics(report: DiversityReport) -> None:
         logger.warning(f"TEMPORAL CLUSTERING: {warning}")
 
     logger.info("================================")
+
+
+# =============================================================================
+# MATCH QUALITY TREND LOGGING (US-63-010)
+# =============================================================================
+
+@dataclass
+class ChunkTrendMetrics:
+    """Metrics for a 10% chunk of voiceover segments during matching."""
+    chunk_index: int
+    chunk_start_idx: int  # Starting segment index
+    chunk_end_idx: int    # Ending segment index (exclusive)
+    segment_count: int
+    rolling_avg_confidence: float  # Rolling average up to this chunk
+    chunk_avg_confidence: float    # Average for just this chunk
+    low_confidence_segments: List[int] = field(default_factory=list)  # Segments >0.2 below avg
+
+
+@dataclass
+class MatchQualityTrend:
+    """Complete trend data for a matching run across all chunks.
+
+    Tracks confidence trends across 10% chunks of voiceover segments,
+    identifying problematic sections that consistently match poorly.
+
+    US-63-010: Helps identify voiceover sections (e.g., technical jargon,
+    abstract concepts) that need targeted query refinement in ITERATIVE_MATCH.
+    """
+    chunk_metrics: List[ChunkTrendMetrics] = field(default_factory=list)
+    trend_direction: str = "stable"  # 'improving', 'stable', 'degrading'
+    trend_slope: float = 0.0  # Linear regression slope of chunk averages
+    overall_avg_confidence: float = 0.0
+    low_confidence_threshold: float = 0.2  # Delta below running avg to flag
+    total_low_confidence_segments: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize for checkpoint storage."""
+        return {
+            'chunk_metrics': [
+                {
+                    'chunk_index': cm.chunk_index,
+                    'chunk_start_idx': cm.chunk_start_idx,
+                    'chunk_end_idx': cm.chunk_end_idx,
+                    'segment_count': cm.segment_count,
+                    'rolling_avg_confidence': float(cm.rolling_avg_confidence),
+                    'chunk_avg_confidence': float(cm.chunk_avg_confidence),
+                    'low_confidence_segments': cm.low_confidence_segments,
+                }
+                for cm in self.chunk_metrics
+            ],
+            'trend_direction': self.trend_direction,
+            'trend_slope': float(self.trend_slope),
+            'overall_avg_confidence': float(self.overall_avg_confidence),
+            'low_confidence_threshold': float(self.low_confidence_threshold),
+            'total_low_confidence_segments': self.total_low_confidence_segments,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MatchQualityTrend':
+        """Deserialize from checkpoint data."""
+        trend = cls()
+        trend.trend_direction = data.get('trend_direction', 'stable')
+        trend.trend_slope = data.get('trend_slope', 0.0)
+        trend.overall_avg_confidence = data.get('overall_avg_confidence', 0.0)
+        trend.low_confidence_threshold = data.get('low_confidence_threshold', 0.2)
+        trend.total_low_confidence_segments = data.get('total_low_confidence_segments', 0)
+
+        for cm_data in data.get('chunk_metrics', []):
+            trend.chunk_metrics.append(ChunkTrendMetrics(
+                chunk_index=cm_data.get('chunk_index', 0),
+                chunk_start_idx=cm_data.get('chunk_start_idx', 0),
+                chunk_end_idx=cm_data.get('chunk_end_idx', 0),
+                segment_count=cm_data.get('segment_count', 0),
+                rolling_avg_confidence=cm_data.get('rolling_avg_confidence', 0.0),
+                chunk_avg_confidence=cm_data.get('chunk_avg_confidence', 0.0),
+                low_confidence_segments=cm_data.get('low_confidence_segments', []),
+            ))
+
+        return trend
+
+
+def calculate_confidence_trend(
+    matches: List[Any],
+    chunk_count: int = 10,
+    low_conf_threshold: float = 0.2,
+) -> MatchQualityTrend:
+    """
+    Calculate confidence trend across voiceover chunks.
+
+    Divides matches into chunks (default 10% each) and calculates:
+    - Rolling average confidence up to each chunk
+    - Segments with confidence significantly below rolling average
+    - Overall trend direction (improving/stable/degrading)
+
+    Args:
+        matches: List of match objects from matching stage
+        chunk_count: Number of chunks to divide segments into (default 10 for 10% each)
+        low_conf_threshold: Delta below running avg to flag as low confidence
+
+    Returns:
+        MatchQualityTrend with per-chunk metrics and trend analysis
+    """
+    trend = MatchQualityTrend(low_confidence_threshold=low_conf_threshold)
+
+    if not matches:
+        return trend
+
+    # Extract confidence scores
+    confidences: List[float] = []
+    for m in matches:
+        if hasattr(m, 'primary_match') and m.primary_match:
+            conf = getattr(m.primary_match, 'confidence', 0.0)
+        elif hasattr(m, 'confidence'):
+            conf = m.confidence
+        else:
+            conf = 0.0
+        confidences.append(float(conf))
+
+    if not confidences:
+        return trend
+
+    total_segments = len(confidences)
+    chunk_size = max(1, total_segments // chunk_count)
+
+    # Track cumulative stats for rolling average
+    cumulative_sum = 0.0
+    cumulative_count = 0
+    chunk_averages: List[float] = []
+    total_low_conf_segments = 0
+
+    for chunk_idx in range(chunk_count):
+        start_idx = chunk_idx * chunk_size
+        # Last chunk takes remaining segments
+        if chunk_idx == chunk_count - 1:
+            end_idx = total_segments
+        else:
+            end_idx = start_idx + chunk_size
+
+        if start_idx >= total_segments:
+            break
+
+        chunk_confidences = confidences[start_idx:end_idx]
+        if not chunk_confidences:
+            continue
+
+        chunk_avg = sum(chunk_confidences) / len(chunk_confidences)
+        chunk_averages.append(chunk_avg)
+
+        # Update cumulative for rolling average
+        cumulative_sum += sum(chunk_confidences)
+        cumulative_count += len(chunk_confidences)
+        rolling_avg = cumulative_sum / cumulative_count
+
+        # Find low confidence segments (>threshold below rolling avg)
+        low_conf_segments = []
+        for i, conf in enumerate(chunk_confidences):
+            segment_idx = start_idx + i
+            if rolling_avg - conf > low_conf_threshold:
+                low_conf_segments.append(segment_idx)
+
+        total_low_conf_segments += len(low_conf_segments)
+
+        chunk_metrics = ChunkTrendMetrics(
+            chunk_index=chunk_idx,
+            chunk_start_idx=start_idx,
+            chunk_end_idx=end_idx,
+            segment_count=len(chunk_confidences),
+            rolling_avg_confidence=rolling_avg,
+            chunk_avg_confidence=chunk_avg,
+            low_confidence_segments=low_conf_segments,
+        )
+        trend.chunk_metrics.append(chunk_metrics)
+
+    trend.total_low_confidence_segments = total_low_conf_segments
+    trend.overall_avg_confidence = cumulative_sum / cumulative_count if cumulative_count > 0 else 0.0
+
+    # Calculate trend direction using linear regression on chunk averages
+    if len(chunk_averages) >= 2:
+        trend.trend_slope = _calculate_trend_slope(chunk_averages)
+
+        # Classify trend direction based on slope
+        # Use threshold of 0.02 to determine significance
+        if trend.trend_slope > 0.02:
+            trend.trend_direction = "improving"
+        elif trend.trend_slope < -0.02:
+            trend.trend_direction = "degrading"
+        else:
+            trend.trend_direction = "stable"
+
+    return trend
+
+
+def _calculate_trend_slope(values: List[float]) -> float:
+    """
+    Calculate linear regression slope for trend detection.
+
+    Uses simple linear regression: slope = sum((x-x_mean)(y-y_mean)) / sum((x-x_mean)^2)
+
+    Args:
+        values: List of chunk average confidences
+
+    Returns:
+        Slope of the linear fit (positive = improving, negative = degrading)
+    """
+    n = len(values)
+    if n < 2:
+        return 0.0
+
+    # x values are chunk indices (0, 1, 2, ...)
+    x_mean = (n - 1) / 2.0
+    y_mean = sum(values) / n
+
+    numerator = 0.0
+    denominator = 0.0
+
+    for i, y in enumerate(values):
+        x_diff = i - x_mean
+        y_diff = y - y_mean
+        numerator += x_diff * y_diff
+        denominator += x_diff * x_diff
+
+    if denominator == 0:
+        return 0.0
+
+    return numerator / denominator
+
+
+def log_chunk_trend(chunk: ChunkTrendMetrics, total_segments: int) -> None:
+    """
+    Log metrics for a single chunk after matching.
+
+    Called after each 10% chunk is matched to provide real-time feedback.
+
+    Args:
+        chunk: ChunkTrendMetrics for the completed chunk
+        total_segments: Total number of segments being matched
+    """
+    pct_complete = (chunk.chunk_end_idx / total_segments) * 100
+
+    logger.info(
+        f"  Chunk {chunk.chunk_index + 1} ({pct_complete:.0f}%): "
+        f"avg={chunk.chunk_avg_confidence:.3f}, "
+        f"rolling_avg={chunk.rolling_avg_confidence:.3f}, "
+        f"low_conf_count={len(chunk.low_confidence_segments)}"
+    )
+
+    # Log warning for chunks with significant low-confidence segments
+    if chunk.low_confidence_segments:
+        logger.warning(
+            f"    Low confidence segments in chunk {chunk.chunk_index + 1}: "
+            f"{chunk.low_confidence_segments[:5]}{'...' if len(chunk.low_confidence_segments) > 5 else ''} "
+            f"(>0.2 below rolling avg of {chunk.rolling_avg_confidence:.3f})"
+        )
+
+
+def log_trend_summary(trend: MatchQualityTrend) -> None:
+    """
+    Log summary of confidence trend at end of MATCH stage.
+
+    Args:
+        trend: Complete MatchQualityTrend from matching run
+    """
+    logger.info("=== Match Quality Trend Summary ===")
+    logger.info(f"  Overall avg confidence: {trend.overall_avg_confidence:.3f}")
+    logger.info(f"  Trend direction: {trend.trend_direction.upper()}")
+    logger.info(f"  Trend slope: {trend.trend_slope:+.4f}")
+    logger.info(f"  Low confidence segments: {trend.total_low_confidence_segments}")
+
+    # Print trend indicator
+    if trend.trend_direction == "improving":
+        indicator = "↑ IMPROVING - quality increased over voiceover duration"
+    elif trend.trend_direction == "degrading":
+        indicator = "↓ DEGRADING - quality decreased over voiceover duration"
+    else:
+        indicator = "→ STABLE - consistent quality throughout"
+
+    logger.info(f"  {indicator}")
+
+    # Log chunk-by-chunk summary
+    if trend.chunk_metrics:
+        logger.info("  Chunk breakdown:")
+        for cm in trend.chunk_metrics:
+            marker = ""
+            if cm.low_confidence_segments:
+                marker = f" [!{len(cm.low_confidence_segments)} low]"
+            logger.info(
+                f"    {cm.chunk_index + 1:2d}: avg={cm.chunk_avg_confidence:.3f}, "
+                f"rolling={cm.rolling_avg_confidence:.3f}{marker}"
+            )
+
+    logger.info("===================================")
+
+    # Additional warning for degrading trend
+    if trend.trend_direction == "degrading":
+        logger.warning(
+            "TREND WARNING: Match confidence degraded over voiceover duration. "
+            "Later segments may benefit from ITERATIVE_MATCH refinement."
+        )
