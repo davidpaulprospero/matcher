@@ -141,8 +141,8 @@ class CaptionCircuitBreakerConfig:
     YouTube during rate limit windows.
 
     Example with defaults:
-      - 10 fetches fail in a row → circuit trips
-      - Wait 120 seconds before allowing new fetches
+      - 5 fetches fail in a row → circuit trips
+      - Wait 60 seconds before allowing new fetches
       - On next successful fetch → circuit resets to closed state
 
     Configure in config.yaml under download.caption_first.circuit_breaker.
@@ -151,10 +151,10 @@ class CaptionCircuitBreakerConfig:
     enabled: bool = True
 
     # Number of consecutive failures before circuit trips (opens)
-    threshold: int = 10
+    threshold: int = 5
 
     # Duration to pause after circuit trips (seconds)
-    pause_seconds: float = 120.0
+    pause_seconds: float = 60.0
 
     # Maximum pause duration cap (seconds) to prevent runaway pause scaling
     max_pause_seconds: float = 300.0
@@ -464,6 +464,17 @@ class CaptionFirstConfig:
     # Number of videos to check before evaluating error patterns.
     # Lower = faster detection, higher = more confidence in pattern.
     error_pattern_sample_size: int = 10
+
+    # Batch progress reporting interval (US-66-005)
+    # Log batch-level progress every N videos processed.
+    # Lower values provide more frequent updates; higher values reduce log noise.
+    progress_report_interval: int = 25
+
+    # Unavailable early termination threshold (US-66-005)
+    # When this fraction of a rolling window of recent videos lack captions,
+    # switch remaining videos to preflight-only mode (lighter check).
+    # 0.8 = switch when 80% of recent videos are unavailable.
+    unavailable_threshold: float = 0.8
 
     # Worker-level progress tracking (US-008 Sprint 8)
     # Time threshold in seconds for considering a worker "stuck" on a video.

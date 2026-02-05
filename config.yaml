@@ -1152,6 +1152,14 @@ download:
     abort_on_error_pattern: "warn"    # Action on error pattern detection (default: warn)
     error_pattern_threshold: 0.3      # Ratio of failures to trigger (30% = 3/10 videos)
     error_pattern_sample_size: 10     # Videos to check before evaluating patterns
+    # Batch progress reporting interval (US-66-005)
+    # Log batch-level progress every N videos processed.
+    # Lower values = more frequent updates; higher values = less log noise.
+    progress_report_interval: 25      # Log progress every 25 videos (default: 25)
+    # Unavailable early termination threshold (US-66-005)
+    # When this fraction of a rolling window of recent videos lack captions,
+    # switch remaining videos to preflight-only mode (lighter check).
+    unavailable_threshold: 0.8        # Switch at 80% unavailable in window (default: 0.8)
     # Worker progress tracking (US-008 Sprint 8)
     # Time threshold for considering a worker "stuck" on a video.
     # Workers exceeding this threshold are reported in progress callbacks.
