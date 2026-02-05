@@ -1318,6 +1318,7 @@ class HealingOrchestrator:
             },
             'user_escalations': self.metrics.user_escalations,
             'rollbacks': self.metrics.rollbacks_performed,
+            'healer_cache': self._healer_cache.get_cache_stats(),
         }
 
     def export_metrics_json(self, output_path: Optional[Path] = None) -> Path:
@@ -1532,6 +1533,20 @@ class HealingOrchestrator:
             print(self.format_dashboard())
         else:
             print(f"\n{self.metrics.summary()}")
+
+        # US-68-008: Print healer cache statistics
+        cache_stats = self._healer_cache.get_cache_stats()
+        cache_total = cache_stats['hits'] + cache_stats['misses']
+        if cache_total > 0 or cache_stats['entry_count'] > 0:
+            print("\n" + "-" * 60)
+            print("HEALER CACHE")
+            print("-" * 60)
+            print(f"Entries: {cache_stats['entry_count']}")
+            print(f"Hits: {cache_stats['hits']}, Misses: {cache_stats['misses']}")
+            if cache_total > 0:
+                print(f"Hit Rate: {cache_stats['hit_rate']:.1%}")
+            if cache_stats['invalidation_count'] > 0:
+                print(f"Invalidations: {cache_stats['invalidation_count']}")
 
         if self.metrics.errors_encountered:
             print(f"\nErrors encountered: {len(self.metrics.errors_encountered)}")

@@ -316,5 +316,22 @@ class HealerResultCache:
             'invalidations': self._invalidations,
         }
 
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for dashboard metrics (US-68-008).
+
+        Returns:
+            Dict with keys: hits, misses, hit_rate, invalidation_count, entry_count
+        """
+        total_requests = self._hits + self._misses
+        hit_rate = self._hits / total_requests if total_requests > 0 else 0.0
+
+        return {
+            'hits': self._hits,
+            'misses': self._misses,
+            'hit_rate': hit_rate,
+            'invalidation_count': self._invalidations,
+            'entry_count': len(self._cache),
+        }
+
     def __repr__(self) -> str:
         return f"HealerResultCache(entries={len(self._cache)}, ttl={self.config.ttl_seconds}s)"
