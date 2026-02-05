@@ -13,6 +13,7 @@ and dynamic index building by scanning cache directory.
 import json
 import hashlib
 import logging
+import shutil
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -49,12 +50,54 @@ class TranscriptCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._source_map: Dict[str, Path] = {}
         self._video_id_map: Dict[str, Path] = {}
+        self._legacy_migrated: bool = False
 
         logger.debug(f"Primary cache: {self.cache_dir}")
         logger.debug(f"Alt cache: {self.alt_cache_dir}")
 
+        # Warn about and migrate legacy cache directory
+        self._check_legacy_cache()
+
         # Build reverse lookup by reading source_file from each cache file
         self._build_source_map()
+
+    def _check_legacy_cache(self):
+        """Check for legacy transcripts/ directory and warn + migrate if it has files."""
+        if not self.alt_cache_dir.exists():
+            return
+
+        legacy_files = list(self.alt_cache_dir.glob("*.json"))
+        if not legacy_files:
+            return
+
+        logger.warning(
+            f"Found {len(legacy_files)} cached file(s) in legacy directory '{self.alt_cache_dir}'. "
+            f"Move files from transcripts/ to transcriptions/ and delete transcripts/"
+        )
+        self._migrate_legacy_cache()
+
+    def _migrate_legacy_cache(self):
+        """Copy entries from legacy transcripts/ to transcriptions/ (once per session)."""
+        if self._legacy_migrated:
+            return
+
+        self._legacy_migrated = True
+
+        if not self.alt_cache_dir.exists():
+            return
+
+        migrated = 0
+        for cache_file in self.alt_cache_dir.glob("*.json"):
+            dest = self.cache_dir / cache_file.name
+            if not dest.exists():
+                try:
+                    shutil.copy2(cache_file, dest)
+                    migrated += 1
+                except Exception as e:
+                    logger.debug(f"Could not migrate {cache_file.name}: {e}")
+
+        if migrated > 0:
+            logger.info(f"Migrated {migrated} transcript cache file(s) from transcripts/ to transcriptions/")
 
     def _build_source_map(self):
         """
