@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, Set
+from typing import TYPE_CHECKING, Any, Optional, Set, Union
 
 from ..base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData, get_config_value, set_config_value
 from ...downloader.cookie_rotator import CookieRotator
@@ -78,10 +78,10 @@ class DownloadHealer(Healer):
     MAX_BACKOFF = 600.0  # 10 minutes
     BACKOFF_MULTIPLIER = 2.0
 
-    def __init__(self, config, project_dir, escalation_manager: Optional['EscalationManager'] = None):
+    def __init__(self, config: 'Config', project_dir: Union[str, Any], escalation_manager: Optional['EscalationManager'] = None) -> None:
         super().__init__(config, project_dir)
-        self.backoff_time = self.INITIAL_BACKOFF
-        self.retry_count = 0
+        self.backoff_time: float = self.INITIAL_BACKOFF
+        self.retry_count: int = 0
         self.skipped_videos: Set[str] = set()
 
         # Store shared escalation manager from pipeline's VideoDownloader
@@ -110,6 +110,10 @@ class DownloadHealer(Healer):
                 self.vpn_manager = VPNManager(vpn_config)
                 if self.vpn_manager.is_enabled:
                     logger.info("DownloadHealer: VPN manager enabled")
+
+    def can_handle(self, error: Exception, stage_name: str) -> bool:
+        """Check if this healer can handle the given error."""
+        return super().can_handle(error, stage_name)
 
     def _get_retry_context(self, error: Exception) -> tuple[int, int, bool]:
         """

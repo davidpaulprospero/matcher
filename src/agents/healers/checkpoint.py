@@ -57,9 +57,13 @@ class CheckpointHealer(Healer):
     CHECKPOINT_FILE = "checkpoint.json"
     BACKUP_FILE = "checkpoint.backup.json"
 
-    def __init__(self, config, project_dir):
+    def __init__(self, config: 'Config', project_dir: Any) -> None:
         super().__init__(config, project_dir)
-        self.cache_was_cleaned = False
+        self.cache_was_cleaned: bool = False
+
+    def can_handle(self, error: Exception, stage_name: str) -> bool:
+        """Check if this healer can handle the given error."""
+        return super().can_handle(error, stage_name)
 
     def handle_event(self, event_data: HealerEventData) -> None:
         """Handle cross-healer coordination events.

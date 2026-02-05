@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 from ..base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData, get_config_value, set_config_value
 
@@ -71,10 +71,14 @@ class APIHealer(Healer):
         "ollama": ["gemini", "anthropic"],
     }
 
-    def __init__(self, config, project_dir):
+    def __init__(self, config: 'Config', project_dir: Union[str, Any]) -> None:
         super().__init__(config, project_dir)
-        self.backoff_time = self.INITIAL_BACKOFF
-        self.retry_count = 0
+        self.backoff_time: float = self.INITIAL_BACKOFF
+        self.retry_count: int = 0
+
+    def can_handle(self, error: Exception, stage_name: str) -> bool:
+        """Check if this healer can handle the given error."""
+        return super().can_handle(error, stage_name)
 
     def fix(
         self,
