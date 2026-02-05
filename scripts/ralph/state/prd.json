@@ -118,7 +118,7 @@
                             "id":  "US-65-008",
                             "title":  "Re-validate config sections after CLI merge overrides are applied",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "After merge_config() in src/cli/config_utils.py applies all overrides, __post_init__() is called on each modified config section that has one",
                                                        "Duration tier merges trigger DurationTiersConfig.__post_init__() to re-validate min \u003c= max constraints",
@@ -126,13 +126,13 @@
                                                        "Add test that merges an invalid duration tier override (min \u003e max) and verifies the post-merge validation catches it",
                                                        "Existing merge behavior is preserved for valid overrides (no regressions in config loading)"
                                                    ],
-                            "notes":  "Tier: T2 (correctness). Source files: src/cli/config_utils.py merge_config() at lines ~235-292, specifically lines ~276-282 for duration tier merges. Currently merges raw values without re-validating. The fix: after _merge_single_tier() calls, invoke __post_init__() on the parent config section. Check which sections have __post_init__: duration.py, infrastructure.py, matching.py, iterative_matching.py, keywords.py, llm.py, broll.py."
+                            "notes":  "Added _revalidate_modified_sections() that calls __post_init__() on each modified section after merge. Extended DurationTiersConfig.__post_init__() to validate min/max on existing DurationTierConfig instances (not just dicts). Added 6 tests in TestPostMergeRevalidation: invalid duration tier warning, healing dict conversion (watcher + llm_healer), valid override preservation, unmodified section preservation, legacy path revalidation. All 50 config merge tests pass."
                         },
                         {
                             "id":  "US-65-009",
                             "title":  "Unify path resolution between base.py and cli/config_utils.py into single implementation",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Path resolution logic exists in exactly one location (src/config/base.py _resolve_paths or a new shared function)",
                                                        "src/cli/config_utils.py make_paths_project_relative() delegates to the shared path resolution instead of reimplementing",
@@ -140,7 +140,7 @@
                                                        "Paths containing forward slashes, backslashes, and mixed separators all resolve correctly on Windows",
                                                        "Add test that loads config with relative paths and verifies they resolve to absolute project-relative paths exactly once"
                                                    ],
-                            "notes":  "Tier: T2 (deduplication). Source files: src/config/base.py _resolve_paths() at lines ~245-283, src/cli/config_utils.py make_paths_project_relative() at lines ~71-100. Both functions try to resolve paths but with different logic. The unified function should handle: download.root_dir, download.download_dir, transcription.cache_dir, image_search.root_dir. CLAUDE.md Rule 14 (OTIO paths use file:/// URLs) should be preserved."
+                            "notes":  "Unified path resolution: (1) Config._resolve_paths() in base.py is the single source of truth for all path resolution. (2) make_paths_project_relative() delegates to _resolve_paths() - no reimplementation. (3) load_project_config() now delegates to make_paths_project_relative() instead of duplicating its logic (removed 4 duplicated lines). (4) _resolve_paths() uses pathlib which normalizes mixed separators. (5) Added 5 new tests: forward-slash, backslash, no-double-resolution, load_project_config delegation, plus existing mixed-separator and exact-once tests. All 36 tests pass."
                         },
                         {
                             "id":  "US-65-010",
