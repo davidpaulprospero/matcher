@@ -84,7 +84,7 @@
                                                        "Add a CRITICAL_SECTIONS list or similar marker in base.py that distinguishes critical from optional sections",
                                                        "Add test that attempts to load a malformed critical section and verifies ConfigError is raised with a descriptive message"
                                                    ],
-                            "notes":  "Implemented: Added ConfigError exception class and CRITICAL_SECTIONS frozenset to base.py. _build_dataclass now accepts section_name param; critical sections raise ConfigError with field names, optional sections fall back to defaults with debug log. _from_dict passes yaml_key as section_name. 29 tests in test_config_build_dataclass_errors.py. All 537 config tests pass (1 pre-existing failure in test_config_post_init.py unrelated)."
+                            "notes":  "Implementation complete. ConfigError class and CRITICAL_SECTIONS frozenset in base.py (lines 126-138). _build_dataclass raises ConfigError for critical sections, logs debug for optional sections (lines 463-480). 29 tests in test_config_build_dataclass_errors.py all pass, covering all 5 acceptance criteria."
                         },
                         {
                             "id":  "US-65-006",
