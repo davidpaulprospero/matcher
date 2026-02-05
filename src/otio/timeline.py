@@ -105,16 +105,18 @@ def _is_missing_file(file_path: str) -> bool:
     """
     Check if the video file is missing from disk.
 
-    Returns True if the file does not exist, False if it exists or if the path
-    appears to be a URL or video ID (not a local file path).
+    Returns True if the file does not exist (including bare video IDs that
+    failed segment resolution), False if it exists or is a URL.
     """
-    # Skip check for URLs or video IDs (no path separators)
-    if '/' not in file_path and '\\' not in file_path:
-        # Likely a video ID or special reference, not a file path
-        return False
-
     # Skip check for URLs
     if file_path.startswith(('http://', 'https://', 'file://')):
+        return False
+
+    # Bare video ID (no path separators, no extension) = unresolved segment
+    if '/' not in file_path and '\\' not in file_path:
+        ext = Path(file_path).suffix
+        if not ext:
+            return True  # Bare video ID, no file on disk
         return False
 
     # Check if file exists
@@ -483,14 +485,25 @@ def create_timeline(
                         resolved_file = seg_info['file']
                         break
                 else:
-                    # If no segment contains this exact time, use the first segment
-                    # and let the clip reference the original time (fallback)
+                    # Find the nearest segment (closest start/end to source_start)
                     if segments:
-                        seg_info = segments[0]
-                        # Check if it's reasonably close
-                        if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
-                            adjusted_start = max(0, source_start - seg_info['start'])
-                            resolved_file = seg_info['file']
+                        best_seg = None
+                        best_distance = float('inf')
+                        for seg_info in segments:
+                            if source_start < seg_info['start']:
+                                dist = seg_info['start'] - source_start
+                            elif source_start > seg_info['end']:
+                                dist = source_start - seg_info['end']
+                            else:
+                                dist = 0
+                            if dist < best_distance:
+                                best_distance = dist
+                                best_seg = seg_info
+                        if best_seg and best_distance <= 60:
+                            adjusted_start = max(0, source_start - best_seg['start'])
+                            seg_duration = best_seg['end'] - best_seg['start']
+                            adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
+                            resolved_file = best_seg['file']
 
         # Apply path normalization to prevent duplicate file references
         # which cause DaVinci Resolve to hang during OTIO import

@@ -127,14 +127,40 @@ def _resolve_video_segment(
             adjusted_start = source_start - seg_info['start']
             return seg_info['file'], adjusted_start
 
-    # Fallback: use first segment if reasonably close
+    # Fallback: find the nearest segment (closest start/end to source_start)
     if segments:
-        seg_info = segments[0]
-        if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
-            adjusted_start = max(0, source_start - seg_info['start'])
-            return seg_info['file'], adjusted_start
+        best_seg = None
+        best_distance = float('inf')
+        for seg_info in segments:
+            # Distance from source_start to the segment's time range
+            if source_start < seg_info['start']:
+                dist = seg_info['start'] - source_start
+            elif source_start > seg_info['end']:
+                dist = source_start - seg_info['end']
+            else:
+                dist = 0  # Should have been caught above
+            if dist < best_distance:
+                best_distance = dist
+                best_seg = seg_info
+        # Allow up to 60s gap between source_start and nearest segment
+        if best_seg and best_distance <= 60:
+            adjusted_start = max(0, source_start - best_seg['start'])
+            # Clamp to segment duration
+            seg_duration = best_seg['end'] - best_seg['start']
+            adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
+            return best_seg['file'], adjusted_start
 
     return source_file, source_start
+
+
+def _is_unresolved_path(resolved_path: str, original_source: str) -> bool:
+    """Check if segment resolution failed (bare video ID returned unchanged)."""
+    if resolved_path != original_source:
+        return False  # Resolution succeeded
+    # Bare video ID: no path separators, no file extension
+    ext = Path(resolved_path).suffix
+    has_sep = '/' in resolved_path or '\\' in resolved_path
+    return not ext and not has_sep
 
 
 def _get_segment_file_duration(
@@ -290,6 +316,22 @@ def generate_resolve_xml_with_bins(
         vo_seg = m.primary_match.voiceover_segment
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
         total_frames += int(target_duration * frame_rate)
+
+    # Filter out bare video IDs that failed segment resolution (only when
+    # segment_lookup is populated, meaning we have downloaded segments)
+    if segment_lookup:
+        unresolved_count = 0
+        filtered_files = {}
+        for fp, fi in all_files.items():
+            ext = Path(fp).suffix
+            has_sep = '/' in fp or '\\' in fp
+            if not ext and not has_sep:
+                unresolved_count += 1
+            else:
+                filtered_files[fp] = fi
+        if unresolved_count:
+            logger.info(f"Filtered {unresolved_count} unresolved video IDs from media bins")
+        all_files = filtered_files
 
     # Generate complete XML with bin AND timeline
     xml_lines = [
@@ -551,34 +593,37 @@ def generate_resolve_xml_with_bins(
                 resolved_path, adjusted_start = _resolve_video_segment(
                     alt_seg.source_file, alt_source_start, segment_lookup
                 )
-                alt_start_frames = int(adjusted_start * frame_rate)
 
-                # Clamp in/out to physical segment file duration
-                seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
-                seg_dur_frames = int(seg_dur_secs * frame_rate)
-                alt_start_frames = min(alt_start_frames, max(0, seg_dur_frames - 1))
-                alt_out_frames = min(alt_start_frames + alt_source_frames, seg_dur_frames)
+                # Skip unresolved clips (bare video IDs with no downloaded segment)
+                if not _is_unresolved_path(resolved_path, alt_seg.source_file):
+                    alt_start_frames = int(adjusted_start * frame_rate)
 
-                file_info = all_files.get(resolved_path, {})
-                file_id = file_info.get('file_id', '')
-                file_dur_frames = max(file_info.get('duration_frames', seg_dur_frames), alt_out_frames)
+                    # Clamp in/out to physical segment file duration
+                    seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+                    seg_dur_frames = int(seg_dur_secs * frame_rate)
+                    alt_start_frames = min(alt_start_frames, max(0, seg_dur_frames - 1))
+                    alt_out_frames = min(alt_start_frames + alt_source_frames, seg_dur_frames)
 
-                segment_id = f"S{match_idx:03d}"
-                folder_name = Path(resolved_path).parent.name
-                base_name = Path(resolved_path).stem
-                unique_name = escape_xml(f"[{segment_id}] {folder_name}_{base_name}")
+                    file_info = all_files.get(resolved_path, {})
+                    file_id = file_info.get('file_id', '')
+                    file_dur_frames = max(file_info.get('duration_frames', seg_dur_frames), alt_out_frames)
 
-                xml_lines.extend([
-                    '                            <clipitem>',
-                    f'                                <name>{unique_name}</name>',
-                    f'                                <duration>{file_dur_frames}</duration>',
-                    f'                                <start>{alt_timeline_pos}</start>',
-                    f'                                <end>{alt_timeline_pos + target_frames}</end>',
-                    f'                                <in>{alt_start_frames}</in>',
-                    f'                                <out>{alt_out_frames}</out>',
-                    f'                                <file id="{file_id}"/>',
-                    '                            </clipitem>',
-                ])
+                    segment_id = f"S{match_idx:03d}"
+                    folder_name = Path(resolved_path).parent.name
+                    base_name = Path(resolved_path).stem
+                    unique_name = escape_xml(f"[{segment_id}] {folder_name}_{base_name}")
+
+                    xml_lines.extend([
+                        '                            <clipitem>',
+                        f'                                <name>{unique_name}</name>',
+                        f'                                <duration>{file_dur_frames}</duration>',
+                        f'                                <start>{alt_timeline_pos}</start>',
+                        f'                                <end>{alt_timeline_pos + target_frames}</end>',
+                        f'                                <in>{alt_start_frames}</in>',
+                        f'                                <out>{alt_out_frames}</out>',
+                        f'                                <file id="{file_id}"/>',
+                        '                            </clipitem>',
+                    ])
 
             alt_timeline_pos += target_frames
 
@@ -958,6 +1003,12 @@ def _add_sequence_alt_tracks(
                 resolved_path, adjusted_start = _resolve_video_segment(
                     alt_seg.source_file, alt_source_start, segment_lookup
                 )
+
+                # Skip unresolved clips (bare video IDs with no downloaded segment)
+                if _is_unresolved_path(resolved_path, alt_seg.source_file):
+                    alt_timeline_pos += target_frames
+                    continue
+
                 in_frames = int(adjusted_start * frame_rate)
                 out_frames = in_frames + alt_source_frames
 
