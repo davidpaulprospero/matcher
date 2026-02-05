@@ -285,6 +285,96 @@ class TestBatchProcessorConfig:
         assert config.prioritize_by_channel is True
 
 
+class TestBatchProcessorConfigFromCaptionFirst:
+    """Tests for BatchProcessorConfig.from_caption_first_config (US-66-005)."""
+
+    def test_custom_progress_report_interval_from_config(self):
+        """Custom progress_report_interval is pulled from CaptionFirstConfig."""
+        from src.caption.batch_processor import BatchProcessorConfig
+        from src.config.sections.download import CaptionFirstConfig
+
+        caption_cfg = CaptionFirstConfig(progress_report_interval=50)
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(caption_cfg)
+
+        assert batch_cfg.progress_report_interval == 50
+
+    def test_custom_unavailable_threshold_from_config(self):
+        """Custom unavailable_threshold is pulled from CaptionFirstConfig."""
+        from src.caption.batch_processor import BatchProcessorConfig
+        from src.config.sections.download import CaptionFirstConfig
+
+        caption_cfg = CaptionFirstConfig(unavailable_threshold=0.5)
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(caption_cfg)
+
+        assert batch_cfg.unavailable_threshold == 0.5
+
+    def test_both_custom_values_respected(self):
+        """Both progress_report_interval and unavailable_threshold are respected together."""
+        from src.caption.batch_processor import BatchProcessorConfig
+        from src.config.sections.download import CaptionFirstConfig
+
+        caption_cfg = CaptionFirstConfig(
+            progress_report_interval=10,
+            unavailable_threshold=0.9,
+        )
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(caption_cfg)
+
+        assert batch_cfg.progress_report_interval == 10
+        assert batch_cfg.unavailable_threshold == 0.9
+
+    def test_defaults_match_when_no_custom_values(self):
+        """Default CaptionFirstConfig values match BatchProcessorConfig defaults."""
+        from src.caption.batch_processor import BatchProcessorConfig
+        from src.config.sections.download import CaptionFirstConfig
+
+        caption_cfg = CaptionFirstConfig()
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(caption_cfg)
+
+        assert batch_cfg.progress_report_interval == 25
+        assert batch_cfg.unavailable_threshold == 0.8
+
+    def test_error_pattern_fields_pulled_from_config(self):
+        """error_pattern_threshold and error_pattern_sample_size are pulled through."""
+        from src.caption.batch_processor import BatchProcessorConfig
+        from src.config.sections.download import CaptionFirstConfig
+
+        caption_cfg = CaptionFirstConfig(
+            error_pattern_threshold=0.5,
+            error_pattern_sample_size=20,
+        )
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(caption_cfg)
+
+        assert batch_cfg.error_pattern_threshold == 0.5
+        assert batch_cfg.error_pattern_sample_size == 20
+
+    def test_overrides_take_precedence(self):
+        """Explicit overrides take precedence over CaptionFirstConfig values."""
+        from src.caption.batch_processor import BatchProcessorConfig
+        from src.config.sections.download import CaptionFirstConfig
+
+        caption_cfg = CaptionFirstConfig(progress_report_interval=50)
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(
+            caption_cfg, progress_report_interval=100
+        )
+
+        assert batch_cfg.progress_report_interval == 100
+
+    def test_dict_config_access(self):
+        """from_caption_first_config works with dict-style config (Rule 6)."""
+        from src.caption.batch_processor import BatchProcessorConfig
+
+        config_dict = {
+            'progress_report_interval': 15,
+            'unavailable_threshold': 0.6,
+            'abort_on_error_pattern': 'abort',
+        }
+        batch_cfg = BatchProcessorConfig.from_caption_first_config(config_dict)
+
+        assert batch_cfg.progress_report_interval == 15
+        assert batch_cfg.unavailable_threshold == 0.6
+        assert batch_cfg.error_pattern_mode == 'abort'
+
+
 class TestBatchResult:
     """Tests for BatchResult dataclass."""
 

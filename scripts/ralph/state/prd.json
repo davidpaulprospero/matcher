@@ -77,7 +77,7 @@
                             "id":  "US-66-005",
                             "title":  "Extract hardcoded batch processor thresholds to CaptionFirstConfig",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "progress_report_interval is a field on CaptionFirstConfig (or CaptionBatchConfig) in src/config/sections/download.py with default 25",
                                                        "unavailable_threshold is a field on CaptionFirstConfig in src/config/sections/download.py with default 0.8",
@@ -85,7 +85,7 @@
                                                        "config.yaml documents these new fields under download.caption_first with comments",
                                                        "At least 2 tests verify custom config values are respected by batch_processor"
                                                    ],
-                            "notes":  "Tier: config extraction. Files: src/caption/batch_processor.py (lines 67-76, hardcoded defaults), src/config/sections/download.py (CaptionFirstConfig class, line ~265), config.yaml. Note: error_pattern_threshold and error_pattern_sample_size already exist in CaptionFirstConfig (line ~461) â€” only progress_report_interval and unavailable_threshold are missing."
+                            "notes":  "Added progress_report_interval (default 25) and unavailable_threshold (default 0.8) fields to CaptionFirstConfig in src/config/sections/download.py. Added BatchProcessorConfig.from_caption_first_config() classmethod to bridge config from CaptionFirstConfig to BatchProcessorConfig (supports both object and dict access per Rule 6). Documented both fields in config.yaml under download.caption_first. Added 7 tests in TestBatchProcessorConfigFromCaptionFirst class verifying custom values, defaults, overrides, and dict access. 580 tests pass."
                         },
                         {
                             "id":  "US-66-006",

@@ -69,11 +69,46 @@ class BatchProcessorConfig:
     prioritize_by_channel: bool = True
     stuck_worker_threshold: float = 60.0
     slow_threshold_ratio: float = 0.8  # 80% of timeout = slow
-    # US-37-011: Batch progress reporting interval
+    # US-37-011: Batch progress reporting interval (US-66-005: driven by CaptionFirstConfig)
     progress_report_interval: int = 25  # Log progress every N videos
-    # US-59-006: Unavailable early termination settings
+    # US-59-006: Unavailable early termination settings (US-66-005: driven by CaptionFirstConfig)
     unavailable_window_size: int = 10  # Rolling window size for unavailable detection
     unavailable_threshold: float = 0.8  # 80% of window must be unavailable to trigger
+
+    @classmethod
+    def from_caption_first_config(cls, caption_first_config, **overrides) -> 'BatchProcessorConfig':
+        """Create BatchProcessorConfig from a CaptionFirstConfig instance.
+
+        Pulls progress_report_interval, unavailable_threshold, error_pattern_threshold,
+        error_pattern_sample_size, stuck_worker_threshold, and other batch-relevant
+        settings from the canonical CaptionFirstConfig source.
+
+        Args:
+            caption_first_config: CaptionFirstConfig instance (or dict with same keys).
+            **overrides: Additional keyword arguments override values from config.
+
+        Returns:
+            BatchProcessorConfig with values from CaptionFirstConfig.
+        """
+        cfg = caption_first_config
+        # Support both object attribute access and dict access (Rule 6)
+        def _get(field_name, default):
+            if isinstance(cfg, dict):
+                return cfg.get(field_name, default)
+            return getattr(cfg, field_name, default)
+
+        kwargs = {
+            'max_workers': _get('max_parallel_fetches', 4),
+            'error_pattern_mode': _get('abort_on_error_pattern', 'warn'),
+            'error_pattern_threshold': _get('error_pattern_threshold', 0.3),
+            'error_pattern_sample_size': _get('error_pattern_sample_size', 10),
+            'prioritize_by_channel': _get('prioritize_by_channel', True),
+            'stuck_worker_threshold': _get('stuck_worker_threshold', 60.0),
+            'progress_report_interval': _get('progress_report_interval', 25),
+            'unavailable_threshold': _get('unavailable_threshold', 0.8),
+        }
+        kwargs.update(overrides)
+        return cls(**kwargs)
 
 
 @dataclass
