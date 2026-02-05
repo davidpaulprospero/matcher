@@ -39,6 +39,18 @@ class VisionConfig:
     max_api_calls_per_run: int = 100
     estimated_cost_per_call: float = 0.001
 
+    def __post_init__(self):
+        if not (0.0 <= self.coverage_threshold <= 1.0):
+            raise ValueError(
+                f"VisionConfig.coverage_threshold must be between 0.0 and 1.0, "
+                f"got {self.coverage_threshold}"
+            )
+        if self.max_api_calls_per_run <= 0:
+            raise ValueError(
+                f"VisionConfig.max_api_calls_per_run must be positive, "
+                f"got {self.max_api_calls_per_run}"
+            )
+
 
 @dataclass
 class SceneDetectionConfig:
@@ -72,6 +84,18 @@ class SceneDetectionConfig:
     # Face detection per scene (B-roll identification)
     detect_faces_per_scene: bool = True  # Enable scene-level face detection
     face_sample_frames: int = 3  # Frames to sample per scene for face detection
+
+    def __post_init__(self):
+        if self.threshold <= 0:
+            raise ValueError(
+                f"SceneDetectionConfig.threshold must be positive, "
+                f"got {self.threshold}"
+            )
+        if self.min_scene_len <= 0:
+            raise ValueError(
+                f"SceneDetectionConfig.min_scene_len must be positive, "
+                f"got {self.min_scene_len}"
+            )
 
 
 @dataclass
