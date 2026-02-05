@@ -10,7 +10,10 @@ Provides confidence adjustments for:
 - Adaptive thresholds based on voiceover length and candidate variance
 """
 
-from typing import Any, Tuple, List, Optional, TYPE_CHECKING
+from typing import Any, Tuple, List, Optional, TYPE_CHECKING, TYPE_CHECKING as TC
+
+if TC:
+    from ..utils import Match
 import logging
 import math
 import statistics
@@ -2134,6 +2137,141 @@ def normalize_confidence_by_pool(
     )
 
     return normalized, reason
+
+
+def apply_consecutive_source_penalty(
+    confidence: float,
+    video_segment: SRTSegment,
+    recent_matches: List['Match'],
+    config=None
+) -> Tuple[float, str]:
+    """
+    Apply penalty for using the same video source in consecutive segments (US-63-009).
+
+    Visual variety is important in the final edit. Using the same video source
+    repeatedly in adjacent segments creates a monotonous viewing experience.
+    This function applies a stacking penalty for consecutive same-source matches.
+
+    Args:
+        confidence: Current confidence score
+        video_segment: Video segment being considered
+        recent_matches: List of recent Match objects (most recent first), used to check
+                       if previous N matches used the same source
+        config: Optional config object with matching settings
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    if not recent_matches:
+        return confidence, ""
+
+    # Get config values
+    if config is not None:
+        mc = getattr(config, 'matching', None)
+        if mc is not None:
+            penalty_per_consecutive = getattr(mc, 'consecutive_source_penalty', 0.1)
+            max_consecutive = getattr(mc, 'max_consecutive_same_source', 3)
+        else:
+            penalty_per_consecutive = 0.1
+            max_consecutive = 3
+    else:
+        penalty_per_consecutive = 0.1
+        max_consecutive = 3
+
+    # Get current video source
+    current_source = getattr(video_segment, 'source_file', None)
+    if not current_source:
+        return confidence, ""
+
+    # Count consecutive same-source matches
+    consecutive_count = 0
+    for match in recent_matches:
+        if match is None:
+            break
+        match_source = getattr(match.video_segment, 'source_file', None) if match.video_segment else None
+        if match_source == current_source:
+            consecutive_count += 1
+        else:
+            break  # Stop counting when we hit a different source
+
+    if consecutive_count == 0:
+        return confidence, ""
+
+    # Calculate stacking penalty
+    total_penalty = penalty_per_consecutive * consecutive_count
+
+    # Apply penalty
+    adjusted = max(0.0, confidence - total_penalty)
+
+    # Build reason string
+    reason = f"consecutive_source_penalty: -{total_penalty:.2f} ({consecutive_count} consecutive)"
+
+    logger.debug(
+        f"US-63-009 consecutive source penalty: source={current_source}, "
+        f"consecutive={consecutive_count}, penalty={total_penalty:.2f}, "
+        f"{confidence:.2f} -> {adjusted:.2f}"
+    )
+
+    return adjusted, reason
+
+
+def check_consecutive_source_hard_cap(
+    video_segment: SRTSegment,
+    recent_matches: List['Match'],
+    config=None
+) -> Tuple[bool, int]:
+    """
+    Check if using this video source would exceed the consecutive same-source hard cap.
+
+    Args:
+        video_segment: Video segment being considered
+        recent_matches: List of recent Match objects (most recent first)
+        config: Optional config object with matching settings
+
+    Returns:
+        Tuple of (should_block, consecutive_count)
+        - should_block: True if this source should be blocked
+        - consecutive_count: Number of consecutive matches from this source
+    """
+    if not recent_matches:
+        return False, 0
+
+    # Get config values
+    if config is not None:
+        mc = getattr(config, 'matching', None)
+        if mc is not None:
+            max_consecutive = getattr(mc, 'max_consecutive_same_source', 3)
+        else:
+            max_consecutive = 3
+    else:
+        max_consecutive = 3
+
+    # Get current video source
+    current_source = getattr(video_segment, 'source_file', None)
+    if not current_source:
+        return False, 0
+
+    # Count consecutive same-source matches
+    consecutive_count = 0
+    for match in recent_matches:
+        if match is None:
+            break
+        match_source = getattr(match.video_segment, 'source_file', None) if match.video_segment else None
+        if match_source == current_source:
+            consecutive_count += 1
+        else:
+            break
+
+    # Block if would exceed hard cap (current use would be consecutive_count + 1)
+    should_block = consecutive_count >= max_consecutive
+
+    if should_block:
+        logger.debug(
+            f"US-63-009 hard cap reached: source={current_source}, "
+            f"consecutive={consecutive_count}, max={max_consecutive}"
+        )
+
+    return should_block, consecutive_count
 
 
 def normalize_pool_batch(

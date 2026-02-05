@@ -122,7 +122,7 @@
             "id": "US-63-008",
             "title": "Add LLM reranker confidence calibration based on candidate spread",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In LLMReranker.rerank(), calculate score spread between top-2 candidates",
                 "If spread < 0.05 (very close), apply confidence reduction factor (e.g., 0.9x)",
@@ -131,13 +131,13 @@
                 "Add unit test with mocked LLM that verifies confidence adjustments based on spread",
                 "Log spread and adjustment at DEBUG level"
             ],
-            "notes": "Tier: P2 (quality refinement). Target file: src/matching/llm_reranker.py. LLM reranking confidence should reflect certainty based on how close the top candidates are. Very close candidates indicate ambiguity; large spread indicates clear winner."
+            "notes": "IMPLEMENTED: (1) Added _apply_spread_calibration() method to LLMReranker that calculates spread between top-2 candidate similarities and applies adjustment; (2) Close spread (< 0.05) multiplies confidence by 0.9x factor; (3) Clear winner (> 0.20) multiplies confidence by 1.1x factor, capped at 1.0; (4) Added config options to LLMRerankerConfig: close_spread_threshold=0.05, clear_winner_threshold=0.20, close_spread_factor=0.9, clear_winner_factor=1.1; (5) Added matching config fields llm_reranker_* to MatchingConfig for config.yaml access; (6) Factory method from_matching_config() reads spread calibration config; (7) Added 9 unit tests in TestLLMRerankerSpreadCalibration class covering all cases; (8) DEBUG logging via logger.debug() with 'US-63-008 spread calibration' tag. All 20 tests in test_matching_llm_reranker.py pass."
         },
         {
             "id": "US-63-009",
             "title": "Add diversity penalty for consecutive same-source matches",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "In TieredMatcher.match_segment(), check if previous N matches used same video source",
                 "Apply configurable penalty (default: 0.1) per consecutive same-source match",
@@ -146,7 +146,7 @@
                 "Add unit test that verifies penalty is applied and stacks for multiple consecutive",
                 "Record penalty in confidence_breakdown (depends on US-63-007)"
             ],
-            "notes": "Tier: P2 (quality diversity). Target file: src/matching/tiered_matcher.py. Visual variety in final edit is important. Currently no penalty for reusing same source in adjacent segments. ReuseTracker exists but operates globally, not on consecutive sequences."
+            "notes": "IMPLEMENTED: (1) Added _recent_matches list and _update_recent_matches() method to TieredMatcher to track previous matches for consecutive source checking; (2) Added apply_consecutive_source_penalty() and check_consecutive_source_hard_cap() functions to src/matching/scoring.py - penalty stacks at 0.1 per consecutive match; (3) Added config options matching.consecutive_source_penalty (default: 0.1) and matching.max_consecutive_same_source (default: 3) to MatchingConfig in src/config/sections/matching.py; (4) Applied penalty in all 3 Match creation paths in TieredMatcher.match_segment() (obvious match, high similarity, LLM rerank) with _record_breakdown for confidence_breakdown; (5) Added 10 unit tests in TestConsecutiveSourcePenalty class verifying: no penalty when no recent matches, no penalty when different source, 1x/2x/3x stacking penalties, stops counting at different source, does not go negative, hard cap check pass/fail, penalty recorded in breakdown. All 10 tests pass."
         },
         {
             "id": "US-63-010",

@@ -195,6 +195,12 @@ class MatchingConfig:
     smart_reuse: bool = True
     sequential_when_reuse: bool = True
 
+    # Consecutive same-source penalty (US-63-009)
+    # Penalizes using the same video source in adjacent segments to improve visual variety
+    # Penalty stacks: 1st repeat = 1x penalty, 2nd repeat = 2x penalty, etc.
+    consecutive_source_penalty: float = 0.1  # Penalty per consecutive same-source match
+    max_consecutive_same_source: int = 3  # Hard cap - block source after N consecutive uses
+
     # Global clip deduplication (hard block mode)
     # When True, same clip can NEVER appear twice anywhere in timeline (P1 requirement)
     clip_hard_block: bool = True
