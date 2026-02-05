@@ -25,40 +25,53 @@ logger = logging.getLogger(__name__)
 def parse_timestamp(ts: str) -> Optional[float]:
     """Parse a timestamp string to seconds.
 
+    This is the single canonical timestamp parsing function for all caption
+    modules. All other timestamp parsers should delegate to this function.
+
     Supports formats:
         HH:MM:SS,mmm (SRT)
         HH:MM:SS.mmm (VTT)
         MM:SS.mmm (VTT short)
         HH:MM:SS (no milliseconds)
+        MM:SS (no milliseconds, short)
+        Bare float string (e.g., "123.456")
 
     Args:
-        ts: Timestamp string to parse.
+        ts: Timestamp string to parse. None or empty returns None.
 
     Returns:
         Time in seconds, or None if parsing fails.
     """
+    if not ts:
+        return None
+
     ts = ts.strip()
+
+    if not ts:
+        return None
 
     # Replace comma with period for SRT format
     ts = ts.replace(',', '.')
 
-    # Pattern for HH:MM:SS.mmm or MM:SS.mmm
-    match = re.match(r'^(?:(\d+):)?(\d+):(\d+)\.(\d+)$', ts)
+    # Try bare float (e.g., "123.456" or "90")
+    try:
+        val = float(ts)
+        if val < 0:
+            logger.warning(f"Negative timestamp value: {ts}")
+            return None
+        return val
+    except ValueError:
+        pass
+
+    # Pattern for HH:MM:SS.mmm or MM:SS.mmm (with optional milliseconds)
+    match = re.match(r'^(?:(\d+):)?(\d+):(\d+)(?:\.(\d+))?$', ts)
     if match:
         hours = int(match.group(1)) if match.group(1) else 0
         minutes = int(match.group(2))
         seconds = int(match.group(3))
-        millis = int(match.group(4).ljust(3, '0')[:3])  # Ensure 3 digits
+        millis = int(match.group(4).ljust(3, '0')[:3]) if match.group(4) else 0
 
         return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
-
-    # Try simpler pattern without milliseconds
-    match = re.match(r'^(?:(\d+):)?(\d+):(\d+)$', ts)
-    if match:
-        hours = int(match.group(1)) if match.group(1) else 0
-        minutes = int(match.group(2))
-        seconds = int(match.group(3))
-        return hours * 3600 + minutes * 60 + seconds
 
     logger.warning(f"Could not parse timestamp: {ts}")
     return None
