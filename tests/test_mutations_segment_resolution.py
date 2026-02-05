@@ -194,6 +194,39 @@ class TestMutationInvertUnresolved:
 
 
 # ============================================================================
+# Mutation 7: Remove ffprobe preference (revert to segment range only)
+# ============================================================================
+
+class TestMutationRemoveFfprobePreference:
+    """If ffprobe preference is removed, duration mismatch returns."""
+
+    @pytest.mark.fast
+    def test_kill_no_ffprobe(self):
+        """Mutation: remove ffprobe call, use only segment range."""
+        from unittest.mock import patch
+        from src.otio.xml_export import _get_segment_file_duration, _build_segment_lookup, _ffprobe_cache
+        from src.stages.output import SegmentInfo
+
+        segments = [SegmentInfo(
+            video_id='vid', file='/v/vid_100_200.mp4',
+            original_start=100.0, original_end=200.0
+        )]
+        lookup = _build_segment_lookup(segments)
+        _ffprobe_cache.pop('/v/vid_100_200.mp4', None)
+
+        # Simulate ffprobe returning shorter actual duration
+        with patch('src.otio.xml_export._get_media_duration', return_value=197.5):
+            with patch('pathlib.Path.exists', return_value=True):
+                dur = _get_segment_file_duration('/v/vid_100_200.mp4', lookup)
+        _ffprobe_cache.pop('/v/vid_100_200.mp4', None)
+
+        # If ffprobe preference were removed (mutation), dur would be 100.0
+        # With ffprobe, dur is 197.5
+        assert dur != 100.0, "Mutation: ffprobe preference was removed"
+        assert dur == 197.5
+
+
+# ============================================================================
 # Summary runner
 # ============================================================================
 
@@ -210,5 +243,6 @@ class TestMutationSummary:
             TestMutationIsMissingFileOldBehavior,
             TestMutationRemoveStartClamping,
             TestMutationInvertUnresolved,
+            TestMutationRemoveFfprobePreference,
         ]
-        assert len(mutation_classes) >= 6, "Should have at least 6 mutation categories"
+        assert len(mutation_classes) >= 7, "Should have at least 7 mutation categories"

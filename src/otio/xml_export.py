@@ -14,7 +14,7 @@ import uuid as uuid_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .utils import escape_xml, format_path_url, parse_timecode_to_frames, seg_start, seg_end
+from .utils import escape_xml, format_path_url, parse_timecode_to_frames, seg_start, seg_end, _get_media_duration
 from .timeline import _validate_entity_images
 
 if TYPE_CHECKING:
@@ -163,6 +163,9 @@ def _is_unresolved_path(resolved_path: str, original_source: str) -> bool:
     return not ext and not has_sep
 
 
+_ffprobe_cache: Dict[str, float] = {}
+
+
 def _get_segment_file_duration(
     resolved_path: str,
     segment_lookup: Dict,
@@ -171,13 +174,29 @@ def _get_segment_file_duration(
     """
     Get the physical duration of a resolved segment file in seconds.
 
-    Looks up the segment in segment_lookup by matching file path.
-    Falls back to fallback_duration if not found.
+    Uses ffprobe for actual file duration (cached), falling back to
+    segment_lookup range, then fallback_duration. ffprobe is essential
+    because yt-dlp cuts on keyframes, making files slightly shorter
+    than the requested range — DaVinci Resolve rejects clips whose
+    declared duration exceeds the actual file frames.
     """
+    # Try ffprobe first (cached) — gives exact file duration
+    if resolved_path in _ffprobe_cache:
+        return _ffprobe_cache[resolved_path]
+
+    if Path(resolved_path).exists():
+        probed = _get_media_duration(resolved_path)
+        if probed is not None:
+            _ffprobe_cache[resolved_path] = probed
+            return probed
+
+    # Fall back to segment lookup range
     for video_id, segments in segment_lookup.items():
         for seg_info in segments:
             if seg_info['file'] == resolved_path:
-                return seg_info['end'] - seg_info['start']
+                duration = seg_info['end'] - seg_info['start']
+                _ffprobe_cache[resolved_path] = duration
+                return duration
     return fallback_duration
 
 
