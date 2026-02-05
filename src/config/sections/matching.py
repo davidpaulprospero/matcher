@@ -249,6 +249,13 @@ class MatchingConfig:
     cache_llm_responses: bool = True
     cache_ttl_hours: int = 24
 
+    # LLM reranker spread calibration (US-63-008)
+    # Adjusts confidence based on candidate spread (top-1 vs top-2 similarity)
+    llm_reranker_close_spread_threshold: float = 0.05  # Spread < this = ambiguous, reduce confidence
+    llm_reranker_clear_winner_threshold: float = 0.20  # Spread > this = clear winner, boost confidence
+    llm_reranker_close_spread_factor: float = 0.9  # Multiply confidence by this when close spread
+    llm_reranker_clear_winner_factor: float = 1.1  # Multiply confidence by this when clear winner
+
     # Delta matching (only match new videos)
     delta_matching_enabled: bool = True  # Enable delta-aware matching
     force_rematch: bool = False  # Force rematch all videos (CLI override)

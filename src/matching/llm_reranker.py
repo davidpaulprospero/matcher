@@ -25,6 +25,12 @@ class LLMRerankerConfig:
     ambiguous_threshold: float = 0.65  # Confidence below this triggers secondary LLM
     cache_llm_responses: bool = True  # Enable response caching
 
+    # Confidence calibration based on candidate spread (US-63-008)
+    close_spread_threshold: float = 0.05  # If top-2 spread < this, apply reduction
+    clear_winner_threshold: float = 0.20  # If top-2 spread > this, apply boost
+    close_spread_factor: float = 0.9  # Multiply confidence by this when close spread
+    clear_winner_factor: float = 1.1  # Multiply confidence by this when clear winner
+
 
 @dataclass
 class RerankResult:
@@ -62,7 +68,11 @@ class LLMReranker:
         """Create LLMReranker from matching config section."""
         config = LLMRerankerConfig(
             ambiguous_threshold=getattr(matching_config, 'ambiguous_threshold', 0.65),
-            cache_llm_responses=getattr(matching_config, 'cache_llm_responses', True)
+            cache_llm_responses=getattr(matching_config, 'cache_llm_responses', True),
+            close_spread_threshold=getattr(matching_config, 'llm_reranker_close_spread_threshold', 0.05),
+            clear_winner_threshold=getattr(matching_config, 'llm_reranker_clear_winner_threshold', 0.20),
+            close_spread_factor=getattr(matching_config, 'llm_reranker_close_spread_factor', 0.9),
+            clear_winner_factor=getattr(matching_config, 'llm_reranker_clear_winner_factor', 1.1),
         )
         return cls(config, cache)
 
@@ -135,6 +145,13 @@ class LLMReranker:
                     reasoning = f"(secondary) {sec_reason}"
                     used_secondary = True
 
+            # Apply confidence calibration based on candidate spread (US-63-008)
+            confidence, spread_adjustment = self._apply_spread_calibration(
+                confidence, candidates
+            )
+            if spread_adjustment != 0.0:
+                reasoning = f"{reasoning} [spread_adj={spread_adjustment:+.2f}]"
+
             # Cache the result
             self._cache_response(cache_key, selected_idx, confidence, reasoning)
 
@@ -176,3 +193,59 @@ class LLMReranker:
                 'confidence': confidence,
                 'reasoning': reasoning
             })
+
+    def _apply_spread_calibration(
+        self,
+        confidence: float,
+        candidates: List[Tuple['SRTSegment', float]]
+    ) -> Tuple[float, float]:
+        """
+        Apply confidence calibration based on candidate spread (US-63-008).
+
+        If top-2 candidates are very close (spread < close_spread_threshold),
+        reduce confidence to reflect ambiguity.
+
+        If top-2 candidates are far apart (spread > clear_winner_threshold),
+        boost confidence to reflect certainty (capped at 1.0).
+
+        Args:
+            confidence: Raw confidence from LLM
+            candidates: List of (segment, similarity) tuples
+
+        Returns:
+            Tuple of (calibrated_confidence, adjustment_delta)
+        """
+        if len(candidates) < 2:
+            logger.debug("US-63-008 spread calibration: skipped (< 2 candidates)")
+            return confidence, 0.0
+
+        # Calculate spread between top-2 candidate similarities
+        top_sim = candidates[0][1]
+        second_sim = candidates[1][1]
+        spread = top_sim - second_sim
+
+        original_confidence = confidence
+        adjustment = 0.0
+
+        if spread < self.config.close_spread_threshold:
+            # Very close candidates - reduce confidence (ambiguity)
+            confidence = confidence * self.config.close_spread_factor
+            adjustment = confidence - original_confidence
+            logger.debug(
+                f"US-63-008 spread calibration: close spread ({spread:.3f} < {self.config.close_spread_threshold}), "
+                f"confidence {original_confidence:.3f} -> {confidence:.3f} (factor={self.config.close_spread_factor})"
+            )
+        elif spread > self.config.clear_winner_threshold:
+            # Clear winner - boost confidence (capped at 1.0)
+            confidence = min(1.0, confidence * self.config.clear_winner_factor)
+            adjustment = confidence - original_confidence
+            logger.debug(
+                f"US-63-008 spread calibration: clear winner ({spread:.3f} > {self.config.clear_winner_threshold}), "
+                f"confidence {original_confidence:.3f} -> {confidence:.3f} (factor={self.config.clear_winner_factor}, capped=1.0)"
+            )
+        else:
+            logger.debug(
+                f"US-63-008 spread calibration: neutral spread ({spread:.3f}), no adjustment"
+            )
+
+        return confidence, adjustment
