@@ -13,6 +13,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 from .models import CaptionSegment, NormalizationConfig
 from .exceptions import CaptionNormalizationError, CaptionParseWarning
+from .parsers import parse_timestamp as _canonical_parse_timestamp
 
 if TYPE_CHECKING:
     pass
@@ -515,41 +516,9 @@ class CaptionNormalizer:
     def convert_timestamp_to_seconds(timestamp: str) -> Optional[float]:
         """Convert a timestamp string to seconds.
 
-        Supports formats:
-        - HH:MM:SS,mmm (SRT)
-        - HH:MM:SS.mmm (VTT)
-        - MM:SS.mmm (VTT short)
-        - Seconds as float string
-
-        Args:
-            timestamp: Timestamp string to convert.
-
-        Returns:
-            Time in seconds, or None if parsing fails.
+        Delegates to the canonical implementation in src.caption.parsers.parse_timestamp.
         """
-        if not timestamp:
-            return None
-
-        timestamp = timestamp.strip().replace(',', '.')
-
-        # Try float directly (e.g., "1.5")
-        try:
-            return float(timestamp)
-        except ValueError:
-            pass
-
-        # Pattern for HH:MM:SS.mmm or MM:SS.mmm
-        match = re.match(r'^(?:(\d+):)?(\d+):(\d+)(?:\.(\d+))?$', timestamp)
-        if match:
-            hours = int(match.group(1)) if match.group(1) else 0
-            minutes = int(match.group(2))
-            seconds = int(match.group(3))
-            millis = int(match.group(4).ljust(3, '0')[:3]) if match.group(4) else 0
-
-            return hours * 3600 + minutes * 60 + seconds + millis / 1000.0
-
-        logger.warning(f"Could not parse timestamp: {timestamp}")
-        return None
+        return _canonical_parse_timestamp(timestamp)
 
     @staticmethod
     def seconds_to_vtt_timestamp(seconds: float) -> str:
