@@ -20,6 +20,7 @@ from src.otio.xml_export import (
     _write_media_xml_part,
     _build_segment_lookup,
     _resolve_video_segment,
+    _get_segment_file_duration,
 )
 from src.stages.output import OutputStage, SegmentInfo
 from src.utils import Match, MatchResult, SRTSegment, AlternativeMatch
@@ -390,3 +391,132 @@ class TestSegmentLookupResolution:
         resolved, start = _resolve_video_segment("unknown_id", 10.0, lookup)
         assert resolved == "unknown_id"
         assert start == 10.0
+
+    @pytest.mark.fast
+    def test_get_segment_file_duration_found(self):
+        """_get_segment_file_duration returns physical segment duration."""
+        segments = [
+            SegmentInfo(
+                video_id="vid123",
+                file="E:/v/project/vid123_100_200.mp4",
+                original_start=100.0,
+                original_end=200.0
+            )
+        ]
+        lookup = _build_segment_lookup(segments)
+        dur = _get_segment_file_duration("E:/v/project/vid123_100_200.mp4", lookup)
+        assert dur == 100.0
+
+    @pytest.mark.fast
+    def test_get_segment_file_duration_fallback(self):
+        """_get_segment_file_duration returns fallback for unknown path."""
+        lookup = _build_segment_lookup([])
+        dur = _get_segment_file_duration("unknown_path.mp4", lookup, fallback_duration=42.0)
+        assert dur == 42.0
+
+
+# ============================================================================
+# Bug 4: Timecode extent mismatch (in/out > file duration)
+# ============================================================================
+
+class TestTimecodeExtentClamping:
+    """XML clipitem in/out must not exceed file duration."""
+
+    @pytest.mark.fast
+    def test_sequence_xml_in_out_within_duration(self, multitrack_matches, tmp_path):
+        """Sequence XML clipitem out must not exceed duration."""
+        # Create segments with known durations
+        segments = [
+            SegmentInfo(
+                video_id="primary",
+                file="/videos/primary.mp4",
+                original_start=0.0,
+                original_end=30.0
+            ),
+            SegmentInfo(
+                video_id="alt1",
+                file="/videos/alt1.mp4",
+                original_start=0.0,
+                original_end=20.0
+            ),
+            SegmentInfo(
+                video_id="secondary1",
+                file="/videos/secondary1.mp4",
+                original_start=0.0,
+                original_end=25.0
+            ),
+        ]
+
+        out_path = str(tmp_path / "timeline")
+        generate_davinci_sequence_xml(
+            multitrack_matches, out_path, frame_rate=30.0,
+            downloaded_segments=segments
+        )
+        xml_path = str(tmp_path / "timeline_sequence.xml")
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+
+        for clipitem in root.iter('clipitem'):
+            dur_el = clipitem.find('duration')
+            in_el = clipitem.find('in')
+            out_el = clipitem.find('out')
+            name_el = clipitem.find('name')
+            if dur_el is not None and in_el is not None and out_el is not None:
+                dur = int(dur_el.text)
+                in_val = int(in_el.text)
+                out_val = int(out_el.text)
+                name = name_el.text if name_el is not None else '?'
+                assert out_val <= dur, (
+                    f"Clip '{name}': out({out_val}) > duration({dur})"
+                )
+                assert in_val < dur, (
+                    f"Clip '{name}': in({in_val}) >= duration({dur})"
+                )
+
+    @pytest.mark.fast
+    def test_project_xml_in_out_within_duration(self, multitrack_matches, temp_output_path):
+        """Project XML clipitem out must not exceed duration."""
+        segments = [
+            SegmentInfo(
+                video_id="primary",
+                file="/videos/primary.mp4",
+                original_start=0.0,
+                original_end=30.0
+            ),
+            SegmentInfo(
+                video_id="alt1",
+                file="/videos/alt1.mp4",
+                original_start=0.0,
+                original_end=20.0
+            ),
+            SegmentInfo(
+                video_id="secondary1",
+                file="/videos/secondary1.mp4",
+                original_start=0.0,
+                original_end=25.0
+            ),
+        ]
+
+        paths = generate_resolve_xml_with_bins(
+            multitrack_matches, temp_output_path, frame_rate=30.0,
+            downloaded_segments=segments
+        )
+        tree = ET.parse(paths[0])
+        root = tree.getroot()
+
+        for clipitem in root.iter('clipitem'):
+            dur_el = clipitem.find('duration')
+            in_el = clipitem.find('in')
+            out_el = clipitem.find('out')
+            name_el = clipitem.find('name')
+            if dur_el is not None and in_el is not None and out_el is not None:
+                dur = int(dur_el.text)
+                in_val = int(in_el.text)
+                out_val = int(out_el.text)
+                name = name_el.text if name_el is not None else '?'
+                assert out_val <= dur, (
+                    f"Clip '{name}': out({out_val}) > duration({dur})"
+                )
+                assert in_val < dur or dur == 0, (
+                    f"Clip '{name}': in({in_val}) >= duration({dur})"
+                )

@@ -8,7 +8,17 @@ code strings, NOT to files on disk.
 
 import pytest
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
+
+from src.otio.xml_export import (
+    generate_resolve_xml_with_bins,
+    generate_davinci_sequence_xml,
+    _build_segment_lookup,
+    _get_segment_file_duration,
+)
+from src.stages.output import SegmentInfo
+from src.utils import Match, MatchResult, SRTSegment, AlternativeMatch
 
 
 def _read_source(relative_path: str) -> str:
@@ -152,3 +162,151 @@ class TestMutationsScanVideoSegments:
         assert "if file_str in seen_files:" in source, "Dedup guard should exist"
         # If we remove the dedup, test_no_duplicates_between_legacy_and_flat
         # would catch files counted twice (if both paths find same file)
+
+
+class TestMutationsTimecodeExtent:
+    """Mutate xml_export.py timecode clamping and verify tests catch regressions."""
+
+    @pytest.mark.fast
+    def test_mutation_remove_get_segment_file_duration(self):
+        """KILL: Removing _get_segment_file_duration function body."""
+        source = _read_source("src/otio/xml_export.py")
+        assert "def _get_segment_file_duration(" in source, "Helper must exist"
+        # The function is called in add_file, V1 clips, alt clips, and sequence XML
+        assert source.count("_get_segment_file_duration(") >= 5, (
+            "Expected at least 5 calls to _get_segment_file_duration"
+        )
+
+    @pytest.mark.fast
+    def test_mutation_remove_in_out_clamping(self):
+        """KILL: Removing the min() clamping on in/out frames."""
+        source = _read_source("src/otio/xml_export.py")
+        # Clamping pattern: min(..., seg_dur_frames) or min(..., max(0, seg_dur_frames - 1))
+        clamp_count = source.count("min(")
+        assert clamp_count >= 6, (
+            f"Expected at least 6 min() clamping calls, found {clamp_count}"
+        )
+
+    @pytest.mark.fast
+    def test_mutation_restore_300fps_padding(self):
+        """KILL: Re-adding int(300 * frame_rate) padding would be caught."""
+        source = _read_source("src/otio/xml_export.py")
+        # The old pattern `int(300 * frame_rate)` must NOT exist
+        assert "int(300 * frame_rate)" not in source, (
+            "Old 300*fps padding still exists — would inflate file_duration"
+        )
+
+    @pytest.mark.fast
+    def test_mutation_use_target_frames_for_duration(self):
+        """KILL: Using target_frames instead of file_dur_frames for clipitem duration."""
+        source = _read_source("src/otio/xml_export.py")
+        # The fix uses file_dur_frames for <duration>, NOT target_frames
+        # Verify file_dur_frames is computed and used
+        assert "file_dur_frames" in source, "file_dur_frames variable must exist"
+        assert source.count("file_dur_frames") >= 4, (
+            "file_dur_frames should be used in multiple locations"
+        )
+
+    @pytest.mark.fast
+    def test_mutation_behavioral_sequence_xml_clamped(self):
+        """KILL: Verify sequence XML clips have in/out <= duration with real data."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=5.0,
+            text="Test", source_file="voiceover.srt"
+        )
+        # Video match references a range that extends beyond segment file
+        vid_seg = SRTSegment(
+            index=0, start_time=105.0, end_time=125.0,
+            text="Video", source_file="vid123"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning="Test"
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+        # Segment file covers 100-115 (15 seconds)
+        segments = [SegmentInfo(
+            video_id="vid123",
+            file="/v/vid123_100_115.mp4",
+            original_start=100.0, original_end=115.0
+        )]
+
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "timeline")
+            generate_davinci_sequence_xml(
+                matches, out_path, frame_rate=30.0,
+                downloaded_segments=segments
+            )
+            xml_path = os.path.join(tmp, "timeline_sequence.xml")
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+
+            for clipitem in root.iter('clipitem'):
+                dur_el = clipitem.find('duration')
+                in_el = clipitem.find('in')
+                out_el = clipitem.find('out')
+                if dur_el is not None and in_el is not None and out_el is not None:
+                    dur = int(dur_el.text)
+                    out_val = int(out_el.text)
+                    in_val = int(in_el.text)
+                    # Segment is 15s = 450 frames. Match wants 105-125 (20s).
+                    # After resolution: adjusted_start=5s=150fr, source=20s=600fr
+                    # Without clamping: out=750 > dur=450 → FAIL
+                    # With clamping: out=450, in=150 → PASS
+                    assert out_val <= dur, (
+                        f"out({out_val}) > duration({dur}) — clamping broken"
+                    )
+
+    @pytest.mark.fast
+    def test_mutation_behavioral_project_xml_clamped(self):
+        """KILL: Verify project XML clips have in/out <= duration."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=5.0,
+            text="Test", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=105.0, end_time=125.0,
+            text="Video", source_file="vid123"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning="Test"
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+        segments = [SegmentInfo(
+            video_id="vid123",
+            file="/v/vid123_100_115.mp4",
+            original_start=100.0, original_end=115.0
+        )]
+
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "test_output.xml")
+            paths = generate_resolve_xml_with_bins(
+                matches, out_path, frame_rate=30.0,
+                downloaded_segments=segments
+            )
+            tree = ET.parse(paths[0])
+            root = tree.getroot()
+
+            for clipitem in root.iter('clipitem'):
+                dur_el = clipitem.find('duration')
+                in_el = clipitem.find('in')
+                out_el = clipitem.find('out')
+                if dur_el is not None and in_el is not None and out_el is not None:
+                    dur = int(dur_el.text)
+                    out_val = int(out_el.text)
+                    in_val = int(in_el.text)
+                    assert out_val <= dur, (
+                        f"out({out_val}) > duration({dur}) — clamping broken"
+                    )
+                    assert in_val < dur or dur == 0, (
+                        f"in({in_val}) >= duration({dur}) — clamping broken"
+                    )

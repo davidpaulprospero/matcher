@@ -137,6 +137,24 @@ def _resolve_video_segment(
     return source_file, source_start
 
 
+def _get_segment_file_duration(
+    resolved_path: str,
+    segment_lookup: Dict,
+    fallback_duration: float = 60.0
+) -> float:
+    """
+    Get the physical duration of a resolved segment file in seconds.
+
+    Looks up the segment in segment_lookup by matching file path.
+    Falls back to fallback_duration if not found.
+    """
+    for video_id, segments in segment_lookup.items():
+        for seg_info in segments:
+            if seg_info['file'] == resolved_path:
+                return seg_info['end'] - seg_info['start']
+    return fallback_duration
+
+
 def generate_resolve_xml_with_bins(
     matches: List['MatchResult'],
     output_path: str,
@@ -193,7 +211,15 @@ def generate_resolve_xml_with_bins(
         path_resolution_map[path] = resolved_path
 
         if resolved_path not in all_files:
-            dur_frames = int(duration_seconds * frame_rate) if duration_seconds > 0 else int(60 * frame_rate)
+            # Use physical segment file duration (from segment lookup) if available.
+            # This ensures <duration> matches the actual file on disk.
+            seg_dur = _get_segment_file_duration(resolved_path, segment_lookup, fallback_duration=0)
+            if seg_dur > 0:
+                dur_frames = int(seg_dur * frame_rate)
+            elif duration_seconds > 0:
+                dur_frames = int(duration_seconds * frame_rate)
+            else:
+                dur_frames = int(60 * frame_rate)
             all_files[resolved_path] = {
                 'file_id': f"file-{file_counter}",
                 'uuid': str(uuid_module.uuid4()),
@@ -203,22 +229,27 @@ def generate_resolve_xml_with_bins(
         return all_files[resolved_path]
 
     # Collect files from all tracks
+    # NOTE: duration must be segment duration (end - start), NOT absolute end_time.
+    # After segment resolution, files are trimmed segments (e.g., 20s), not full videos.
     for match_result in matches:
         vid_seg = match_result.primary_match.video_segment
-        dur = vid_seg.end_time if vid_seg.end_time > 0 else 60.0
+        dur = (vid_seg.end_time - vid_seg.start_time) if vid_seg.end_time > vid_seg.start_time else 60.0
         add_file(vid_seg.source_file, dur, vid_seg.start_time)
 
         for alt in match_result.alternatives:
-            dur = alt.video_segment.end_time if alt.video_segment.end_time > 0 else 60.0
-            add_file(alt.video_segment.source_file, dur, alt.video_segment.start_time)
+            s = alt.video_segment
+            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+            add_file(s.source_file, dur, s.start_time)
 
         for sec in getattr(match_result, 'secondary_matches', []):
-            dur = sec.video_segment.end_time if sec.video_segment.end_time > 0 else 60.0
-            add_file(sec.video_segment.source_file, dur, sec.video_segment.start_time)
+            s = sec.video_segment
+            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+            add_file(s.source_file, dur, s.start_time)
 
         for strat in match_result.strategy_matches:
-            dur = strat.video_segment.end_time if strat.video_segment.end_time > 0 else 60.0
-            add_file(strat.video_segment.source_file, dur, strat.video_segment.start_time)
+            s = strat.video_segment
+            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+            add_file(s.source_file, dur, s.start_time)
 
     if entity_images:
         # Validate entity images first
@@ -414,8 +445,16 @@ def generate_resolve_xml_with_bins(
         )
         source_start_frames = int(adjusted_start * frame_rate)
 
+        # Clamp in/out to physical segment file duration
+        seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+        seg_dur_frames = int(seg_dur_secs * frame_rate)
+        source_start_frames = min(source_start_frames, max(0, seg_dur_frames - 1))
+        clamped_out = min(source_start_frames + source_frames, seg_dur_frames)
+
         file_info = all_files.get(resolved_path, {})
         file_id = file_info.get('file_id', '')
+        # Ensure duration >= out point so DaVinci doesn't reject the clip
+        file_dur_frames = max(file_info.get('duration_frames', seg_dur_frames), clamped_out)
 
         # Make clip name unique by including segment ID and parent folder
         segment_id = f"S{match_idx:03d}"
@@ -426,11 +465,11 @@ def generate_resolve_xml_with_bins(
         xml_lines.extend([
             '                            <clipitem>',
             f'                                <name>{unique_name}</name>',
-            f'                                <duration>{target_frames}</duration>',
+            f'                                <duration>{file_dur_frames}</duration>',
             f'                                <start>{timeline_pos}</start>',
             f'                                <end>{timeline_pos + target_frames}</end>',
             f'                                <in>{source_start_frames}</in>',
-            f'                                <out>{source_start_frames + source_frames}</out>',
+            f'                                <out>{clamped_out}</out>',
             f'                                <file id="{file_id}"/>',
         ])
 
@@ -514,8 +553,15 @@ def generate_resolve_xml_with_bins(
                 )
                 alt_start_frames = int(adjusted_start * frame_rate)
 
+                # Clamp in/out to physical segment file duration
+                seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+                seg_dur_frames = int(seg_dur_secs * frame_rate)
+                alt_start_frames = min(alt_start_frames, max(0, seg_dur_frames - 1))
+                alt_out_frames = min(alt_start_frames + alt_source_frames, seg_dur_frames)
+
                 file_info = all_files.get(resolved_path, {})
                 file_id = file_info.get('file_id', '')
+                file_dur_frames = max(file_info.get('duration_frames', seg_dur_frames), alt_out_frames)
 
                 segment_id = f"S{match_idx:03d}"
                 folder_name = Path(resolved_path).parent.name
@@ -525,11 +571,11 @@ def generate_resolve_xml_with_bins(
                 xml_lines.extend([
                     '                            <clipitem>',
                     f'                                <name>{unique_name}</name>',
-                    f'                                <duration>{target_frames}</duration>',
+                    f'                                <duration>{file_dur_frames}</duration>',
                     f'                                <start>{alt_timeline_pos}</start>',
                     f'                                <end>{alt_timeline_pos + target_frames}</end>',
                     f'                                <in>{alt_start_frames}</in>',
-                    f'                                <out>{alt_start_frames + alt_source_frames}</out>',
+                    f'                                <out>{alt_out_frames}</out>',
                     f'                                <file id="{file_id}"/>',
                     '                            </clipitem>',
                 ])
@@ -922,7 +968,13 @@ def _add_sequence_alt_tracks(
 
                 clip_name = escape_xml(Path(resolved_path).name)
                 path_url = format_path_url(resolved_path)
-                file_duration = max(alt_source_frames + in_frames, int(300 * frame_rate))
+                # file_duration must match the physical segment file on disk.
+                # Clamp in/out to not exceed the segment file.
+                seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+                seg_dur_frames = int(seg_dur_secs * frame_rate)
+                file_duration = seg_dur_frames
+                in_frames = min(in_frames, max(0, seg_dur_frames - 1))
+                out_frames = min(out_frames, seg_dur_frames)
 
                 segment_id = f"S{match_idx:03d}"
 
@@ -1078,8 +1130,13 @@ def generate_davinci_sequence_xml(
         clip_name = escape_xml(Path(resolved_path).name)
         path_url = format_path_url(resolved_path)
 
-        # Estimate file duration (use source duration as minimum)
-        file_duration = max(source_frames + in_frames, int(300 * frame_rate))
+        # file_duration must match the physical segment file on disk.
+        # Clamp in/out to not exceed the segment file.
+        seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+        seg_dur_frames = int(seg_dur_secs * frame_rate)
+        file_duration = seg_dur_frames
+        in_frames = min(in_frames, max(0, seg_dur_frames - 1))
+        out_frames = min(out_frames, seg_dur_frames)
 
         # Store clip data for audio track
         clip_data.append({
