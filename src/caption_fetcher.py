@@ -937,39 +937,43 @@ class CaptionBatchCheckpoint:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     remaining_video_ids: List[str] = field(default_factory=list)
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     def update(self, video_id: str, result: Union['CaptionResult', Dict[str, Any]]) -> None:
         """Add or update a result in the checkpoint.
+
+        Thread-safe: acquires _lock before modifying shared state.
 
         Args:
             video_id: Video ID that was processed.
             result: CaptionResult on success, or error dict on failure.
         """
-        if isinstance(result, CaptionResult):
-            # Serialize CaptionResult to dict
-            self.results[video_id] = {
-                'video_id': result.video_id,
-                'segments': [seg.to_dict() for seg in result.segments],
-                'language': result.language,
-                'is_auto_generated': result.is_auto_generated,
-                'format_source': result.format_source,
-                'segment_count': len(result.segments),
-                'caption_quality': result.caption_quality,
-            }
-            self.success_count += 1
-        else:
-            # Already a dict (error result)
-            self.results[video_id] = result
-            if result.get('error') or result.get('unavailable'):
-                self.error_count += 1
-            else:
+        with self._lock:
+            if isinstance(result, CaptionResult):
+                # Serialize CaptionResult to dict
+                self.results[video_id] = {
+                    'video_id': result.video_id,
+                    'segments': [seg.to_dict() for seg in result.segments],
+                    'language': result.language,
+                    'is_auto_generated': result.is_auto_generated,
+                    'format_source': result.format_source,
+                    'segment_count': len(result.segments),
+                    'caption_quality': result.caption_quality,
+                }
                 self.success_count += 1
+            else:
+                # Already a dict (error result)
+                self.results[video_id] = result
+                if result.get('error') or result.get('unavailable'):
+                    self.error_count += 1
+                else:
+                    self.success_count += 1
 
-        # Remove from remaining if present
-        if video_id in self.remaining_video_ids:
-            self.remaining_video_ids.remove(video_id)
+            # Remove from remaining if present
+            if video_id in self.remaining_video_ids:
+                self.remaining_video_ids.remove(video_id)
 
-        self.updated_at = time.time()
+            self.updated_at = time.time()
 
     def mark_aborted(
         self,
@@ -979,40 +983,47 @@ class CaptionBatchCheckpoint:
     ) -> None:
         """Mark the checkpoint as aborted due to error pattern.
 
+        Thread-safe: acquires _lock before modifying shared state.
+
         Args:
             reason: Human-readable abort reason.
             pattern_result: ErrorPatternResult with detection details.
             remaining_ids: List of video IDs not yet processed.
         """
-        self.aborted = True
-        self.abort_reason = reason
-        if pattern_result:
-            self.abort_pattern_info = {
-                'detected': pattern_result.detected,
-                'error_signature': pattern_result.error_signature,
-                'affected_video_ids': pattern_result.affected_video_ids,
-                'sample_size': pattern_result.sample_size,
-                'ratio': pattern_result.ratio,
-                'likely_cause': pattern_result.likely_cause,
-            }
-        if remaining_ids:
-            self.remaining_video_ids = remaining_ids
-        self.updated_at = time.time()
+        with self._lock:
+            self.aborted = True
+            self.abort_reason = reason
+            if pattern_result:
+                self.abort_pattern_info = {
+                    'detected': pattern_result.detected,
+                    'error_signature': pattern_result.error_signature,
+                    'affected_video_ids': pattern_result.affected_video_ids,
+                    'sample_size': pattern_result.sample_size,
+                    'ratio': pattern_result.ratio,
+                    'likely_cause': pattern_result.likely_cause,
+                }
+            if remaining_ids:
+                self.remaining_video_ids = remaining_ids
+            self.updated_at = time.time()
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            'results': self.results,
-            'total_requested': self.total_requested,
-            'success_count': self.success_count,
-            'error_count': self.error_count,
-            'aborted': self.aborted,
-            'abort_reason': self.abort_reason,
-            'abort_pattern_info': self.abort_pattern_info,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
-            'remaining_video_ids': self.remaining_video_ids,
-        }
+        """Convert to dictionary for JSON serialization.
+
+        Thread-safe: acquires _lock (RLock) for consistent snapshot.
+        """
+        with self._lock:
+            return {
+                'results': dict(self.results),
+                'total_requested': self.total_requested,
+                'success_count': self.success_count,
+                'error_count': self.error_count,
+                'aborted': self.aborted,
+                'abort_reason': self.abort_reason,
+                'abort_pattern_info': self.abort_pattern_info,
+                'created_at': self.created_at,
+                'updated_at': self.updated_at,
+                'remaining_video_ids': list(self.remaining_video_ids),
+            }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CaptionBatchCheckpoint':
