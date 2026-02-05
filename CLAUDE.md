@@ -58,6 +58,8 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | `/watch <project>` | Monitor pipeline progress (maintains `PIPELINE_STATUS.md`) |
 | `/research <topic>` | Research using Perplexity AI |
 | `/import-feedback <project> [csv]` | Import DaVinci Resolve marker feedback |
+| `/bugfix <error>` | Fast bug fix: reproduce, diagnose, fix, verify, scan for similar |
+| `/ralph-insights` | Analyze sessions split by Ralph vs interactive — true success rates |
 
 **Use `/research` proactively** for API docs, library usage, error debugging. Don't guess—research first.
 
@@ -85,6 +87,21 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 34 | Ralph prompt maxLength | `ralph-config.json` `prompts.maxLength` (default 10000) truncates story prompts — if stories fail mysteriously, check truncation first |
 | 35 | PowerShell threading | Never use `[System.Threading.Thread]` with PS cmdlets — use `[powershell]::Create()` with `.AddArgument()` for background work; raw threads crash the host process |
 | 36 | Console Quick Edit | Ralph disables Quick Edit Mode at startup (`Disable-QuickEditMode`) — clicking the console window freezes ALL `Write-Host` calls, blocking the monitoring loop, stall detection, and heartbeat while Claude keeps running |
+| 37 | Non-locking file reads | Python `open()` on Windows blocks other writers — use `os.open(path, os.O_RDONLY \| os.O_BINARY)` for files Ralph writes concurrently (metrics.csv, prd.json, sprint_history.json) |
+
+### Bug Fixing
+
+**Fix first, explain second.** Always attempt a fix within the first 2-3 messages, even if speculative. Do not spend extended time investigating without producing an actionable patch.
+
+**Dict-vs-object pattern:** When hitting `AttributeError` on a dict (e.g., `'dict' object has no attribute 'end_time'`):
+1. Check if the variable is a `dict` where a dataclass/object was expected
+2. Search for where the variable is assigned — look for JSON loads, cache returns, or dict literals
+3. Fix with dict access (`obj['key']`) or convert upstream to the correct type
+4. This is the #1 recurring bug class in this codebase
+
+**Fix one, find all:** After fixing any bug, always `grep` for the same anti-pattern across the entire codebase and fix all instances in one pass.
+
+**Add types at fix time:** When fixing attribute-related bugs, add type annotations to the function and its callers so mypy would catch the issue at lint time.
 
 ### Config Access Pattern
 
@@ -106,6 +123,16 @@ else:
 3. Add to `config.yaml` with comment
 4. Access in code with `getattr()` fallback
 5. Verify: `python -m py_compile src/config/sections/<section>.py`
+
+### Claude Code Session Data
+
+| Source | Location | Notes |
+|--------|----------|-------|
+| Session conversations | `~/.claude/projects/<project-key>/*.jsonl` | First `type: "user"` entry classifies session |
+| Prompt history | `~/.claude/history.jsonl` | Per-prompt: display, timestamp, sessionId, project |
+| Daily aggregates | `~/.claude/stats-cache.json` | Messages, sessions, tool calls, tokens by model |
+| Telemetry | `~/.claude/telemetry/*.json` | Sparse (failed events only); `tengu_init` has `print` flag |
+| Session insights script | `scripts/insights/analyze_sessions.py` | Classifies Ralph vs interactive, generates split report |
 
 ## Architecture
 
@@ -329,7 +356,7 @@ pytest tests/ -v --tb=short -x
 | V8 track empty | No B-roll matches | Check `face_score < 0.3` OR `word_count < threshold` |
 | 403 Forbidden | Download failures | Wait 1 hour, check cookies, or use VPN |
 | Empty source_file | Caption-first mode | Rule 22: Video IDs not file paths |
-| `--output-only` runs stages | Checkpoint corrupted | Use `--match-only` instead |
+| `--output-only` no effect | Was dead code before 2026-02-05 fix | Now wired in main.py |
 | Checkpoint corrupted | Various | Restore from `checkpoint.backup.json` |
 | Subprocess crash | Windows encoding | Rule 27: Add `encoding='utf-8', errors='replace'` |
 | Videos skipped (budget_exhausted) | Logs show `EXHAUSTED` | Increase `retry_budget.max_attempts` or check for rate limiting |
@@ -394,6 +421,10 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 | Date | Changes |
 |------|---------|
+| 2026-02-05 | Fix: Empty alt tracks (V2-V8) — 3 bugs: ITERATIVE_MATCH serialization dropped multi-track data, VoiceoverSegment/SRTSegment attribute mismatch crashed OUTPUT, `strategy_alternatives` typo in output.py |
+| 2026-02-05 | Feat: Wire `--output-only` flag — was declared in args.py but never consumed in main.py; now creates output-only pipeline, resets checkpoint to DOWNLOAD_SEGMENTS, re-runs only OUTPUT |
+| 2026-02-05 | Fix: Caption fetch "Requested format not available" — escalation `--extractor-args` caused yt-dlp video format resolution to fail before subtitle extraction; added `--ignore-no-formats-error` to subtitle fetch and list-subs commands |
+| 2026-02-05 | Fix: `_fetch_captions_for_videos` crashed on cache hits — `CachedCaption.segments` are dicts but code used attribute access (`.end_time`); added `isinstance` branch for dict vs object segments |
 | 2026-02-05 | Fix: Early exit race condition — added 30s periodic re-check of prd.json for `passes:true` regardless of file write detection; catches cases where `passes:true` written in same polling interval as prior write, reducing worst-case stall from 360s to ~45s |
 | 2026-02-05 | Fix: Phantom revalidation — exit code override in `Invoke-ClaudeSubprocess` now re-reads `prd.json` before overriding; prevents false phantom when Claude reverts `passes:true` during grace period, which caused permanent hard-story ban |
 | 2026-02-05 | Fix: PHANTOM false-positive — `Log-StoryVerification` return value leaked to pipeline in timeout/failure paths of `Resolve-ClaudeResult`, making `$resolution.Success` truthy via array member enumeration; suppressed with `$null =` |

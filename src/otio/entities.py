@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Literal
 
 import opentimelineio as otio
 
-from .utils import _to_windows_path, _get_media_duration, _has_problematic_path
+from .utils import _to_windows_path, _get_media_duration, _has_problematic_path, seg_start, seg_end
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -314,15 +314,15 @@ def add_entity_media_to_track(
     timeline_frame = 0
 
     # Get first segment start time for reference (scaled)
-    first_segment_start = matches[0].primary_match.voiceover_segment.start * time_scale_factor if matches else 0.0
+    first_segment_start = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor if matches else 0.0
 
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
 
         # Scale segment timing to match V1-V8 tracks
-        scaled_start = vo_seg.start * time_scale_factor
-        target_duration = (vo_seg.end - vo_seg.start) * time_scale_factor
+        scaled_start = seg_start(vo_seg) * time_scale_factor
+        target_duration = (seg_end(vo_seg) - seg_start(vo_seg)) * time_scale_factor
         duration_frames = round(target_duration * frame_rate)
 
         # Calculate expected position (where this segment should start)

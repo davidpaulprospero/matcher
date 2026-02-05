@@ -446,7 +446,7 @@ def main():
         sys.exit(1)
 
     # Run pipeline using modular architecture
-    from src.pipeline import create_default_pipeline, create_match_only_pipeline
+    from src.pipeline import create_default_pipeline, create_match_only_pipeline, create_output_only_pipeline
     from src.agents import ResilientRunner, HealingOrchestrator, HealingStrategy
 
     # Handle keyword presets/selection
@@ -454,8 +454,53 @@ def main():
     use_keywords = getattr(args, 'use_keywords', None)
     save_keywords = getattr(args, 'save_keywords', None)
 
+    # Validate mutually exclusive flags
+    if getattr(args, 'match_only', False) and getattr(args, 'output_only', False):
+        print("\n  Error: --match-only and --output-only cannot be used together.")
+        sys.exit(1)
+
     # Create pipeline
-    if args.match_only:
+    if getattr(args, 'output_only', False):
+        pipeline = create_output_only_pipeline(config, PROJECT_DIR)
+        # Output-only requires checkpoint data - force resume mode
+        if not args.resume:
+            args.resume = True
+
+        # Validate checkpoint exists
+        if not pipeline.checkpoint.exists():
+            print("\n  Error: --output-only requires existing checkpoint data.")
+            print("  Run the full pipeline first.")
+            sys.exit(1)
+
+        # Check checkpoint has sufficient data (at least DOWNLOAD_SEGMENTS completed)
+        checkpoint_data = pipeline.checkpoint.load()
+        if checkpoint_data:
+            last_stage = checkpoint_data.last_completed_stage
+            if last_stage:
+                from src.checkpoint import STAGE_ORDER
+                try:
+                    last_idx = STAGE_ORDER.index(last_stage)
+                    dl_idx = STAGE_ORDER.index('DOWNLOAD_SEGMENTS')
+                    if last_idx < dl_idx:
+                        print(f"\n  Error: Checkpoint incomplete for output-only mode.")
+                        print(f"  Last completed: {last_stage}")
+                        print(f"  Required: at least DOWNLOAD_SEGMENTS (run full pipeline first)")
+                        sys.exit(1)
+
+                    # Reset so only OUTPUT re-runs
+                    if last_stage in ('DOWNLOAD_SEGMENTS', 'OUTPUT'):
+                        pipeline.checkpoint.data.last_completed_stage = 'DOWNLOAD_SEGMENTS'
+                        pipeline.checkpoint._atomic_save()
+                        if last_stage == 'OUTPUT':
+                            print(f"  Reset checkpoint from OUTPUT to DOWNLOAD_SEGMENTS for re-generation")
+                except ValueError:
+                    pass  # Unknown stage, let it proceed
+
+        print(f"\n  Output-only mode: Regenerating OTIO/EDL/XML from checkpoint")
+        print(f"  Will skip: ANALYZE through DOWNLOAD_SEGMENTS")
+        print(f"  Will run: OUTPUT")
+
+    elif args.match_only:
         pipeline = create_match_only_pipeline(config, PROJECT_DIR)
         # Match-only requires checkpoint data - force resume mode
         if not args.resume:

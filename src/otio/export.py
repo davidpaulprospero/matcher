@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, List
 import opentimelineio as otio
 
 from .reporting import print_timeline_statistics
+from .utils import seg_start, seg_end
 
 if TYPE_CHECKING:
     from ..utils import MatchResult
@@ -361,7 +362,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         vo_seg = match.voiceover_segment
 
         # Calculate segment duration
-        target_duration = vo_seg.end - vo_seg.start
+        target_duration = seg_end(vo_seg) - seg_start(vo_seg)
         duration_frames = int(target_duration * frame_rate)
 
         # Marker at segment start

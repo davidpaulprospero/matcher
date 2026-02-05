@@ -23,6 +23,8 @@ from .utils import (
     get_segment_file_offset,
     _is_audio_only,
     _has_problematic_path,
+    seg_start,
+    seg_end,
 )
 
 
@@ -180,7 +182,7 @@ class TrackBuilder(ABC):
             Updated timeline_frames position
         """
         # Check for gap before this segment (silence in voiceover)
-        expected_start_frames = round((vo_seg.start - first_segment_start) * self.frame_rate)
+        expected_start_frames = round((seg_start(vo_seg) - first_segment_start) * self.frame_rate)
 
         if expected_start_frames > timeline_frames:
             # There's a gap - insert silence/gap clips
@@ -270,7 +272,7 @@ class PrimaryTrackBuilder(TrackBuilder):
             vid_seg = match.video_segment
 
             # Target duration = voiceover segment duration
-            target_duration = vo_seg.end - vo_seg.start
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             # Source duration = video segment duration
@@ -358,7 +360,7 @@ class AlternativeTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end - vo_seg.start
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             if alt_idx < len(match_result.alternatives):
@@ -431,7 +433,7 @@ class DiversityTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end - vo_seg.start
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             if sec_idx < len(match_result.secondary_matches):
@@ -508,7 +510,7 @@ class EmbeddingDiversityTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end - vo_seg.start
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             # Find strategy match for this strategy
@@ -582,7 +584,7 @@ class BRollTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end - vo_seg.start
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             # Find B-roll strategy match
