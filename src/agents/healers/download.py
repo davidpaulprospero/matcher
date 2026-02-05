@@ -21,7 +21,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Optional, Set
 
-from ..base import Healer, HealerResult, HealerAction
+from ..base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData, get_config_value, set_config_value
 from ...downloader.cookie_rotator import CookieRotator
 from ...downloader.vpn_manager import VPNManager
 from ...downloader.types import DownloadError
@@ -386,7 +386,7 @@ class DownloadHealer(Healer):
             "best",
         ]
 
-        current_format = getattr(download_config, 'format', None)
+        current_format = get_config_value(download_config, 'format', None)
 
         try:
             current_idx = format_fallbacks.index(current_format) if current_format else -1
@@ -398,11 +398,7 @@ class DownloadHealer(Healer):
             return HealerResult.failed("All format options exhausted")
 
         new_format = format_fallbacks[next_idx]
-
-        if hasattr(download_config, 'format'):
-            download_config.format = new_format
-        elif isinstance(download_config, dict):
-            download_config['format'] = new_format
+        set_config_value(download_config, 'format', new_format)
 
         self.log_success(f"Switched format: {current_format} -> {new_format}")
         return HealerResult.config_changed(
@@ -435,13 +431,10 @@ class DownloadHealer(Healer):
         # Try increasing socket timeout
         download_config = getattr(self.config, 'download', None)
         if download_config:
-            current_timeout = getattr(download_config, 'socket_timeout', 30)
+            current_timeout = get_config_value(download_config, 'socket_timeout', 30)
             new_timeout = min(current_timeout * 2, 120)
 
-            if hasattr(download_config, 'socket_timeout'):
-                download_config.socket_timeout = new_timeout
-            elif isinstance(download_config, dict):
-                download_config['socket_timeout'] = new_timeout
+            set_config_value(download_config, 'socket_timeout', new_timeout)
 
             self.log_success(f"Increased socket timeout: {current_timeout}s -> {new_timeout}s")
             return HealerResult.config_changed(
@@ -464,10 +457,7 @@ class DownloadHealer(Healer):
         # Enable resume in yt-dlp config
         download_config = getattr(self.config, 'download', None)
         if download_config:
-            if hasattr(download_config, 'continue_dl'):
-                download_config.continue_dl = True
-            elif isinstance(download_config, dict):
-                download_config['continue_dl'] = True
+            set_config_value(download_config, 'continue_dl', True)
 
         self.log_success("Enabled download resume, retrying")
         return HealerResult.fixed(
@@ -530,6 +520,24 @@ class DownloadHealer(Healer):
                 return match.group(1)
 
         return None
+
+    def handle_event(self, event_data: HealerEventData) -> None:
+        """Handle cross-healer coordination events.
+
+        Reacts to:
+        - CONFIG_CHANGED: Reset backoff since config may have fixed the issue
+        - RATE_LIMITED: Increase backoff preemptively
+        - PROVIDER_SWITCHED: Reset backoff for fresh start with new provider
+        """
+        if event_data.event == HealerEvent.CONFIG_CHANGED:
+            self.reset_backoff()
+            logger.debug(f"[{self.name}] Reset backoff due to config change from {event_data.source_healer}")
+        elif event_data.event == HealerEvent.RATE_LIMITED:
+            self.backoff_time = min(self.backoff_time * self.BACKOFF_MULTIPLIER, self.MAX_BACKOFF)
+            logger.debug(f"[{self.name}] Increased backoff to {self.backoff_time:.1f}s due to rate limit from {event_data.source_healer}")
+        elif event_data.event == HealerEvent.PROVIDER_SWITCHED:
+            self.reset_backoff()
+            logger.debug(f"[{self.name}] Reset backoff due to provider switch from {event_data.source_healer}")
 
     def reset_backoff(self):
         """Reset backoff state.
