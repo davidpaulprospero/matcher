@@ -139,7 +139,7 @@
                             "id":  "US-64-009",
                             "title":  "Add preflight check extensibility for custom validators",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Add register_preflight_check() method to HealingOrchestrator",
                                                        "Accept callable validators with signature (state: PipelineState) -\u003e List[PreflightIssue]",
@@ -148,7 +148,7 @@
                                                        "Add test verifying custom validators are called during preflight",
                                                        "Add test verifying custom validator issues are included in preflight results"
                                                    ],
-                            "notes":  "Tier 3 (Extensibility). Source files: src/agents/orchestrator.py (run_preflight at lines 233-303). Current preflight checks are hardcoded; this allows pipeline stages or external code to register domain-specific validation without modifying orchestrator source."
+                            "notes":  "Implemented register/unregister_preflight_check() on HealingOrchestrator with Dict[str, Callable] registry. Custom validators execute in run_preflight() after healer checks, with exception handling so failing validators don't block pipeline. 10 tests in TestCustomPreflightValidators class cover registration, unregistration, duplicate detection, invocation during preflight, issue inclusion in results, multiple validators, exception handling, and re-registration. Also fixed conftest.py caption_first mock config."
                         },
                         {
                             "id":  "US-64-010",
