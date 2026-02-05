@@ -5,8 +5,11 @@ Extracted from monolithic config.py during refactoring (Jan 7, 2026).
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     'ProjectConfig',
@@ -147,6 +150,41 @@ class EmbeddingConfig:
     # Caching
     cache_embeddings: bool = True
     cache_batch_results: bool = True
+
+    # Known embedding providers
+    KNOWN_PROVIDERS = {'gemini', 'openai', 'local', 'sentence_transformers'}
+
+    def __post_init__(self):
+        # Validate batch_size >= 1
+        if self.batch_size < 1:
+            logger.warning(
+                "EmbeddingConfig.batch_size=%s is invalid (must be >= 1), "
+                "correcting to 1", self.batch_size
+            )
+            self.batch_size = 1
+
+        # Validate max_retries >= 0
+        if self.max_retries < 0:
+            logger.warning(
+                "EmbeddingConfig.max_retries=%s is invalid (must be >= 0), "
+                "correcting to 0", self.max_retries
+            )
+            self.max_retries = 0
+
+        # Validate max_workers >= 1
+        if self.max_workers < 1:
+            logger.warning(
+                "EmbeddingConfig.max_workers=%s is invalid (must be >= 1), "
+                "correcting to 1", self.max_workers
+            )
+            self.max_workers = 1
+
+        # Warn on unknown provider
+        if self.provider not in self.KNOWN_PROVIDERS:
+            logger.warning(
+                "EmbeddingConfig.provider='%s' is not a known provider "
+                "(known: %s)", self.provider, sorted(self.KNOWN_PROVIDERS)
+            )
 
 
 @dataclass
