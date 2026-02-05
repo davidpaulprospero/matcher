@@ -2170,3 +2170,162 @@ class TestCacheStalenessIntegration:
 
         # In strict mode, 4 stale should be skipped, 6 returned
         assert returned_count == 6
+
+
+@pytest.mark.fast
+class TestNegativeCacheTTLEdgeCases:
+    """Test negative cache TTL edge cases using time mocking (US-66-012).
+
+    Covers TTL expiration behavior without real waiting by monkeypatching time.time().
+    """
+
+    def _make_cache(self, ttl_seconds=3600, validation_mode='strict'):
+        """Create a CaptionCache with specific negative TTL."""
+        from src.config.sections.download import CaptionFirstConfig
+        import tempfile
+
+        config = CaptionFirstConfig(
+            cache_dir=tempfile.mkdtemp(),
+            negative_cache_ttl_seconds=ttl_seconds,
+            cache_validation=validation_mode,
+            max_cache_age_days=30,
+        )
+        return CaptionCache(config)
+
+    def test_is_caption_unavailable_true_within_ttl(self, monkeypatch):
+        """Verify is_caption_unavailable returns True for entry within TTL window.
+
+        Stores an unavailable entry at t=1000, then checks at t=1000+1800 (half of
+        the 3600s TTL). Entry should still be considered unavailable.
+        """
+        base_time = 1000.0
+        current_time = [base_time]
+
+        def mock_time():
+            return current_time[0]
+
+        monkeypatch.setattr(time, 'time', mock_time)
+
+        cache = self._make_cache(ttl_seconds=3600, validation_mode='strict')
+        cache.store_unavailable("ttl_vid_001", "en")
+
+        # Advance time to halfway through TTL (1800s of 3600s)
+        current_time[0] = base_time + 1800
+
+        assert cache.is_caption_unavailable("ttl_vid_001", "en") is True
+
+    def test_is_caption_unavailable_false_past_ttl(self, monkeypatch):
+        """Verify is_caption_unavailable returns False for entry past TTL (expired).
+
+        Stores an unavailable entry at t=1000, then checks at t=1000+3601 (just past
+        the 3600s TTL). In strict mode, expired entry should return False.
+        """
+        base_time = 1000.0
+        current_time = [base_time]
+
+        def mock_time():
+            return current_time[0]
+
+        monkeypatch.setattr(time, 'time', mock_time)
+
+        cache = self._make_cache(ttl_seconds=3600, validation_mode='strict')
+        cache.store_unavailable("ttl_vid_002", "en")
+
+        # Advance time past TTL (3601s > 3600s)
+        current_time[0] = base_time + 3601
+
+        assert cache.is_caption_unavailable("ttl_vid_002", "en") is False
+
+    def test_refetch_succeeds_after_negative_cache_expires(self, monkeypatch):
+        """Verify re-fetch succeeds after negative cache entry expires.
+
+        Integration test: store_unavailable → is_caption_unavailable=True →
+        advance time past TTL → is_caption_unavailable=False → store new
+        positive entry → get_caption returns data.
+        """
+        base_time = 1000.0
+        current_time = [base_time]
+
+        def mock_time():
+            return current_time[0]
+
+        monkeypatch.setattr(time, 'time', mock_time)
+
+        cache = self._make_cache(ttl_seconds=3600, validation_mode='strict')
+
+        # Step 1: Store unavailable entry
+        cache.store_unavailable("ttl_vid_003", "en")
+
+        # Step 2: Confirm it's marked unavailable
+        assert cache.is_caption_unavailable("ttl_vid_003", "en") is True
+
+        # Step 3: Advance time past TTL
+        current_time[0] = base_time + 3601
+
+        # Step 4: Confirm expired - no longer unavailable
+        assert cache.is_caption_unavailable("ttl_vid_003", "en") is False
+
+        # Step 5: Simulate re-fetch storing a positive result
+        segments = [CaptionSegment(0, 0.0, 5.0, "Captions now available", "ttl_vid_003")]
+        result = CaptionResult(
+            video_id="ttl_vid_003",
+            segments=segments,
+            language="en",
+            is_auto_generated=True,
+            format_source="json3",
+        )
+        cache.store(result)
+
+        # Step 6: Confirm positive entry retrieval works
+        cached = cache.get_caption("ttl_vid_003", "en")
+        assert cached is not None
+        assert cached.video_id == "ttl_vid_003"
+        assert len(cached.segments) == 1
+        # Should no longer be flagged as unavailable
+        assert cache.is_caption_unavailable("ttl_vid_003", "en") is False
+
+    def test_exact_ttl_boundary_is_not_expired(self, monkeypatch):
+        """Verify entry at exact TTL boundary is NOT expired.
+
+        The check is `age_seconds > max_age_seconds` (strictly greater),
+        so at exactly the TTL boundary the entry should still be valid.
+        """
+        base_time = 1000.0
+        current_time = [base_time]
+
+        def mock_time():
+            return current_time[0]
+
+        monkeypatch.setattr(time, 'time', mock_time)
+
+        cache = self._make_cache(ttl_seconds=3600, validation_mode='strict')
+        cache.store_unavailable("boundary_vid", "en")
+
+        # Advance time to exactly the TTL boundary (3600s == 3600s)
+        current_time[0] = base_time + 3600
+
+        # At exact boundary, age == max, not >, so should still be valid
+        assert cache.is_caption_unavailable("boundary_vid", "en") is True
+
+        # One second past boundary → expired
+        current_time[0] = base_time + 3601
+        assert cache.is_caption_unavailable("boundary_vid", "en") is False
+
+    def test_very_large_ttl_entry_stays_valid(self, monkeypatch):
+        """Verify entry with very large TTL stays valid after significant time."""
+        base_time = 1000.0
+        current_time = [base_time]
+
+        def mock_time():
+            return current_time[0]
+
+        monkeypatch.setattr(time, 'time', mock_time)
+
+        # 30 days in seconds
+        cache = self._make_cache(ttl_seconds=30 * 24 * 3600, validation_mode='strict')
+        cache.store_unavailable("longlive_vid", "en")
+
+        # Advance 29 days (still within 30-day TTL)
+        current_time[0] = base_time + 29 * 24 * 3600
+
+        assert cache.is_caption_unavailable("longlive_vid", "en") is True
