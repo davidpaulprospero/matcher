@@ -53,6 +53,28 @@ class VarietyConfig:
     timeline_variety_window: float = 600.0  # 10 minutes - no same source within this window
     max_source_repeats_in_window: int = 1  # Max times same source can appear in window
 
+    def __post_init__(self):
+        if self.min_time_distance < 0:
+            raise ValueError(
+                f"VarietyConfig.min_time_distance must be non-negative "
+                f"(seconds between clips from same source), got {self.min_time_distance}"
+            )
+        if not (0.0 <= self.min_embedding_distance <= 2.0):
+            raise ValueError(
+                f"VarietyConfig.min_embedding_distance must be in range 0.0-2.0 "
+                f"(cosine distance), got {self.min_embedding_distance}"
+            )
+        if self.timeline_variety_window <= 0:
+            raise ValueError(
+                f"VarietyConfig.timeline_variety_window must be positive "
+                f"(seconds), got {self.timeline_variety_window}"
+            )
+        if self.max_source_repeats_in_window <= 0:
+            raise ValueError(
+                f"VarietyConfig.max_source_repeats_in_window must be positive "
+                f"(count), got {self.max_source_repeats_in_window}"
+            )
+
 
 @dataclass
 class OutputConfig:
@@ -140,3 +162,18 @@ class MultiStyleConfig:
     """Multi-style OTIO generation"""
     enabled: bool = False
     styles: List[str] = field(default_factory=lambda: ["default", "strict"])
+
+    def __post_init__(self):
+        import warnings
+        if self.enabled and not self.styles:
+            raise ValueError(
+                "MultiStyleConfig.styles must be non-empty when enabled=True "
+                "(no styles to generate)"
+            )
+        if self.enabled and self.styles == ["default"]:
+            warnings.warn(
+                "MultiStyleConfig enabled with only 'default' style — "
+                "multi-style generation has no effect with a single default style",
+                UserWarning,
+                stacklevel=2,
+            )

@@ -1430,11 +1430,119 @@ duration_tiers:
 
 
 # =============================================================================
+# US-69-011: MultiStyleConfig and StockFootageConfig validation
+# =============================================================================
+
+from src.config.sections.output import MultiStyleConfig
+from src.config.sections.duration import StockFootageConfig
+
+
+@pytest.mark.fast
+class TestMultiStyleConfigValueErrorValidation:
+    """Test MultiStyleConfig raises ValueError for invalid values."""
+
+    def test_enabled_with_empty_styles_raises_valueerror(self):
+        """Test MultiStyleConfig(enabled=True, styles=[]) raises ValueError."""
+        with pytest.raises(ValueError, match="styles.*non-empty.*enabled"):
+            MultiStyleConfig(enabled=True, styles=[])
+
+    def test_enabled_with_only_default_warns(self):
+        """Test MultiStyleConfig(enabled=True, styles=['default']) warns."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            config = MultiStyleConfig(enabled=True, styles=["default"])
+            assert len(w) == 1
+            assert "only 'default' style" in str(w[0].message)
+            assert config.enabled is True
+
+    def test_disabled_with_empty_styles_accepted(self):
+        """Test MultiStyleConfig(enabled=False, styles=[]) is valid."""
+        config = MultiStyleConfig(enabled=False, styles=[])
+        assert config.enabled is False
+        assert config.styles == []
+
+    def test_enabled_with_multiple_styles_accepted(self):
+        """Test MultiStyleConfig(enabled=True, styles=['default', 'strict']) is valid."""
+        config = MultiStyleConfig(enabled=True, styles=["default", "strict"])
+        assert config.enabled is True
+        assert config.styles == ["default", "strict"]
+
+    def test_disabled_with_only_default_no_warning(self):
+        """Test disabled config with only 'default' does NOT warn."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            config = MultiStyleConfig(enabled=False, styles=["default"])
+            user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+            assert len(user_warnings) == 0
+            assert config.styles == ["default"]
+
+    def test_defaults_accepted(self):
+        """Test default MultiStyleConfig values pass validation."""
+        config = MultiStyleConfig()
+        assert config.enabled is False
+        assert config.styles == ["default", "strict"]
+
+
+@pytest.mark.fast
+class TestStockFootageConfigValueErrorValidation:
+    """Test StockFootageConfig raises ValueError for invalid values."""
+
+    def test_min_duration_zero_raises_valueerror(self):
+        """Test min_duration=0 raises ValueError."""
+        with pytest.raises(ValueError, match="min_duration.*positive"):
+            StockFootageConfig(min_duration=0)
+
+    def test_min_duration_negative_raises_valueerror(self):
+        """Test min_duration=-5 raises ValueError."""
+        with pytest.raises(ValueError, match="min_duration.*positive"):
+            StockFootageConfig(min_duration=-5)
+
+    def test_max_duration_zero_raises_valueerror(self):
+        """Test max_duration=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_duration.*positive"):
+            StockFootageConfig(max_duration=0)
+
+    def test_max_duration_negative_raises_valueerror(self):
+        """Test max_duration=-10 raises ValueError."""
+        with pytest.raises(ValueError, match="max_duration.*positive"):
+            StockFootageConfig(max_duration=-10)
+
+    def test_min_greater_than_max_raises_valueerror(self):
+        """Test min_duration > max_duration raises ValueError."""
+        with pytest.raises(ValueError, match="min_duration.*<=.*max_duration"):
+            StockFootageConfig(min_duration=60, max_duration=5)
+
+    def test_min_equals_max_accepted(self):
+        """Test min_duration == max_duration is valid (exact duration)."""
+        config = StockFootageConfig(min_duration=30, max_duration=30)
+        assert config.min_duration == 30
+        assert config.max_duration == 30
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = StockFootageConfig(min_duration=1, max_duration=1)
+        assert config.min_duration == 1
+        assert config.max_duration == 1
+
+        config = StockFootageConfig(min_duration=5, max_duration=60)
+        assert config.min_duration == 5
+        assert config.max_duration == 60
+
+    def test_defaults_accepted(self):
+        """Test default StockFootageConfig values pass validation."""
+        config = StockFootageConfig()
+        assert config.min_duration == 5
+        assert config.max_duration == 60
+
+
+# =============================================================================
 # US-69-004: ValueError for impossible config values
 # =============================================================================
 
 from src.config.sections.core import EmbeddingConfig
-from src.config.sections.output import DeduplicationConfig
+from src.config.sections.output import DeduplicationConfig, VarietyConfig
 
 
 @pytest.mark.fast
@@ -1814,6 +1922,84 @@ class TestZeroDownloadRemixConfigValueErrorValidation:
         config = ZeroDownloadRemixConfig(max_retries=50, max_keywords_per_batch=100)
         assert config.max_retries == 50
         assert config.max_keywords_per_batch == 100
+
+
+@pytest.mark.fast
+class TestVarietyConfigValueErrorValidation:
+    """Test VarietyConfig raises ValueError for invalid values."""
+
+    def test_min_time_distance_negative_raises_valueerror(self):
+        """Test min_time_distance=-1 raises ValueError."""
+        with pytest.raises(ValueError, match="min_time_distance"):
+            VarietyConfig(min_time_distance=-1)
+
+    def test_min_time_distance_negative_float_raises_valueerror(self):
+        """Test min_time_distance=-0.1 raises ValueError."""
+        with pytest.raises(ValueError, match="min_time_distance"):
+            VarietyConfig(min_time_distance=-0.1)
+
+    def test_min_time_distance_zero_accepted(self):
+        """Test min_time_distance=0 is valid (no minimum distance)."""
+        config = VarietyConfig(min_time_distance=0)
+        assert config.min_time_distance == 0
+
+    def test_min_embedding_distance_negative_raises_valueerror(self):
+        """Test min_embedding_distance=-0.1 raises ValueError."""
+        with pytest.raises(ValueError, match="min_embedding_distance"):
+            VarietyConfig(min_embedding_distance=-0.1)
+
+    def test_min_embedding_distance_above_max_raises_valueerror(self):
+        """Test min_embedding_distance=2.1 raises ValueError (cosine max is 2.0)."""
+        with pytest.raises(ValueError, match="min_embedding_distance"):
+            VarietyConfig(min_embedding_distance=2.1)
+
+    def test_min_embedding_distance_boundary_values_accepted(self):
+        """Test min_embedding_distance boundary values 0.0 and 2.0 are valid."""
+        config = VarietyConfig(min_embedding_distance=0.0)
+        assert config.min_embedding_distance == 0.0
+        config = VarietyConfig(min_embedding_distance=2.0)
+        assert config.min_embedding_distance == 2.0
+
+    def test_timeline_variety_window_zero_raises_valueerror(self):
+        """Test timeline_variety_window=0 raises ValueError."""
+        with pytest.raises(ValueError, match="timeline_variety_window"):
+            VarietyConfig(timeline_variety_window=0)
+
+    def test_timeline_variety_window_negative_raises_valueerror(self):
+        """Test timeline_variety_window=-100 raises ValueError."""
+        with pytest.raises(ValueError, match="timeline_variety_window"):
+            VarietyConfig(timeline_variety_window=-100)
+
+    def test_max_source_repeats_in_window_zero_raises_valueerror(self):
+        """Test max_source_repeats_in_window=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_source_repeats_in_window"):
+            VarietyConfig(max_source_repeats_in_window=0)
+
+    def test_max_source_repeats_in_window_negative_raises_valueerror(self):
+        """Test max_source_repeats_in_window=-1 raises ValueError."""
+        with pytest.raises(ValueError, match="max_source_repeats_in_window"):
+            VarietyConfig(max_source_repeats_in_window=-1)
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = VarietyConfig(
+            min_time_distance=0.0,
+            min_embedding_distance=0.0,
+            timeline_variety_window=0.1,
+            max_source_repeats_in_window=1,
+        )
+        assert config.min_time_distance == 0.0
+        assert config.min_embedding_distance == 0.0
+        assert config.timeline_variety_window == 0.1
+        assert config.max_source_repeats_in_window == 1
+
+    def test_defaults_accepted(self):
+        """Test default VarietyConfig values pass validation."""
+        config = VarietyConfig()
+        assert config.min_time_distance == 10.0
+        assert config.min_embedding_distance == 0.3
+        assert config.timeline_variety_window == 600.0
+        assert config.max_source_repeats_in_window == 1
 
 
 if __name__ == "__main__":
