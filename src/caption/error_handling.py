@@ -12,6 +12,14 @@ import re
 import threading
 from typing import Any, Dict, List, Optional
 
+from ..common.error_patterns import (
+    FORMAT_UNAVAILABLE_PATTERNS,
+    NETWORK_PATTERNS,
+    PARSE_PATTERNS,
+    RATE_LIMIT_PATTERNS,
+    TIMEOUT_PATTERNS,
+    UNAVAILABLE_PATTERNS,
+)
 from .enums import CaptionErrorCategory
 from .exceptions import CaptionFormatUnavailableError, CaptionUnavailableError
 from .models import ErrorPatternResult
@@ -61,51 +69,28 @@ def categorize_caption_error(error: Exception, reason: str = "") -> CaptionError
     error_str = str(error).lower()
     combined = f"{reason_lower} {error_str}"
 
-    # Rate limit patterns
-    rate_limit_patterns = [
-        "429", "too many requests", "rate limit", "quota exceeded",
-        "rate-limit", "throttle", "slow down"
-    ]
-    if any(p in combined for p in rate_limit_patterns):
+    # Rate limit patterns (US-67-009: shared from src/common/error_patterns.py)
+    if any(p in combined for p in RATE_LIMIT_PATTERNS):
         return CaptionErrorCategory.RATE_LIMIT
 
-    # Timeout patterns
-    timeout_patterns = [
-        "timeout", "timed out", "deadline exceeded", "connection timed out"
-    ]
-    if any(p in combined for p in timeout_patterns):
+    # Timeout patterns (US-67-009: shared from src/common/error_patterns.py)
+    if any(p in combined for p in TIMEOUT_PATTERNS):
         return CaptionErrorCategory.TIMEOUT
 
-    # Parse error patterns
-    parse_patterns = [
-        "parse", "decode", "invalid json", "malformed", "syntax error",
-        "unexpected token", "invalid format", "corrupt"
-    ]
-    if any(p in combined for p in parse_patterns):
+    # Parse error patterns (US-67-009: shared from src/common/error_patterns.py)
+    if any(p in combined for p in PARSE_PATTERNS):
         return CaptionErrorCategory.PARSE
 
-    # Format-specific unavailable (US-59-004) — check before general unavailable
-    format_unavailable_patterns = [
-        "requested format is not available",
-    ]
-    if any(p in combined for p in format_unavailable_patterns):
+    # Format-specific unavailable (US-59-004, US-67-009: shared)
+    if any(p in combined for p in FORMAT_UNAVAILABLE_PATTERNS):
         return CaptionErrorCategory.FORMAT_UNAVAILABLE
 
-    # Unavailable patterns
-    unavailable_patterns = [
-        "not available", "unavailable", "no subtitles", "no captions",
-        "subtitles disabled", "captions disabled", "not found"
-    ]
-    if any(p in combined for p in unavailable_patterns):
+    # Unavailable patterns (US-67-009: shared from src/common/error_patterns.py)
+    if any(p in combined for p in UNAVAILABLE_PATTERNS):
         return CaptionErrorCategory.UNAVAILABLE
 
-    # Network patterns (catch-all for connectivity issues)
-    network_patterns = [
-        "network", "connection", "dns", "resolve", "unreachable",
-        "refused", "reset", "broken pipe", "http error", "ssl",
-        "certificate", "socket", "eof"
-    ]
-    if any(p in combined for p in network_patterns):
+    # Network patterns (US-67-009: shared from src/common/error_patterns.py)
+    if any(p in combined for p in NETWORK_PATTERNS):
         return CaptionErrorCategory.NETWORK
 
     # Default to NETWORK for unknown errors (most likely to benefit from retry)
