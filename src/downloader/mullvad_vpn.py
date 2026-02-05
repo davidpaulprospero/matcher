@@ -114,6 +114,14 @@ class MullvadVPN(VPNManager):
         self._last_rotation_time: float = 0.0
         # Rotation delay cooldown from config (seconds between rotations)
         self._rotation_delay: float = float(getattr(config, 'rotation_delay_seconds', 5))
+        # Exponential backoff for rotation delays (US-67-007)
+        self._backoff_count: int = 0
+        self._initial_rotation_delay: float = float(
+            getattr(config, 'initial_rotation_delay_seconds', 5.0)
+        )
+        self._max_rotation_delay: float = float(
+            getattr(config, 'max_rotation_delay_seconds', 60.0)
+        )
 
         if self.is_enabled:
             logger.info(
@@ -286,7 +294,19 @@ class MullvadVPN(VPNManager):
             self._current_country = country
             self._used_countries.append(country)
 
-            # Wait for connection
+            # Wait with exponential backoff delay (US-67-007)
+            backoff_delay = self._compute_backoff_delay()
+            if backoff_delay > 0:
+                logger.info(
+                    f"Mullvad rotation backoff: waiting {backoff_delay:.1f}s "
+                    f"(attempt {self._backoff_count}, base={self._initial_rotation_delay}s, "
+                    f"cap={self._max_rotation_delay}s)"
+                )
+                time.sleep(backoff_delay)
+            # Increment backoff counter after applying delay
+            self._backoff_count += 1
+
+            # Additional connection stabilization delay if configured
             if self.config.switch_delay_seconds > 0:
                 logger.debug(f"Waiting {self.config.switch_delay_seconds}s for VPN connection...")
                 time.sleep(self.config.switch_delay_seconds)
@@ -346,6 +366,34 @@ class MullvadVPN(VPNManager):
             available.remove(self._current_country)
 
         return random.choice(available)
+
+    def _compute_backoff_delay(self) -> float:
+        """
+        Compute the exponential backoff delay for the current rotation.
+
+        Formula: base_delay * 2^(rotation_count) capped at max_rotation_delay.
+        First rotation (backoff_count=0): base_delay * 2^0 = base_delay (5s).
+
+        Returns:
+            Delay in seconds
+        """
+        delay = self._initial_rotation_delay * (2 ** self._backoff_count)
+        return min(delay, self._max_rotation_delay)
+
+    def reset_backoff(self) -> None:
+        """
+        Reset the exponential backoff counter after a successful download.
+
+        Call this when a download succeeds after VPN rotation to indicate
+        that the rotation was effective and future rotations should start
+        with the base delay again.
+        """
+        if self._backoff_count > 0:
+            logger.info(
+                f"Mullvad backoff reset (was at count={self._backoff_count}, "
+                f"delay would have been {self._compute_backoff_delay():.1f}s)"
+            )
+            self._backoff_count = 0
 
     def get_status(self) -> Dict:
         """

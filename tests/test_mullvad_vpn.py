@@ -731,3 +731,143 @@ class TestMullvadVPNRotationCooldown:
 
         # First rotation should succeed despite long cooldown setting
         assert result is True
+
+
+class TestMullvadVPNExponentialBackoff:
+    """Tests for MullvadVPN exponential backoff on rotation delays (US-67-007)."""
+
+    def _make_vpn(self, initial_delay=5.0, max_delay=60.0, rotation_delay=0):
+        """Create a MullvadVPN with backoff config for testing."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock()
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.verify_connection = False
+        config.skip_verification = True
+        config.max_rotations_per_session = 10
+        config.max_switches_per_session = 10
+        config.rotation_delay_seconds = rotation_delay
+        config.preferred_countries = ['us', 'de', 'gb']
+        config.initial_rotation_delay_seconds = initial_delay
+        config.max_rotation_delay_seconds = max_delay
+
+        return MullvadVPN(config)
+
+    def test_backoff_progression_5_10_20_40_60(self):
+        """Test backoff delays: 5s, 10s, 20s, 40s, 60s (capped at max_rotation_delay)."""
+        vpn = self._make_vpn(initial_delay=5.0, max_delay=60.0)
+
+        expected = [5.0, 10.0, 20.0, 40.0, 60.0]
+        actual = []
+        for i in range(5):
+            vpn._backoff_count = i
+            actual.append(vpn._compute_backoff_delay())
+
+        assert actual == expected
+
+    def test_backoff_cap_prevents_exceeding_max(self):
+        """Test that backoff never exceeds max_rotation_delay_seconds."""
+        vpn = self._make_vpn(initial_delay=5.0, max_delay=60.0)
+
+        # At very high backoff count, delay should still be capped
+        vpn._backoff_count = 100
+        assert vpn._compute_backoff_delay() == 60.0
+
+    def test_backoff_resets_after_success(self):
+        """Test that reset_backoff() resets the backoff counter to 0."""
+        vpn = self._make_vpn()
+
+        # Simulate several rotations
+        vpn._backoff_count = 4
+
+        # 5 * 2^4 = 80, capped at 60
+        assert vpn._compute_backoff_delay() == 60.0
+
+        # Reset backoff
+        vpn.reset_backoff()
+
+        # Counter should be 0, delay back to base
+        assert vpn._backoff_count == 0
+        assert vpn._compute_backoff_delay() == 5.0
+
+    def test_backoff_reset_is_noop_when_already_zero(self):
+        """Test that reset_backoff() is safe to call when backoff is already 0."""
+        vpn = self._make_vpn()
+
+        assert vpn._backoff_count == 0
+        vpn.reset_backoff()  # Should not raise
+        assert vpn._backoff_count == 0
+
+    def test_rotate_server_increments_backoff(self):
+        """Test that each rotation increments the backoff counter."""
+        vpn = self._make_vpn(initial_delay=0.01, max_delay=1.0)
+
+        assert vpn._backoff_count == 0
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            vpn.rotate_server(country='us')
+
+        assert vpn._backoff_count == 1
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+            vpn.rotate_server(country='de')
+
+        assert vpn._backoff_count == 2
+
+    def test_rotate_server_applies_backoff_delay(self):
+        """Test that rotate_server() sleeps for the computed backoff delay."""
+        vpn = self._make_vpn(initial_delay=5.0, max_delay=60.0)
+
+        with patch('subprocess.run') as mock_run, \
+             patch('time.sleep') as mock_sleep:
+            mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+            # First rotation: delay = 5 * 2^0 = 5s
+            vpn.rotate_server(country='us')
+
+            # time.sleep should have been called with 5.0 for backoff
+            sleep_calls = [c[0][0] for c in mock_sleep.call_args_list]
+            assert 5.0 in sleep_calls
+
+    def test_backoff_uses_config_values(self):
+        """Test that backoff reads initial and max delay from config."""
+        vpn = self._make_vpn(initial_delay=10.0, max_delay=120.0)
+
+        assert vpn._initial_rotation_delay == 10.0
+        assert vpn._max_rotation_delay == 120.0
+
+        # First delay should be 10s
+        vpn._backoff_count = 0
+        assert vpn._compute_backoff_delay() == 10.0
+
+        # Second delay should be 20s
+        vpn._backoff_count = 1
+        assert vpn._compute_backoff_delay() == 20.0
+
+        # Capped at 120s
+        vpn._backoff_count = 5  # 10 * 32 = 320 -> capped at 120
+        assert vpn._compute_backoff_delay() == 120.0
+
+    def test_backoff_defaults_when_config_missing(self):
+        """Test that backoff defaults to 5s initial and 60s max when config is missing."""
+        from src.downloader.mullvad_vpn import MullvadVPN
+
+        config = MagicMock(spec=[
+            'enabled', 'max_vpn_switches', 'switch_delay_seconds',
+            'min_switch_interval', 'switch_command'
+        ])
+        config.enabled = True
+        config.max_vpn_switches = 10
+        config.switch_delay_seconds = 0
+        config.min_switch_interval = 0
+        config.switch_command = ""
+
+        vpn = MullvadVPN(config)
+
+        assert vpn._initial_rotation_delay == 5.0
+        assert vpn._max_rotation_delay == 60.0
