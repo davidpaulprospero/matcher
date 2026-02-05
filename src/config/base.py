@@ -260,7 +260,17 @@ class Config:
         self.voyage_api_key = self.api_keys.voyage_api_key
 
     def _resolve_paths(self):
-        """Resolve relative paths to absolute"""
+        """Resolve relative paths to absolute based on project_dir.
+
+        This is the single source of truth for all config path resolution.
+        Handles: convenience paths (downloaded_videos_dir, otio_output_dir),
+        section paths (output.output_dir, download.download_dir,
+        transcription.cache_dir, cache.cache_dir, logging.log_dir).
+
+        Paths that are already absolute are left unchanged, ensuring
+        idempotent behavior when called multiple times.
+        Mixed forward/backslash separators are normalized via pathlib.
+        """
         base = Path(self.project_dir).resolve()
 
         # Determine video directory with priority:
@@ -272,14 +282,15 @@ class Config:
             video_dir = video_source
         elif getattr(self.download, 'root_dir', ''):
             root_dir = Path(self.download.root_dir)
-            # Use project name, truncated to 15 chars for short paths
+            # Use project name, truncated to max_name_display_length for short paths
             project_name = getattr(self.project, 'name', base.name) or base.name
-            project_name = project_name[:15]
+            max_len = getattr(self.project, 'max_name_display_length', 15)
+            project_name = project_name[:max_len]
             video_dir = str(root_dir / project_name)
         else:
             video_dir = self.downloading.output_dir
 
-        # Resolve all path attributes
+        # Resolve convenience path attributes on the Config object itself
         path_attrs = [
             ('downloaded_videos_dir', video_dir),
             ('otio_output_dir', self.output.output_dir),
@@ -291,13 +302,20 @@ class Config:
             else:
                 setattr(self, attr_name, config_value)
 
-        # Cache dir
-        if self.cache.cache_dir and not Path(self.cache.cache_dir).is_absolute():
-            self.cache.cache_dir = str(base / self.cache.cache_dir)
+        # Resolve section-level paths (relative -> project-relative).
+        # Each tuple: (section_obj, field_name)
+        section_paths = [
+            (self.output, 'output_dir'),
+            (self.download, 'download_dir'),
+            (self.transcription, 'cache_dir'),
+            (self.cache, 'cache_dir'),
+            (self.logging, 'log_dir'),
+        ]
 
-        # Log dir
-        if self.logging.log_dir and not Path(self.logging.log_dir).is_absolute():
-            self.logging.log_dir = str(base / self.logging.log_dir)
+        for section_obj, field_name in section_paths:
+            value = getattr(section_obj, field_name, None)
+            if value and not Path(value).is_absolute():
+                setattr(section_obj, field_name, str(base / value))
 
     @classmethod
     def from_yaml(cls, config_path: str) -> "Config":

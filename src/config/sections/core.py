@@ -26,6 +26,7 @@ class ProjectConfig:
     name: str = "matcher-alt"
     version: str = "3.0.0"
     description: str = ""
+    max_name_display_length: int = 15  # Truncation length for project name in short paths
 
 
 @dataclass

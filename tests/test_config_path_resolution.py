@@ -353,3 +353,53 @@ class TestUnifiedPathResolution:
         assert project_str in config.logging.log_dir
         assert Path(config.transcription.cache_dir).is_absolute()
         assert project_str in config.transcription.cache_dir
+
+
+class TestProjectNameTruncation:
+    """Test that project name truncation uses max_name_display_length from config."""
+
+    @pytest.mark.fast
+    def test_long_project_name_truncated_to_default_length(self, tmp_path):
+        """Project names longer than default max_name_display_length (15) are truncated."""
+        project_dir = tmp_path / "my_project"
+        project_dir.mkdir()
+
+        config = Config()
+        config.project_dir = str(project_dir)
+        config.download.root_dir = str(tmp_path / "v")
+        config.project.name = "a_very_long_project_name_exceeding_fifteen"
+        config._resolve_paths()
+
+        # Default max_name_display_length is 15
+        truncated = "a_very_long_pro"  # first 15 chars
+        assert config.downloaded_videos_dir.endswith(truncated)
+
+    @pytest.mark.fast
+    def test_custom_max_name_display_length_truncates_correctly(self, tmp_path):
+        """Setting max_name_display_length changes the truncation point."""
+        project_dir = tmp_path / "my_project"
+        project_dir.mkdir()
+
+        config = Config()
+        config.project_dir = str(project_dir)
+        config.download.root_dir = str(tmp_path / "v")
+        config.project.name = "a_very_long_project_name_exceeding_fifteen"
+        config.project.max_name_display_length = 10
+        config._resolve_paths()
+
+        truncated = "a_very_lon"  # first 10 chars
+        assert config.downloaded_videos_dir.endswith(truncated)
+
+    @pytest.mark.fast
+    def test_short_project_name_not_truncated(self, tmp_path):
+        """Project names shorter than max_name_display_length are not truncated."""
+        project_dir = tmp_path / "my_project"
+        project_dir.mkdir()
+
+        config = Config()
+        config.project_dir = str(project_dir)
+        config.download.root_dir = str(tmp_path / "v")
+        config.project.name = "short"
+        config._resolve_paths()
+
+        assert config.downloaded_videos_dir.endswith("short")
