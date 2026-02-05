@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
+from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
+
 if TYPE_CHECKING:
     from .escalation_manager import EscalationManager
     from .rate_limit_budget import RateLimitBudget
@@ -75,16 +77,12 @@ class CircuitBreakerConfig:
 
 
 @dataclass
-class CircuitBreakerState:
+class CircuitBreakerState(CircuitBreakerStateBase):
     """Internal state for circuit breaker."""
-    consecutive_failures: int = 0
-    is_open: bool = False  # True = circuit is tripped, searches paused
-    opened_at: Optional[float] = None  # timestamp when circuit opened
-    total_trips: int = 0  # Total times circuit has tripped this session
-    total_paused_seconds: float = 0.0  # Total time spent paused this session
+    pass
 
 
-class CircuitBreaker:
+class CircuitBreaker(CircuitBreakerBase):
     """Circuit breaker for YouTube search failures.
 
     Monitors consecutive search failures and temporarily pauses searches
@@ -118,8 +116,8 @@ class CircuitBreaker:
         Args:
             config: CircuitBreakerConfig. If None, uses defaults.
         """
-        self.config = config or CircuitBreakerConfig()
-        self.state = CircuitBreakerState()
+        self._config = config or CircuitBreakerConfig()
+        self.state = self._create_state()
         self._escalation_manager: Optional[EscalationManager] = None
         self._budget: Optional[RateLimitBudget] = None
         self._consecutive_successes: int = 0
@@ -127,14 +125,19 @@ class CircuitBreaker:
         self._caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None
 
     @property
-    def is_enabled(self) -> bool:
-        """Check if circuit breaker is enabled."""
-        return self.config.enabled
+    def config(self) -> CircuitBreakerConfig:
+        return self._config
 
-    @property
-    def is_open(self) -> bool:
-        """Check if circuit is currently open (tripped)."""
-        return self.state.is_open
+    def _create_state(self) -> CircuitBreakerState:
+        return CircuitBreakerState()
+
+    def _get_failure_threshold(self) -> int:
+        return self.config.consecutive_failures_threshold
+
+    def _get_domain_label(self) -> str:
+        return "search"
+
+    # --- Escalation / Budget / Cascade linking ---
 
     def set_escalation_manager(self, manager: EscalationManager) -> None:
         """Link an EscalationManager for coordinated rate-limiting.
@@ -177,13 +180,10 @@ class CircuitBreaker:
         self._caption_circuit_breaker = caption_cb
         logger.debug("Download circuit breaker linked to caption circuit breaker for cascade")
 
-    def _cascade_failure_to_caption(self) -> None:
-        """Propagate failure to caption circuit breaker (US-61-003).
+    # --- Cascade logic ---
 
-        Called when download CB records a failure. Increments the caption CB's
-        failure counter to speed up coordinated tripping when YouTube is
-        broadly rate-limiting.
-        """
+    def _cascade_failure_to_caption(self) -> None:
+        """Propagate failure to caption circuit breaker (US-61-003)."""
         if not self._caption_circuit_breaker:
             return
 
@@ -194,7 +194,6 @@ class CircuitBreaker:
         if not self._caption_circuit_breaker.is_enabled:
             return
 
-        # Increment caption CB failure counter
         self._caption_circuit_breaker.state.consecutive_failures += 1
         logger.debug(
             f"Download CB cascading failure to caption CB "
@@ -202,11 +201,7 @@ class CircuitBreaker:
         )
 
     def _cascade_trip_to_caption(self) -> None:
-        """Propagate trip (open) state to caption circuit breaker (US-61-003).
-
-        Called when download CB trips. Propagates the pause state to caption CB
-        so both circuit breakers pause together.
-        """
+        """Propagate trip (open) state to caption circuit breaker (US-61-003)."""
         if not self._caption_circuit_breaker:
             return
 
@@ -217,7 +212,6 @@ class CircuitBreaker:
         if not self._caption_circuit_breaker.is_enabled:
             return
 
-        # If caption CB is not already open, trip it
         if not self._caption_circuit_breaker.state.is_open:
             logger.info(
                 "Download circuit breaker cascading trip to caption circuit breaker"
@@ -226,24 +220,30 @@ class CircuitBreaker:
             self._caption_circuit_breaker.state.opened_at = self.state.opened_at
             self._caption_circuit_breaker.state.total_trips += 1
 
-    def _base_pause(self) -> float:
-        """Get the base pause duration from config.
+    def _on_record_failure(self) -> None:
+        """Called after each failure - cascade to caption CB."""
+        self._cascade_failure_to_caption()
 
-        Returns:
-            Base pause duration in seconds.
-        """
+    def _on_trip(self) -> None:
+        """Called after circuit trips - log and cascade to caption CB."""
+        effective_pause = self._get_effective_pause_seconds()
+        logger.info(
+            f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive "
+            f"search failures. Pausing for {effective_pause:.0f}s before "
+            f"allowing new searches. (trip #{self.state.total_trips})"
+        )
+        self._cascade_trip_to_caption()
+
+    # --- Pause calculation pipeline ---
+
+    def _base_pause(self) -> float:
+        """Get the base pause duration from config."""
         return self.config.pause_seconds
 
     def _escalation_adjusted_pause(self, pause: float) -> float:
         """Apply escalation-based extension to a pause duration.
 
         Doubles the pause when >50% of active keywords are at Tier 3.
-
-        Args:
-            pause: Current pause duration in seconds.
-
-        Returns:
-            Adjusted pause duration (2x if escalation threshold met, unchanged otherwise).
         """
         if self._escalation_manager is None:
             return pause
@@ -271,19 +271,7 @@ class CircuitBreaker:
         return pause
 
     def _budget_adjusted_pause(self, pause: float) -> float:
-        """Apply budget-aware extension to a pause duration.
-
-        Extensions:
-        - Fully exhausted budget: 2.5x
-        - Nearly exhausted (>80%): 1.5x
-        - Healthy: no change
-
-        Args:
-            pause: Current pause duration in seconds.
-
-        Returns:
-            Adjusted pause duration based on budget state.
-        """
+        """Apply budget-aware extension to a pause duration."""
         if self._budget is None:
             return pause
 
@@ -306,17 +294,7 @@ class CircuitBreaker:
         return pause
 
     def _cap_pause_duration(self, pause: float) -> float:
-        """Cap a pause duration at max_pause_seconds.
-
-        Used by both _get_effective_pause_seconds and _apply_jitter to ensure
-        consistent capping behavior.
-
-        Args:
-            pause: Pause duration in seconds.
-
-        Returns:
-            Capped pause duration, at most max_pause_seconds.
-        """
+        """Cap a pause duration at max_pause_seconds."""
         max_pause = getattr(self.config, 'max_pause_seconds', 300.0)
         if pause > max_pause:
             logger.debug(
@@ -331,16 +309,6 @@ class CircuitBreaker:
 
         Composes _base_pause, _escalation_adjusted_pause, _budget_adjusted_pause,
         _apply_jitter, and _cap_pause_duration into a single pause calculation pipeline.
-
-        Extensions applied (multiplicative):
-        - EscalationManager: 2x when >50% of active keywords are at Tier 3
-        - RateLimitBudget: 1.5x when nearly exhausted (>80%), 2.5x when fully exhausted
-
-        Jitter is applied before the final cap to ensure the result never
-        exceeds max_pause_seconds regardless of jitter factor.
-
-        Returns:
-            Effective pause duration in seconds.
         """
         pause = self._base_pause()
         pause = self._escalation_adjusted_pause(pause)
@@ -349,6 +317,8 @@ class CircuitBreaker:
         pause = self._cap_pause_duration(pause)
         return pause
 
+    # --- Jitter ---
+
     def _apply_jitter_raw(self, delay: float) -> float:
         """Apply random jitter to a delay value without capping.
 
@@ -356,29 +326,14 @@ class CircuitBreaker:
         resume simultaneously after circuit breaker recovery.
 
         The jitter formula is: delay * (1 + random.uniform(-jitter, +jitter))
-
-        For example, with jitter_factor=0.2 and delay=60s:
-        - Minimum: 60 * (1 - 0.2) = 48s
-        - Maximum: 60 * (1 + 0.2) = 72s
-
-        This method does NOT cap the result. Use _apply_jitter for a version
-        that caps at max_pause_seconds, or call _cap_pause_duration separately.
-
-        Args:
-            delay: Base delay in seconds.
-
-        Returns:
-            Jittered delay (uncapped).
         """
         jitter_factor = getattr(self.config, 'jitter_factor', 0.2)
 
-        # Clamp jitter_factor to valid range [0.0, 1.0]
         if jitter_factor < 0.0:
             jitter_factor = 0.0
         elif jitter_factor > 1.0:
             jitter_factor = 1.0
 
-        # Apply jitter
         if jitter_factor > 0.0:
             jitter_multiplier = 1 + random.uniform(-jitter_factor, jitter_factor)
             jittered_delay = delay * jitter_multiplier
@@ -390,31 +345,15 @@ class CircuitBreaker:
         return jittered_delay
 
     def _apply_jitter(self, delay: float) -> float:
-        """Apply random jitter to a delay value, capped at max_pause_seconds.
-
-        Convenience wrapper around _apply_jitter_raw that also applies the
-        max_pause_seconds cap. Used by call sites that need standalone jitter
-        with capping (e.g., remaining time calculations).
-
-        Args:
-            delay: Base delay in seconds.
-
-        Returns:
-            Jittered delay, capped at max_pause_seconds.
-        """
+        """Apply random jitter to a delay value, capped at max_pause_seconds."""
         jittered_delay = self._apply_jitter_raw(delay)
         jittered_delay = self._cap_pause_duration(jittered_delay)
         return jittered_delay
 
+    # --- Escalation tier checks ---
+
     def _is_escalation_at_tier3(self) -> bool:
-        """Check if escalation is at Tier 3 for any tracked keyword.
-
-        Used to determine if extended reset (3 consecutive successes)
-        is required instead of the default 1.
-
-        Returns:
-            True if any keyword is at Tier 3, False otherwise.
-        """
+        """Check if escalation is at Tier 3 for any tracked keyword."""
         if self._escalation_manager is None:
             return False
 
@@ -427,6 +366,17 @@ class CircuitBreaker:
             EscalationTier.FULL_BYPASS
         )
         return len(tier3_keywords) > 0
+
+    # --- Overrides for domain-specific behavior ---
+
+    def _log_pause_wait(self, remaining: float) -> None:
+        """Override to include jitter % in log message."""
+        jitter_pct = abs(self._last_jitter_applied) * 100
+        logger.info(
+            f"Circuit breaker OPEN: pausing {remaining:.1f}s "
+            f"(jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, "
+            f"{self.state.consecutive_failures} consecutive failures)"
+        )
 
     def check_and_wait(self) -> bool:
         """Check circuit state and wait if necessary.
@@ -651,18 +601,7 @@ class CircuitBreaker:
         return remaining
 
     def get_stats(self) -> dict:
-        """Get circuit breaker statistics for reporting.
-
-        Returns:
-            Dict with stats including:
-            - enabled: Whether circuit breaker is enabled
-            - is_open: Current open/closed state
-            - consecutive_failures: Current failure count
-            - total_trips: Total times circuit has tripped this session
-            - total_paused_seconds: Total time spent paused this session
-            - threshold: Configured failure threshold
-            - pause_seconds: Configured pause duration
-        """
+        """Get circuit breaker statistics for reporting."""
         return {
             'enabled': self.config.enabled,
             'is_open': self.state.is_open,
@@ -674,31 +613,20 @@ class CircuitBreaker:
         }
 
     def to_checkpoint_dict(self) -> dict:
-        """Serialize state to dictionary for checkpoint persistence.
-
-        Returns:
-            Dict that can be saved to checkpoint JSON.
-        """
+        """Serialize state to dictionary for checkpoint persistence."""
         return {
             'consecutive_failures': self.state.consecutive_failures,
             'total_trips': self.state.total_trips,
             'total_paused_seconds': self.state.total_paused_seconds,
-            # Don't persist is_open/opened_at - start fresh on resume
         }
 
     def from_checkpoint_dict(self, data: dict) -> None:
-        """Restore state from checkpoint dictionary.
-
-        Args:
-            data: Dict from checkpoint JSON.
-        """
+        """Restore state from checkpoint dictionary."""
         if not data:
             return
 
-        # Restore cumulative stats but not transient state
         self.state.total_trips = data.get('total_trips', 0)
         self.state.total_paused_seconds = data.get('total_paused_seconds', 0.0)
-        # Don't restore consecutive_failures or is_open - start fresh on resume
         self.state.consecutive_failures = 0
         self.state.is_open = False
         self.state.opened_at = None

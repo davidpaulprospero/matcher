@@ -20,6 +20,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
+from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
+
 # Canonical config source (Rule 11): import from config/sections/download.py
 from src.config.sections.download import CaptionCircuitBreakerConfig  # noqa: F401 - re-exported
 
@@ -30,16 +32,12 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class CaptionCircuitBreakerState:
+class CaptionCircuitBreakerState(CircuitBreakerStateBase):
     """Internal state for circuit breaker."""
-    consecutive_failures: int = 0
-    is_open: bool = False  # True = circuit is tripped, fetches paused
-    opened_at: Optional[float] = None  # timestamp when circuit opened
-    total_trips: int = 0  # Total times circuit has tripped this session
-    total_paused_seconds: float = 0.0  # Total time spent paused this session
+    pass
 
 
-class CaptionCircuitBreaker:
+class CaptionCircuitBreaker(CircuitBreakerBase):
     """Circuit breaker for YouTube caption fetch failures.
 
     Monitors consecutive fetch failures and temporarily pauses fetches
@@ -73,19 +71,24 @@ class CaptionCircuitBreaker:
         Args:
             config: CaptionCircuitBreakerConfig. If None, uses defaults.
         """
-        self.config = config or CaptionCircuitBreakerConfig()
-        self.state = CaptionCircuitBreakerState()
+        self._config = config or CaptionCircuitBreakerConfig()
+        self.state = self._create_state()
         self._download_circuit_breaker: Optional['DownloadCircuitBreaker'] = None
 
     @property
-    def is_enabled(self) -> bool:
-        """Check if circuit breaker is enabled."""
-        return self.config.enabled
+    def config(self) -> CaptionCircuitBreakerConfig:
+        return self._config
 
-    @property
-    def is_open(self) -> bool:
-        """Check if circuit is currently open (tripped)."""
-        return self.state.is_open
+    def _create_state(self) -> CaptionCircuitBreakerState:
+        return CaptionCircuitBreakerState()
+
+    def _get_failure_threshold(self) -> int:
+        return self.config.threshold
+
+    def _get_domain_label(self) -> str:
+        return "fetch"
+
+    # --- Cascade linking ---
 
     def set_download_circuit_breaker(self, download_cb: 'DownloadCircuitBreaker') -> None:
         """Link the download circuit breaker for cascade coordination (US-61-003).
@@ -99,6 +102,8 @@ class CaptionCircuitBreaker:
         """
         self._download_circuit_breaker = download_cb
         logger.debug("Caption circuit breaker linked to download circuit breaker for cascade")
+
+    # --- Cascade logic ---
 
     def _cascade_failure_to_download(self) -> None:
         """Propagate failure to download circuit breaker (US-61-003).
@@ -150,6 +155,22 @@ class CaptionCircuitBreaker:
             self._download_circuit_breaker.state.opened_at = self.state.opened_at
             self._download_circuit_breaker.state.total_trips += 1
 
+    def _on_record_failure(self) -> None:
+        """Called after each failure - cascade to download CB."""
+        self._cascade_failure_to_download()
+
+    def _on_trip(self) -> None:
+        """Called after circuit trips - log and cascade to download CB."""
+        effective_pause = self._get_effective_pause_seconds()
+        logger.info(
+            f"Caption circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive "
+            f"fetch failures. Pausing for {effective_pause:.0f}s before "
+            f"allowing new fetches. (trip #{self.state.total_trips})"
+        )
+        self._cascade_trip_to_download()
+
+    # --- Pause calculation ---
+
     def _get_effective_pause_seconds(self) -> float:
         """Get the effective pause duration, capped at max_pause_seconds.
 
@@ -164,6 +185,8 @@ class CaptionCircuitBreaker:
             )
             pause = max_pause
         return pause
+
+    # --- Overrides to match original log messages exactly ---
 
     def check_and_wait(self) -> bool:
         """Check circuit state and wait if necessary.
