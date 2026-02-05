@@ -1158,7 +1158,11 @@ class ListSubsCache(BaseCache):
                 # Direct list format (backward compat)
                 languages = cached_data
 
-            logger.debug(f"ListSubsCache hit: {video_id} ({len(languages)} languages)")
+            # US-62-004: Log specific message for negative cache hit
+            if len(languages) == 0:
+                logger.info(f"Negative cache hit: no captions for {video_id}")
+            else:
+                logger.debug(f"ListSubsCache hit: {video_id} ({len(languages)} languages)")
             return languages
         except Exception as e:
             logger.warning(f"Failed to deserialize list-subs cache {video_id}: {e}")
@@ -1208,3 +1212,34 @@ class ListSubsCache(BaseCache):
         self.set(video_id, cached_data)
         logger.debug(f"Cached list-subs: {video_id} ({len(language_dicts)} languages)")
         return True
+
+    def is_no_captions_available(self, video_id: str) -> bool:
+        """Check if video is known to have no captions available (US-62-004).
+
+        This checks the negative cache (list-subs result was empty). Returns True
+        only if there's a non-expired cache entry with an empty language list.
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            True if cached as having no captions, False otherwise
+            (not cached or has captions).
+        """
+        if not self.enabled:
+            return False
+
+        entry = self.get(video_id)
+        if entry is None:
+            return False
+
+        try:
+            cached_data = entry.data
+            if isinstance(cached_data, dict):
+                languages = cached_data.get('languages', [])
+            else:
+                languages = cached_data
+
+            return len(languages) == 0
+        except Exception:
+            return False

@@ -306,3 +306,143 @@ en        English              vtt, ttml, srv3, srv2, srv1, json3
             languages = fetcher2.list_available_languages("dQw4w9WgXcQ")
             assert subprocess_call_count == 1  # Still 1
             assert len(languages) >= 1
+
+
+@pytest.mark.fast
+class TestListSubsNegativeCache:
+    """Tests for US-62-004: Negative cache for videos with no captions."""
+
+    def test_store_and_retrieve_empty_languages(self, tmp_path):
+        """Storing empty language list creates a negative cache entry.
+
+        AC: When --list-subs returns empty, store negative cache entry with video_id.
+        """
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1.0)
+
+        # Store empty languages (no captions available)
+        cache.store("no_caps_vid1", [])
+
+        # Retrieve should return empty list, not None
+        cached = cache.get_languages("no_caps_vid1")
+        assert cached is not None, "Empty list should be cached, not None"
+        assert cached == []
+
+    def test_is_no_captions_available_returns_true_for_empty_cache(self, tmp_path):
+        """is_no_captions_available returns True for videos cached with empty list.
+
+        AC: Subsequent requests for same video_id check negative cache before network call.
+        """
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1.0)
+
+        # Store empty (negative cache)
+        cache.store("no_caps_vid2", [])
+
+        # Should return True
+        assert cache.is_no_captions_available("no_caps_vid2") is True
+
+    def test_is_no_captions_available_returns_false_for_videos_with_captions(self, tmp_path):
+        """is_no_captions_available returns False for videos with cached captions."""
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1.0)
+
+        # Store with captions
+        cache.store("has_caps_vid", ENGLISH_AVAILABLE)
+
+        assert cache.is_no_captions_available("has_caps_vid") is False
+
+    def test_is_no_captions_available_returns_false_for_uncached_videos(self, tmp_path):
+        """is_no_captions_available returns False for videos not in cache."""
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1.0)
+
+        # Never cached
+        assert cache.is_no_captions_available("never_seen_vid") is False
+
+    def test_negative_cache_hit_logs_message(self, tmp_path, caplog):
+        """Negative cache hit logs 'Negative cache hit: no captions'.
+
+        AC: Negative cache hit logs 'Negative cache hit: no captions' and returns immediately.
+        """
+        import logging
+        caplog.set_level(logging.INFO)
+
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1.0)
+
+        # Store empty (negative cache)
+        cache.store("log_test_vid", [])
+
+        # Clear logs before the get
+        caplog.clear()
+
+        # Retrieve should log the message
+        cached = cache.get_languages("log_test_vid")
+        assert cached == []
+
+        # Check log message
+        assert any("Negative cache hit: no captions" in record.message for record in caplog.records)
+
+    def test_zero_ytdlp_calls_for_negative_cached_video(self, tmp_path):
+        """Second list_available_languages call for negative-cached video makes 0 yt-dlp calls.
+
+        AC: Test verifies 0 yt-dlp calls for negative-cached video.
+        """
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1.0)
+        fetcher = CaptionFetcher(list_subs_cache=cache)
+
+        subprocess_call_count = 0
+
+        def mock_subprocess_run(*args, **kwargs):
+            nonlocal subprocess_call_count
+            subprocess_call_count += 1
+            result = Mock()
+            # Return empty subtitles
+            result.stdout = "[info] Available subtitles for emptycapvid:\n"
+            result.stderr = ""
+            return result
+
+        with patch('subprocess.run', side_effect=mock_subprocess_run):
+            # First call - should hit subprocess, get empty result
+            languages1 = fetcher.list_available_languages("emptycapvid")
+            assert len(languages1) == 0
+            assert subprocess_call_count == 1
+
+            # Second call - should use negative cache, zero subprocess calls
+            languages2 = fetcher.list_available_languages("emptycapvid")
+            assert len(languages2) == 0
+            assert subprocess_call_count == 1, "Should be 1, not 2 - negative cache should prevent second call"
+
+    def test_negative_cache_expires_after_ttl(self, tmp_path):
+        """Negative cache entries expire after TTL.
+
+        AC: Test verifies negative cache expires after TTL.
+        AC: Negative cache entries use configurable TTL (default 1 hour).
+        """
+        # Use 1 second TTL for testing
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=1/3600)
+
+        # Store empty (negative cache)
+        cache.store("expire_test_vid", [])
+
+        # Immediately should be available
+        assert cache.is_no_captions_available("expire_test_vid") is True
+
+        # Wait for TTL to expire
+        time.sleep(1.5)
+
+        # Should be expired now - get_languages returns None
+        cached = cache.get_languages("expire_test_vid")
+        assert cached is None, "Negative cache should expire after TTL"
+
+        # is_no_captions_available should also return False
+        assert cache.is_no_captions_available("expire_test_vid") is False
+
+    def test_negative_cache_configurable_ttl(self, tmp_path):
+        """Negative cache TTL is configurable.
+
+        AC: Negative cache entries use configurable TTL (default 1 hour).
+        """
+        # Use 2 hour TTL
+        cache = ListSubsCache(cache_dir=tmp_path / "list_subs_cache", ttl_hours=2.0)
+        assert cache.ttl_hours == 2.0
+
+        # Use 0.5 hour TTL
+        cache2 = ListSubsCache(cache_dir=tmp_path / "list_subs_cache2", ttl_hours=0.5)
+        assert cache2.ttl_hours == 0.5

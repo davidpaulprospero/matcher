@@ -173,6 +173,10 @@ class CaptionMetrics:
     # Count of subprocess calls avoided by negative cache hit (US-59-009)
     calls_saved_by_negative_cache: int = 0
 
+    # US-62-005: Auto-generated fallback tracking
+    # Count of videos where manual captions failed and auto-generated was used as fallback
+    auto_fallback_count: int = 0
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -338,6 +342,36 @@ class CaptionMetrics:
             self.calls_saved_by_negative_cache += 1
 
         logger.debug(f"Negative cache saved subprocess call for {video_id or 'unknown'}")
+
+    def record_auto_fallback(self, video_id: str, language: str = "en") -> None:
+        """Record auto-generated fallback usage when manual captions unavailable (US-62-005).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Called when manual caption fetch fails and auto-generated captions are
+        used as a fallback. This is separate from auto_generated_count which
+        tracks all auto-generated captions regardless of fallback.
+
+        Args:
+            video_id: YouTube video ID.
+            language: Language code that was fetched.
+        """
+        with self._lock:
+            self.auto_fallback_count += 1
+
+        logger.info(
+            f"Auto-generated fallback used for {video_id}: "
+            f"selection_reason='auto-generated fallback'"
+        )
+
+        # Also record in language selection trace for audit trail
+        self.record_language_selection(
+            video_id=video_id,
+            attempted_codes=[language],
+            selected_code=language,
+            selection_reason='auto-generated fallback',
+            is_auto_generated=True
+        )
 
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get caption fetch performance summary (US-59-009).
@@ -1171,11 +1205,15 @@ class CaptionMetrics:
 
         # Caption source breakdown
         if self.human_caption_count > 0 or self.auto_generated_count > 0:
-            lines.append(
+            source_line = (
                 f"  Caption sources: {self.human_caption_count} human, "
                 f"{self.auto_generated_count} auto, "
                 f"{self.quality_distribution.get('unavailable', 0)} unavailable"
             )
+            # US-62-005: Include auto-fallback count if any
+            if self.auto_fallback_count > 0:
+                source_line += f" ({self.auto_fallback_count} auto-fallback)"
+            lines.append(source_line)
 
         # Language distribution (top 5)
         if self.language_distribution:
@@ -1344,6 +1382,7 @@ class CaptionMetrics:
             'format_attempt_records': list(self.format_attempt_records),  # US-59-009
             'calls_saved_by_preflight': self.calls_saved_by_preflight,  # US-59-009
             'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,  # US-59-009
+            'auto_fallback_count': self.auto_fallback_count,  # US-62-005
         }
 
     @classmethod
@@ -1399,6 +1438,7 @@ class CaptionMetrics:
             format_attempt_records=data.get('format_attempt_records', []),  # US-59-009
             calls_saved_by_preflight=data.get('calls_saved_by_preflight', 0),  # US-59-009
             calls_saved_by_negative_cache=data.get('calls_saved_by_negative_cache', 0),  # US-59-009
+            auto_fallback_count=data.get('auto_fallback_count', 0),  # US-62-005
         )
 
     def export_json(
@@ -1556,6 +1596,7 @@ class CaptionMetrics:
             self.total_segments += other.total_segments
             self.auto_generated_count += other.auto_generated_count
             self.human_caption_count += other.human_caption_count
+            self.auto_fallback_count += other.auto_fallback_count  # US-62-005
 
             # Merge language distribution
             for lang, count in other.language_distribution.items():
@@ -1629,3 +1670,4 @@ class CaptionMetrics:
             self.total_segments = 0
             self.auto_generated_count = 0
             self.human_caption_count = 0
+            self.auto_fallback_count = 0  # US-62-005

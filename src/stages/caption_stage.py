@@ -303,6 +303,12 @@ class CaptionStage(Stage):
                 retry_budget = CaptionRetryBudget.from_config(None)
                 logger.info("Using default retry budget (config missing)")
 
+            # US-62-006: Link circuit breaker to retry budget for observability
+            # This allows retry budget summary to include circuit breaker state
+            if retry_budget and circuit_breaker:
+                retry_budget.circuit_breaker = circuit_breaker
+                logger.debug("Circuit breaker linked to retry budget for observability")
+
             # US-40-002: Restore retry budget state from checkpoint if available
             # When resuming from checkpoint, the budget limits may have been scaled for
             # a previous batch size. After restoring, we'll re-scale for the current batch.
@@ -891,19 +897,81 @@ class CaptionStage(Stage):
                 # US-005 Sprint 8: With checkpoint support for abort recovery
                 # US-33-009: With circuit breaker for consecutive failure protection
                 # US-34-002: With global rate limit coordinator for unified rate limiting
+                # US-61-011: VPN rotation on caption budget exhaustion with rate limits
                 try:
-                    batch_results = self._fetcher.fetch_captions_batch(
-                        video_ids=ids_to_fetch,
-                        preferred_language=preferred_lang,
-                        max_workers=max_workers,
-                        metrics=metrics,
-                        progress_callback=on_progress,
-                        batch_checkpoint=batch_checkpoint,
-                        checkpoint_save_interval=checkpoint_save_interval,
-                        circuit_breaker=circuit_breaker,
-                        retry_budget=retry_budget,
-                        rate_limit_coordinator=rate_limit_coordinator,
-                    )
+                    # US-61-011: Initialize VPN manager for potential rotation
+                    mullvad_vpn = None
+                    mullvad_config = getattr(config.download, 'mullvad', None)
+                    if mullvad_config and getattr(mullvad_config, 'enabled', False):
+                        from ..downloader.mullvad_vpn import MullvadVPN
+                        if MullvadVPN.is_available():
+                            mullvad_vpn = MullvadVPN(mullvad_config)
+                            logger.debug("US-61-011: MullvadVPN initialized for caption budget exhaustion rotation")
+
+                    # US-61-011: Track remaining videos for potential VPN rotation retry
+                    remaining_ids = list(ids_to_fetch)
+                    all_batch_results: Dict[str, Any] = {}
+
+                    # US-61-011: Loop to support VPN rotation retry
+                    while remaining_ids:
+                        batch_results = self._fetcher.fetch_captions_batch(
+                            video_ids=remaining_ids,
+                            preferred_language=preferred_lang,
+                            max_workers=max_workers,
+                            metrics=metrics,
+                            progress_callback=on_progress,
+                            batch_checkpoint=batch_checkpoint,
+                            checkpoint_save_interval=checkpoint_save_interval,
+                            circuit_breaker=circuit_breaker,
+                            retry_budget=retry_budget,
+                            rate_limit_coordinator=rate_limit_coordinator,
+                        )
+
+                        # Merge results into all_batch_results
+                        all_batch_results.update(batch_results)
+
+                        # US-61-011: Check if VPN rotation should be triggered
+                        if retry_budget and mullvad_vpn and retry_budget.should_trigger_vpn_rotation():
+                            # Get videos that were skipped due to budget exhaustion
+                            skipped_ids = [
+                                vid for vid, result in batch_results.items()
+                                if isinstance(result, dict)
+                                and result.get('skipped')
+                                and result.get('reason') == 'budget_exhausted'
+                            ]
+
+                            if skipped_ids:
+                                rate_limit_pct = retry_budget.get_rate_limit_error_percentage()
+                                logger.info(
+                                    f"Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited), "
+                                    f"rotating VPN and retrying {len(skipped_ids)} videos"
+                                )
+                                print(f"\n  ! Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited)")
+                                print(f"    Rotating VPN and retrying {len(skipped_ids)} remaining videos...")
+
+                                # Rotate VPN (also resets circuit breaker if provided)
+                                if mullvad_vpn.rotate_server(circuit_breaker=circuit_breaker):
+                                    # Record VPN reset and reset budget for retry
+                                    retry_budget.record_vpn_reset()
+                                    retry_budget.reset(preserve_vpn_count=True)
+
+                                    # Re-scale budget for remaining videos
+                                    retry_budget.ensure_scaled(len(skipped_ids))
+
+                                    # Set remaining_ids to skipped videos for retry
+                                    remaining_ids = skipped_ids
+                                    print(f"    VPN rotated successfully, retrying...")
+                                    continue
+                                else:
+                                    logger.warning("VPN rotation failed, skipping retry")
+                                    print(f"    ! VPN rotation failed, cannot retry")
+
+                        # No VPN rotation needed or possible - exit loop
+                        break
+
+                    # Use all_batch_results for the rest of the processing
+                    batch_results = all_batch_results
+
                     # US-005 Sprint 8: Save final checkpoint on success
                     if batch_checkpoint and batch_checkpoint_path:
                         batch_checkpoint.save(batch_checkpoint_path)
