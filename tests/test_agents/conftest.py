@@ -54,6 +54,11 @@ def mock_config():
     config.download.cookie_rotation.cooldown_seconds = 300
     config.download.cookie_rotation.max_rotations_per_session = 0
 
+    # Caption-first config
+    config.download.caption_first = Mock()
+    config.download.caption_first.negative_cache_ttl_seconds = 3600
+    config.download.caption_first.negative_cache_ttl_hours = 1.0
+
     # VPN config - disabled by default
     config.download.vpn = Mock()
     config.download.vpn.enabled = False

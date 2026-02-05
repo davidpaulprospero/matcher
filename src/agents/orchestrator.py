@@ -142,6 +142,10 @@ class HealingOrchestrator:
         # Healer result cache for idempotent healing (US-64-007)
         self._healer_cache = self._init_healer_cache()
 
+        # Custom preflight validators registry (US-64-009)
+        # Validators are callables with signature (state: PipelineState) -> List[PreflightIssue]
+        self._custom_preflight_validators: Dict[str, Callable[['PipelineState'], List[PreflightIssue]]] = {}
+
         # Initialize two-tier LLM system if enabled
         self._init_llm_delegation()
 
@@ -257,6 +261,63 @@ class HealingOrchestrator:
     # PREFLIGHT CHECKS
     # =========================================================================
 
+    def register_preflight_check(
+        self,
+        name: str,
+        validator: Callable[['PipelineState'], List[PreflightIssue]]
+    ) -> None:
+        """
+        Register a custom preflight validator.
+
+        Custom validators allow pipeline stages or external code to add
+        domain-specific validation without modifying orchestrator source.
+
+        Args:
+            name: Unique identifier for the validator (used for unregistration)
+            validator: Callable with signature (state: PipelineState) -> List[PreflightIssue]
+                      Must return a list of PreflightIssue objects
+
+        Raises:
+            ValueError: If a validator with the same name is already registered
+
+        Example:
+            def my_validator(state: PipelineState) -> List[PreflightIssue]:
+                issues = []
+                if not state.voiceover_path:
+                    issues.append(PreflightIssue(
+                        category="custom",
+                        severity="critical",
+                        message="Voiceover path required",
+                        auto_fixable=False,
+                    ))
+                return issues
+
+            orchestrator.register_preflight_check("my-validator", my_validator)
+        """
+        if name in self._custom_preflight_validators:
+            raise ValueError(
+                f"Preflight validator '{name}' is already registered. "
+                f"Use unregister_preflight_check('{name}') first to replace it."
+            )
+        self._custom_preflight_validators[name] = validator
+        logger.debug(f"[orchestrator] Registered custom preflight validator: {name}")
+
+    def unregister_preflight_check(self, name: str) -> bool:
+        """
+        Unregister a custom preflight validator.
+
+        Args:
+            name: Identifier of the validator to remove
+
+        Returns:
+            True if validator was removed, False if it wasn't registered
+        """
+        if name in self._custom_preflight_validators:
+            del self._custom_preflight_validators[name]
+            logger.debug(f"[orchestrator] Unregistered custom preflight validator: {name}")
+            return True
+        return False
+
     def run_preflight(self, state: 'PipelineState') -> List[PreflightIssue]:
         """
         Run preflight checks before pipeline execution.
@@ -315,6 +376,28 @@ class HealingOrchestrator:
                         auto_fixable=True,
                         healer=healer.name,
                     ))
+
+        # Run custom preflight validators (US-64-009)
+        for validator_name, validator in self._custom_preflight_validators.items():
+            try:
+                validator_issues = validator(state)
+                if validator_issues:
+                    issues.extend(validator_issues)
+                    logger.debug(
+                        f"[preflight] Custom validator '{validator_name}' "
+                        f"reported {len(validator_issues)} issue(s)"
+                    )
+            except Exception as e:
+                # Don't let a failing validator block the pipeline
+                logger.warning(
+                    f"[preflight] Custom validator '{validator_name}' raised exception: {e}"
+                )
+                issues.append(PreflightIssue(
+                    category="custom-validator",
+                    severity="warning",
+                    message=f"Validator '{validator_name}' failed: {str(e)[:100]}",
+                    auto_fixable=False,
+                ))
 
         self.metrics.preflight_issues_found = len(issues)
 
