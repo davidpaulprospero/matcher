@@ -162,7 +162,7 @@
       "id": "US-66-011",
       "title": "Add transcription config focus area to ralph-config.json",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "scripts/ralph/config/ralph-config.json has a 'transcription' entry in focusAreas array with id, name, category, description",
         "relevantFiles.transcription lists: src/transcription/, src/caption_fetcher.py, src/caption/, src/stages/caption_stage.py, src/config/sections/core.py (TranscriptionConfig)",
@@ -170,7 +170,7 @@
         "The focus area is categorized under 'acquisition' or 'processing' category",
         "Queue.json can now reference 'transcription' as a valid focus area (already referenced, this validates it)"
       ],
-      "notes": "Tier: config. Files: scripts/ralph/config/ralph-config.json. Currently 'transcription' is used as a focus area in queue.json but is NOT defined in ralph-config.json focusAreas array. Only 'caption' exists there. This means Ralph can't look up test patterns or relevant files for the transcription focus area, falling back to defaults."
+      "notes": "Added transcription focus area to ralph-config.json: (1) focusAreas entry with id=transcription, name=Transcription System, category=acquisition, (2) relevantFiles.transcription with src/transcription/, src/caption_fetcher.py, src/caption/, src/stages/caption_stage.py, src/config/sections/core.py, (3) testPatterns.transcription with test_transcription*.py, test_caption*.py, test_caption_fetcher*.py, (4) added to focusAreaCategories.acquisition.areas. queue.json already references transcription (validated)."
     },
     {
       "id": "US-66-012",
