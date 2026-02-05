@@ -1425,5 +1425,107 @@ duration_tiers:
         assert len(tier_errors) >= 2, f"Expected at least 2 tier errors, got {len(tier_errors)}: {tier_errors}"
 
 
+# =============================================================================
+# US-69-004: ValueError for impossible config values
+# =============================================================================
+
+from src.config.sections.core import EmbeddingConfig
+
+
+@pytest.mark.fast
+class TestMatchingConfigValueErrorValidation:
+    """Test MatchingConfig raises ValueError for clearly invalid (impossible) values."""
+
+    @pytest.mark.parametrize("field_name,value", [
+        ("min_confidence", -0.1),
+        ("high_confidence_threshold", -1.0),
+        ("low_confidence_threshold", -0.5),
+        ("ambiguous_threshold", -0.01),
+        ("skip_llm_threshold", -99.0),
+        ("confidence_threshold", -0.001),
+    ])
+    def test_negative_confidence_raises_valueerror(self, field_name, value):
+        """Test negative confidence thresholds raise ValueError."""
+        with pytest.raises(ValueError, match=f"MatchingConfig.{field_name}.*negative"):
+            MatchingConfig(**{field_name: value})
+
+    @pytest.mark.parametrize("field_name", [
+        "embedding_candidates",
+        "llm_rerank_candidates",
+        "top_k_candidates",
+        "context_window",
+    ])
+    def test_zero_or_negative_int_raises_valueerror(self, field_name):
+        """Test zero or negative positive-int fields raise ValueError."""
+        with pytest.raises(ValueError, match=f"MatchingConfig.{field_name}"):
+            MatchingConfig(**{field_name: 0})
+        with pytest.raises(ValueError, match=f"MatchingConfig.{field_name}"):
+            MatchingConfig(**{field_name: -5})
+
+    def test_confidence_above_one_clamped_not_error(self):
+        """Test confidence > 1.0 is warn+clamped, not ValueError."""
+        config = MatchingConfig(min_confidence=1.5)
+        assert config.min_confidence == 1.0
+
+    def test_valid_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = MatchingConfig(
+            min_confidence=0.0,
+            high_confidence_threshold=1.0,
+            embedding_candidates=1,
+        )
+        assert config.min_confidence == 0.0
+        assert config.high_confidence_threshold == 1.0
+        assert config.embedding_candidates == 1
+
+
+@pytest.mark.fast
+class TestEmbeddingConfigValueErrorValidation:
+    """Test EmbeddingConfig raises ValueError for clearly invalid (impossible) values."""
+
+    def test_negative_batch_size_raises_valueerror(self):
+        """Test negative batch_size raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size"):
+            EmbeddingConfig(batch_size=-1)
+
+    def test_zero_batch_size_raises_valueerror(self):
+        """Test zero batch_size raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size"):
+            EmbeddingConfig(batch_size=0)
+
+    def test_negative_max_retries_raises_valueerror(self):
+        """Test negative max_retries raises ValueError."""
+        with pytest.raises(ValueError, match="max_retries"):
+            EmbeddingConfig(max_retries=-1)
+
+    def test_negative_retry_delay_raises_valueerror(self):
+        """Test negative retry_delay raises ValueError."""
+        with pytest.raises(ValueError, match="retry_delay"):
+            EmbeddingConfig(retry_delay=-0.5)
+
+    def test_negative_max_workers_raises_valueerror(self):
+        """Test negative max_workers raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers"):
+            EmbeddingConfig(max_workers=-1)
+
+    def test_zero_max_workers_raises_valueerror(self):
+        """Test zero max_workers raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers"):
+            EmbeddingConfig(max_workers=0)
+
+    def test_valid_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = EmbeddingConfig(
+            batch_size=1,
+            max_retries=0,
+            retry_delay=0.0,
+            max_workers=1,
+        )
+        assert config.batch_size == 1
+        assert config.max_retries == 0
+        assert config.retry_delay == 0.0
+        assert config.max_workers == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

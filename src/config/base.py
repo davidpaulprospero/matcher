@@ -27,6 +27,22 @@ Usage:
     # Anywhere in codebase
     config = get_config()
     threshold = config.matching.min_confidence
+
+Config Validation Convention:
+    All config dataclass __post_init__ methods follow this two-tier pattern:
+
+    1. ValueError for invalid types and impossible values:
+       - Negative counts (batch_size, max_workers, max_retries)
+       - Negative thresholds (confidence < 0.0, retry_delay < 0)
+       - Invalid enum values (unknown model names, unknown compute types)
+       These represent configuration errors that cannot produce correct behavior.
+
+    2. warn + clamp for soft limits (values slightly outside recommended range):
+       - Confidence threshold > 1.0 (clamped to 1.0 with warning)
+       - Workers exceeding CPU count (capped with warning)
+       These represent likely typos or misunderstandings but are recoverable.
+
+    See TranscriptionConfig, MatchingConfig, and EmbeddingConfig for examples.
 """
 
 from __future__ import annotations
