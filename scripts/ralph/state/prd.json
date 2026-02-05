@@ -163,7 +163,7 @@
                                                        "Add config.yaml option to select strategy preset by name",
                                                        "Add tests verifying each preset has expected configuration values"
                                                    ],
-                            "notes":  "Tier 3 (Enhancement). Source files: src/agents/strategy.py (add after line 139, alongside existing aggressive/conservative/interactive/minimal presets), src/config/sections/healing.py (add strategy_preset field). Current presets don\u0027t cover overnight/batch processing or dev/debug scenarios."
+                            "notes":  "Completed. All 3 presets implemented in src/agents/strategy.py: (1) overnight() at line 171 - AGGRESSIVE mode, 8 attempts/stage, 100 total heals, 5s delay for unattended batch processing. (2) development() at line 192 - MINIMAL mode, 1 attempt, 3 total heals, 0s delay, no auto-fix for fast debugging. (3) production() at line 213 - CONSERVATIVE mode, 4 attempts/stage, 30 total heals, 3s delay for balanced resilience. Each preset has detailed docstrings documenting differences. config.yaml updated at line 1785 with all preset names (overnight, development, production). 5 new tests in tests/test_agents/test_strategy.py: test_overnight_factory, test_development_factory, test_production_factory, test_overnight_more_resilient_than_aggressive, test_development_faster_than_minimal. All 24 strategy tests pass (0.67s)."
                         },
                         {
                             "id":  "US-64-011",
