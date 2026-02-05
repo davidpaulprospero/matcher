@@ -23,8 +23,8 @@ class TestCaptionCircuitBreakerConfig:
         """Test default configuration values."""
         config = CaptionCircuitBreakerConfig()
         assert config.enabled is True
-        assert config.threshold == 10
-        assert config.pause_seconds == 120.0
+        assert config.threshold == 5
+        assert config.pause_seconds == 60.0
         assert config.max_pause_seconds == 300.0
 
     def test_custom_values(self):
@@ -39,6 +39,53 @@ class TestCaptionCircuitBreakerConfig:
         assert config.threshold == 5
         assert config.pause_seconds == 60.0
         assert config.max_pause_seconds == 180.0
+
+
+class TestCaptionCircuitBreakerConfigValidation:
+    """Test CaptionCircuitBreakerConfig __post_init__ validation (US-66-007)."""
+
+    def test_pause_seconds_zero_raises(self):
+        """Test that pause_seconds=0 raises ValueError."""
+        with pytest.raises(ValueError, match="pause_seconds must be > 0"):
+            CaptionCircuitBreakerConfig(pause_seconds=0)
+
+    def test_pause_seconds_negative_raises(self):
+        """Test that negative pause_seconds raises ValueError."""
+        with pytest.raises(ValueError, match="pause_seconds must be > 0"):
+            CaptionCircuitBreakerConfig(pause_seconds=-10.0)
+
+    def test_max_pause_seconds_less_than_pause_seconds_raises(self):
+        """Test that max_pause_seconds < pause_seconds raises ValueError."""
+        with pytest.raises(ValueError, match="max_pause_seconds must be >= pause_seconds"):
+            CaptionCircuitBreakerConfig(pause_seconds=100.0, max_pause_seconds=50.0)
+
+    def test_threshold_zero_raises(self):
+        """Test that threshold=0 raises ValueError."""
+        with pytest.raises(ValueError, match="threshold must be >= 1"):
+            CaptionCircuitBreakerConfig(threshold=0)
+
+    def test_threshold_negative_raises(self):
+        """Test that negative threshold raises ValueError."""
+        with pytest.raises(ValueError, match="threshold must be >= 1"):
+            CaptionCircuitBreakerConfig(threshold=-1)
+
+    def test_pause_seconds_equals_max_pause_seconds_valid(self):
+        """Test that pause_seconds == max_pause_seconds is valid (edge case)."""
+        config = CaptionCircuitBreakerConfig(
+            pause_seconds=100.0, max_pause_seconds=100.0
+        )
+        assert config.pause_seconds == 100.0
+        assert config.max_pause_seconds == 100.0
+
+    def test_threshold_one_valid(self):
+        """Test that threshold=1 is valid (edge case)."""
+        config = CaptionCircuitBreakerConfig(threshold=1)
+        assert config.threshold == 1
+
+    def test_small_positive_pause_seconds_valid(self):
+        """Test that a small positive pause_seconds is valid."""
+        config = CaptionCircuitBreakerConfig(pause_seconds=0.001)
+        assert config.pause_seconds == 0.001
 
 
 class TestCaptionCircuitBreakerState:
@@ -62,8 +109,8 @@ class TestCaptionCircuitBreakerBasic:
         breaker = CaptionCircuitBreaker()
         assert breaker.is_enabled is True
         assert breaker.is_open is False
-        assert breaker.config.threshold == 10
-        assert breaker.config.pause_seconds == 120.0
+        assert breaker.config.threshold == 5
+        assert breaker.config.pause_seconds == 60.0
 
     def test_init_custom_config(self):
         """Test initialization with custom config."""
@@ -224,11 +271,11 @@ class TestCaptionCircuitBreakerPauseCapping:
     """Test pause duration capping."""
 
     def test_pause_capped_at_max(self):
-        """Test that pause is capped at max_pause_seconds."""
+        """Test that pause is capped at max_pause_seconds via effective pause."""
         config = CaptionCircuitBreakerConfig(
             threshold=1,
-            pause_seconds=500.0,  # Higher than max
-            max_pause_seconds=100.0,
+            pause_seconds=100.0,
+            max_pause_seconds=100.0,  # Equal to pause_seconds (edge case)
         )
         breaker = CaptionCircuitBreaker(config)
 

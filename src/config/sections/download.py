@@ -164,6 +164,29 @@ class CaptionCircuitBreakerConfig:
     # when YouTube is rate-limiting. Default: True.
     circuit_breaker_cascade: bool = True
 
+    def __post_init__(self) -> None:
+        """Validate configuration values at load time (US-66-007)."""
+        if self.pause_seconds <= 0:
+            raise ValueError(
+                f"CaptionCircuitBreakerConfig.pause_seconds must be > 0, "
+                f"got {self.pause_seconds}. "
+                f"Check config.yaml under download.caption_first.circuit_breaker.pause_seconds"
+            )
+
+        if self.max_pause_seconds < self.pause_seconds:
+            raise ValueError(
+                f"CaptionCircuitBreakerConfig.max_pause_seconds must be >= pause_seconds, "
+                f"got max_pause_seconds={self.max_pause_seconds} < pause_seconds={self.pause_seconds}. "
+                f"Check config.yaml under download.caption_first.circuit_breaker.max_pause_seconds"
+            )
+
+        if self.threshold < 1:
+            raise ValueError(
+                f"CaptionCircuitBreakerConfig.threshold must be >= 1, "
+                f"got {self.threshold}. "
+                f"Check config.yaml under download.caption_first.circuit_breaker.threshold"
+            )
+
 
 @dataclass
 class CaptionRetryBudgetConfig:
