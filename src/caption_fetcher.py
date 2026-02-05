@@ -4670,7 +4670,27 @@ class CaptionFetcher:
         formats_tried_list: list = []
         retry_budget = getattr(self, '_active_retry_budget', None)
 
+        # US-67-003: Total format timeout budget across all format attempts per video
+        caption_config = getattr(self.config.download, 'caption_first', None) if self.config else None
+        _raw_budget = getattr(caption_config, 'total_format_timeout_seconds', 60.0) if caption_config else 60.0
+        format_timeout_budget = float(_raw_budget) if isinstance(_raw_budget, (int, float)) else 60.0
+        format_start_time = time.monotonic()
+        formats_skipped_timeout = 0
+
         for fallback_level, fmt in enumerate(unique_formats):
+            # US-67-003: Check format timeout budget before attempting next format
+            if format_timeout_budget > 0:
+                elapsed = time.monotonic() - format_start_time
+                if elapsed >= format_timeout_budget:
+                    remaining_formats = unique_formats[fallback_level:]
+                    formats_skipped_timeout += len(remaining_formats)
+                    logger.debug(
+                        f"Caption {video_id}: Format timeout budget exceeded "
+                        f"({elapsed:.1f}s / {format_timeout_budget:.1f}s), "
+                        f"skipping remaining formats: {remaining_formats}"
+                    )
+                    break
+
             # US-62-008: Skip exhausted formats
             if retry_budget and retry_budget.is_format_exhausted(fmt):
                 logger.debug(
@@ -4711,16 +4731,18 @@ class CaptionFetcher:
                 )
                 continue
 
-        # All formats exhausted (US-67-002)
-        formats_tried = len(unique_formats) - formats_skipped
+        # All formats exhausted (US-67-002, US-67-003)
+        total_skipped = formats_skipped + formats_skipped_timeout
+        formats_tried = len(unique_formats) - total_skipped
         logger.debug(
             f"Caption {video_id}: All formats exhausted after {formats_tried} attempts "
-            f"({formats_skipped} skipped due to exhaustion)"
+            f"({formats_skipped} skipped due to exhaustion, "
+            f"{formats_skipped_timeout} skipped due to timeout budget)"
         )
         raise CaptionFormatExhaustedError(
             video_id,
             formats_tried=formats_tried_list,
-            formats_skipped=formats_skipped,
+            formats_skipped=total_skipped,
             last_error=last_error,
         )
 

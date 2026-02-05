@@ -1112,6 +1112,12 @@ download:
     cache_validation: "warn"      # Validation mode (default: warn)
     cache_validation_tolerance: 0.2  # Max segment count deviation ratio (20%)
 
+    # Total format timeout budget (US-67-003): maximum wall-clock seconds across ALL
+    # subtitle format attempts per video. When cumulative time exceeds this budget,
+    # remaining formats are skipped. Prevents wasting ~95s (45+25+25) per video when
+    # no captions exist. Set to 0 to disable (unlimited time across formats).
+    total_format_timeout_seconds: 60.0  # Max seconds across all format attempts per video
+
     # Negative cache TTL (US-63-005): how long to remember videos without captions
     # When a video is found to have no captions, this result is cached to avoid
     # repeated expensive lookups. TTL allows re-checking since captions may be added later.
@@ -1444,6 +1450,11 @@ download:
     auto_scale_budget: true     # Scale budget limits by keyword count (ceil(n/5), max 5x)
 
   # Segment download settings (DOWNLOAD_SEGMENTS stage)
+  # Delay between segment download requests (seconds). Prevents YouTube rate-limiting.
+  # Adaptive: doubles after each failure (capped at segment_request_delay_max), resets on success.
+  segment_request_delay: 1.0
+  # Maximum adaptive delay after consecutive failures (seconds)
+  segment_request_delay_max: 30.0
   # Buffer seconds to add before/after each matched segment for editing flexibility
   segment_buffer: 5.0
   # yt-dlp format string for segment downloads (use {segment_max_resolution} placeholder)

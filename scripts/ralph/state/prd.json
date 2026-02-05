@@ -34,7 +34,7 @@
                             "id":  "US-67-002",
                             "title":  "Eliminate duplicate json3 retry in caption format fallback sequence",
                             "priority":  "high",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
                                                        "Caption format fallback sequence does NOT repeat any format (no duplicate json3 at end)",
                                                        "When all formats fail for a video, total yt-dlp invocations is exactly len(unique_formats) not more",
@@ -42,13 +42,13 @@
                                                        "Unit test verifies fallback tries each format exactly once then raises CaptionFormatExhaustedError",
                                                        "Unit test verifies no subprocess is spawned for a format that already failed in the same fetch cycle"
                                                    ],
-                            "notes":  "All 5 criteria verified. Dedup via dict.fromkeys at init and in _fetch_subtitle_formats. CaptionFormatExhaustedError in src/caption/exceptions.py. 15 tests in tests/test_format_dedup_exhaustion.py all pass."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-67-003",
                             "title":  "Add format-level timeout budget across all caption format attempts",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "A configurable total_format_timeout_seconds field exists in CaptionFirstConfig (default: 60)",
                                                        "When cumulative time across ALL format attempts exceeds the budget, remaining formats are skipped",
