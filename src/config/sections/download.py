@@ -121,6 +121,21 @@ class EnhancedFeaturesConfig:
     # Options: "neutral" (no preference), "more" (prefer faces), "none" (avoid faces)
     face_preference: str = "neutral"
 
+    def __post_init__(self):
+        if not (0.0 <= self.min_confidence <= 1.0):
+            raise ValueError(
+                f"EnhancedFeaturesConfig.min_confidence must be in range 0.0-1.0, got {self.min_confidence}"
+            )
+        if self.max_retries < 1:
+            raise ValueError(
+                f"EnhancedFeaturesConfig.max_retries must be positive, got {self.max_retries}"
+            )
+        valid_face_preferences = ("neutral", "more", "none")
+        if self.face_preference not in valid_face_preferences:
+            raise ValueError(
+                f"EnhancedFeaturesConfig.face_preference must be one of {valid_face_preferences}, got '{self.face_preference}'"
+            )
+
 
 @dataclass
 class LLMTitleFilterConfig:
@@ -130,6 +145,16 @@ class LLMTitleFilterConfig:
     model: str = "gemini-2.0-flash"  # or claude-3-haiku-20240307
     batch_size: int = 20  # Check multiple titles at once
     min_relevance: float = 0.7  # 0-1, reject if below
+
+    def __post_init__(self):
+        if not (0.0 <= self.min_relevance <= 1.0):
+            raise ValueError(
+                f"LLMTitleFilterConfig.min_relevance must be in range 0.0-1.0, got {self.min_relevance}"
+            )
+        if self.batch_size < 1:
+            raise ValueError(
+                f"LLMTitleFilterConfig.batch_size must be positive, got {self.batch_size}"
+            )
 
 
 @dataclass

@@ -52,7 +52,11 @@ from src.config.sections.llm import (
 )
 
 # Download config imports
-from src.config.sections.download import DownloadConfig
+from src.config.sections.download import (
+    DownloadConfig,
+    EnhancedFeaturesConfig,
+    LLMTitleFilterConfig,
+)
 
 # Base config for validation
 from src.config.base import Config
@@ -1629,6 +1633,97 @@ class TestSceneDetectionConfigValueErrorValidation:
         config = SceneDetectionConfig(threshold=27.0, min_scene_len=15)
         assert config.threshold == 27.0
         assert config.min_scene_len == 15
+
+
+# =============================================================================
+# US-69-007: EnhancedFeaturesConfig and LLMTitleFilterConfig validation
+# =============================================================================
+
+
+@pytest.mark.fast
+class TestEnhancedFeaturesConfigValueErrorValidation:
+    """Test EnhancedFeaturesConfig raises ValueError for invalid values."""
+
+    def test_min_confidence_above_one_raises_valueerror(self):
+        """Test min_confidence=1.5 raises ValueError."""
+        with pytest.raises(ValueError, match="min_confidence"):
+            EnhancedFeaturesConfig(min_confidence=1.5)
+
+    def test_min_confidence_negative_raises_valueerror(self):
+        """Test min_confidence=-0.1 raises ValueError."""
+        with pytest.raises(ValueError, match="min_confidence"):
+            EnhancedFeaturesConfig(min_confidence=-0.1)
+
+    def test_max_retries_zero_raises_valueerror(self):
+        """Test max_retries=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_retries"):
+            EnhancedFeaturesConfig(max_retries=0)
+
+    def test_max_retries_negative_raises_valueerror(self):
+        """Test max_retries=-3 raises ValueError."""
+        with pytest.raises(ValueError, match="max_retries"):
+            EnhancedFeaturesConfig(max_retries=-3)
+
+    def test_face_preference_invalid_raises_valueerror(self):
+        """Test face_preference='invalid' raises ValueError."""
+        with pytest.raises(ValueError, match="face_preference"):
+            EnhancedFeaturesConfig(face_preference="invalid")
+
+    def test_face_preference_case_sensitive(self):
+        """Test face_preference='Neutral' (wrong case) raises ValueError."""
+        with pytest.raises(ValueError, match="face_preference"):
+            EnhancedFeaturesConfig(face_preference="Neutral")
+
+    def test_valid_face_preferences_accepted(self):
+        """Test all valid face_preference values are accepted."""
+        for pref in ("neutral", "more", "none"):
+            config = EnhancedFeaturesConfig(face_preference=pref)
+            assert config.face_preference == pref
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = EnhancedFeaturesConfig(min_confidence=0.0, max_retries=1)
+        assert config.min_confidence == 0.0
+        assert config.max_retries == 1
+
+        config = EnhancedFeaturesConfig(min_confidence=1.0, max_retries=100)
+        assert config.min_confidence == 1.0
+        assert config.max_retries == 100
+
+
+@pytest.mark.fast
+class TestLLMTitleFilterConfigValueErrorValidation:
+    """Test LLMTitleFilterConfig raises ValueError for invalid values."""
+
+    def test_min_relevance_above_one_raises_valueerror(self):
+        """Test min_relevance=1.5 raises ValueError."""
+        with pytest.raises(ValueError, match="min_relevance"):
+            LLMTitleFilterConfig(min_relevance=1.5)
+
+    def test_min_relevance_negative_raises_valueerror(self):
+        """Test min_relevance=-0.1 raises ValueError."""
+        with pytest.raises(ValueError, match="min_relevance"):
+            LLMTitleFilterConfig(min_relevance=-0.1)
+
+    def test_batch_size_zero_raises_valueerror(self):
+        """Test batch_size=0 raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size"):
+            LLMTitleFilterConfig(batch_size=0)
+
+    def test_batch_size_negative_raises_valueerror(self):
+        """Test batch_size=-5 raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size"):
+            LLMTitleFilterConfig(batch_size=-5)
+
+    def test_valid_boundary_values_accepted(self):
+        """Test valid boundary values are accepted without error."""
+        config = LLMTitleFilterConfig(min_relevance=0.0, batch_size=1)
+        assert config.min_relevance == 0.0
+        assert config.batch_size == 1
+
+        config = LLMTitleFilterConfig(min_relevance=1.0, batch_size=100)
+        assert config.min_relevance == 1.0
+        assert config.batch_size == 100
 
 
 if __name__ == "__main__":
