@@ -211,3 +211,66 @@ class TestFromDictSectionPropagation:
         assert config.download.quality == "720p"
         assert config.matching.min_confidence == 0.5
         assert config.output.frame_rate == 30
+
+
+# ---------------------------------------------------------------------------
+# US-69-010: duration_tiers loading uses consistent error handling
+# ---------------------------------------------------------------------------
+
+class TestDurationTiersErrorHandling:
+    """Malformed duration_tiers raises ConfigError instead of raw exceptions."""
+
+    def test_malformed_duration_tiers_string_raises_config_error(self):
+        """Non-dict duration_tiers value raises ConfigError."""
+        data = {"duration_tiers": "not_a_dict"}
+        with pytest.raises(ConfigError, match="duration_tiers"):
+            Config._from_dict(data)
+
+    def test_malformed_duration_tiers_list_raises_config_error(self):
+        """List value for duration_tiers raises ConfigError."""
+        data = {"duration_tiers": [1, 2, 3]}
+        with pytest.raises(ConfigError, match="duration_tiers"):
+            Config._from_dict(data)
+
+    def test_malformed_tier_value_raises_config_error(self):
+        """Non-dict tier value inside duration_tiers raises ConfigError."""
+        data = {"duration_tiers": {"short": "bad_value"}}
+        with pytest.raises(ConfigError, match="duration_tiers"):
+            Config._from_dict(data)
+
+    def test_config_error_is_chained_from_attribute_error(self):
+        """ConfigError preserves the original exception as __cause__ for tier errors."""
+        data = {"duration_tiers": {"short": "bad_value"}}
+        with pytest.raises(ConfigError) as exc_info:
+            Config._from_dict(data)
+        assert exc_info.value.__cause__ is not None
+
+    def test_valid_duration_tiers_loads_correctly(self):
+        """Valid duration_tiers dict populates DurationTiersConfig correctly."""
+        data = {
+            "duration_tiers": {
+                "short": {"min": 10, "max": 60, "count": 3},
+                "medium": {"min": 60, "max": 300, "count": 5},
+            }
+        }
+        config = Config._from_dict(data)
+        assert config.duration_tiers.short.min_seconds == 10
+        assert config.duration_tiers.short.max_seconds == 60
+        assert config.duration_tiers.short.videos_per_keyword == 3
+        assert config.duration_tiers.medium.min_seconds == 60
+        assert config.duration_tiers.medium.max_seconds == 300
+        assert config.duration_tiers.medium.videos_per_keyword == 5
+
+    def test_valid_duration_tiers_preserves_defaults_for_missing_tiers(self):
+        """Tiers not specified in data keep their defaults."""
+        data = {
+            "duration_tiers": {
+                "short": {"min": 5, "max": 30, "count": 2},
+            }
+        }
+        config = Config._from_dict(data)
+        # short is overridden
+        assert config.duration_tiers.short.min_seconds == 5
+        # long keeps its default (600, 1500, 5, 0)
+        assert config.duration_tiers.long.min_seconds == 600
+        assert config.duration_tiers.long.max_seconds == 1500
