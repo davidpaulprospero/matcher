@@ -435,10 +435,17 @@ def create_resilient_pipeline(
 def create_orchestrated_pipeline(
     config: 'Config',
     project_dir: Path,
-    strategy: 'HealingStrategy' = None
+    strategy: 'HealingStrategy' = None,
+    recover_session: bool = True,
 ) -> tuple:
     """
     Create a fully orchestrated pipeline with healing.
+
+    Args:
+        config: Pipeline configuration
+        project_dir: Project directory path
+        strategy: Optional healing strategy
+        recover_session: Whether to attempt session recovery from crash (US-64-012)
 
     Returns:
         Tuple of (PipelineOrchestrator, HealingOrchestrator, ResilientRunner)
@@ -452,5 +459,15 @@ def create_orchestrated_pipeline(
     pipeline = create_default_pipeline(config, project_dir)
     orchestrator = HealingOrchestrator(config, project_dir, strategy)
     runner = ResilientRunner(config, project_dir, orchestrator=orchestrator)
+
+    # US-64-012: Attempt session recovery if enabled
+    if recover_session:
+        recovered = orchestrator.load_session()
+        if recovered:
+            logger.info(
+                "[runner] Recovered healing session from previous run "
+                f"(stage={orchestrator.current_stage}, "
+                f"heals={orchestrator.metrics.total_heals})"
+            )
 
     return pipeline, orchestrator, runner

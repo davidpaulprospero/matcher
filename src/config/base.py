@@ -53,6 +53,8 @@ except ImportError:
     YAML_FAST = False
 
 # Import all section configs
+from .utils import safe_get_config_value
+
 from .sections import (
     # Infrastructure
     LoggingConfig,
@@ -606,12 +608,9 @@ class Config:
         errors = []
 
         # Location matching filter level
-        location_config = getattr(self.matching, 'location_matching', None)
+        location_config = safe_get_config_value(self.matching, 'location_matching')
         if location_config:
-            if isinstance(location_config, dict):
-                filter_level = location_config.get('hard_filter_level', 'city')
-            else:
-                filter_level = getattr(location_config, 'hard_filter_level', 'city')
+            filter_level = safe_get_config_value(location_config, 'hard_filter_level', 'city')
 
             valid_levels = {'city', 'state', 'country', 'continent'}
             if filter_level not in valid_levels:
@@ -621,7 +620,7 @@ class Config:
                 )
 
         # Face preference
-        face_pref = getattr(self.enhanced, 'face_preference', 'neutral')
+        face_pref = safe_get_config_value(self.enhanced, 'face_preference', 'neutral')
         valid_face_prefs = {'prefer_faces', 'avoid_faces', 'neutral'}
         if face_pref not in valid_face_prefs:
             errors.append(
@@ -630,12 +629,9 @@ class Config:
             )
 
         # Audio quality (0-9)
-        audio_first = getattr(self.download, 'audio_first', None)
+        audio_first = safe_get_config_value(self.download, 'audio_first')
         if audio_first:
-            if isinstance(audio_first, dict):
-                audio_quality = audio_first.get('audio_quality', 5)
-            else:
-                audio_quality = getattr(audio_first, 'audio_quality', 5)
+            audio_quality = safe_get_config_value(audio_first, 'audio_quality', 5)
 
             if not (0 <= audio_quality <= 9):
                 errors.append(
@@ -666,7 +662,7 @@ class Config:
         errors = []
 
         # min_confidence should be <= high_confidence_threshold
-        high_conf = getattr(self.matching, 'high_confidence_threshold', 0.85)
+        high_conf = safe_get_config_value(self.matching, 'high_confidence_threshold', 0.85)
         if self.matching.min_confidence > high_conf:
             errors.append(
                 f"matching.min_confidence ({self.matching.min_confidence}) should be <= "
@@ -674,8 +670,8 @@ class Config:
             )
 
         # embedding_candidates should be >= num_alternatives * 3 for diversity
-        num_alts = getattr(self.output, 'num_alternatives', 2)
-        embed_candidates = getattr(self.matching, 'embedding_candidates', 50)
+        num_alts = safe_get_config_value(self.output, 'num_alternatives', 2)
+        embed_candidates = safe_get_config_value(self.matching, 'embedding_candidates', 50)
         min_required = num_alts * 3
         if embed_candidates < min_required:
             errors.append(
@@ -684,20 +680,16 @@ class Config:
             )
 
         # split_otio requires generate_otio
-        if getattr(self.output, 'split_otio', False) and not getattr(self.output, 'generate_otio', True):
+        if safe_get_config_value(self.output, 'split_otio', False) and not safe_get_config_value(self.output, 'generate_otio', True):
             errors.append(
                 "output.split_otio=true requires output.generate_otio=true"
             )
 
         # Pause split thresholds
-        pause_split = getattr(self.transcription, 'pause_split', None)
+        pause_split = safe_get_config_value(self.transcription, 'pause_split')
         if pause_split:
-            if isinstance(pause_split, dict):
-                min_gap = pause_split.get('min_gap_ms', 300)
-                min_seg = pause_split.get('min_segment_duration', 0.5)
-            else:
-                min_gap = getattr(pause_split, 'min_gap_ms', 300)
-                min_seg = getattr(pause_split, 'min_segment_duration', 0.5)
+            min_gap = safe_get_config_value(pause_split, 'min_gap_ms', 300)
+            min_seg = safe_get_config_value(pause_split, 'min_segment_duration', 0.5)
 
             # min_gap_ms (in ms) should be greater than min_segment_duration (in s) * 1000
             if min_gap < min_seg * 1000:
@@ -719,15 +711,14 @@ class Config:
         parts = path.split(".")
         obj = self
 
+        _sentinel = object()
         for part in parts:
-            if hasattr(obj, part):
-                obj = getattr(obj, part)
-            elif isinstance(obj, dict) and part in obj:
-                obj = obj[part]
-            else:
+            result = safe_get_config_value(obj, part, _sentinel)
+            if result is _sentinel:
                 if self.logging.log_config_access:
                     logger.debug(f"Config path not found: {path}")
                 return default
+            obj = result
 
         return obj
 

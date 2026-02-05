@@ -329,5 +329,94 @@ class TestConfigDefaults:
             assert pipeline is not None
 
 
+class TestSafeGetConfigValue:
+    """Test safe_get_config_value utility (US-65-002)."""
+
+    @pytest.mark.fast
+    def test_dict_input(self):
+        """Test safe_get_config_value with dict input."""
+        from src.config.utils import safe_get_config_value
+
+        d = {'timeout': 30, 'retries': 3}
+        assert safe_get_config_value(d, 'timeout') == 30
+        assert safe_get_config_value(d, 'retries') == 3
+
+    @pytest.mark.fast
+    def test_dataclass_input(self):
+        """Test safe_get_config_value with dataclass input."""
+        from dataclasses import dataclass
+        from src.config.utils import safe_get_config_value
+
+        @dataclass
+        class SampleConfig:
+            timeout: int = 30
+            retries: int = 3
+
+        obj = SampleConfig()
+        assert safe_get_config_value(obj, 'timeout') == 30
+        assert safe_get_config_value(obj, 'retries') == 3
+
+    @pytest.mark.fast
+    def test_missing_key_with_default(self):
+        """Test safe_get_config_value returns default for missing keys."""
+        from src.config.utils import safe_get_config_value
+
+        d = {'timeout': 30}
+        assert safe_get_config_value(d, 'missing', 'fallback') == 'fallback'
+        assert safe_get_config_value(d, 'missing') is None
+
+    @pytest.mark.fast
+    def test_missing_attr_with_default(self):
+        """Test safe_get_config_value returns default for missing attrs on objects."""
+        from dataclasses import dataclass
+        from src.config.utils import safe_get_config_value
+
+        @dataclass
+        class SampleConfig:
+            timeout: int = 30
+
+        obj = SampleConfig()
+        assert safe_get_config_value(obj, 'nonexistent', 42) == 42
+        assert safe_get_config_value(obj, 'nonexistent') is None
+
+    @pytest.mark.fast
+    def test_none_input(self):
+        """Test safe_get_config_value handles None input gracefully."""
+        from src.config.utils import safe_get_config_value
+
+        assert safe_get_config_value(None, 'key', 'default') == 'default'
+        assert safe_get_config_value(None, 'key') is None
+
+    @pytest.mark.fast
+    def test_real_config_sections(self):
+        """Test safe_get_config_value works with actual config dataclasses."""
+        from src.config.utils import safe_get_config_value
+        from src.config import MatchingConfig, DownloadConfig
+
+        matching = MatchingConfig()
+        assert safe_get_config_value(matching, 'min_confidence') is not None
+
+        download = DownloadConfig()
+        assert safe_get_config_value(download, 'nonexistent_field', 'fallback') == 'fallback'
+
+    @pytest.mark.fast
+    def test_dict_and_object_return_same_value(self):
+        """Test that dict and object access return identical results."""
+        from dataclasses import dataclass
+        from src.config.utils import safe_get_config_value
+
+        @dataclass
+        class Cfg:
+            name: str = "test"
+            count: int = 5
+
+        obj = Cfg()
+        d = {'name': 'test', 'count': 5}
+
+        assert safe_get_config_value(obj, 'name') == safe_get_config_value(d, 'name')
+        assert safe_get_config_value(obj, 'count') == safe_get_config_value(d, 'count')
+        assert safe_get_config_value(obj, 'missing', -1) == safe_get_config_value(d, 'missing', -1)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
