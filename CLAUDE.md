@@ -424,4 +424,4 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 ## Session History
 
-See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent: Carlini-inspired Ralph improvements (early-exit tuning, structured test output, fast test mode, sprint progress doc), OTIO available_range ffprobe fix, XML ffprobe duration fix.
+See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent: FAISS index space mismatch fix (iterative match gap filling), Embedding model migration (text-embedding-004 → gemini-embedding-001), Carlini-inspired Ralph improvements, OTIO available_range ffprobe fix.
