@@ -650,7 +650,11 @@ class CheckpointManager:
         # Store stage-specific data
         if stage_data:
             stage_key = stage.lower()
-            if stage_key not in CheckpointData.__dataclass_fields__:
+            if stage in _STAGE_FIELD_MAP_TERMINAL:
+                logger.debug(
+                    f"save(): stage '{stage}' is terminal — stage_data not persisted"
+                )
+            elif stage_key not in CheckpointData.__dataclass_fields__:
                 logger.warning(
                     f"save(): stage_key '{stage_key}' (from stage '{stage}') "
                     f"does not map to a CheckpointData field — data will not be persisted"
@@ -688,7 +692,11 @@ class CheckpointManager:
         # Store stage-specific data without changing last_completed_stage
         if stage_data:
             stage_key = stage.lower()
-            if stage_key not in CheckpointData.__dataclass_fields__:
+            if stage in _STAGE_FIELD_MAP_TERMINAL:
+                logger.debug(
+                    f"save_intermediate(): stage '{stage}' is terminal — stage_data not persisted"
+                )
+            elif stage_key not in CheckpointData.__dataclass_fields__:
                 logger.warning(
                     f"save_intermediate(): stage_key '{stage_key}' (from stage '{stage}') "
                     f"does not map to a CheckpointData field — data will not be persisted"
