@@ -532,3 +532,54 @@ function Get-LearningInsights {
 
     return $insights
 }
+
+function Get-LearningInjection {
+    <#
+    .SYNOPSIS
+        Generate warning text from learning DB for injection into story prompts.
+        Only active when learningInjection flag is enabled.
+    .PARAMETER FocusArea
+        Current focus area for filtering
+    .PARAMETER MaxWarnings
+        Maximum number of warnings to return (default: 3)
+    .RETURNS
+        String: formatted warning section, or empty string if no relevant warnings
+    #>
+    param(
+        [string]$FocusArea = "",
+        [int]$MaxWarnings = 3
+    )
+
+    $config = Get-RalphConfig
+    if (-not $config.flags -or -not $config.flags.learningInjection) { return "" }
+
+    $insights = Get-LearningInsights -FocusArea $FocusArea -LastN 20
+    if (-not $insights.hasData) { return "" }
+
+    # Filter to errors with 3+ occurrences
+    $significantErrors = @($insights.commonErrorTypes.GetEnumerator() |
+        Where-Object { $_.Value -ge 3 } |
+        Sort-Object Value -Descending |
+        Select-Object -First $MaxWarnings)
+
+    if ($significantErrors.Count -eq 0) { return "" }
+
+    $lines = @()
+    $lines += ""
+    $lines += "## Known Issues (from learning database)"
+    foreach ($err in $significantErrors) {
+        $errorType = $err.Key
+        $count = $err.Value
+        $warning = switch -Wildcard ($errorType) {
+            "ImportError"    { "Frequent ImportError from circular imports. Verify imports with ``python -m py_compile`` before committing." }
+            "TestFailure"    { "Tests in this area are fragile. Run the full test suite, not just your new tests." }
+            "Timeout"        { "Previous stories in this area timed out. Keep changes small and focused." }
+            "SyntaxError"    { "Syntax errors are common. Run ``python -m py_compile`` on every file you modify." }
+            "HealthCheckFailure" { "Health checks fail frequently. Run pytest after every change." }
+            default          { "Pattern '$errorType' appeared $count times recently. Be extra careful." }
+        }
+        $lines += "- WARNING ($count recent occurrences): $warning"
+    }
+
+    return ($lines -join "`n")
+}

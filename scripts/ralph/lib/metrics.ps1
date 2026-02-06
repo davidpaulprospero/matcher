@@ -2,6 +2,79 @@
 # Metrics, logging, instrumentation: CSV tracking, git state, health, tokens
 
 # ============================================================================
+# NON-LOCKING CSV READER
+# ============================================================================
+
+function Write-MetricsRow {
+    <#
+    .SYNOPSIS
+        Append a row to a CSV file using non-locking FileStream.
+        Retries up to 5 times with exponential backoff on IOException.
+    #>
+    param(
+        [string]$Path,
+        [string]$Row
+    )
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            $stream = [System.IO.FileStream]::new(
+                $Path,
+                [System.IO.FileMode]::Append,
+                [System.IO.FileAccess]::Write,
+                [System.IO.FileShare]::ReadWrite
+            )
+            $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
+            try {
+                $writer.WriteLine($Row)
+            } finally {
+                $writer.Close()
+                $stream.Close()
+            }
+            return
+        } catch {
+            if ($attempt -lt 5) {
+                Start-Sleep -Milliseconds (100 * $attempt)
+            } else {
+                Write-Host "  Warning: Failed to write metrics row after 5 attempts: $_" -ForegroundColor Yellow
+            }
+        }
+    }
+}
+
+function Import-CsvNonLocking {
+    <#
+    .SYNOPSIS
+        Read a CSV file without holding an exclusive lock, preventing IOException
+        when another process (Add-Content/FileStream) writes concurrently.
+    .PARAMETER Path
+        Path to the CSV file
+    .OUTPUTS
+        Array of PSCustomObjects (same as Import-Csv)
+    #>
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return @() }
+    try {
+        $stream = [System.IO.FileStream]::new(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite
+        )
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+        try {
+            $content = $reader.ReadToEnd()
+        } finally {
+            $reader.Close()
+            $stream.Close()
+        }
+        if ([string]::IsNullOrWhiteSpace($content)) { return @() }
+        return @($content | ConvertFrom-Csv)
+    } catch {
+        return @()
+    }
+}
+
+# ============================================================================
 # COMPREHENSIVE LOGGING FUNCTIONS (Phase 1)
 # ============================================================================
 
@@ -774,7 +847,7 @@ function Get-SprintTokenBudget {
     $totalUsed = 0
     if (Test-Path $script:MetricsFile) {
         try {
-            $metrics = @(Import-Csv $script:MetricsFile -ErrorAction SilentlyContinue)
+            $metrics = @(Import-CsvNonLocking $script:MetricsFile)
             $sessionMetrics = @($metrics | Where-Object { $_.session -eq $script:State.SessionId })
             $sumResult = ($sessionMetrics | Measure-Object -Property tokens_used -Sum).Sum
             if ($sumResult) { $totalUsed = [int]$sumResult }
@@ -1531,46 +1604,50 @@ function Record-Metric {
         # Exploration tracking
         [bool]$ExplorationTriggered = $false,
         [string]$ExplorationReason = "",
-        [int]$ExplorationTokens = 0
+        [int]$ExplorationTokens = 0,
+        # Role tracking
+        [string]$Role = ""
     )
 
-    # V3 schema: 24 columns including exploration tracking
-    $v3Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms,exploration_triggered,exploration_reason,exploration_tokens"
+    # V4 schema: 25 columns including role tracking
+    $v4Header = "timestamp,session,sprint,story_id,mode,duration_min,success,timeout,focus_area,tokens_used,error_category,hour_of_day,test_results,retry_count,lines_added,lines_deleted,phase_read_ms,phase_analyze_ms,phase_implement_ms,phase_test_ms,phase_commit_ms,exploration_triggered,exploration_reason,exploration_tokens,role"
 
-    # Ensure metrics file exists with v3 header
+    # Ensure metrics file exists with v4 header
     if (-not (Test-Path $script:MetricsFile)) {
-        $v3Header | Set-Content $script:MetricsFile -Encoding UTF8
+        $v4Header | Set-Content $script:MetricsFile -Encoding UTF8
     }
     else {
         # Check if we need to migrate schema
         $header = Get-Content $script:MetricsFile -First 1
         $headerCols = ($header -split ',').Count
 
-        if ($headerCols -lt 24) {
-            # Migration: rewrite with v3 header and pad old rows
+        if ($headerCols -lt 25) {
+            # Migration: rewrite with v4 header and pad old rows
             $lines = Get-Content $script:MetricsFile
-            $lines[0] = $v3Header
-            # Add empty values to existing rows (pad to 24 columns)
+            $lines[0] = $v4Header
+            # Add empty values to existing rows (pad to 25 columns)
             for ($i = 1; $i -lt $lines.Count; $i++) {
                 $rowCols = ($lines[$i] -split ',').Count
-                $padding = 24 - $rowCols
-                if ($padding -gt 0) {
-                    # Pad with appropriate defaults: false,, 0 for new exploration columns
-                    if ($rowCols -eq 21) {
-                        # Coming from v2, add 3 new exploration columns
-                        $lines[$i] = $lines[$i] + ",false,,0"
-                    } else {
-                        # Coming from older version, pad phase timing with 0s then exploration defaults
+                if ($rowCols -eq 24) {
+                    # Coming from v3, add 1 new role column
+                    $lines[$i] = $lines[$i] + ","
+                } elseif ($rowCols -eq 21) {
+                    # Coming from v2, add 3 exploration columns + role
+                    $lines[$i] = $lines[$i] + ",false,,0,"
+                } else {
+                    # Coming from older version, pad to 25
+                    $padding = 25 - $rowCols
+                    if ($padding -gt 0) {
                         $phasePadding = [math]::Max(0, 21 - $rowCols)
                         if ($phasePadding -gt 0) {
                             $lines[$i] = $lines[$i] + (',0' * $phasePadding)
                         }
-                        $lines[$i] = $lines[$i] + ",false,,0"
+                        $lines[$i] = $lines[$i] + ",false,,0,"
                     }
                 }
             }
             $lines | Set-Content $script:MetricsFile -Encoding UTF8
-            Write-Host "  Migrated metrics.csv to v3 schema (24 columns with exploration)" -ForegroundColor DarkGray
+            Write-Host "  Migrated metrics.csv to v4 schema (25 columns with role)" -ForegroundColor DarkGray
         }
     }
 
@@ -1595,17 +1672,186 @@ function Record-Metric {
     $safeError = if ($ErrorCategory -match '[,"\r\n]') { "`"$(($ErrorCategory -replace '"', '""') -replace '[\r\n]+', ' ')`"" } else { $ErrorCategory }
     $safeResults = if ($TestResults -match '[,"\r\n]') { "`"$(($TestResults -replace '"', '""') -replace '[\r\n]+', ' ')`"" } else { $TestResults }
     $safeReason = if ($ExplorationReason -match '[,"\r\n]') { "`"$(($ExplorationReason -replace '"', '""') -replace '[\r\n]+', ' ')`"" } else { $ExplorationReason }
-    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$safeError,$HourOfDay,$safeResults,$RetryCount,$LinesAdded,$LinesDeleted,$PhaseReadMs,$PhaseAnalyzeMs,$PhaseImplementMs,$PhaseTestMs,$PhaseCommitMs,$($ExplorationTriggered.ToString().ToLower()),$safeReason,$ExplorationTokens"
-    try {
-        Add-Content -Path $script:MetricsFile -Value $row -Encoding UTF8
-    } catch {
-        Start-Sleep -Milliseconds 200
-        try {
-            Add-Content -Path $script:MetricsFile -Value $row -Encoding UTF8
-        } catch {
-            Write-Host "  Warning: Failed to write metrics row: $_" -ForegroundColor Yellow
+    $row = "$timestamp,$Session,$Sprint,$StoryId,$Mode,$DurationMin,$($Success.ToString().ToLower()),$($Timeout.ToString().ToLower()),$FocusArea,$TokensUsed,$safeError,$HourOfDay,$safeResults,$RetryCount,$LinesAdded,$LinesDeleted,$PhaseReadMs,$PhaseAnalyzeMs,$PhaseImplementMs,$PhaseTestMs,$PhaseCommitMs,$($ExplorationTriggered.ToString().ToLower()),$safeReason,$ExplorationTokens,$Role"
+    Write-MetricsRow -Path $script:MetricsFile -Row $row
+}
+
+# ============================================================================
+# SPRINT DIAGNOSTICS
+# ============================================================================
+
+function Get-SprintDiagnostics {
+    <#
+    .SYNOPSIS
+        Compute sprint diagnostics: flag state, derived metrics, 3-sprint comparison.
+        Writes session/diagnostics.json and returns the diagnostics hashtable.
+    .PARAMETER SprintNumber
+        Sprint number to analyze (0 = current sprint from PRD)
+    .PARAMETER Prd
+        Optional PRD object (loaded if not provided)
+    .RETURNS
+        Hashtable with active_flags, metrics, comparison, flag_impact
+    #>
+    param(
+        [int]$SprintNumber = 0,
+        [object]$Prd = $null
+    )
+
+    # Load PRD if not provided
+    if (-not $Prd) {
+        $Prd = Get-Sprint
+    }
+    if (-not $Prd) { return $null }
+
+    if ($SprintNumber -eq 0 -and $Prd.sprintNumber) {
+        $SprintNumber = $Prd.sprintNumber
+    }
+
+    # 1. Read config flags
+    $config = Get-RalphConfig
+    $activeFlags = @{}
+    if ($config.flags) {
+        $config.flags.PSObject.Properties | ForEach-Object {
+            $activeFlags[$_.Name] = $_.Value
         }
     }
+
+    # 2. Read metrics CSV
+    $metricsFile = if ($script:MetricsFile) { $script:MetricsFile } else {
+        $sessionDir = if ($script:Paths) { $script:Paths.SessionDir } else { Join-Path $script:RalphDir "session" }
+        Join-Path $sessionDir "metrics.csv"
+    }
+    $allMetrics = @()
+    if (Test-Path $metricsFile) {
+        $allMetrics = @(Import-CsvNonLocking $metricsFile)
+    }
+
+    # 3. Filter to current sprint rows
+    $sprintLabel = "sprint-$SprintNumber"
+    $sprintRows = @($allMetrics | Where-Object { $_.sprint -eq $sprintLabel })
+
+    # 4. Compute derived metrics
+    $storyRows = @($sprintRows | Where-Object { $_.story_id -and $_.story_id -notlike 'HEALING-*' })
+    $distinctStories = @($storyRows | Select-Object -ExpandProperty story_id -Unique)
+    $storiesAttempted = $distinctStories.Count
+
+    $storiesPassedFirstTry = 0
+    $storiesPassedWithRetry = 0
+    $storiesFailed = 0
+
+    foreach ($sid in $distinctStories) {
+        $storyMetrics = @($storyRows | Where-Object { $_.story_id -eq $sid } | Sort-Object timestamp)
+        if ($storyMetrics.Count -eq 0) { continue }
+
+        $firstRow = $storyMetrics[0]
+        $anySuccess = @($storyMetrics | Where-Object { $_.success -eq 'true' -or $_.success -eq 'True' })
+
+        if ($firstRow.success -eq 'true' -or $firstRow.success -eq 'True') {
+            $retryCount = if ($firstRow.retry_count) { [int]$firstRow.retry_count } else { 0 }
+            if ($retryCount -eq 0) {
+                $storiesPassedFirstTry++
+            } else {
+                $storiesPassedWithRetry++
+            }
+        } elseif ($anySuccess.Count -gt 0) {
+            $storiesPassedWithRetry++
+        } else {
+            $storiesFailed++
+        }
+    }
+
+    $firstAttemptSuccessRate = if ($storiesAttempted -gt 0) { [math]::Round($storiesPassedFirstTry / $storiesAttempted, 4) } else { 0 }
+    $overallSuccessRate = if ($storiesAttempted -gt 0) { [math]::Round(($storiesPassedFirstTry + $storiesPassedWithRetry) / $storiesAttempted, 4) } else { 0 }
+
+    $avgDurationMinutes = 0
+    $durationValues = @($sprintRows | Where-Object { $_.duration_min } | ForEach-Object { [double]$_.duration_min })
+    if ($durationValues.Count -gt 0) {
+        $avgDurationMinutes = [math]::Round(($durationValues | Measure-Object -Average).Average, 2)
+    }
+
+    $healingSessions = @($sprintRows | Where-Object { $_.story_id -like 'HEALING-*' }).Count
+
+    # Count regressions from healing log
+    $regressionsCaught = 0
+    $healingLogFile = if ($script:Paths) { Join-Path $script:Paths.SessionDir "healing_log.jsonl" } else { Join-Path $script:RalphDir "session\healing_log.jsonl" }
+    if (Test-Path $healingLogFile) {
+        try {
+            $healingLines = Get-Content $healingLogFile -ErrorAction SilentlyContinue
+            foreach ($line in $healingLines) {
+                if ($line -match '"regression_detected"') {
+                    $regressionsCaught++
+                }
+            }
+        } catch {}
+    }
+
+    # 5. 3-sprint comparison
+    $comparison = @{ vs_last_3_sprints = $null }
+    try {
+        $history = Get-SprintHistory
+        if ($history -and $history.sprints -and $history.sprints.Count -gt 0) {
+            $recentSprints = @($history.sprints | Select-Object -Last 3)
+            if ($recentSprints.Count -gt 0) {
+                $avgHistoricCompleted = [math]::Round(($recentSprints | ForEach-Object { $_.storiesCompleted } | Measure-Object -Average).Average, 2)
+                $avgHistoricTotal = [math]::Round(($recentSprints | ForEach-Object { $_.storiesTotal } | Measure-Object -Average).Average, 2)
+                $avgHistoricRate = if ($avgHistoricTotal -gt 0) { [math]::Round($avgHistoricCompleted / $avgHistoricTotal, 4) } else { 0 }
+
+                $firstAttemptDelta = $null
+                if ($avgHistoricRate -gt 0) {
+                    $delta = $firstAttemptSuccessRate - $avgHistoricRate
+                    $sign = if ($delta -ge 0) { "+" } else { "" }
+                    $firstAttemptDelta = "$sign$([math]::Round($delta * 100, 1))%"
+                }
+
+                $comparison.vs_last_3_sprints = @{
+                    avg_stories_completed = $avgHistoricCompleted
+                    avg_stories_total = $avgHistoricTotal
+                    avg_success_rate = $avgHistoricRate
+                    first_attempt_rate_delta = $firstAttemptDelta
+                    sprints_compared = $recentSprints.Count
+                }
+            }
+        }
+    } catch {}
+
+    # 6. Flag impact (stubbed, regressionGuard only for now)
+    $flagImpact = @{}
+    if ($activeFlags['regressionGuard'] -eq $true) {
+        $flagImpact['regressionGuard'] = @{
+            enabled_since = "current_sprint"
+            regressions_caught = $regressionsCaught
+        }
+    }
+
+    # 7. Build diagnostics object
+    $diagnostics = @{
+        sprint_number = $SprintNumber
+        generated_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        active_flags = $activeFlags
+        metrics = @{
+            stories_attempted = $storiesAttempted
+            stories_passed_first_try = $storiesPassedFirstTry
+            stories_passed_with_retry = $storiesPassedWithRetry
+            stories_failed = $storiesFailed
+            first_attempt_success_rate = $firstAttemptSuccessRate
+            overall_success_rate = $overallSuccessRate
+            avg_duration_minutes = $avgDurationMinutes
+            healing_sessions = $healingSessions
+            regressions_caught = $regressionsCaught
+        }
+        comparison = $comparison
+        flag_impact = $flagImpact
+    }
+
+    # 8. Write to session/diagnostics.json
+    try {
+        $diagFile = if ($script:Paths) { Join-Path $script:Paths.SessionDir "diagnostics.json" } else { Join-Path $script:RalphDir "session\diagnostics.json" }
+        Write-JsonNoBom -Path $diagFile -Content ($diagnostics | ConvertTo-Json -Depth 5)
+    } catch {
+        Write-Host "  Warning: Could not write diagnostics.json: $_" -ForegroundColor Yellow
+    }
+
+    return $diagnostics
 }
 
 # ============================================================================

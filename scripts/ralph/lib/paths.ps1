@@ -82,6 +82,7 @@ function Initialize-RalphPaths {
         MetricsFile            = Join-Path $RalphDir "session\metrics.csv"
         SprintProgressFile     = Join-Path $RalphDir "session\sprint_progress.md"
         GracefulStopSignal     = Join-Path $RalphDir "session\graceful_stop.signal"
+        PreStoryBaselineFile   = Join-Path $RalphDir "session\pre_story_baseline.json"
     }
 
     # Ensure directories exist

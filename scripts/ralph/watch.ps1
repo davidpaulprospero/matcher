@@ -15,11 +15,12 @@ param(
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ScriptDir "lib\watch.ps1")
 
-# Paths - state files are in state/ subdirectory
+# Paths - state files in state/, session-volatile files in session/
 $StateDir = Join-Path $ScriptDir "state"
+$SessionDir = Join-Path $ScriptDir "session"
 $PrdPath = Join-Path $StateDir "prd.json"
-$ProgressPath = Join-Path $StateDir "progress.txt"
-$MetricsPath = Join-Path $StateDir "metrics.csv"
+$ProgressPath = Join-Path $SessionDir "progress.txt"
+$MetricsPath = Join-Path $SessionDir "metrics.csv"
 $BlockedPath = Join-Path $ScriptDir "BLOCKED.md"
 $QueuePath = Join-Path $StateDir "queue.json"
 $LogsDir = Join-Path $ScriptDir "logs"
@@ -30,7 +31,8 @@ Write-Host "Watching Ralph progress (refresh every ${Interval}s)... Ctrl+C to st
 Write-Host ""
 
 while ($true) {
-    Clear-Host
+    # Clear viewport and scrollback to prevent log bleed from previous refresh
+    [Console]::Clear()
     $loopCount++
 
     # Header
@@ -63,7 +65,11 @@ while ($true) {
 
     if (Test-Path $MetricsPath) {
         try {
-            $metrics = Import-Csv $MetricsPath
+            # Non-locking read to avoid blocking concurrent writers
+            $fs = [System.IO.FileStream]::new($MetricsPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
+            try { $csvText = $sr.ReadToEnd() } finally { $sr.Close(); $fs.Close() }
+            $metrics = $csvText | ConvertFrom-Csv
 
             # Get session metrics
             if ($currentSession) {
@@ -147,6 +153,29 @@ while ($true) {
                             Write-Host "    (Read:${avgRead}s Analyze:${avgAnalyze}s Impl:${avgImpl}s Test:${avgTest}s Commit:${avgCommit}s)" -ForegroundColor DarkGray
                         }
                     }
+                }
+
+                # Sprint diagnostics
+                $diagFile = Join-Path $SessionDir "diagnostics.json"
+                if (Test-Path $diagFile) {
+                    try {
+                        $diag = Get-Content $diagFile -Raw | ConvertFrom-Json
+                        $flagList = @()
+                        if ($diag.active_flags) {
+                            $diag.active_flags.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $flagList += $_.Name }
+                        }
+                        $flagStr = if ($flagList.Count -gt 0) { $flagList -join ' | ' } else { 'none' }
+                        $firstTry = if ($diag.metrics.first_attempt_success_rate) { [math]::Round($diag.metrics.first_attempt_success_rate * 100) } else { '?' }
+                        $delta = ''
+                        if ($diag.comparison -and $diag.comparison.vs_last_3_sprints -and $diag.comparison.vs_last_3_sprints.first_attempt_rate_delta) {
+                            $delta = " ($($diag.comparison.vs_last_3_sprints.first_attempt_rate_delta))"
+                        }
+                        $heal = if ($null -ne $diag.metrics.healing_sessions) { $diag.metrics.healing_sessions } else { '?' }
+                        $regress = if ($null -ne $diag.metrics.regressions_caught) { $diag.metrics.regressions_caught } else { '?' }
+                        Write-Host ""
+                        Write-Host "  [DIAG] Flags: $flagStr | 1st-try: ${firstTry}%${delta} | Heal: $heal | Regress: $regress" -ForegroundColor DarkCyan
+                    }
+                    catch {}
                 }
             } else {
                 Write-Host "  No metrics data for current session" -ForegroundColor DarkGray
