@@ -13,7 +13,10 @@ BeforeAll {
         'Test-TokenBudget', 'Get-PromptEffectivenessHistory', 'Get-PromptRecommendation',
         'Get-StoryFailureContext', 'Get-FeedbackForStory', 'Get-RetrospectiveContext',
         'Import-HumanFeedback', 'Test-FileConflict', 'Get-StoryFileTouches',
-        'Get-SprintTokenBudget', 'Search-CriterionEvidence'
+        'Get-SprintTokenBudget', 'Search-CriterionEvidence',
+        'Get-SprintProgressContext', 'Get-LearningInjection', 'Get-StoryRole',
+        'Build-BudgetedPrompt', 'Compress-FailureContext', 'Build-ResumePrompt',
+        'Get-StoryProgress'
     )
 
     Import-RalphFunctions -RalphDir $script:RalphDir -GlobalScope -OnlyFunctions $neededFunctions

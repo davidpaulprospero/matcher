@@ -147,7 +147,14 @@
         "autoGeneratePesterTests": false,
         "llmAsJudgeQuality": false,
         "phaseTracking": true,
-        "acceptanceDrivenBackpressure": false
+        "acceptanceDrivenBackpressure": false,
+        "regressionGuard": false,
+        "testSubsampling": false,
+        "learningInjection": false,
+        "roleSpecialization": false,
+        "adaptivePruning": false,
+        "deltaDebugging": false,
+        "parallelExecution": false
     },
     "ralphsChoice": {
         "enabled": true,
@@ -205,6 +212,19 @@
         "fastPytestArgs": "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random",
         "criticalFiles": ["main.py", "src/__init__.py", "config.yaml", "src/config.py", "src/pipeline.py"]
     },
+    "testSubsampling": {
+        "maxTestsPerFastRun": 0,
+        "focusAreaScoped": true,
+        "alwaysFullOnCadence": true
+    },
+    "roles": {
+        "bugfix":      { "timeout": 420,  "maxIterations": 3 },
+        "refactor":    { "timeout": 720,  "maxIterations": 4 },
+        "test":        { "timeout": 360,  "maxIterations": 2 },
+        "docs":        { "timeout": 240,  "maxIterations": 2 },
+        "performance": { "timeout": 600,  "maxIterations": 3 },
+        "feature":     { "timeout": 600,  "maxIterations": 5 }
+    },
     "budget": {
         "enabled": false,
         "maxTokensPerSprint": 500000,
@@ -212,7 +232,13 @@
     },
     "prompts": {
         "adaptive": false,
-        "maxLength": 10000
+        "maxLength": 10000,
+        "budgetAllocation": {
+            "storyDetails": 0.40,
+            "failureContext": 0.20,
+            "contextHints": 0.20,
+            "supplementary": 0.20
+        }
     },
     "parallel": {
         "enabled": false,
@@ -222,6 +248,12 @@
         "enabled": true,
         "trackCoverage": false,
         "trackTechDebt": true
+    },
+    "healing": {
+        "deltaDebugging": {
+            "triggerAfterFailures": 2,
+            "minCriteriaToSplit": 2
+        }
     },
     "ordering": {
         "smart": false,

@@ -251,7 +251,8 @@ function Invoke-ClaudeProcess {
     $claudePath = Get-ClaudePath
 
     # Build arguments
-    $claudeArgs = @("--print", "--dangerously-skip-permissions")
+    $model = if ($script:Config.model) { $script:Config.model } else { "opus" }
+    $claudeArgs = @("--print", "--dangerously-skip-permissions", "--model", $model)
     if ($AllowedTools) {
         $claudeArgs += "--allowedTools=Bash,Read,Write,Edit,Glob,Grep,WebSearch"
     }
@@ -473,8 +474,8 @@ function Complete-StoryAutomatically {
 "@
         $progressEntry | Out-File -FilePath $progressFile -Append -Encoding UTF8
 
-        # Record metrics
-        $metricsFile = Join-Path $script:RalphDir "metrics.csv"
+        # Record metrics (use canonical session path)
+        $metricsFile = $script:MetricsFile
         if (Test-Path $metricsFile) {
             $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
             $sessionId = if ($script:State.SessionId) { $script:State.SessionId } else { "preflight" }
@@ -486,7 +487,7 @@ function Complete-StoryAutomatically {
             $sprintNum = if ($prdData -and $prdData.sprintNumber) { $prdData.sprintNumber } else { "0" }
             $sprintName = "sprint-$sprintNum"
             $metricsLine = "$timestamp,$sessionId,$sprintName,$StoryId,PreFlight,0,true,false,$focusArea,0,,$(Get-Date -Format 'HH'),,0,0,0,0,0,0,0,0,false,,0"
-            $metricsLine | Out-File -FilePath $metricsFile -Append -Encoding UTF8
+            Write-MetricsRow -Path $metricsFile -Row $metricsLine
         }
     }
     catch {
@@ -551,6 +552,9 @@ function Invoke-ClaudeForStory {
         }
     }
 
+    # Oracle-based regression guard: capture pre-story baseline
+    $script:State.PreStoryBaseline = Test-RegressionBaseline -StoryId $StoryId
+
     # Story 3.1: Adaptive prompt builder (consolidates Stories 1.2, 1.3, 1.6, 2.5, 3.3)
     $prompt = Build-StoryPrompt -StoryId $StoryId -Story $storyObj -FocusArea $focusArea -RetryCount $script:State.CurrentRetryCount
 
@@ -610,6 +614,27 @@ function Invoke-ClaudeForStory {
             ErrorType = "failure"
             ErrorMessage = "Story failed on attempt $($script:State.CurrentRetryCount)"
             Timestamp = (Get-Date).ToString("o")
+        }
+
+        # Delta debugging: split multi-criteria stories after N failures (before hard story threshold)
+        if ($script:Config.flags -and $script:Config.flags.deltaDebugging) {
+            $triggerAfter = 2
+            if ($script:Config.healing -and $script:Config.healing.deltaDebugging -and $script:Config.healing.deltaDebugging.triggerAfterFailures) {
+                $triggerAfter = [int]$script:Config.healing.deltaDebugging.triggerAfterFailures
+            }
+            if ($script:State.CurrentRetryCount -ge $triggerAfter -and $storyObj) {
+                $subStories = Split-StuckStory -StoryId $StoryId -Story $storyObj
+                if ($subStories.Count -gt 0) {
+                    Add-DecomposedStoriesToPRD -Stories $subStories
+                    Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "Delta-split into $($subStories.Count) sub-stories"
+                    Write-SessionLog -Event "delta_split" -Data @{ storyId = $StoryId; subCount = $subStories.Count }
+                    Write-Host "  [DELTA] Split $StoryId into $($subStories.Count) per-criterion sub-stories" -ForegroundColor Cyan
+                    # Reset error tracking — sub-stories picked up by Get-OptimalNextStory
+                    $script:State.CurrentStoryErrors = @()
+                    $script:State.CurrentStoryStartTime = $null
+                    return $false
+                }
+            }
         }
 
         # Check if we should mark as hard (3 failures or 30-min timeout)
@@ -817,13 +842,24 @@ function Get-SprintStatus {
         }
     }
 
+    # Delta debugging: check if any delta-split parents can be completed
+    $parentUpdated = Complete-DeltaSplitParents -Stories $prd.userStories
+    if ($parentUpdated) {
+        Save-Sprint -Sprint $prd
+        # Recount after parent completion
+        $passed = 0; $failed = 0
+        foreach ($story in $prd.userStories) {
+            if ($story.passes) { $passed++ } else { $failed++ }
+        }
+    }
+
     # Story 2.2: Smart story ordering
     $nextStory = $null
     if ($failed -gt 0) {
-        $metricsFile = Join-Path $script:RalphDir "metrics.csv"
+        $metricsFile = $script:MetricsFile
         $metricsData = $null
         if (Test-Path $metricsFile) {
-            try { $metricsData = Import-Csv $metricsFile } catch {}
+            try { $metricsData = Import-CsvNonLocking $metricsFile } catch {}
         }
         $nextStory = Get-OptimalNextStory -Stories $prd.userStories -Metrics $metricsData
     }
