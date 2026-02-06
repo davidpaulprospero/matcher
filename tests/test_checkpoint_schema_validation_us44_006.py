@@ -341,14 +341,16 @@ class TestSaveStageKeyValidation:
         manager.save("OUTPUT")
         assert manager.data.last_completed_stage == "OUTPUT"
 
-    def test_save_output_stage_with_data_warns(self, tmp_path, caplog):
-        """save() for OUTPUT with data warns because there's no field."""
+    def test_save_output_stage_with_data_no_warning(self, tmp_path, caplog):
+        """save() for terminal OUTPUT with data logs debug, not warning."""
         manager = CheckpointManager(tmp_path)
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             manager.save("OUTPUT", {"some": "data"})
 
-        assert "does not map to a CheckpointData field" in caplog.text
+        assert "does not map to a CheckpointData field" not in caplog.text
+        assert "terminal" in caplog.text
+        assert manager.data.last_completed_stage == "OUTPUT"
 
     def test_save_intermediate_unknown_stage_warns(self, tmp_path, caplog):
         """save_intermediate() with unknown stage logs warning."""
