@@ -61,7 +61,7 @@ def mock_config_gemini():
     config = Mock()
     config.embedding = Mock()
     config.embedding.provider = 'gemini'
-    config.embedding.gemini_model = 'models/text-embedding-004'
+    config.embedding.gemini_model = 'models/gemini-embedding-001'
     config.embedding.batch_size = 100
     config.embedding.max_retries = 3
     config.embedding.retry_delay = 2.0
@@ -144,7 +144,7 @@ class TestGetEmbeddingProvider:
         provider = get_embedding_provider(mock_config_gemini)
 
         assert isinstance(provider, GeminiEmbeddings)
-        assert provider.model == 'models/text-embedding-004'
+        assert provider.model == 'models/gemini-embedding-001'
         mock_configure.assert_called_once()
 
     @patch.dict(os.environ, {'VOYAGE_API_KEY': 'test_voyage_key'})

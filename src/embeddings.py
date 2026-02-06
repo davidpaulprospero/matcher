@@ -590,7 +590,7 @@ class EmbeddingProvider:
 class GeminiEmbeddings(EmbeddingProvider):
     """Google Gemini embeddings with batching"""
     
-    def __init__(self, api_key: str, model: str = "models/text-embedding-004"):
+    def __init__(self, api_key: str, model: str = "models/gemini-embedding-001"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         self.model = model
@@ -666,7 +666,7 @@ def get_embedding_provider(config: Any) -> EmbeddingProvider:
         api_key = os.getenv('GEMINI_API_KEY') or getattr(config, 'gemini_api_key', None)
         if api_key:
             try:
-                model = getattr(config.embedding, 'gemini_model', 'models/text-embedding-004')
+                model = getattr(config.embedding, 'gemini_model', 'models/gemini-embedding-001')
                 return GeminiEmbeddings(api_key, model)
             except Exception as e:
                 logger.warning(f"Could not initialize Gemini: {e}")

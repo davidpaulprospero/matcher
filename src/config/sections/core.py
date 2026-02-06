@@ -177,7 +177,7 @@ class EmbeddingConfig:
     provider: str = "gemini"  # gemini, voyage, local
 
     # Model settings per provider
-    gemini_model: str = "models/text-embedding-004"
+    gemini_model: str = "models/gemini-embedding-001"
     voyage_model: str = "voyage-2"
     local_model: str = "all-MiniLM-L6-v2"
 
