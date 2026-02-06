@@ -352,3 +352,510 @@ Describe 'Sprint Progress Reset at Sprint Start' -Tag 'Unit', 'Carlini' {
         $content | Should -BeLike "*Reset-SprintProgress*"
     }
 }
+
+# ============================================================================
+# Phase 1: Oracle-Based Regression Guard + Deterministic Test Subsampling
+# ============================================================================
+
+Describe 'Oracle-Based Regression Guard' -Tag 'Unit', 'Carlini' {
+    It 'Test-RegressionBaseline exists in healing.ps1' {
+        $healingPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\healing.ps1'
+        $content = Get-Content $healingPath -Raw
+        $content | Should -BeLike "*function Test-RegressionBaseline*"
+    }
+
+    It 'Compare-TestBaseline accepts BaselineOverride param' {
+        $qualityPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\quality.ps1'
+        $content = Get-Content $qualityPath -Raw
+        $content | Should -BeLike "*`$BaselineOverride*"
+    }
+
+    It 'Invoke-ClaudeForStory calls Test-RegressionBaseline' {
+        $ralphPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ralph.ps1'
+        $content = Get-Content $ralphPath -Raw
+        $content | Should -BeLike "*Test-RegressionBaseline*"
+    }
+
+    It 'Resolve-ClaudeResult passes BaselineOverride' {
+        $claudePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\claude.ps1'
+        $content = Get-Content $claudePath -Raw
+        $content | Should -BeLike "*-BaselineOverride*"
+    }
+
+    It 'Get-StoryFailureContext references pre-story baseline' {
+        $qualityPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\quality.ps1'
+        $content = Get-Content $qualityPath -Raw
+        $content | Should -BeLike "*Pre-story test baseline*"
+        $content | Should -BeLike "*PreStoryBaselineFile*"
+    }
+
+    It 'paths.ps1 has PreStoryBaselineFile' {
+        $pathsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\paths.ps1'
+        $content = Get-Content $pathsPath -Raw
+        $content | Should -BeLike "*PreStoryBaselineFile*"
+        $content | Should -BeLike "*pre_story_baseline.json*"
+    }
+}
+
+Describe 'Deterministic Test Subsampling' -Tag 'Unit', 'Carlini' {
+    It 'Get-SubsampledTestCommand exists in healing.ps1' {
+        $healingPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\healing.ps1'
+        $content = Get-Content $healingPath -Raw
+        $content | Should -BeLike "*function Get-SubsampledTestCommand*"
+    }
+
+    It 'Invoke-TieredHealthCheck accepts StoryId and FocusArea params' {
+        $healingPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\healing.ps1'
+        $content = Get-Content $healingPath -Raw
+        $content | Should -Match 'Invoke-TieredHealthCheck[\s\S]*?\[string\]\$StoryId'
+        $content | Should -Match 'Invoke-TieredHealthCheck[\s\S]*?\[string\]\$FocusArea'
+    }
+
+    It 'ralph-config.json has testSubsampling section' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config.testSubsampling | Should -Not -BeNullOrEmpty
+        $config.testSubsampling.focusAreaScoped | Should -Be $true
+        $config.testSubsampling.alwaysFullOnCadence | Should -Be $true
+    }
+
+    It 'Invoke-PostIterationHealing forwards StoryId and FocusArea' {
+        $healingPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\healing.ps1'
+        $content = Get-Content $healingPath -Raw
+        $content | Should -BeLike "*Invoke-TieredHealthCheck*-StoryId `$StoryId*-FocusArea `$FocusArea*"
+    }
+}
+
+# ============================================================================
+# Phase 2: Feedback-Driven Learning Loop + Role-Based Story Specialization
+# ============================================================================
+
+Describe 'Feedback-Driven Learning Loop' -Tag 'Unit', 'Carlini' {
+    It 'Get-LearningInjection exists in learning.ps1' {
+        $learningPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\learning.ps1'
+        $content = Get-Content $learningPath -Raw
+        $content | Should -BeLike "*function Get-LearningInjection*"
+    }
+
+    It 'Build-StoryPrompt injects learning warnings' {
+        $promptsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\prompts.ps1'
+        $content = Get-Content $promptsPath -Raw
+        $content | Should -BeLike "*Get-LearningInjection*"
+        $content | Should -BeLike "*Section 5.7*"
+    }
+
+    It 'Resolve-ClaudeResult tracks injection effectiveness' {
+        $claudePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\claude.ps1'
+        $content = Get-Content $claudePath -Raw
+        $content | Should -BeLike "*injection_result*"
+    }
+}
+
+Describe 'Role-Based Story Specialization' -Tag 'Unit', 'Carlini' {
+    It 'Get-StoryRole exists in sprint.ps1' {
+        $sprintPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\sprint.ps1'
+        $content = Get-Content $sprintPath -Raw
+        $content | Should -BeLike "*function Get-StoryRole*"
+    }
+
+    It 'Build-StoryPrompt has role prefix section' {
+        $promptsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\prompts.ps1'
+        $content = Get-Content $promptsPath -Raw
+        $content | Should -BeLike "*Get-StoryRole*"
+        $content | Should -BeLike "*Role: *"
+    }
+
+    It 'ralph-config.json has roles section' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config.roles | Should -Not -BeNullOrEmpty
+        $config.roles.bugfix | Should -Not -BeNullOrEmpty
+        $config.roles.bugfix.timeout | Should -Be 420
+        $config.roles.feature.maxIterations | Should -Be 5
+    }
+
+    It 'Record-Metric accepts Role param' {
+        $metricsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\metrics.ps1'
+        $content = Get-Content $metricsPath -Raw
+        $content | Should -Match '\[string\]\$Role'
+    }
+
+    It 'Record-Metric CSV has role column' {
+        $metricsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\metrics.ps1'
+        $content = Get-Content $metricsPath -Raw
+        $content | Should -BeLike "*,role`"*"
+    }
+
+    It 'Resolve-ClaudeResult passes Role to Record-Metric' {
+        $claudePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\claude.ps1'
+        $content = Get-Content $claudePath -Raw
+        $content | Should -BeLike "*-Role*Get-StoryRole*"
+    }
+}
+
+# ============================================================================
+# Phase 3: Adaptive Context Pruning + Delta Debugging
+# ============================================================================
+
+# --- Improvement #5: Adaptive Context Pruning ---
+
+Describe 'Adaptive Context Pruning - Source Inspection' -Tag 'Unit', 'Carlini' {
+    It 'Build-BudgetedPrompt function exists in prompts.ps1' {
+        $promptsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\prompts.ps1'
+        $content = Get-Content $promptsPath -Raw
+        $content | Should -BeLike "*function Build-BudgetedPrompt*"
+    }
+
+    It 'Compress-FailureContext function exists in prompts.ps1' {
+        $promptsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\prompts.ps1'
+        $content = Get-Content $promptsPath -Raw
+        $content | Should -BeLike "*function Compress-FailureContext*"
+    }
+
+    It 'Build-StoryPrompt checks adaptivePruning flag' {
+        $promptsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\prompts.ps1'
+        $content = Get-Content $promptsPath -Raw
+        $content | Should -BeLike "*adaptivePruning*"
+    }
+
+    It 'Build-StoryPrompt has dual-path branching (budgeted vs legacy)' {
+        $promptsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\prompts.ps1'
+        $content = Get-Content $promptsPath -Raw
+        $content | Should -BeLike "*useBudgeting*"
+        $content | Should -BeLike "*BUDGETED PATH*"
+        $content | Should -BeLike "*LEGACY PATH*"
+    }
+}
+
+Describe 'Adaptive Context Pruning - Config' -Tag 'Unit', 'Carlini' {
+    It 'ralph-config.json has budgetAllocation in prompts section' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config.prompts.budgetAllocation | Should -Not -BeNullOrEmpty
+        $config.prompts.budgetAllocation.storyDetails | Should -Be 0.40
+        $config.prompts.budgetAllocation.failureContext | Should -Be 0.20
+        $config.prompts.budgetAllocation.contextHints | Should -Be 0.20
+        $config.prompts.budgetAllocation.supplementary | Should -Be 0.20
+    }
+
+    It 'adaptivePruning flag exists and is false by default' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config.flags.adaptivePruning | Should -Be $false
+    }
+}
+
+Describe 'Compress-FailureContext' -Tag 'Unit', 'Carlini' {
+    It 'passes through short context unchanged' {
+        # Use 6 distinct lines that fit under budget — passthrough should return verbatim
+        # Without passthrough, Compress-FailureContext extracts headers + error category +
+        # unmet criteria + last output lines, producing a DIFFERENT result
+        $short = "Line 1 header`nLine 2 detail`nLine 3 more`nLine 4 extra`nLine 5 data`nLine 6 end"
+        $result = Compress-FailureContext -FailureContext $short -MaxChars 2000
+        $result | Should -Be $short
+    }
+
+    It 'compresses long context' {
+        # Build a verbose failure context > 2000 chars
+        $lines = @("## Retry Context for US-69-001")
+        $lines += "Attempt 3 of 3"
+        $lines += "Error Category: TestFailure"
+        $lines += ""
+        $lines += "  [ ] Criterion that was NOT met"
+        $lines += "  [x] Criterion that was met"
+        # Add lots of output lines to push over budget
+        for ($i = 0; $i -lt 100; $i++) {
+            $lines += "Output line $i - " + ("x" * 30)
+        }
+        $longContext = $lines -join "`n"
+
+        $result = Compress-FailureContext -FailureContext $longContext -MaxChars 2000
+        $result.Length | Should -BeLessOrEqual 2000
+        $result | Should -BeLike "*Retry Context*"
+        $result | Should -BeLike "*Error Category*"
+        $result | Should -BeLike "*Unmet criteria*"
+    }
+
+    It 'handles null input' {
+        $result = Compress-FailureContext -FailureContext $null
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'handles empty input' {
+        $result = Compress-FailureContext -FailureContext ""
+        $result | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Build-BudgetedPrompt' -Tag 'Unit', 'Carlini' {
+    It 'passes through sections under budget' {
+        $sections = @(
+            @{ name = "details"; content = "Story details here"; priority = 1; displayOrder = 1 }
+            @{ name = "hints"; content = "File hints here"; priority = 3; displayOrder = 0 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 10000
+        $result | Should -BeLike "*File hints here*"
+        $result | Should -BeLike "*Story details here*"
+    }
+
+    It 'preserves display order' {
+        $sections = @(
+            @{ name = "second"; content = "SECOND"; priority = 1; displayOrder = 1 }
+            @{ name = "first"; content = "FIRST"; priority = 3; displayOrder = 0 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 10000
+        $firstIdx = $result.IndexOf("FIRST")
+        $secondIdx = $result.IndexOf("SECOND")
+        $firstIdx | Should -BeLessThan $secondIdx
+    }
+
+    It 'drops P4 sections first when over budget' {
+        $sections = @(
+            @{ name = "critical"; content = ("A" * 500); priority = 1; displayOrder = 0 }
+            @{ name = "optional"; content = ("B" * 500); priority = 4; displayOrder = 1 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 600
+        $result | Should -BeLike "*AAAA*"
+        $result | Should -Not -BeLike "*BBBB*"
+    }
+
+    It 'never trims P1 sections' {
+        $p1Content = "A" * 800
+        $sections = @(
+            @{ name = "critical"; content = $p1Content; priority = 1; displayOrder = 0 }
+            @{ name = "p3"; content = ("B" * 500); priority = 3; displayOrder = 1 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 900
+        # P1 must be fully present
+        $result | Should -BeLike "*$p1Content*"
+    }
+
+    It 'filters empty sections' {
+        $sections = @(
+            @{ name = "empty"; content = ""; priority = 1; displayOrder = 0 }
+            @{ name = "whitespace"; content = "   "; priority = 1; displayOrder = 1 }
+            @{ name = "valid"; content = "Valid content"; priority = 1; displayOrder = 2 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 10000
+        $result | Should -Be "Valid content"
+    }
+
+    It 'returns empty for no valid sections' {
+        $sections = @(
+            @{ name = "empty"; content = ""; priority = 1; displayOrder = 0 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 10000
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'compresses P2 sections before trimming P3' {
+        $longP2 = "## Retry Context`nAttempt 3`nError Category: TestFailure`n" + ("output line`n" * 200)
+        $sections = @(
+            @{ name = "p1"; content = ("A" * 200); priority = 1; displayOrder = 0 }
+            @{ name = "p2"; content = $longP2; priority = 2; displayOrder = 1 }
+            @{ name = "p3"; content = ("C" * 200); priority = 3; displayOrder = 2 }
+        )
+        $result = Build-BudgetedPrompt -Sections $sections -MaxLength 1000
+        # P2 should be compressed, not dropped entirely
+        $result | Should -BeLike "*Retry Context*"
+        $result.Length | Should -BeLessOrEqual 1000
+    }
+}
+
+# --- Improvement #6: Delta Debugging for Stuck Stories ---
+
+Describe 'Delta Debugging - Source Inspection' -Tag 'Unit', 'Carlini' {
+    It 'Split-StuckStory exists in sprint.ps1' {
+        $sprintPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\sprint.ps1'
+        $content = Get-Content $sprintPath -Raw
+        $content | Should -BeLike "*function Split-StuckStory*"
+    }
+
+    It 'Complete-DeltaSplitParents exists in sprint.ps1' {
+        $sprintPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\sprint.ps1'
+        $content = Get-Content $sprintPath -Raw
+        $content | Should -BeLike "*function Complete-DeltaSplitParents*"
+    }
+
+    It 'ralph.ps1 references Split-StuckStory' {
+        $ralphPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ralph.ps1'
+        $content = Get-Content $ralphPath -Raw
+        $content | Should -BeLike "*Split-StuckStory*"
+    }
+
+    It 'ralph.ps1 references Complete-DeltaSplitParents' {
+        $ralphPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ralph.ps1'
+        $content = Get-Content $ralphPath -Raw
+        $content | Should -BeLike "*Complete-DeltaSplitParents*"
+    }
+
+    It 'scoring.ps1 references deltaSplitParentIds' {
+        $scoringPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\scoring.ps1'
+        $content = Get-Content $scoringPath -Raw
+        $content | Should -BeLike "*deltaSplitParentIds*"
+    }
+}
+
+Describe 'Delta Debugging - Config' -Tag 'Unit', 'Carlini' {
+    It 'ralph-config.json has healing.deltaDebugging section' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config.healing.deltaDebugging | Should -Not -BeNullOrEmpty
+        $config.healing.deltaDebugging.triggerAfterFailures | Should -Be 2
+        $config.healing.deltaDebugging.minCriteriaToSplit | Should -Be 2
+    }
+
+    It 'deltaDebugging flag exists and is false by default' {
+        $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\ralph-config.json'
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config.flags.deltaDebugging | Should -Be $false
+    }
+}
+
+Describe 'Split-StuckStory' -Tag 'Unit', 'Carlini' {
+    It 'splits multi-criteria story into per-criterion sub-stories' {
+        $story = @{
+            title = "Fix authentication flow"
+            acceptanceCriteria = @("Login works", "Logout works", "Session persists")
+            priority = "high"
+            notes = ""
+        }
+        $result = Split-StuckStory -StoryId "US-69-003" -Story ([PSCustomObject]$story)
+        $result.Count | Should -Be 3
+        $result[0].acceptanceCriteria.Count | Should -Be 1
+        $result[0].acceptanceCriteria[0] | Should -Be "Login works"
+        $result[1].acceptanceCriteria[0] | Should -Be "Logout works"
+        $result[2].acceptanceCriteria[0] | Should -Be "Session persists"
+    }
+
+    It 'returns empty for stories with < 2 criteria' {
+        $story = @{
+            title = "Simple fix"
+            acceptanceCriteria = @("Just one criterion")
+            priority = "medium"
+        }
+        $result = Split-StuckStory -StoryId "US-69-001" -Story ([PSCustomObject]$story)
+        $result.Count | Should -Be 0
+    }
+
+    It 'returns empty for stories with no criteria' {
+        $story = @{
+            title = "No criteria"
+            priority = "low"
+        }
+        $result = Split-StuckStory -StoryId "US-69-001" -Story ([PSCustomObject]$story)
+        $result.Count | Should -Be 0
+    }
+
+    It 'returns empty for already-decomposed stories (nestingLevel > 0)' {
+        $story = @{
+            title = "Sub-task"
+            acceptanceCriteria = @("A", "B", "C")
+            nestingLevel = 1
+            priority = "high"
+        }
+        $result = Split-StuckStory -StoryId "US-69-D003-01" -Story ([PSCustomObject]$story)
+        $result.Count | Should -Be 0
+    }
+
+    It 'returns empty for already delta-split stories' {
+        $story = @{
+            title = "Already split"
+            acceptanceCriteria = @("A", "B")
+            notes = "Delta-split into 2 sub-stories"
+            priority = "high"
+        }
+        $result = Split-StuckStory -StoryId "US-69-003" -Story ([PSCustomObject]$story)
+        $result.Count | Should -Be 0
+    }
+
+    It 'returns empty for seed stories' {
+        $story = @{
+            title = "Generate sprint stories for testing"
+            acceptanceCriteria = @("A", "B", "C")
+            priority = "high"
+        }
+        $result = Split-StuckStory -StoryId "US-69-001" -Story ([PSCustomObject]$story)
+        $result.Count | Should -Be 0
+    }
+
+    It 'preserves parent priority in sub-stories' {
+        $story = @{
+            title = "Fix stuff"
+            acceptanceCriteria = @("A", "B")
+            priority = "low"
+        }
+        $result = Split-StuckStory -StoryId "US-69-003" -Story ([PSCustomObject]$story)
+        $result[0].priority | Should -Be "low"
+        $result[1].priority | Should -Be "low"
+    }
+
+    It 'sets deltaDebugged marker on sub-stories' {
+        $story = @{
+            title = "Fix stuff"
+            acceptanceCriteria = @("A", "B")
+            priority = "high"
+        }
+        $result = Split-StuckStory -StoryId "US-69-003" -Story ([PSCustomObject]$story)
+        $result[0].deltaDebugged | Should -Be $true
+        $result[1].deltaDebugged | Should -Be $true
+    }
+
+    It 'sets decomposedFrom to parent ID' {
+        $story = @{
+            title = "Fix stuff"
+            acceptanceCriteria = @("A", "B")
+            priority = "high"
+        }
+        $result = Split-StuckStory -StoryId "US-69-003" -Story ([PSCustomObject]$story)
+        $result[0].decomposedFrom | Should -Be "US-69-003"
+        $result[1].decomposedFrom | Should -Be "US-69-003"
+    }
+}
+
+Describe 'Complete-DeltaSplitParents' -Tag 'Unit', 'Carlini' {
+    It 'marks parent as passed when all children pass' {
+        $stories = @(
+            [PSCustomObject]@{ id = "US-69-003"; passes = $false; notes = "Delta-split into 2 sub-stories" }
+            [PSCustomObject]@{ id = "US-69-D003-01"; passes = $true; decomposedFrom = "US-69-003" }
+            [PSCustomObject]@{ id = "US-69-D003-02"; passes = $true; decomposedFrom = "US-69-003" }
+        )
+        $result = Complete-DeltaSplitParents -Stories $stories
+        $result | Should -Be $true
+        $stories[0].passes | Should -Be $true
+    }
+
+    It 'does not mark parent when some children fail' {
+        $stories = @(
+            [PSCustomObject]@{ id = "US-69-003"; passes = $false; notes = "Delta-split into 2 sub-stories" }
+            [PSCustomObject]@{ id = "US-69-D003-01"; passes = $true; decomposedFrom = "US-69-003" }
+            [PSCustomObject]@{ id = "US-69-D003-02"; passes = $false; decomposedFrom = "US-69-003" }
+        )
+        $result = Complete-DeltaSplitParents -Stories $stories
+        $result | Should -Be $false
+        $stories[0].passes | Should -Be $false
+    }
+
+    It 'ignores non-delta stories' {
+        $stories = @(
+            [PSCustomObject]@{ id = "US-69-003"; passes = $false; notes = "Regular failed story" }
+            [PSCustomObject]@{ id = "US-69-004"; passes = $true; notes = "" }
+        )
+        $result = Complete-DeltaSplitParents -Stories $stories
+        $result | Should -Be $false
+    }
+
+    It 'returns false for empty input' {
+        $result = Complete-DeltaSplitParents -Stories @()
+        $result | Should -Be $false
+    }
+
+    It 'skips already-passed parents' {
+        $stories = @(
+            [PSCustomObject]@{ id = "US-69-003"; passes = $true; notes = "Delta-split into 2 sub-stories" }
+            [PSCustomObject]@{ id = "US-69-D003-01"; passes = $true; decomposedFrom = "US-69-003" }
+        )
+        $result = Complete-DeltaSplitParents -Stories $stories
+        $result | Should -Be $false
+    }
+}

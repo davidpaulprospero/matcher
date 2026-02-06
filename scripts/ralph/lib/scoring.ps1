@@ -336,10 +336,15 @@ function Get-OptimalNextStory {
         $hardStoryIds = @($hardArchive.stories | Where-Object { $_.finalStatus -eq "pending_decomposition" } | ForEach-Object { $_.originalId })
     }
 
+    # Get delta-split parent IDs to skip (children will be picked up instead)
+    $deltaSplitParentIds = @($Stories | Where-Object {
+        $_.notes -and $_.notes -match 'Delta-split into \d+ sub-stories' -and -not $_.passes
+    } | ForEach-Object { $_.id })
+
     if (-not $smartEnabled) {
-        # Fallback: first incomplete story (original behavior), but skip hard stories
+        # Fallback: first incomplete story (original behavior), but skip hard stories and delta-split parents
         foreach ($story in $Stories) {
-            if (-not $story.passes -and $story.id -notin $hardStoryIds) {
+            if (-not $story.passes -and $story.id -notin $hardStoryIds -and $story.id -notin $deltaSplitParentIds) {
                 return $story
             }
         }
@@ -356,6 +361,12 @@ function Get-OptimalNextStory {
         # Skip stories marked as hard (pending decomposition)
         if ($story.id -in $hardStoryIds) {
             Write-Host "  Skipping hard story: $($story.id)" -ForegroundColor DarkGray
+            continue
+        }
+
+        # Skip delta-split parents (children will be picked up instead)
+        if ($story.id -in $deltaSplitParentIds) {
+            Write-Host "  Skipping delta-split parent: $($story.id)" -ForegroundColor DarkGray
             continue
         }
 

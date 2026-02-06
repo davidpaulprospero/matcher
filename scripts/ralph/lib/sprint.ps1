@@ -345,6 +345,19 @@ function Save-SprintArchive {
         Write-Host "  Warning: Could not generate retrospective: $_" -ForegroundColor Yellow
     }
 
+    # Sprint diagnostics snapshot
+    try {
+        $diagnostics = Get-SprintDiagnostics -SprintNumber $sprintNum -Prd $prd
+        if ($diagnostics) {
+            $prd._archiveMetadata | Add-Member -NotePropertyName "diagnostics" -NotePropertyValue $diagnostics -Force
+            $diagFile = if ($script:Paths) { Join-Path $script:Paths.SessionDir "diagnostics.json" } else { Join-Path $script:RalphDir "session\diagnostics.json" }
+            Write-JsonNoBom -Path $diagFile -Content ($diagnostics | ConvertTo-Json -Depth 5)
+        }
+    }
+    catch {
+        Write-Host "  Warning: Could not generate diagnostics: $_" -ForegroundColor Yellow
+    }
+
     # Story 3.2: Codebase health snapshot at sprint end
     try {
         $health = Measure-CodebaseHealth
@@ -1056,6 +1069,34 @@ function Get-LearningContext {
     return @($relevant | Select-Object -Last 10)
 }
 
+function Get-StoryRole {
+    <#
+    .SYNOPSIS
+        Classify story into role based on title and criteria keywords.
+        Only returns non-default role when roleSpecialization flag is enabled.
+    .PARAMETER Story
+        Story object from PRD
+    .RETURNS
+        String: 'bugfix', 'feature', 'refactor', 'test', 'docs', 'performance'
+    #>
+    param([object]$Story)
+
+    $config = Get-RalphConfig
+    if (-not $config.flags -or -not $config.flags.roleSpecialization) { return 'feature' }
+
+    $title = if ($Story.title) { $Story.title.ToLower() } else { "" }
+    $criteria = if ($Story.acceptanceCriteria) { ($Story.acceptanceCriteria -join " ").ToLower() } else { "" }
+    $combined = "$title $criteria"
+
+    # Priority-ordered keyword matching
+    if ($combined -match 'fix|bug|error|broken|crash|regression') { return 'bugfix' }
+    if ($combined -match 'refactor|reorganize|restructure|clean.?up|simplify|extract') { return 'refactor' }
+    if ($combined -match '\btest|coverage|assertion|spec|pester') { return 'test' }
+    if ($combined -match '\bdoc|readme|comment|guide|tutorial') { return 'docs' }
+    if ($combined -match 'perf|optimi|speed|latency|memory|cache|benchmark') { return 'performance' }
+    return 'feature'
+}
+
 function Build-DependencyGraph {
     <#
     .SYNOPSIS
@@ -1529,6 +1570,126 @@ function Add-DecomposedStoriesToPRD {
 
     Save-Sprint -Sprint $prd
     Write-Host "  Added $($Stories.Count) decomposed stories to PRD" -ForegroundColor Green
+}
+
+# ============================================================================
+# DELTA DEBUGGING (In-Sprint Per-Criterion Story Splitting)
+# ============================================================================
+
+function Split-StuckStory {
+    <#
+    .SYNOPSIS
+        Split a multi-criteria story into per-criterion sub-stories
+    .DESCRIPTION
+        Deterministic in-sprint splitting for stories that fail 2+ times.
+        Each criterion becomes its own sub-story. No LLM call needed.
+    .PARAMETER StoryId
+        Story identifier
+    .PARAMETER Story
+        Story object from PRD
+    .RETURNS
+        Array of sub-story hashtables, or empty array if splitting not applicable
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StoryId,
+        [Parameter(Mandatory)][object]$Story
+    )
+
+    # Guard: need acceptance criteria to split
+    $criteria = @()
+    if ($Story.acceptanceCriteria) {
+        $criteria = @($Story.acceptanceCriteria)
+    }
+    if ($criteria.Count -lt 2) { return @() }
+
+    # Guard: already decomposed (nestingLevel > 0)
+    $nestingLevel = 0
+    if ($Story.nestingLevel) { $nestingLevel = [int]$Story.nestingLevel }
+    if ($nestingLevel -gt 0) { return @() }
+
+    # Guard: already delta-split
+    if ($Story.notes -and $Story.notes -match 'Delta-split') { return @() }
+
+    # Guard: seed story
+    if ($Story.title -and $Story.title -match 'Generate sprint stories') { return @() }
+
+    # Create one sub-story per criterion
+    $subStories = @()
+    $priority = if ($Story.priority) { $Story.priority } else { "medium" }
+
+    for ($i = 0; $i -lt $criteria.Count; $i++) {
+        $seq = $i + 1
+        $newId = Get-DecomposedStoryId -ParentId $StoryId -NestingLevel 1 -Sequence $seq
+        $criterion = $criteria[$i]
+
+        $subStory = @{
+            id = $newId
+            title = "[DELTA] $($Story.title) - criterion $seq"
+            acceptanceCriteria = @($criterion)
+            priority = $priority
+            passes = $false
+            notes = "Delta-split from $StoryId (criterion $seq of $($criteria.Count))"
+            decomposedFrom = $StoryId
+            nestingLevel = 1
+            deltaDebugged = $true
+        }
+        $subStories += $subStory
+    }
+
+    return $subStories
+}
+
+function Complete-DeltaSplitParents {
+    <#
+    .SYNOPSIS
+        Mark delta-split parent stories as passed when all children pass
+    .DESCRIPTION
+        Scans stories for delta-split parents (notes matching pattern).
+        If ALL children (decomposedFrom == parent.id) have passes=true,
+        sets parent.passes=true.
+    .PARAMETER Stories
+        Array of story objects from PRD
+    .RETURNS
+        $true if any parent was updated, $false otherwise
+    #>
+    param(
+        [array]$Stories
+    )
+
+    if (-not $Stories -or $Stories.Count -eq 0) { return $false }
+
+    $anyUpdated = $false
+
+    foreach ($story in $Stories) {
+        # Only process delta-split parents that haven't passed yet
+        if ($story.passes) { continue }
+        if (-not $story.notes) { continue }
+        if ($story.notes -notmatch 'Delta-split into \d+ sub-stories') { continue }
+
+        # Find children
+        $children = @($Stories | Where-Object {
+            $_.decomposedFrom -eq $story.id
+        })
+
+        if ($children.Count -eq 0) { continue }
+
+        # Check if ALL children pass
+        $allPass = $true
+        foreach ($child in $children) {
+            if (-not $child.passes) {
+                $allPass = $false
+                break
+            }
+        }
+
+        if ($allPass) {
+            $story.passes = $true
+            $anyUpdated = $true
+            Write-Host "  [DELTA] Parent $($story.id) completed - all $($children.Count) sub-stories passed" -ForegroundColor Green
+        }
+    }
+
+    return $anyUpdated
 }
 
 # ============================================================================

@@ -195,6 +195,183 @@ function Get-PromptRecommendation {
     return $recommendation
 }
 
+function Compress-FailureContext {
+    <#
+    .SYNOPSIS
+        Compress verbose failure context into compact format under budget pressure
+    .DESCRIPTION
+        Extracts key information from Get-StoryFailureContext output:
+        retry header (3 lines), error category, unmet criteria (single line),
+        baseline info, last 5 output lines. Passes through unchanged if already
+        under MaxChars budget.
+    .PARAMETER FailureContext
+        The failure context string from Get-StoryFailureContext
+    .PARAMETER MaxChars
+        Maximum character budget for the compressed output
+    .RETURNS
+        Compressed failure context string
+    #>
+    param(
+        [string]$FailureContext,
+        [int]$MaxChars = 2000
+    )
+
+    if (-not $FailureContext) { return "" }
+    if ($FailureContext.Length -le $MaxChars) { return $FailureContext }
+
+    $lines = $FailureContext -split "`n"
+    $compressed = @()
+
+    # Extract retry header (first 3 non-empty lines)
+    $headerCount = 0
+    foreach ($line in $lines) {
+        if ($line.Trim() -and $headerCount -lt 3) {
+            $compressed += $line
+            $headerCount++
+        }
+        if ($headerCount -ge 3) { break }
+    }
+
+    # Extract error category line
+    foreach ($line in $lines) {
+        if ($line -match 'error.?category|Error Category|error_category') {
+            $compressed += $line
+            break
+        }
+    }
+
+    # Extract unmet criteria as single line
+    $unmetCriteria = @()
+    foreach ($line in $lines) {
+        if ($line -match '^\s*\[ \]' -or $line -match 'unmet|NOT met|failed criterion') {
+            $unmetCriteria += ($line.Trim() -replace '^\s*\[ \]\s*', '')
+        }
+    }
+    if ($unmetCriteria.Count -gt 0) {
+        $compressed += "Unmet criteria: $($unmetCriteria -join '; ')"
+    }
+
+    # Extract baseline info
+    foreach ($line in $lines) {
+        if ($line -match 'baseline|pre-story|test.*pass') {
+            $compressed += $line
+            break
+        }
+    }
+
+    # Last 5 lines of output (tail section)
+    $outputLines = @($lines | Where-Object { $_.Trim() })
+    if ($outputLines.Count -gt 5) {
+        $compressed += ""
+        $compressed += "Last output:"
+        $compressed += $outputLines[-5..-1]
+    }
+
+    $result = $compressed -join "`n"
+
+    # Final safety truncation
+    if ($result.Length -gt $MaxChars) {
+        $result = $result.Substring(0, $MaxChars - 30) + "`n[Compressed context truncated]"
+    }
+
+    return $result
+}
+
+function Build-BudgetedPrompt {
+    <#
+    .SYNOPSIS
+        Assemble prompt sections with priority-based pruning
+    .DESCRIPTION
+        Each section is a hashtable with name, content, priority (1-4), displayOrder.
+        Three-phase pruning when over budget:
+        1. Drop P4 sections entirely
+        2. Compress P2 sections (failure context via Compress-FailureContext)
+        3. Trim P3 sections proportionally
+        P1 is never touched.
+    .PARAMETER Sections
+        Array of section hashtables: @{ name; content; priority; displayOrder }
+    .PARAMETER MaxLength
+        Maximum prompt length in characters
+    .PARAMETER BudgetAllocation
+        Budget allocation hashtable (optional, for future use)
+    .RETURNS
+        Assembled prompt string within budget
+    #>
+    param(
+        [array]$Sections,
+        [int]$MaxLength = 10000,
+        [hashtable]$BudgetAllocation = @{}
+    )
+
+    # Filter empty sections
+    $validSections = @($Sections | Where-Object { $_.content -and $_.content.Trim() })
+
+    if ($validSections.Count -eq 0) { return "" }
+
+    # Calculate total length
+    $totalLength = ($validSections | ForEach-Object { $_.content.Length } | Measure-Object -Sum).Sum
+
+    # If under budget, join in displayOrder and return
+    if ($totalLength -le $MaxLength) {
+        $ordered = $validSections | Sort-Object { $_.displayOrder }
+        return ($ordered | ForEach-Object { $_.content }) -join "`n"
+    }
+
+    # Phase 1: Drop P4 sections
+    $remaining = @($validSections | Where-Object { $_.priority -le 3 })
+    $totalLength = ($remaining | ForEach-Object { $_.content.Length } | Measure-Object -Sum).Sum
+
+    if ($totalLength -le $MaxLength) {
+        $ordered = $remaining | Sort-Object { $_.displayOrder }
+        return ($ordered | ForEach-Object { $_.content }) -join "`n"
+    }
+
+    # Phase 2: Compress P2 sections (failure context)
+    foreach ($section in $remaining) {
+        if ($section.priority -eq 2) {
+            $section.content = Compress-FailureContext -FailureContext $section.content -MaxChars 2000
+        }
+    }
+    $totalLength = ($remaining | ForEach-Object { $_.content.Length } | Measure-Object -Sum).Sum
+
+    if ($totalLength -le $MaxLength) {
+        $ordered = $remaining | Sort-Object { $_.displayOrder }
+        return ($ordered | ForEach-Object { $_.content }) -join "`n"
+    }
+
+    # Phase 3: Trim P3 sections proportionally
+    $p1Length = ($remaining | Where-Object { $_.priority -eq 1 } | ForEach-Object { $_.content.Length } | Measure-Object -Sum).Sum
+    $p2Length = ($remaining | Where-Object { $_.priority -eq 2 } | ForEach-Object { $_.content.Length } | Measure-Object -Sum).Sum
+    $p3Sections = @($remaining | Where-Object { $_.priority -eq 3 })
+
+    $availableForP3 = $MaxLength - $p1Length - $p2Length
+    if ($availableForP3 -lt 0) { $availableForP3 = 0 }
+
+    if ($p3Sections.Count -gt 0 -and $availableForP3 -gt 0) {
+        $budgetPerSection = [math]::Floor($availableForP3 / $p3Sections.Count)
+        foreach ($section in $p3Sections) {
+            if ($section.content.Length -gt $budgetPerSection -and $budgetPerSection -gt 50) {
+                $section.content = $section.content.Substring(0, $budgetPerSection - 30) + "`n[Section trimmed]"
+            }
+        }
+    }
+    elseif ($availableForP3 -le 0) {
+        # No space for P3 — drop them
+        $remaining = @($remaining | Where-Object { $_.priority -lt 3 })
+    }
+
+    # Assemble in display order
+    $ordered = $remaining | Sort-Object { $_.displayOrder }
+    $result = ($ordered | ForEach-Object { $_.content }) -join "`n"
+
+    # Final safety truncation fallback
+    if ($result.Length -gt $MaxLength) {
+        $result = $result.Substring(0, $MaxLength - 50) + "`n`n[Prompt truncated to $MaxLength chars]"
+    }
+
+    return $result
+}
+
 function Build-StoryPrompt {
     <#
     .SYNOPSIS
@@ -225,149 +402,337 @@ function Build-StoryPrompt {
     $config = Get-RalphConfig
     $recommendation = Get-PromptRecommendation
     $maxLength = $recommendation.maxLength
-    $promptParts = @()
 
-    # Section 1: Failure context (on retries)
-    if ($recommendation.useFailureContext -and $RetryCount -gt 0) {
-        $failureContext = Get-StoryFailureContext -StoryId $StoryId -RetryCount $RetryCount
-        if ($failureContext) {
-            $promptParts += $failureContext
-        }
-    }
+    # Check for adaptive pruning flag
+    $useBudgeting = $config.flags -and $config.flags.adaptivePruning
 
-    # Section 2: Human feedback
-    if ($recommendation.useFeedback) {
-        $feedbackContext = Get-FeedbackForStory -StoryId $StoryId -Story $Story -FocusArea $FocusArea
-        if ($feedbackContext) {
-            $promptParts += $feedbackContext
-        }
-    }
+    if ($useBudgeting) {
+        # === BUDGETED PATH: Build tagged sections, then assemble with priority-based pruning ===
+        $sections = @()
 
-    # Section 3: Retrospective context
-    if ($recommendation.useRetrospective) {
-        $retroFile = if ($script:Paths) { $script:Paths.LastRetrospectiveFile } else { Join-Path $script:RalphDir "state\last_retrospective.json" }
-        $retro = Read-JsonFile -Path $retroFile
-        if ($retro) {
-            $retroContext = Get-RetrospectiveContext -Retro @{
-                lessons = @($retro.lessons)
-                failurePatterns = @($retro.failurePatterns)
-                recommendations = @($retro.recommendations)
-            }
-            if ($retroContext) {
-                $promptParts += $retroContext
+        # Section: Failure context (on retries) — P2, displayOrder 0
+        if ($recommendation.useFailureContext -and $RetryCount -gt 0) {
+            $failureContext = Get-StoryFailureContext -StoryId $StoryId -RetryCount $RetryCount
+            if ($failureContext) {
+                $sections += @{ name = "failureContext"; content = $failureContext; priority = 2; displayOrder = 0 }
             }
         }
-    }
 
-    # Section 4: Conflict warnings
-    $conflictResult = Test-FileConflict -StoryId $StoryId -Story $Story
-    if ($conflictResult -and $conflictResult.hasConflict) {
-        $promptParts += ""
-        $promptParts += "## File Conflict Warning"
-        $promptParts += "The following files were recently modified by other stories: $($conflictResult.overlappingFiles -join ', ')"
-        $promptParts += "Take extra care when modifying these files to avoid regressions."
-    }
-
-    # Section 5: Relevant file hints
-    if ($recommendation.useFileHints -and $Story) {
-        $relevantFiles = Get-RelevantFilesForStory -Story $Story -MaxFiles 8
-        if ($relevantFiles.Count -gt 0) {
-            $promptParts += ""
-            $promptParts += "## Relevant Files (start here)"
-            foreach ($f in $relevantFiles) {
-                $promptParts += "- $f"
+        # Section: Human feedback — P3, displayOrder 1
+        if ($recommendation.useFeedback) {
+            $feedbackContext = Get-FeedbackForStory -StoryId $StoryId -Story $Story -FocusArea $FocusArea
+            if ($feedbackContext) {
+                $sections += @{ name = "humanFeedback"; content = $feedbackContext; priority = 3; displayOrder = 1 }
             }
         }
-    }
 
-    # Section 5.5: Sprint progress context (what previous sessions accomplished)
-    $sprintProgress = Get-SprintProgressContext
-    if ($sprintProgress) {
-        $promptParts += $sprintProgress
-    }
-
-    # Section 6: Resume context from checkpoints (Phase 4, Story 4.1)
-    if ($RetryCount -gt 0 -and $StoryId) {
-        try {
-            $storyProgress = Get-StoryProgress -StoryId $StoryId
-            if ($storyProgress -and ($storyProgress.milestones.testsCreated -or $storyProgress.milestones.implementationStarted -or $storyProgress.milestones.committed)) {
-                $resumeContext = Build-ResumePrompt -StoryId $StoryId -Progress $storyProgress -Story $Story
-                if ($resumeContext) {
-                    $promptParts += $resumeContext
+        # Section: Retrospective context — P4, displayOrder 2
+        if ($recommendation.useRetrospective) {
+            $retroFile = if ($script:Paths) { $script:Paths.LastRetrospectiveFile } else { Join-Path $script:RalphDir "state\last_retrospective.json" }
+            $retro = Read-JsonFile -Path $retroFile
+            if ($retro) {
+                $retroContext = Get-RetrospectiveContext -Retro @{
+                    lessons = @($retro.lessons)
+                    failurePatterns = @($retro.failurePatterns)
+                    recommendations = @($retro.recommendations)
+                }
+                if ($retroContext) {
+                    $sections += @{ name = "retrospective"; content = $retroContext; priority = 4; displayOrder = 2 }
                 }
             }
         }
-        catch {}
-    }
 
-    # Detect seed stories early (affects how notes are presented)
-    $isSeedStory = $Story.title -and $Story.title -match 'Generate sprint stories'
+        # Section: Conflict warnings — P4, displayOrder 3
+        $conflictResult = Test-FileConflict -StoryId $StoryId -Story $Story
+        if ($conflictResult -and $conflictResult.hasConflict) {
+            $conflictContent = @("", "## File Conflict Warning",
+                "The following files were recently modified by other stories: $($conflictResult.overlappingFiles -join ', ')",
+                "Take extra care when modifying these files to avoid regressions.") -join "`n"
+            $sections += @{ name = "conflictWarnings"; content = $conflictContent; priority = 4; displayOrder = 3 }
+        }
 
-    # Section 7: ALWAYS include full story details in prompt (prevents exploration stalls)
-    $promptParts += ""
-    $promptParts += "============================================================"
-    $promptParts += "STORY: $StoryId - $($Story.title)"
-    $promptParts += "============================================================"
-    $promptParts += ""
-
-    # For seed stories: instructions and criteria FIRST (truncation-safe),
-    # notes last (background context that can be safely trimmed).
-    # For regular stories: notes first (implementation context), then criteria, then instructions.
-    if ($isSeedStory) {
-        # Instructions first - these MUST survive truncation
-        $promptParts += "INSTRUCTIONS:"
-        $promptParts += "1. This is a SEED STORY that generates work items - do NOT implement code fixes"
-        $promptParts += "2. Read scripts/ralph/state/prd.json first, then the config/context files in acceptance criteria"
-        $promptParts += "3. Analyze the codebase and generate 8-12 stories as specified"
-        $promptParts += "4. Write the COMPLETE updated prd.json with all new stories AND set this story's passes: true"
-        $promptParts += "5. CRITICAL: The file must be actually written - verify by reading it back after writing"
-        $promptParts += ""
-
-        if ($Story.acceptanceCriteria) {
-            $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
-            foreach ($criterion in $Story.acceptanceCriteria) {
-                $promptParts += "  [ ] $criterion"
+        # Section: Relevant file hints — P3, displayOrder 4
+        if ($recommendation.useFileHints -and $Story) {
+            $relevantFiles = Get-RelevantFilesForStory -Story $Story -MaxFiles 8
+            if ($relevantFiles.Count -gt 0) {
+                $fileHintsContent = @("", "## Relevant Files (start here)") + ($relevantFiles | ForEach-Object { "- $_" })
+                $sections += @{ name = "fileHints"; content = ($fileHintsContent -join "`n"); priority = 3; displayOrder = 4 }
             }
-            $promptParts += ""
         }
 
-        # Notes last - background context, safe to truncate
-        if ($Story.notes) {
-            $promptParts += "USER INTERVIEW NOTES (background context for generating stories - DO NOT implement these directly):"
-            $promptParts += $Story.notes
-            $promptParts += ""
+        # Section: Sprint progress — P3, displayOrder 5
+        $sprintProgress = Get-SprintProgressContext
+        if ($sprintProgress) {
+            $sections += @{ name = "sprintProgress"; content = $sprintProgress; priority = 3; displayOrder = 5 }
         }
+
+        # Section: Learning injection — P3, displayOrder 6
+        $learningWarnings = Get-LearningInjection -FocusArea $FocusArea
+        if ($learningWarnings) {
+            $sections += @{ name = "learningInjection"; content = $learningWarnings; priority = 3; displayOrder = 6 }
+        }
+
+        # Section: Resume context — P4, displayOrder 7
+        if ($RetryCount -gt 0 -and $StoryId) {
+            try {
+                $storyProgress = Get-StoryProgress -StoryId $StoryId
+                if ($storyProgress -and ($storyProgress.milestones.testsCreated -or $storyProgress.milestones.implementationStarted -or $storyProgress.milestones.committed)) {
+                    $resumeContext = Build-ResumePrompt -StoryId $StoryId -Progress $storyProgress -Story $Story
+                    if ($resumeContext) {
+                        $sections += @{ name = "resumeContext"; content = $resumeContext; priority = 4; displayOrder = 7 }
+                    }
+                }
+            }
+            catch {}
+        }
+
+        # Section: Role specialization — P3, displayOrder 8
+        $storyRole = Get-StoryRole -Story $Story
+        if ($storyRole -ne 'feature') {
+            $rolePrefix = switch ($storyRole) {
+                'bugfix'      { "You are a debugging specialist. Reproduce the bug first with a failing test, then fix. Verify the fix resolves the issue and doesn't break existing tests." }
+                'refactor'    { "You are a refactoring specialist. Preserve ALL existing behavior. Run the full test suite BEFORE and AFTER changes. If any test fails after your change, revert immediately." }
+                'test'        { "You are a test engineer. Focus on edge cases, error paths, and mutation-resistant assertions. Tests should fail for the right reasons when code is broken." }
+                'docs'        { "You are a documentation specialist. Be concise. Update only what's changed. Don't add boilerplate." }
+                'performance' { "You are a performance specialist. Measure before and after. Include benchmark numbers in your commit message. No premature optimization." }
+            }
+            if ($rolePrefix) {
+                $roleContent = "`n## Role: $($storyRole.ToUpper())`n$rolePrefix"
+                $sections += @{ name = "roleSpecialization"; content = $roleContent; priority = 3; displayOrder = 8 }
+            }
+        }
+
+        # Section: Story details — P1 (never trimmed), displayOrder 9
+        $isSeedStory = $Story.title -and $Story.title -match 'Generate sprint stories'
+        $storyParts = @()
+        $storyParts += ""
+        $storyParts += "============================================================"
+        $storyParts += "STORY: $StoryId - $($Story.title)"
+        $storyParts += "============================================================"
+        $storyParts += ""
+
+        if ($isSeedStory) {
+            $storyParts += "INSTRUCTIONS:"
+            $storyParts += "1. This is a SEED STORY that generates work items - do NOT implement code fixes"
+            $storyParts += "2. Read scripts/ralph/state/prd.json first, then the config/context files in acceptance criteria"
+            $storyParts += "3. Analyze the codebase and generate 8-12 stories as specified"
+            $storyParts += "4. Write the COMPLETE updated prd.json with all new stories AND set this story's passes: true"
+            $storyParts += "5. CRITICAL: The file must be actually written - verify by reading it back after writing"
+            $storyParts += ""
+            if ($Story.acceptanceCriteria) {
+                $storyParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+                foreach ($criterion in $Story.acceptanceCriteria) { $storyParts += "  [ ] $criterion" }
+                $storyParts += ""
+            }
+            if ($Story.notes) {
+                $storyParts += "USER INTERVIEW NOTES (background context for generating stories - DO NOT implement these directly):"
+                $storyParts += $Story.notes
+                $storyParts += ""
+            }
+        }
+        else {
+            if ($Story.notes) {
+                $storyParts += "CONTEXT: $($Story.notes)"
+                $storyParts += ""
+            }
+            if ($Story.acceptanceCriteria) {
+                $storyParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+                foreach ($criterion in $Story.acceptanceCriteria) { $storyParts += "  [ ] $criterion" }
+                $storyParts += ""
+            }
+            $storyParts += "INSTRUCTIONS:"
+            $storyParts += "1. All story details are above - DO NOT read prd.json (saves time)"
+            $storyParts += "2. Read scripts/ralph/session/prompt.md for project-level instructions"
+            $storyParts += "3. Implement the story, verify all acceptance criteria"
+            $storyParts += "4. Update scripts/ralph/state/prd.json to set passes: true when complete"
+        }
+
+        $sections += @{ name = "storyDetails"; content = ($storyParts -join "`n"); priority = 1; displayOrder = 9 }
+
+        # Assemble with budget allocation
+        $budgetAlloc = @{}
+        if ($config.prompts -and $config.prompts.budgetAllocation) {
+            $ba = $config.prompts.budgetAllocation
+            $budgetAlloc = @{
+                storyDetails = if ($ba.storyDetails) { $ba.storyDetails } else { 0.40 }
+                failureContext = if ($ba.failureContext) { $ba.failureContext } else { 0.20 }
+                contextHints = if ($ba.contextHints) { $ba.contextHints } else { 0.20 }
+                supplementary = if ($ba.supplementary) { $ba.supplementary } else { 0.20 }
+            }
+        }
+
+        $prompt = Build-BudgetedPrompt -Sections $sections -MaxLength $maxLength -BudgetAllocation $budgetAlloc
+        return $prompt
     }
     else {
-        # Regular stories: notes as implementation context, then criteria, then instructions
-        if ($Story.notes) {
-            $promptParts += "CONTEXT: $($Story.notes)"
-            $promptParts += ""
-        }
+        # === LEGACY PATH: Flat $promptParts array with naive truncation (existing behavior) ===
+        $promptParts = @()
 
-        if ($Story.acceptanceCriteria) {
-            $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
-            foreach ($criterion in $Story.acceptanceCriteria) {
-                $promptParts += "  [ ] $criterion"
+        # Section 1: Failure context (on retries)
+        if ($recommendation.useFailureContext -and $RetryCount -gt 0) {
+            $failureContext = Get-StoryFailureContext -StoryId $StoryId -RetryCount $RetryCount
+            if ($failureContext) {
+                $promptParts += $failureContext
             }
-            $promptParts += ""
         }
 
-        $promptParts += "INSTRUCTIONS:"
-        $promptParts += "1. All story details are above - DO NOT read prd.json (saves time)"
-        $promptParts += "2. Read scripts/ralph/session/prompt.md for project-level instructions"
-        $promptParts += "3. Implement the story, verify all acceptance criteria"
-        $promptParts += "4. Update scripts/ralph/state/prd.json to set passes: true when complete"
+        # Section 2: Human feedback
+        if ($recommendation.useFeedback) {
+            $feedbackContext = Get-FeedbackForStory -StoryId $StoryId -Story $Story -FocusArea $FocusArea
+            if ($feedbackContext) {
+                $promptParts += $feedbackContext
+            }
+        }
+
+        # Section 3: Retrospective context
+        if ($recommendation.useRetrospective) {
+            $retroFile = if ($script:Paths) { $script:Paths.LastRetrospectiveFile } else { Join-Path $script:RalphDir "state\last_retrospective.json" }
+            $retro = Read-JsonFile -Path $retroFile
+            if ($retro) {
+                $retroContext = Get-RetrospectiveContext -Retro @{
+                    lessons = @($retro.lessons)
+                    failurePatterns = @($retro.failurePatterns)
+                    recommendations = @($retro.recommendations)
+                }
+                if ($retroContext) {
+                    $promptParts += $retroContext
+                }
+            }
+        }
+
+        # Section 4: Conflict warnings
+        $conflictResult = Test-FileConflict -StoryId $StoryId -Story $Story
+        if ($conflictResult -and $conflictResult.hasConflict) {
+            $promptParts += ""
+            $promptParts += "## File Conflict Warning"
+            $promptParts += "The following files were recently modified by other stories: $($conflictResult.overlappingFiles -join ', ')"
+            $promptParts += "Take extra care when modifying these files to avoid regressions."
+        }
+
+        # Section 5: Relevant file hints
+        if ($recommendation.useFileHints -and $Story) {
+            $relevantFiles = Get-RelevantFilesForStory -Story $Story -MaxFiles 8
+            if ($relevantFiles.Count -gt 0) {
+                $promptParts += ""
+                $promptParts += "## Relevant Files (start here)"
+                foreach ($f in $relevantFiles) {
+                    $promptParts += "- $f"
+                }
+            }
+        }
+
+        # Section 5.5: Sprint progress context (what previous sessions accomplished)
+        $sprintProgress = Get-SprintProgressContext
+        if ($sprintProgress) {
+            $promptParts += $sprintProgress
+        }
+
+        # Section 5.7: Learning injection (known issues from past sprints)
+        $learningWarnings = Get-LearningInjection -FocusArea $FocusArea
+        if ($learningWarnings) {
+            $promptParts += $learningWarnings
+        }
+
+        # Section 6: Resume context from checkpoints (Phase 4, Story 4.1)
+        if ($RetryCount -gt 0 -and $StoryId) {
+            try {
+                $storyProgress = Get-StoryProgress -StoryId $StoryId
+                if ($storyProgress -and ($storyProgress.milestones.testsCreated -or $storyProgress.milestones.implementationStarted -or $storyProgress.milestones.committed)) {
+                    $resumeContext = Build-ResumePrompt -StoryId $StoryId -Progress $storyProgress -Story $Story
+                    if ($resumeContext) {
+                        $promptParts += $resumeContext
+                    }
+                }
+            }
+            catch {}
+        }
+
+        # Detect seed stories early (affects how notes are presented)
+        $isSeedStory = $Story.title -and $Story.title -match 'Generate sprint stories'
+
+        # Role-based story specialization
+        $storyRole = Get-StoryRole -Story $Story
+        if ($storyRole -ne 'feature') {
+            $rolePrefix = switch ($storyRole) {
+                'bugfix'      { "You are a debugging specialist. Reproduce the bug first with a failing test, then fix. Verify the fix resolves the issue and doesn't break existing tests." }
+                'refactor'    { "You are a refactoring specialist. Preserve ALL existing behavior. Run the full test suite BEFORE and AFTER changes. If any test fails after your change, revert immediately." }
+                'test'        { "You are a test engineer. Focus on edge cases, error paths, and mutation-resistant assertions. Tests should fail for the right reasons when code is broken." }
+                'docs'        { "You are a documentation specialist. Be concise. Update only what's changed. Don't add boilerplate." }
+                'performance' { "You are a performance specialist. Measure before and after. Include benchmark numbers in your commit message. No premature optimization." }
+            }
+            if ($rolePrefix) {
+                $promptParts += ""
+                $promptParts += "## Role: $($storyRole.ToUpper())"
+                $promptParts += $rolePrefix
+            }
+        }
+
+        # Section 7: ALWAYS include full story details in prompt (prevents exploration stalls)
+        $promptParts += ""
+        $promptParts += "============================================================"
+        $promptParts += "STORY: $StoryId - $($Story.title)"
+        $promptParts += "============================================================"
+        $promptParts += ""
+
+        # For seed stories: instructions and criteria FIRST (truncation-safe),
+        # notes last (background context that can be safely trimmed).
+        # For regular stories: notes first (implementation context), then criteria, then instructions.
+        if ($isSeedStory) {
+            # Instructions first - these MUST survive truncation
+            $promptParts += "INSTRUCTIONS:"
+            $promptParts += "1. This is a SEED STORY that generates work items - do NOT implement code fixes"
+            $promptParts += "2. Read scripts/ralph/state/prd.json first, then the config/context files in acceptance criteria"
+            $promptParts += "3. Analyze the codebase and generate 8-12 stories as specified"
+            $promptParts += "4. Write the COMPLETE updated prd.json with all new stories AND set this story's passes: true"
+            $promptParts += "5. CRITICAL: The file must be actually written - verify by reading it back after writing"
+            $promptParts += ""
+
+            if ($Story.acceptanceCriteria) {
+                $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+                foreach ($criterion in $Story.acceptanceCriteria) {
+                    $promptParts += "  [ ] $criterion"
+                }
+                $promptParts += ""
+            }
+
+            # Notes last - background context, safe to truncate
+            if ($Story.notes) {
+                $promptParts += "USER INTERVIEW NOTES (background context for generating stories - DO NOT implement these directly):"
+                $promptParts += $Story.notes
+                $promptParts += ""
+            }
+        }
+        else {
+            # Regular stories: notes as implementation context, then criteria, then instructions
+            if ($Story.notes) {
+                $promptParts += "CONTEXT: $($Story.notes)"
+                $promptParts += ""
+            }
+
+            if ($Story.acceptanceCriteria) {
+                $promptParts += "ACCEPTANCE CRITERIA (verify each before marking complete):"
+                foreach ($criterion in $Story.acceptanceCriteria) {
+                    $promptParts += "  [ ] $criterion"
+                }
+                $promptParts += ""
+            }
+
+            $promptParts += "INSTRUCTIONS:"
+            $promptParts += "1. All story details are above - DO NOT read prd.json (saves time)"
+            $promptParts += "2. Read scripts/ralph/session/prompt.md for project-level instructions"
+            $promptParts += "3. Implement the story, verify all acceptance criteria"
+            $promptParts += "4. Update scripts/ralph/state/prd.json to set passes: true when complete"
+        }
+
+        $prompt = $promptParts -join "`n"
+
+        # Enforce max length
+        if ($maxLength -gt 0 -and $prompt.Length -gt $maxLength) {
+            $prompt = $prompt.Substring(0, $maxLength - 50) + "`n`n[Prompt truncated to $maxLength chars]"
+        }
+
+        return $prompt
     }
-
-    $prompt = $promptParts -join "`n"
-
-    # Enforce max length
-    if ($maxLength -gt 0 -and $prompt.Length -gt $maxLength) {
-        $prompt = $prompt.Substring(0, $maxLength - 50) + "`n`n[Prompt truncated to $maxLength chars]"
-    }
-
-    return $prompt
 }
 
 function Build-ResumePrompt {
