@@ -2,6 +2,8 @@
 
 | Date | Changes |
 |------|---------|
+| 2026-02-06 | Fix: FAISS index space mismatch in iterative match — `self._embeddings` local indices (0-based) treated as global `text_metadata` indices; caused `k` to go negative (all gaps skipped) and wrong metadata lookup; added `_embedding_global_offset` to map between local FAISS and global text_metadata index spaces |
+| 2026-02-06 | Fix: Migrate embedding model from `text-embedding-004` (shut down 2026-01-14) to `gemini-embedding-001` — updated config dataclass, config.yaml, provider defaults, fallbacks, and cost table |
 | 2026-02-06 | Feat: 4 Carlini-inspired Ralph improvements — early-exit tuning (grace 60→30s + git commit detection), structured test output (Format-TestSummary replaces raw dump), randomized fast test mode (T3-fast on non-cadence), living sprint progress doc (sprint_progress.md) |
 | 2026-02-06 | Fix: OTIO `available_range` mismatch — `create_clip_with_timewarp()` estimated duration exceeded actual file length for keyframe-cut segments; now uses ffprobe in both `utils.py` and `otio_builder.py`, eliminating DaVinci "File not found in search directories" on OTIO import |
 | 2026-02-06 | Fix: XML duration mismatch — `_get_segment_file_duration()` now uses ffprobe for actual file duration (cached) instead of filename-parsed range; yt-dlp keyframe cuts make files ~0.5-1.5s shorter than requested, causing DaVinci "timecode extents" rejection |

@@ -246,6 +246,8 @@ class IterativeMatchStage(Stage):
             # Initialize local embedding storage (no longer stored on PipelineState)
             self._embeddings = None
             self._embedding_index = None
+            # Track the global text_metadata index where self._embeddings[0] starts
+            self._embedding_global_offset = None
 
             for pass_num in range(1, max_iterations + 1):
                 pass_start = time.time()
@@ -1537,6 +1539,8 @@ class IterativeMatchStage(Stage):
                 self._embeddings = np.vstack([self._embeddings, new_embeddings])
             else:
                 self._embeddings = new_embeddings
+                # Record the global text_metadata offset for the first batch
+                self._embedding_global_offset = start_index
 
             # Rebuild embedding index with all vectors
             from ..embeddings import build_embedding_index
@@ -1603,6 +1607,10 @@ class IterativeMatchStage(Stage):
 
             gaps_filled = 0
 
+            # FAISS indices are local (0-based into self._embeddings).
+            # Convert to global text_metadata indices using the offset.
+            global_offset = self._embedding_global_offset or 0
+
             for gap in gaps:
                 # Get voiceover segment embedding (from precomputed cache)
                 vo_embedding = self._get_voiceover_embedding(
@@ -1612,13 +1620,16 @@ class IterativeMatchStage(Stage):
                 if vo_embedding is None:
                     continue
 
-                # Search only in new segments (indices >= new_segment_start)
-                # Use FAISS index for similarity search
-                k = min(20, len(self._embeddings) - new_segment_start)
+                # Compute how many local embedding indices correspond to new segments
+                # new_segment_start is a global text_metadata index;
+                # convert to local embedding index for counting
+                local_new_start = new_segment_start - global_offset
+                num_new = len(self._embeddings) - max(0, local_new_start)
+                k = min(20, num_new)
                 if k <= 0:
                     continue
 
-                # Query FAISS index
+                # Query FAISS index (returns local indices into self._embeddings)
                 distances, indices = self._embedding_index.search(
                     np.array([vo_embedding]).astype('float32'), k * 2
                 )
@@ -1628,10 +1639,14 @@ class IterativeMatchStage(Stage):
                 best_conf = 0.0
 
                 for dist, idx in zip(distances[0], indices[0]):
-                    if idx < new_segment_start:
-                        continue  # Skip old segments
+                    if idx < 0:
+                        continue  # FAISS sentinel for fewer results than k
+                    # Convert local FAISS index to global text_metadata index
+                    global_idx = idx + global_offset
+                    if global_idx < new_segment_start:
+                        continue  # Skip segments from earlier passes
 
-                    meta = state.text_metadata[idx]
+                    meta = state.text_metadata[global_idx]
                     video_id = self._extract_video_id_from_path(meta.get('video_path', ''))
 
                     # Check source spacing
@@ -1650,7 +1665,7 @@ class IterativeMatchStage(Stage):
                     if confidence > best_conf and confidence >= target_conf:
                         best_conf = confidence
                         best_match = {
-                            'index': idx,
+                            'index': global_idx,
                             'video_id': video_id,
                             'confidence': confidence,
                             'meta': meta
