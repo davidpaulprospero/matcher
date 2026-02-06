@@ -197,7 +197,7 @@ embedding:
   provider: gemini
 
   # Model names per provider
-  gemini_model: models/text-embedding-004
+  gemini_model: models/gemini-embedding-001
   voyage_model: voyage-2
   local_model: all-MiniLM-L6-v2
 
