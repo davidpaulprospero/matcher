@@ -307,6 +307,18 @@ function Get-StoryFailureContext {
         }
     }
 
+    # Regression delta from pre-story baseline (regressionGuard)
+    $preBaselineFile = if ($script:Paths) { $script:Paths.PreStoryBaselineFile }
+                       else { Join-Path $script:RalphDir "session\pre_story_baseline.json" }
+    if (Test-Path $preBaselineFile) {
+        $preBaseline = Read-JsonFile -Path $preBaselineFile
+        if ($preBaseline -and $preBaseline.passed) {
+            $context += ""
+            $context += "Pre-story test baseline: $($preBaseline.passed) passed, $($preBaseline.failed) failed"
+            $context += "Your changes must not reduce the pass count below $($preBaseline.passed)."
+        }
+    }
+
     $context += ""
     $context += "Please address these issues in this attempt."
     $context += ""
@@ -471,16 +483,20 @@ function Compare-TestBaseline {
         Compare current test results against baseline (Story 1.5)
     .PARAMETER CurrentResults
         String like "41/41 pass" from Get-TestResults
+    .PARAMETER BaselineOverride
+        Optional hashtable with passed/failed counts from pre-story oracle baseline.
+        When provided, overrides the file-based baseline for oracle-based regression detection.
     .RETURNS
         Hashtable with regression info, or $null if no baseline
     #>
     param(
-        [string]$CurrentResults
+        [string]$CurrentResults,
+        [hashtable]$BaselineOverride = $null
     )
 
     $baselineFile = if ($script:Paths) { $script:Paths.TestBaselineFile } else { Join-Path $script:RalphDir "config\test_baseline.json" }
 
-    if (-not (Test-Path $baselineFile)) {
+    if (-not $BaselineOverride -and -not (Test-Path $baselineFile)) {
         return $null
     }
 
@@ -491,7 +507,7 @@ function Compare-TestBaseline {
         return $null
     }
 
-    $baseline = Read-JsonFile -Path $baselineFile
+    $baseline = if ($BaselineOverride) { $BaselineOverride } else { Read-JsonFile -Path $baselineFile }
     if (-not $baseline) { return $null }
 
     # Parse current results

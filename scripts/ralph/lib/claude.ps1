@@ -857,7 +857,8 @@ function Resolve-ClaudeResult {
             -LinesAdded 0 -LinesDeleted 0 `
             -PhaseReadMs $Ctx.PhaseTimings.read_ms -PhaseAnalyzeMs $Ctx.PhaseTimings.analyze_ms `
             -PhaseImplementMs $Ctx.PhaseTimings.implement_ms -PhaseTestMs $Ctx.PhaseTimings.test_ms `
-            -PhaseCommitMs $Ctx.PhaseTimings.commit_ms
+            -PhaseCommitMs $Ctx.PhaseTimings.commit_ms `
+            -Role $(if ($Ctx.StoryObj) { Get-StoryRole -Story $Ctx.StoryObj } else { "" })
 
         if ($Ctx.StoryObj) { $null = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
         $script:State.ConsecutiveFailures++
@@ -883,10 +884,11 @@ function Resolve-ClaudeResult {
             }
         }
 
-        # Test regression detection
+        # Test regression detection (oracle-based when regressionGuard enabled)
         $regressionResult = $null
         if ($Ctx.TestResults) {
-            $regressionResult = Compare-TestBaseline -CurrentResults $Ctx.TestResults
+            $baselineOverride = if ($script:State -and $script:State.PreStoryBaseline) { $script:State.PreStoryBaseline } else { $null }
+            $regressionResult = Compare-TestBaseline -CurrentResults $Ctx.TestResults -BaselineOverride $baselineOverride
         }
 
         # Auto-rollback on regression
@@ -911,7 +913,8 @@ function Resolve-ClaudeResult {
             -LinesAdded $gitStats.Added -LinesDeleted $gitStats.Deleted `
             -PhaseReadMs $Ctx.PhaseTimings.read_ms -PhaseAnalyzeMs $Ctx.PhaseTimings.analyze_ms `
             -PhaseImplementMs $Ctx.PhaseTimings.implement_ms -PhaseTestMs $Ctx.PhaseTimings.test_ms `
-            -PhaseCommitMs $Ctx.PhaseTimings.commit_ms
+            -PhaseCommitMs $Ctx.PhaseTimings.commit_ms `
+            -Role $(if ($Ctx.StoryObj) { Get-StoryRole -Story $Ctx.StoryObj } else { "" })
 
         if ($Ctx.StoryObj) {
             $evidenceResult = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $true -ClaudeOutput $Ctx.ClaudeOutput -DiffOutput $diffOutput
@@ -989,6 +992,22 @@ function Resolve-ClaudeResult {
                     reviewScore = if ($reviewResult) { $reviewResult.score } else { $null }
                 }
             } catch {}
+
+            # Learning injection effectiveness tracking
+            if ($script:Config.flags -and $script:Config.flags.learningInjection) {
+                try {
+                    $injectedWarnings = Get-LearningInjection -FocusArea $Ctx.FocusAreaId
+                    if ($injectedWarnings) {
+                        Update-LearningDb -Entry @{
+                            type = "injection_result"
+                            storyId = $Ctx.StoryId
+                            focusArea = $Ctx.FocusAreaId
+                            hadWarnings = $true
+                            storySucceeded = $success
+                        }
+                    }
+                } catch {}
+            }
         }
         $script:State.ConsecutiveFailures = 0
     }
@@ -1011,7 +1030,8 @@ function Resolve-ClaudeResult {
             -LinesAdded 0 -LinesDeleted 0 `
             -PhaseReadMs $Ctx.PhaseTimings.read_ms -PhaseAnalyzeMs $Ctx.PhaseTimings.analyze_ms `
             -PhaseImplementMs $Ctx.PhaseTimings.implement_ms -PhaseTestMs $Ctx.PhaseTimings.test_ms `
-            -PhaseCommitMs $Ctx.PhaseTimings.commit_ms
+            -PhaseCommitMs $Ctx.PhaseTimings.commit_ms `
+            -Role $(if ($Ctx.StoryObj) { Get-StoryRole -Story $Ctx.StoryObj } else { "" })
 
         if ($Ctx.StoryObj) { $null = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
 
@@ -1025,6 +1045,23 @@ function Resolve-ClaudeResult {
                     errorCategory = $errorCategory
                     retryCount = $script:State.CurrentRetryCount
                     exitCode = $exitCodeStr
+                }
+            } catch {}
+        }
+
+        # Learning injection effectiveness tracking (failure case)
+        if ($script:Config.flags -and $script:Config.flags.learningInjection) {
+            try {
+                $injectedWarnings = Get-LearningInjection -FocusArea $Ctx.FocusAreaId
+                if ($injectedWarnings) {
+                    Update-LearningDb -Entry @{
+                        type = "injection_result"
+                        storyId = $Ctx.StoryId
+                        focusArea = $Ctx.FocusAreaId
+                        hadWarnings = $true
+                        storySucceeded = $false
+                        actualError = $errorCategory
+                    }
                 }
             } catch {}
         }

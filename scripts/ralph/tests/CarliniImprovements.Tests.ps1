@@ -353,6 +353,20 @@ Describe 'Sprint Progress Reset at Sprint Start' -Tag 'Unit', 'Carlini' {
     }
 }
 
+Describe 'Sprint Diagnostics' -Tag 'Unit', 'Carlini' {
+    It 'Get-SprintDiagnostics exists in metrics.ps1' {
+        $metricsPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\metrics.ps1'
+        $content = Get-Content $metricsPath -Raw
+        $content | Should -BeLike "*function Get-SprintDiagnostics*"
+    }
+
+    It 'sprint.ps1 calls Get-SprintDiagnostics in Save-SprintArchive' {
+        $sprintPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\sprint.ps1'
+        $content = Get-Content $sprintPath -Raw
+        $content | Should -BeLike "*Get-SprintDiagnostics*"
+    }
+}
+
 # ============================================================================
 # Phase 1: Oracle-Based Regression Guard + Deterministic Test Subsampling
 # ============================================================================

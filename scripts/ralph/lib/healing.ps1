@@ -227,6 +227,109 @@ function Invoke-FullHealthCheck {
     return $result
 }
 
+function Test-RegressionBaseline {
+    <#
+    .SYNOPSIS
+        Capture fresh pre-story test baseline for oracle-based regression detection.
+        Only active when regressionGuard flag is enabled.
+    .PARAMETER StoryId
+        Story about to start (for logging)
+    .RETURNS
+        Hashtable with passed/failed/total counts, or $null if flag disabled
+    #>
+    param([string]$StoryId = "")
+
+    $config = Get-RalphConfig
+    if (-not $config.flags -or -not $config.flags.regressionGuard) { return $null }
+
+    Write-Host "  [RegressionGuard] Capturing pre-story baseline..." -ForegroundColor DarkGray
+
+    try {
+        $output = & python -m pytest tests/ --tb=no -q --no-header --non-interactive 2>&1
+        $text = $output -join "`n"
+
+        $passed = 0; $failed = 0
+        if ($text -match '(\d+)\s+passed') { $passed = [int]$Matches[1] }
+        if ($text -match '(\d+)\s+failed') { $failed = [int]$Matches[1] }
+
+        $baseline = @{
+            capturedAt = (Get-Date).ToString("o")
+            storyId    = $StoryId
+            passed     = $passed
+            failed     = $failed
+            totalTests = $passed + $failed
+        }
+
+        # Save to session file
+        $baselineFile = if ($script:Paths) { $script:Paths.PreStoryBaselineFile }
+                        else { Join-Path $script:RalphDir "session\pre_story_baseline.json" }
+        Write-JsonNoBom -Path $baselineFile -Content ($baseline | ConvertTo-Json -Depth 3)
+
+        Write-Host "  [RegressionGuard] Baseline: $passed passed, $failed failed" -ForegroundColor DarkGray
+        return $baseline
+    }
+    catch {
+        Write-Host "  [RegressionGuard] Could not capture baseline: $_" -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Get-SubsampledTestCommand {
+    <#
+    .SYNOPSIS
+        Build a deterministic, focus-area-scoped pytest command for fast T3 runs.
+        Only active when testSubsampling flag is enabled.
+    .PARAMETER StoryId
+        Current story ID — used as hash seed for deterministic ordering
+    .PARAMETER FocusArea
+        Current focus area — used to scope tests via testPatterns config
+    .RETURNS
+        String pytest args, or $null if subsampling disabled (fall through to default)
+    #>
+    param(
+        [string]$StoryId = "",
+        [string]$FocusArea = ""
+    )
+
+    $config = Get-RalphConfig
+    if (-not $config.flags -or -not $config.flags.testSubsampling) { return $null }
+
+    $subsamplingConfig = $config.testSubsampling
+
+    # Deterministic seed from story ID
+    $seed = 0
+    if ($StoryId) {
+        foreach ($c in $StoryId.ToCharArray()) { $seed = ($seed * 31 + [int]$c) -band 0x7FFFFFFF }
+    }
+    if ($seed -eq 0) { $seed = (Get-Date).Ticks -band 0x7FFFFFFF }
+
+    # Focus-area-scoped test selection
+    $testTarget = "tests/"
+    if ($FocusArea -and $subsamplingConfig -and $subsamplingConfig.focusAreaScoped) {
+        $patterns = $config.testPatterns
+        if ($patterns -and $patterns.$FocusArea) {
+            $areaPatterns = @($patterns.$FocusArea)
+            $testFiles = @()
+            foreach ($pat in $areaPatterns) {
+                $testFiles += @(Get-ChildItem -Path "tests/" -Filter $pat -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+            }
+            if ($testFiles.Count -gt 0) {
+                $testTarget = ($testFiles | Select-Object -Unique) -join " "
+            }
+        }
+    }
+
+    # Max test limit
+    $maxTests = ""
+    if ($subsamplingConfig -and $subsamplingConfig.maxTestsPerFastRun -gt 0) {
+        $maxTests = " --maxfail=$($subsamplingConfig.maxTestsPerFastRun)"
+    }
+
+    $subsampledArgs = "$testTarget --tb=line -q --no-header -x -p randomly --randomly-seed=$seed$maxTests"
+    Write-Host "  [Subsample] seed=$seed scope=$( if ($testTarget -ne 'tests/') { $FocusArea } else { 'all' } )" -ForegroundColor DarkGray
+    return $subsampledArgs
+}
+
 function Invoke-TieredHealthCheck {
     <#
     .SYNOPSIS
@@ -243,7 +346,9 @@ function Invoke-TieredHealthCheck {
     param(
         [string[]]$ChangedFiles = @(),
         [int]$FullRunCadence = 3,
-        [switch]$ForceFullRun
+        [switch]$ForceFullRun,
+        [string]$StoryId = "",
+        [string]$FocusArea = ""
     )
 
     $result = @{
@@ -307,14 +412,17 @@ function Invoke-TieredHealthCheck {
             Write-Host " OK" -ForegroundColor DarkGray
         }
     } elseif ($runFastTier3) {
-        # Fast mode: randomized order, stop on first failure
-        $fastArgs = "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random"
-        try {
-            $config = Get-RalphConfig
-            if ($config.selfHealing -and $config.selfHealing.fastPytestArgs) {
-                $fastArgs = $config.selfHealing.fastPytestArgs
-            }
-        } catch {}
+        # Fast mode: deterministic subsampling if enabled, else randomized
+        $fastArgs = Get-SubsampledTestCommand -StoryId $StoryId -FocusArea $FocusArea
+        if (-not $fastArgs) {
+            $fastArgs = "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random"
+            try {
+                $config = Get-RalphConfig
+                if ($config.selfHealing -and $config.selfHealing.fastPytestArgs) {
+                    $fastArgs = $config.selfHealing.fastPytestArgs
+                }
+            } catch {}
+        }
 
         Write-Host "  Health [T3-fast]: randomized stop-on-fail..." -ForegroundColor DarkGray -NoNewline
         $t3 = Invoke-FullHealthCheck -PytestArgs $fastArgs
@@ -924,7 +1032,7 @@ function Invoke-PostIterationHealing {
     $fullRunCadence = if ($shConfig -and $shConfig.fullRunCadence) { $shConfig.fullRunCadence } else { 3 }
 
     # Run tiered health check
-    $health = Invoke-TieredHealthCheck -ChangedFiles $ChangedFiles -FullRunCadence $fullRunCadence
+    $health = Invoke-TieredHealthCheck -ChangedFiles $ChangedFiles -FullRunCadence $fullRunCadence -StoryId $StoryId -FocusArea $FocusArea
 
     if (-not $health.HasErrors) {
         return $result

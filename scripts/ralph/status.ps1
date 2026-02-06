@@ -90,7 +90,11 @@ if (Test-Path $BlockedPath) {
 # Metrics summary
 if (Test-Path $MetricsPath) {
     try {
-        $metrics = Import-Csv $MetricsPath
+        # Non-locking read to avoid blocking concurrent writers
+        $fs = [System.IO.FileStream]::new($MetricsPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
+        try { $csvText = $sr.ReadToEnd() } finally { $sr.Close(); $fs.Close() }
+        $metrics = $csvText | ConvertFrom-Csv
         $totalRuns = $metrics.Count
         $successes = @($metrics | Where-Object { $_.success -eq 'true' }).Count
         $timeouts = @($metrics | Where-Object { $_.timeout -eq 'true' }).Count

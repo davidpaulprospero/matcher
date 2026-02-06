@@ -390,7 +390,7 @@ function Show-LatestLogs {
     }
 
     # Latest manifest
-    $latestManifest = Get-ChildItem $latestLogDir.FullName -Filter "iteration_*_manifest.json" | Sort-Object Name -Descending | Select-Object -First 1
+    $latestManifest = Get-ChildItem $latestLogDir.FullName -Filter "iteration_*_manifest.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($latestManifest) {
         Write-Host ""
         Write-Host "----------------------------------------------------------------------" -ForegroundColor Cyan
