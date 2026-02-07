@@ -91,7 +91,7 @@
             "id": "US-69-006",
             "title": "Add __post_init__ validation to VisionConfig and SceneDetectionConfig",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "VisionConfig.__post_init__ validates coverage_threshold is in range 0.0-1.0",
                 "VisionConfig.__post_init__ validates max_api_calls_per_run is positive",
@@ -100,13 +100,13 @@
                 "Write tests for VisionConfig with coverage_threshold=1.5 (raises ValueError)",
                 "Write tests for SceneDetectionConfig with threshold=-1 (raises ValueError)"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/media.py (VisionConfig, SceneDetectionConfig). Neither has __post_init__. coverage_threshold is a ratio (0-1), max_api_calls_per_run should be >0, scene detection threshold and min_scene_len should be >0. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to VisionConfig (coverage_threshold 0-1, max_api_calls_per_run positive) and SceneDetectionConfig (threshold positive, min_scene_len positive). 10 new tests + updated 2 existing parametrized tests. All 211 config validation tests pass."
         },
         {
             "id": "US-69-007",
             "title": "Add __post_init__ validation to EnhancedFeaturesConfig and LLMTitleFilterConfig",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "EnhancedFeaturesConfig.__post_init__ validates min_confidence is in range 0.0-1.0",
                 "EnhancedFeaturesConfig.__post_init__ validates max_retries is positive",
@@ -115,13 +115,13 @@
                 "LLMTitleFilterConfig.__post_init__ validates batch_size is positive",
                 "Write tests covering invalid values for each validated field"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/download.py (EnhancedFeaturesConfig lines ~91-123, LLMTitleFilterConfig lines ~125-133). Neither has __post_init__. min_confidence and min_relevance are score thresholds (0-1), face_preference is an enum-like string. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to EnhancedFeaturesConfig validating min_confidence in 0.0-1.0, max_retries >= 1, and face_preference in ('neutral', 'more', 'none'). Added __post_init__ to LLMTitleFilterConfig validating min_relevance in 0.0-1.0 and batch_size >= 1. Added 13 tests in 2 new test classes (TestEnhancedFeaturesConfigValueErrorValidation, TestLLMTitleFilterConfigValueErrorValidation) in test_config_section_validation.py. All 224 config validation tests pass."
         },
         {
             "id": "US-69-008",
             "title": "Add __post_init__ validation to RemixConfig and ZeroDownloadRemixConfig",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "RemixConfig.__post_init__ validates min_relevance_score is in range 0.0-1.0",
                 "RemixConfig.__post_init__ validates max_workers is positive",
@@ -130,13 +130,13 @@
                 "ZeroDownloadRemixConfig.__post_init__ validates max_keywords_per_batch is positive",
                 "Write tests covering invalid values for each validated field"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/download.py (RemixConfig lines ~36-73, ZeroDownloadRemixConfig lines ~75-89). Neither has __post_init__. min_relevance_score is a score threshold (0-1), auto_accept_filter is an enum-like string with known valid values. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to RemixConfig validating min_relevance_score in 0.0-1.0, max_workers >= 1, and auto_accept_filter in ('filtered', 'all', 'prompt'). Added __post_init__ to ZeroDownloadRemixConfig validating max_retries >= 1 and max_keywords_per_batch >= 1. Added 13 tests in 2 new test classes (TestRemixConfigValueErrorValidation, TestZeroDownloadRemixConfigValueErrorValidation) in test_config_section_validation.py. All 237 config validation tests pass."
         },
         {
             "id": "US-69-009",
             "title": "Add __post_init__ validation to VarietyConfig",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "VarietyConfig.__post_init__ validates min_time_distance is non-negative (>=0)",
                 "VarietyConfig.__post_init__ validates min_embedding_distance is in range 0.0-2.0",
@@ -151,7 +151,7 @@
             "id": "US-69-010",
             "title": "Handle duration_tiers loading through _build_dataclass for consistent error handling",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "duration_tiers loading in Config._from_dict uses the same error handling path as other sections",
                 "Malformed duration_tiers in YAML raises ConfigError with descriptive message instead of silently falling back",
@@ -159,13 +159,13 @@
                 "Write test that loads config with valid duration_tiers dict and verifies DurationTiersConfig is correctly populated",
                 "Existing _build_duration_tiers method is either integrated into the standard path or wrapped with try/except ConfigError"
             ],
-            "notes": "Tier: LOW. Files: src/config/base.py (lines 418-420). duration_tiers is handled separately from section_mapping with cls._build_duration_tiers(data['duration_tiers']) which bypasses the _build_dataclass error handling. If duration_tiers config is malformed, it may raise raw KeyError/TypeError instead of ConfigError. Tests: tests/test_config_build_dataclass_errors.py"
+            "notes": "Tier: LOW. DONE: Wrapped _build_duration_tiers call in _from_dict with type check (non-dict raises ConfigError) and try/except for TypeError/KeyError/AttributeError/ValueError. Added 6 tests in TestDurationTiersErrorHandling covering malformed string, list, bad tier value, chained exception, valid loading, and default preservation."
         },
         {
             "id": "US-69-011",
             "title": "Add MultiStyleConfig validation and StockFootageConfig validation",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "MultiStyleConfig.__post_init__ validates styles list is non-empty when enabled=True",
                 "MultiStyleConfig.__post_init__ warns if enabled=True and styles contains only 'default'",
@@ -173,13 +173,13 @@
                 "Write test for MultiStyleConfig(enabled=True, styles=[]) raises ValueError",
                 "Write test for StockFootageConfig with min_duration > max_duration raises ValueError"
             ],
-            "notes": "Tier: LOW. Files: src/config/sections/output.py (MultiStyleConfig lines 126-131), src/config/sections/media.py (StockFootageConfig). MultiStyleConfig has no __post_init__; enabling with empty styles would cause runtime errors. StockFootageConfig has duration range fields that should be validated for min < max. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: LOW. DONE: MultiStyleConfig.__post_init__ validates styles non-empty when enabled=True, warns on only 'default'. StockFootageConfig.__post_init__ validates min/max duration positive and min <= max. 14 new tests, all 263 config validation tests pass."
         },
         {
             "id": "US-69-012",
             "title": "Add comprehensive config round-trip test for all section_mapping entries",
             "priority": "low",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Write a parametrized test that iterates over all entries in Config._from_dict section_mapping",
                 "Each parametrized case loads a minimal YAML with one non-default value for that section and verifies it is applied",
@@ -187,7 +187,7 @@
                 "Test verifies that unknown YAML keys in a section are logged as warnings (not silently dropped or causing errors)",
                 "Write a separate test that loads the real config.yaml and verifies all sections parse without errors"
             ],
-            "notes": "Tier: LOW. Files: src/config/base.py (section_mapping lines 382-410), tests/test_config*.py. Existing tests cover individual sections but no single parametrized test ensures every section_mapping entry actually works end-to-end. This catches regressions when new sections are added but not mapped. Tests: tests/test_config_base_coverage.py"
+            "notes": "Tier: LOW. Implemented in tests/test_config_roundtrip.py. 36 tests: 30 parametrized round-trip tests (one per section_mapping entry), 1 coverage guard test, 2 unknown-key tests, 3 real config.yaml tests. All pass."
         }
     ]
 }

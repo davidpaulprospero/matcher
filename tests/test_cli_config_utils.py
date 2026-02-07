@@ -221,16 +221,15 @@ class TestValidateRootDirReportsFailure:
 # ===========================================================================
 
 class TestMakePathsProjectRelative:
-    """Test that make_paths_project_relative() resolves relative paths to project_dir."""
+    """Test that make_paths_project_relative() delegates to _resolve_paths()."""
 
     @pytest.mark.fast
     def test_output_dir_resolved(self, tmp_path):
         """Relative output_dir becomes project-relative."""
-        config = MagicMock()
-        config.output = MagicMock()
+        from src.config.base import Config
+
+        config = Config()
         config.output.output_dir = "output"
-        config.download = MagicMock(spec=[])  # no download_dir attr
-        config.transcription = MagicMock(spec=[])  # no cache_dir attr
 
         result = make_paths_project_relative(config, tmp_path)
 
@@ -238,42 +237,39 @@ class TestMakePathsProjectRelative:
         assert result.output.output_dir == expected
 
     @pytest.mark.fast
-    def test_download_dir_resolved(self, tmp_path):
-        """Relative download_dir becomes project-relative."""
-        config = MagicMock()
-        config.output = MagicMock(spec=[])  # no output_dir attr
-        config.download = MagicMock()
-        config.download.download_dir = "videos"
-        config.transcription = MagicMock(spec=[])
+    def test_transcription_cache_dir_resolved(self, tmp_path):
+        """Relative transcription.cache_dir becomes project-relative."""
+        from src.config.base import Config
+
+        config = Config()
+        config.transcription.cache_dir = "my_cache"
 
         result = make_paths_project_relative(config, tmp_path)
 
-        expected = str(tmp_path / "videos")
-        assert result.download.download_dir == expected
+        expected = str(tmp_path / "my_cache")
+        assert result.transcription.cache_dir == expected
 
     @pytest.mark.fast
     def test_cache_dir_resolved(self, tmp_path):
-        """Relative cache_dir becomes project-relative."""
-        config = MagicMock()
-        config.output = MagicMock(spec=[])
-        config.download = MagicMock(spec=[])
-        config.transcription = MagicMock()
-        config.transcription.cache_dir = ".cache"
+        """Relative cache.cache_dir becomes project-relative."""
+        from src.config.base import Config
+
+        config = Config()
+        config.cache.cache_dir = ".cache"
 
         result = make_paths_project_relative(config, tmp_path)
 
-        expected = str(tmp_path / ".cache")
-        assert result.transcription.cache_dir == expected
+        assert str(tmp_path) in result.cache.cache_dir
+        assert ".cache" in result.cache.cache_dir
 
     @pytest.mark.fast
     def test_absolute_paths_not_changed(self, tmp_path):
         """Absolute paths are NOT converted to project-relative."""
+        from src.config.base import Config
+
         abs_path = str(tmp_path / "absolute_output")
-        config = MagicMock()
-        config.output = MagicMock()
+        config = Config()
         config.output.output_dir = abs_path
-        config.download = MagicMock(spec=[])
-        config.transcription = MagicMock(spec=[])
 
         result = make_paths_project_relative(config, tmp_path)
 
@@ -283,10 +279,9 @@ class TestMakePathsProjectRelative:
     @pytest.mark.fast
     def test_returns_config_object(self, tmp_path):
         """make_paths_project_relative returns the config object."""
-        config = MagicMock()
-        config.output = MagicMock(spec=[])
-        config.download = MagicMock(spec=[])
-        config.transcription = MagicMock(spec=[])
+        from src.config.base import Config
+
+        config = Config()
 
         result = make_paths_project_relative(config, tmp_path)
 

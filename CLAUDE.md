@@ -424,4 +424,4 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 ## Session History
 
-See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent: FAISS index space mismatch fix (iterative match gap filling), Embedding model migration (text-embedding-004 → gemini-embedding-001), Carlini-inspired Ralph improvements, OTIO available_range ffprobe fix.
+See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent: Ollama embedding provider (nomic-embed-text) with asymmetric search and provider-specific cache keys, Carlini-inspired Ralph improvements, Terminal OUTPUT stage checkpoint false WARNING fix, FAISS index space mismatch fix.
