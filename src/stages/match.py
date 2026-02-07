@@ -485,7 +485,8 @@ class MatchStage(Stage):
             texts=vo_texts,
             provider=provider,
             cache=cache,
-            cache_key="voiceover"
+            cache_key="voiceover",
+            embed_mode="query"
         )
 
         if vo_embeddings is None or len(vo_embeddings) == 0:
@@ -500,16 +501,18 @@ class MatchStage(Stage):
             texts=vid_texts,
             provider=provider,
             cache=cache,
-            cache_key="video_segments"
+            cache_key="video_segments",
+            embed_mode="document"
         )
 
-        # Log embedding cache hit/miss rate
+        # Log embedding cache hit/miss rate (use provider-qualified keys)
         embedding_cache = EmbeddingCache(cache_dir)
+        provider_tag = type(provider).__name__.lower().replace("embeddings", "")
         vo_cached, vo_uncached, _ = embedding_cache.get_cached_embeddings(
-            [t.strip() if t else "[silence]" for t in vo_texts], "voiceover"
+            [t.strip() if t else "[silence]" for t in vo_texts], f"{provider_tag}_voiceover"
         )
         vid_cached, vid_uncached, _ = embedding_cache.get_cached_embeddings(
-            [t.strip() if t else "[silence]" for t in vid_texts], "video_segments"
+            [t.strip() if t else "[silence]" for t in vid_texts], f"{provider_tag}_video_segments"
         )
         vo_total = len(vo_texts) if vo_texts else 1
         vid_total = len(vid_texts) if vid_texts else 1

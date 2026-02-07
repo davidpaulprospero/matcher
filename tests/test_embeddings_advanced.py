@@ -122,7 +122,7 @@ def sample_embeddings():
 def mock_embedding_provider():
     """Create a mock embedding provider"""
     class MockProvider(EmbeddingProvider):
-        def embed(self, texts):
+        def embed(self, texts, embed_mode="document"):
             # Return 3D embeddings for each text
             return [[float(i), float(i+1), float(i+2)] for i in range(len(texts))]
 
@@ -338,7 +338,7 @@ class TestComputeEmbeddings:
 
         # Mock provider that returns proper embeddings
         class BatchProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[float(i), float(i+1), float(i+2)] for i in range(len(texts))]
 
         provider = BatchProvider()
@@ -407,7 +407,7 @@ class TestComputeEmbeddings:
             def __init__(self):
                 self.attempt = 0
 
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 self.attempt += 1
                 if self.attempt == 1:
                     raise Exception("API Error")
@@ -447,7 +447,7 @@ class TestComputeEmbeddings:
 
         # Create provider that always fails
         class FailingProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 raise Exception("Permanent failure")
 
         provider = FailingProvider()

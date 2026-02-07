@@ -59,7 +59,7 @@ class MockProvider:
         self.embed_calls = []
         self._call_counter = 0
 
-    def embed(self, texts):
+    def embed(self, texts, embed_mode="document"):
         """Return mock embeddings for a batch of texts."""
         call_idx = self._call_counter
         self._call_counter += 1

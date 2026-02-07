@@ -102,6 +102,7 @@ def compute_voiceover_embeddings(
             cache_key="voiceover_chapters",
             show_progress=True,
             config=config,
+            embed_mode="document",
         )
 
         logger.info(f"Computed embeddings for {len(texts)} voiceover segments")

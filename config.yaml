@@ -193,13 +193,15 @@ transcription:
 # Decision: batch_size=100 optimal for Gemini API limits
 
 embedding:
-  # Options: gemini, openai, local, sentence_transformers
+  # Options: gemini, openai, local, sentence_transformers, ollama
   provider: gemini
 
   # Model names per provider
   gemini_model: models/gemini-embedding-001
   voyage_model: voyage-2
   local_model: all-MiniLM-L6-v2
+  ollama_model: nomic-embed-text
+  ollama_base_url: http://localhost:11434
 
   # Batch processing
   # Chain-of-thought: Batching reduces API calls by 100x
@@ -1949,6 +1951,7 @@ iterative_matching:
   # === Iteration control ===
   max_iterations: 5                # Maximum passes to attempt
   min_gap_percentage: 0.05         # Stop if fewer than 5% gaps
+  no_progress_min_pass: 3          # Min pass before stopping on zero progress
 
   # === Search settings ===
   search_results_per_gap: 10       # YouTube results per gap query

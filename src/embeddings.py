@@ -41,6 +41,7 @@ BATCH_SIZES = {
     'voyage': 128,      # Voyage supports up to 128
     'openai': 2048,     # OpenAI supports large batches
     'local': 32,        # Local models - limited by memory
+    'ollama': 50,       # Ollama - conservative for local inference
 }
 
 # Provider maximum batch sizes (hard limits from APIs)
@@ -49,6 +50,7 @@ PROVIDER_MAX_BATCH_SIZES = {
     'voyage': 128,      # Voyage AI hard limit
     'openai': 2048,     # OpenAI limit
     'local': 256,       # Reasonable memory limit
+    'ollama': 512,      # Ollama - depends on available RAM/VRAM
 }
 
 
@@ -536,40 +538,42 @@ class EmbeddingCache(BaseCache):
 class EmbeddingProvider:
     """Base class for embedding providers"""
     
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         raise NotImplementedError
-    
+
     def embed_batch(
-        self, 
-        texts: List[str], 
+        self,
+        texts: List[str],
         batch_size: int = 100,
         show_progress: bool = True,
         max_retries: int = 3,
-        retry_delay: float = 2.0
+        retry_delay: float = 2.0,
+        embed_mode: str = "document"
     ) -> List[List[float]]:
         """Embed texts in batches with progress reporting
-        
+
         Args:
             texts: List of texts to embed
             batch_size: Number of texts per batch (from config)
             show_progress: Whether to log progress
             max_retries: Number of retry attempts (from config)
             retry_delay: Base delay between retries in seconds (from config)
+            embed_mode: "document" for corpus texts, "query" for search queries
         """
         all_embeddings = []
         total_batches = (len(texts) + batch_size - 1) // batch_size
-        
+
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             batch_num = i // batch_size + 1
-            
+
             if show_progress:
                 logger.info(f"    Batch {batch_num}/{total_batches} ({len(batch)} texts)")
-            
+
             # Retry logic with exponential backoff
             for attempt in range(max_retries):
                 try:
-                    embeddings = self.embed(batch)
+                    embeddings = self.embed(batch, embed_mode=embed_mode)
                     all_embeddings.extend(embeddings)
                     break
                 except Exception as e:
@@ -583,7 +587,7 @@ class EmbeddingProvider:
                         # Use first embedding dimension or default to 768
                         dim = len(all_embeddings[0]) if all_embeddings else 768
                         all_embeddings.extend([[0.0] * dim] * len(batch))
-        
+
         return all_embeddings
 
 
@@ -596,17 +600,20 @@ class GeminiEmbeddings(EmbeddingProvider):
         self.model = model
         self.genai = genai
     
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         """Embed a batch of texts (up to 100)"""
         # Clean texts - Gemini doesn't like empty strings
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
-        
+
+        # Map embed_mode to Gemini task_type for asymmetric search
+        task_type = "retrieval_query" if embed_mode == "query" else "retrieval_document"
+
         result = self.genai.embed_content(
             model=self.model,
             content=cleaned,
-            task_type="retrieval_document"
+            task_type=task_type
         )
-        
+
         # Handle both single and batch results
         if isinstance(result['embedding'][0], list):
             return result['embedding']
@@ -616,13 +623,13 @@ class GeminiEmbeddings(EmbeddingProvider):
 
 class VoyageEmbeddings(EmbeddingProvider):
     """Voyage AI embeddings"""
-    
+
     def __init__(self, api_key: str, model: str = "voyage-2"):
         import voyageai
         self.client = voyageai.Client(api_key=api_key)
         self.model = model
-    
-    def embed(self, texts: List[str]) -> List[List[float]]:
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
         result = self.client.embed(cleaned, model=self.model)
         return result.embeddings
@@ -652,10 +659,95 @@ class LocalEmbeddings(EmbeddingProvider):
 
         raise RuntimeError(f"Failed to load SentenceTransformer after {max_retries} attempts: {last_error}")
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
         embeddings = self.model.encode(cleaned, show_progress_bar=False)
         return embeddings.tolist()
+
+
+class OllamaEmbeddings(EmbeddingProvider):
+    """Ollama local embeddings (nomic-embed-text, 768-dim)
+
+    Supports asymmetric search via task prefixes:
+    - "search_document: " for corpus/document texts
+    - "search_query: " for search queries
+    """
+
+    def __init__(self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434", timeout: int = 120):
+        import requests as _requests
+        self._requests = _requests
+        self.model = model
+        self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
+        self._verify_availability()
+
+    def _verify_availability(self):
+        """Check that Ollama server is running and model is pulled."""
+        try:
+            resp = self._requests.get(f"{self.base_url}/api/tags", timeout=5)
+            resp.raise_for_status()
+        except self._requests.ConnectionError:
+            raise RuntimeError(
+                f"Ollama server not reachable at {self.base_url}. "
+                f"Start with: ollama serve"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Ollama server error: {e}")
+
+        # Check model is available
+        try:
+            models = resp.json().get('models', [])
+            model_names = [m.get('name', '').split(':')[0] for m in models]
+            if self.model not in model_names:
+                raise RuntimeError(
+                    f"Model '{self.model}' not found in Ollama. "
+                    f"Available: {model_names}. "
+                    f"Pull with: ollama pull {self.model}"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            # If we can't parse the response, just proceed — embed call will fail clearly
+            logger.warning("Could not verify Ollama model availability, proceeding anyway")
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
+        """Embed texts via Ollama /api/embed endpoint with task prefixes."""
+        cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
+
+        # Apply nomic-embed-text task prefix for asymmetric search
+        prefix = "search_query: " if embed_mode == "query" else "search_document: "
+        prefixed = [prefix + t for t in cleaned]
+
+        payload = {
+            "model": self.model,
+            "input": prefixed,
+            "keep_alive": "5m",
+            "truncate": True,
+        }
+
+        try:
+            resp = self._requests.post(
+                f"{self.base_url}/api/embed",
+                json=payload,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["embeddings"]
+        except self._requests.ConnectionError:
+            raise RuntimeError(
+                f"Ollama server not reachable at {self.base_url}. "
+                f"Start with: ollama serve"
+            )
+        except self._requests.Timeout:
+            raise RuntimeError(
+                f"Ollama embedding request timed out after {self.timeout}s. "
+                f"The model may be loading for the first time."
+            )
+        except KeyError:
+            raise RuntimeError(
+                f"Unexpected Ollama response format: {data}"
+            )
 
 
 def get_embedding_provider(config: Any) -> EmbeddingProvider:
@@ -679,7 +771,15 @@ def get_embedding_provider(config: Any) -> EmbeddingProvider:
                 return VoyageEmbeddings(api_key, model)
             except Exception as e:
                 logger.warning(f"Could not initialize Voyage: {e}")
-    
+
+    if provider_name == 'ollama':
+        try:
+            model = getattr(config.embedding, 'ollama_model', 'nomic-embed-text')
+            base_url = getattr(config.embedding, 'ollama_base_url', 'http://localhost:11434')
+            return OllamaEmbeddings(model, base_url)
+        except Exception as e:
+            logger.warning(f"Could not initialize Ollama embeddings: {e}")
+
     # Fallback to local
     try:
         model = getattr(config.embedding, 'local_model', 'all-MiniLM-L6-v2')
@@ -694,7 +794,8 @@ def parallel_embed_batch(
     texts: List[str],
     provider: EmbeddingProvider,
     config: Any = None,
-    show_progress: bool = True
+    show_progress: bool = True,
+    embed_mode: str = "document"
 ) -> List[List[float]]:
     """
     Embed texts in parallel batches using ThreadPoolExecutor.
@@ -707,6 +808,7 @@ def parallel_embed_batch(
         provider: EmbeddingProvider instance
         config: Configuration object with embedding.max_workers, batch_size, etc.
         show_progress: Whether to log progress
+        embed_mode: "document" for corpus texts, "query" for search queries
 
     Returns:
         List of embedding vectors in original order
@@ -762,7 +864,7 @@ def parallel_embed_batch(
 
         for attempt in range(max_retries):
             try:
-                embeddings = provider.embed(batch_texts)
+                embeddings = provider.embed(batch_texts, embed_mode=embed_mode)
                 return (batch_idx, embeddings)
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -808,11 +910,12 @@ def compute_embeddings(
     cache: Any,
     cache_key: str = "segments",
     show_progress: bool = True,
-    config: Any = None
+    config: Any = None,
+    embed_mode: str = "document"
 ) -> Any:
     """
     Compute embeddings with batch processing and caching.
-    
+
     Args:
         texts: List of text strings to embed
         provider: EmbeddingProvider instance
@@ -820,7 +923,8 @@ def compute_embeddings(
         cache_key: Key for caching (e.g., "video_segments", "voiceover")
         show_progress: Whether to show progress logs
         config: Configuration object for batch_size, retries, etc.
-    
+        embed_mode: "document" for corpus texts, "query" for search queries
+
     Returns:
         Numpy array of embedding vectors (or list if numpy unavailable)
     """
@@ -837,9 +941,13 @@ def compute_embeddings(
     cache_dir = cache.cache_dir if hasattr(cache, 'cache_dir') else str(cache)
     embedding_cache = EmbeddingCache(cache_dir)
 
+    # Provider-qualified cache key prevents cross-provider cache pollution
+    provider_tag = type(provider).__name__.lower().replace("embeddings", "")
+    qualified_cache_key = f"{provider_tag}_{cache_key}"
+
     # Check individual text cache (survives text changes between runs)
     cached_results, uncached_texts, uncached_indices = embedding_cache.get_cached_embeddings(
-        cleaned_texts, cache_key
+        cleaned_texts, qualified_cache_key
     )
 
     # If all texts are cached, return immediately
@@ -890,7 +998,7 @@ def compute_embeddings(
         # Compute this batch with retries
         for attempt in range(max_retries):
             try:
-                batch_embeddings = provider.embed(batch_texts)
+                batch_embeddings = provider.embed(batch_texts, embed_mode=embed_mode)
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -903,7 +1011,7 @@ def compute_embeddings(
                     batch_embeddings = [[0.0] * dim] * len(batch_texts)
 
         # Cache this batch immediately (survives interruption)
-        embedding_cache.cache_embeddings(batch_texts, batch_embeddings, batch_indices, cache_key)
+        embedding_cache.cache_embeddings(batch_texts, batch_embeddings, batch_indices, qualified_cache_key)
         new_embeddings.extend(batch_embeddings)
 
     elapsed = time.time() - start_time

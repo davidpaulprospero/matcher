@@ -420,8 +420,10 @@ class IterativeMatchStage(Stage):
                 )
                 all_pass_metrics.append(pass_metrics)
 
-                # Check if no progress
-                if gaps_filled == 0 and pass_num >= 2:
+                # Check if no progress (configurable minimum pass before giving up)
+                _min_pass = getattr(iter_config, 'no_progress_min_pass', None)
+                no_progress_min_pass = _min_pass if isinstance(_min_pass, int) else 3
+                if gaps_filled == 0 and pass_num >= no_progress_min_pass:
                     print(f"  ✓ No progress in pass {pass_num}, stopping")
                     break
 
@@ -1531,7 +1533,8 @@ class IterativeMatchStage(Stage):
                 cache=cache,
                 cache_key="iterative_segments",
                 show_progress=False,
-                config=config
+                config=config,
+                embed_mode="document"
             )
 
             # Append to local embedding storage (no longer stored on PipelineState)
@@ -1630,9 +1633,12 @@ class IterativeMatchStage(Stage):
                     continue
 
                 # Query FAISS index (returns local indices into self._embeddings)
-                distances, indices = self._embedding_index.search(
-                    np.array([vo_embedding]).astype('float32'), k * 2
-                )
+                # Normalize query vector for consistent cosine similarity with IndexFlatIP
+                query_vec = np.array([vo_embedding]).astype('float32')
+                norm = np.linalg.norm(query_vec)
+                if norm > 0:
+                    query_vec = query_vec / norm
+                distances, indices = self._embedding_index.search(query_vec, k * 2)
 
                 # Filter to only new segments and check source spacing
                 best_match = None
@@ -1658,9 +1664,9 @@ class IterativeMatchStage(Stage):
                         if violates_spacing:
                             continue
 
-                    # Convert distance to confidence (FAISS returns L2 distance)
-                    # Smaller distance = higher similarity
-                    confidence = max(0, 1.0 - (dist / 2.0))
+                    # FAISS IndexFlatIP returns inner product (cosine similarity
+                    # for normalized vectors): higher = more similar, range [0, 1]
+                    confidence = max(0.0, min(1.0, float(dist)))
 
                     if confidence > best_conf and confidence >= target_conf:
                         best_conf = confidence
@@ -1673,8 +1679,8 @@ class IterativeMatchStage(Stage):
 
                 # Update match if we found a good one
                 if best_match:
-                    self._update_match_for_gap(gap, best_match, state)
-                    gaps_filled += 1
+                    if self._update_match_for_gap(gap, best_match, state):
+                        gaps_filled += 1
 
                     # Track this source for future spacing checks
                     locked_sources[best_match['video_id']].append(gap.position)
@@ -1724,7 +1730,7 @@ class IterativeMatchStage(Stage):
         logger.info(f"Pre-computing {len(gaps_needing_embed)} voiceover embeddings (batch)")
         try:
             texts = [g.voiceover_text for g in gaps_needing_embed]
-            computed = provider.embed(texts)
+            computed = provider.embed(texts, embed_mode="query")
 
             if computed is not None:
                 for gap, emb in zip(gaps_needing_embed, computed):
@@ -1772,7 +1778,7 @@ class IterativeMatchStage(Stage):
 
             # Compute embedding for this text (fallback)
             logger.debug(f"Computing single voiceover embedding for segment {segment_index}")
-            embeddings = provider.embed([text])
+            embeddings = provider.embed([text], embed_mode="query")
             return embeddings[0] if embeddings is not None else None
 
         except Exception as e:
@@ -1784,33 +1790,55 @@ class IterativeMatchStage(Stage):
         gap: GapSegment,
         best_match: Dict[str, Any],
         state: 'PipelineState'
-    ):
-        """Update the match for a gap segment with a new candidate."""
+    ) -> bool:
+        """Update the match for a gap segment with a new candidate.
+
+        Returns:
+            True if the match was actually updated, False otherwise.
+        """
         try:
             # Find the match object for this segment
-            if gap.segment_index < len(state.matches):
-                match = state.matches[gap.segment_index]
+            if gap.segment_index >= len(state.matches):
+                return False
 
-                # Update the primary match
-                if hasattr(match, 'primary_match') and match.primary_match:
-                    pm = match.primary_match
-                    if hasattr(pm, 'confidence'):
-                        pm.confidence = best_match['confidence']
-                    if hasattr(pm, 'video_segment'):
-                        # Update video segment with new source
-                        vs = pm.video_segment
-                        if hasattr(vs, 'source_file'):
-                            vs.source_file = best_match['video_id']
-                        if hasattr(vs, 'text'):
-                            vs.text = best_match['meta'].get('text', '')
+            match = state.matches[gap.segment_index]
 
-                    logger.debug(
-                        f"Updated gap {gap.segment_index} with {best_match['video_id']} "
-                        f"(conf: {best_match['confidence']:.2f})"
-                    )
+            # Handle flat Match objects (from src/state.py) — have video_file, confidence, strategy
+            if hasattr(match, 'video_file'):
+                match.video_file = best_match['video_id']
+                match.confidence = best_match['confidence']
+                if hasattr(match, 'strategy'):
+                    match.strategy = 'iterative_embedding'
+                logger.debug(
+                    f"Updated gap {gap.segment_index} with {best_match['video_id']} "
+                    f"(conf: {best_match['confidence']:.2f})"
+                )
+                return True
+
+            # Legacy: nested primary_match structure
+            if hasattr(match, 'primary_match') and match.primary_match:
+                pm = match.primary_match
+                if hasattr(pm, 'confidence'):
+                    pm.confidence = best_match['confidence']
+                if hasattr(pm, 'video_segment'):
+                    vs = pm.video_segment
+                    if hasattr(vs, 'source_file'):
+                        vs.source_file = best_match['video_id']
+                    if hasattr(vs, 'text'):
+                        vs.text = best_match['meta'].get('text', '')
+
+                logger.debug(
+                    f"Updated gap {gap.segment_index} with {best_match['video_id']} "
+                    f"(conf: {best_match['confidence']:.2f})"
+                )
+                return True
+
+            logger.debug(f"Gap {gap.segment_index}: match object has neither video_file nor primary_match")
+            return False
 
         except Exception as e:
             logger.debug(f"Failed to update match for gap: {e}")
+            return False
 
     def _update_query_learning(
         self,
