@@ -311,7 +311,7 @@ class TestEmbeddingProviderBatchProgress:
         import logging
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -471,7 +471,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock Gemini-like provider
         class GeminiLikeProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = GeminiLikeProvider()
@@ -504,7 +504,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock Voyage-like provider
         class VoyageLikeProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = VoyageLikeProvider()
@@ -537,7 +537,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock Local-like provider
         class LocalLikeProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = LocalLikeProvider()
@@ -570,7 +570,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock unknown provider
         class UnknownProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = UnknownProvider()
@@ -611,7 +611,7 @@ class TestComputeEmbeddingsProgressLogging:
         mock_cache_class.return_value = mock_cache_inst
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -646,7 +646,7 @@ class TestComputeEmbeddingsProgressLogging:
         mock_cache_class.return_value = mock_cache_inst
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -695,7 +695,7 @@ class TestComputeEmbeddingsRateLogging:
         mock_cache_class.return_value = mock_cache_inst
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -821,7 +821,7 @@ class TestComputeEmbeddingsRetryPaths:
             def __init__(self):
                 self.batch_count = 0
 
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 self.batch_count += 1
                 if self.batch_count == 1:
                     return [[1.0, 2.0, 3.0, 4.0, 5.0] for _ in texts]  # 5-dim

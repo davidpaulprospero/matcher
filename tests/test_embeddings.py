@@ -820,7 +820,7 @@ class TestEmbeddingProvider:
         from src.embeddings import EmbeddingProvider
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0] for _ in texts]
 
         provider = MockProvider()
@@ -837,7 +837,7 @@ class TestEmbeddingProvider:
         from src.embeddings import EmbeddingProvider
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0] for _ in texts]
 
         provider = MockProvider()
@@ -856,7 +856,7 @@ class TestEmbeddingProvider:
             def __init__(self):
                 self.attempt = 0
 
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 self.attempt += 1
                 if self.attempt == 1:
                     raise Exception("API Error")
@@ -876,7 +876,7 @@ class TestEmbeddingProvider:
         from src.embeddings import EmbeddingProvider
 
         class FailingProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 raise Exception("Permanent failure")
 
         provider = FailingProvider()
@@ -898,7 +898,7 @@ class TestEmbeddingProvider:
             def __init__(self):
                 self.call_count = 0
 
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 self.call_count += 1
                 if self.call_count == 1:
                     return [[1.0, 2.0, 3.0] for _ in texts]  # 3-dim

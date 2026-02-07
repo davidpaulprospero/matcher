@@ -181,6 +181,10 @@ class EmbeddingConfig:
     voyage_model: str = "voyage-2"
     local_model: str = "all-MiniLM-L6-v2"
 
+    # Ollama settings
+    ollama_model: str = "nomic-embed-text"
+    ollama_base_url: str = "http://localhost:11434"
+
     # Batch processing (Gemini supports up to 100)
     batch_size: int = 100
     max_retries: int = 3
@@ -195,7 +199,7 @@ class EmbeddingConfig:
     cache_batch_results: bool = True
 
     # Known embedding providers
-    KNOWN_PROVIDERS = {'gemini', 'openai', 'local', 'sentence_transformers'}
+    KNOWN_PROVIDERS = {'gemini', 'openai', 'local', 'sentence_transformers', 'ollama'}
 
     def __post_init__(self):
         # ValueError for impossible values (negative); warn+clamp for soft limits
