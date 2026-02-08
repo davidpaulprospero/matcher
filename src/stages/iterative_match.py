@@ -864,20 +864,41 @@ class IterativeMatchStage(Stage):
                         'priority': 2
                     })
 
-        # Strategy 4: Description-derived queries (US-70-012)
+        # Strategy 4: Description-derived queries (US-70-012, US-75-012)
         if getattr(config, 'use_description_queries', True) and locked:
-            from ..iterative_match.gap_analyzer import extract_description_queries
-            # Collect descriptions from locked matches via video_search_results
-            descriptions = []
+            from ..iterative_match.gap_analyzer import (
+                extract_description_queries,
+                derive_queries_from_descriptions,
+            )
+            # Build video dicts with descriptions from search results
             vid_id_to_desc = {}
             for vsr in (state.video_search_results or []):
                 desc = getattr(vsr, 'description', '') or ''
                 if desc and hasattr(vsr, 'video_id'):
                     vid_id_to_desc[vsr.video_id] = desc
+            matched_video_dicts = []
+            descriptions = []
             for lm in locked:
                 desc = vid_id_to_desc.get(lm.video_id, '')
                 if desc:
+                    matched_video_dicts.append({'description': desc, 'video_id': lm.video_id})
                     descriptions.append(desc)
+
+            # 4a: Per-gap description queries (targeted, higher priority)
+            if matched_video_dicts:
+                for gap in gaps[:15]:
+                    gap_desc_queries = derive_queries_from_descriptions(
+                        matched_video_dicts, gap, max_queries=3
+                    )
+                    for dq in gap_desc_queries:
+                        queries.append({
+                            'query': dq,
+                            'strategy': 'description_gap',
+                            'gap_indices': [gap.segment_index],
+                            'priority': 2
+                        })
+
+            # 4b: Broad description queries (fallback, lower priority)
             if descriptions:
                 desc_queries = extract_description_queries(descriptions, max_queries=10)
                 for dq in desc_queries:

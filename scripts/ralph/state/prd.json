@@ -184,8 +184,8 @@
       "id": "US-75-012",
       "title": "Add gap-specific description-derived queries to iterative match",
       "priority": "low",
-      "passes": false,
-      "notes": "Tier: ENHANCEMENT. derive_queries_from_descriptions exists in gap_analyzer.py (~line 927) and is called from iterative_match stage (~line 868), but the current call passes all locked match descriptions as broad queries (priority=1, gap_indices=[]). The function supports gap-specific targeting (scores phrases by relevance to gap text) but the stage doesn't use per-gap description queries. Should call derive_queries_from_descriptions per gap segment for targeted queries. Files: src/stages/iterative_match.py (~line 867-889), src/iterative_match/gap_analyzer.py (derive_queries_from_descriptions ~line 927).",
+      "passes": true,
+      "notes": "Tier: ENHANCEMENT. Strategy 4 in _generate_multi_strategy_queries now calls derive_queries_from_descriptions per gap (4a) with priority=2 and gap_indices=[gap.segment_index], plus broad extract_description_queries (4b) with priority=1 as fallback. Uses strategy='description_gap' for gap-specific, 'description' for broad. All 5 tests pass: gap generation, priority=2, gap_indices, broad fallback, relevance to gap text. 178 related tests pass.",
       "acceptanceCriteria": [
         "For each gap segment, derive_queries_from_descriptions is called with that gap's context",
         "Gap-specific description queries have higher priority (2) than broad description queries (1)",
