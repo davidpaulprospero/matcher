@@ -26,6 +26,7 @@ import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
@@ -42,6 +43,20 @@ if TYPE_CHECKING:
 # Type aliases for callbacks
 StageStartCallback = Callable[[str], None]  # (stage_name) -> None
 StageCompleteCallback = Callable[[str, StageResult, float], None]  # (stage_name, result, elapsed_seconds) -> None
+
+
+@dataclass
+class StageValidationResult:
+    """Structured validation result for a single pipeline stage.
+
+    Attributes:
+        stage_name: Name of the stage
+        status: One of 'run', 'skip', 'checkpoint', 'error'
+        message: Human-readable detail about the validation outcome
+    """
+    stage_name: str
+    status: str  # 'run' | 'skip' | 'checkpoint' | 'error'
+    message: str
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +236,99 @@ class PipelineOrchestrator:
         self._warn_cookies_from_browser()
 
         return errors
+
+    def validate_all(
+        self,
+        skip_stages: List[str] = None,
+        only_stages: List[str] = None,
+        resume: bool = False,
+    ) -> List[StageValidationResult]:
+        """
+        Run validate_inputs() for ALL stages in order, collecting all validation
+        errors before failing.  Does NOT execute any stage.
+
+        Checks config validity (via _validate_config) and per-stage input
+        validation (via stage.validate_inputs) without modifying state or
+        checkpoint.
+
+        Args:
+            skip_stages: Stage names to skip
+            only_stages: If provided, only validate these stages
+            resume: Whether to check checkpoint for skippable stages
+
+        Returns:
+            List of StageValidationResult, one per stage, with status indicating
+            'run' (valid), 'skip' (filtered), 'checkpoint' (would restore), or
+            'error' (validation failed).
+        """
+        skip_set = set(skip_stages or [])
+        only_set = set(only_stages) if only_stages else None
+
+        results: List[StageValidationResult] = []
+
+        # 1. Check pipeline-level config first
+        config_errors = self._validate_config()
+        if config_errors:
+            for err in config_errors:
+                results.append(StageValidationResult(
+                    stage_name='CONFIG',
+                    status='error',
+                    message=err,
+                ))
+
+        # 2. Optionally load checkpoint (read-only)
+        checkpoint_loaded = False
+        if resume:
+            checkpoint_loaded = self.load_checkpoint()
+
+        # 3. Walk stages
+        for stage in self.stages:
+            stage_name = stage.name
+
+            # Filter: skip_stages
+            if stage_name in skip_set:
+                results.append(StageValidationResult(
+                    stage_name=stage_name,
+                    status='skip',
+                    message='filtered by skip_stages',
+                ))
+                continue
+
+            # Filter: only_stages
+            if only_set and stage_name not in only_set:
+                results.append(StageValidationResult(
+                    stage_name=stage_name,
+                    status='skip',
+                    message='not in only_stages',
+                ))
+                continue
+
+            # Checkpoint skip
+            if resume and checkpoint_loaded and self.resume_mode:
+                if stage.can_skip(self.state, self.checkpoint):
+                    results.append(StageValidationResult(
+                        stage_name=stage_name,
+                        status='checkpoint',
+                        message='would restore from checkpoint',
+                    ))
+                    continue
+
+            # Validate inputs
+            validation_error = stage.validate_inputs(self.state, self.config)
+            if validation_error:
+                results.append(StageValidationResult(
+                    stage_name=stage_name,
+                    status='error',
+                    message=validation_error,
+                ))
+            else:
+                results.append(StageValidationResult(
+                    stage_name=stage_name,
+                    status='run',
+                    message='inputs valid',
+                ))
+
+        return results
 
     def _warn_cookies_from_browser(self) -> None:
         """Check if cookies_from_browser browser is findable on PATH.
@@ -707,9 +815,8 @@ class PipelineOrchestrator:
         """
         Run pipeline in dry-run mode: validate all stage inputs without executing.
 
-        Iterates all stages in order, determines which would run vs skip
-        (via checkpoint), validates inputs for stages that would run, and
-        produces a structured summary table.
+        Delegates to validate_all() for structured validation, then logs the
+        results as a summary table.
 
         Does NOT modify state or checkpoint.
 
@@ -725,45 +832,14 @@ class PipelineOrchestrator:
         logger.info("DRY-RUN MODE: Previewing pipeline execution plan")
         logger.info("=" * 60)
 
-        # Load checkpoint for skip detection (read-only, does not modify state)
-        checkpoint_loaded = False
-        if resume:
-            checkpoint_loaded = self.load_checkpoint()
-            if checkpoint_loaded:
-                logger.info("Checkpoint found - checking which stages can be skipped")
-            else:
-                logger.info("No checkpoint found - all stages would run")
+        # Delegate to validate_all() for structured results
+        validation_results = self.validate_all(
+            skip_stages=list(skip_stages) if skip_stages else None,
+            only_stages=list(only_stages) if only_stages else None,
+            resume=resume,
+        )
 
-        # Categorize each stage: skip, checkpoint, run, error
-        # action: "skip" (filtered), "checkpoint" (would restore), "run", "error"
-        summary = []  # list of (stage_name, action, detail)
-        has_errors = False
-
-        for stage in self.stages:
-            stage_name = stage.name
-
-            # Check skip/only filters
-            if stage_name in skip_stages:
-                summary.append((stage_name, "skip", "filtered by skip_stages"))
-                continue
-
-            if only_stages and stage_name not in only_stages:
-                summary.append((stage_name, "skip", "not in only_stages"))
-                continue
-
-            # Check checkpoint skip
-            if resume and checkpoint_loaded and self.resume_mode:
-                if stage.can_skip(self.state, self.checkpoint):
-                    summary.append((stage_name, "checkpoint", "would restore from checkpoint"))
-                    continue
-
-            # Validate inputs for stages that would actually run
-            validation_error = stage.validate_inputs(self.state, self.config)
-            if validation_error:
-                summary.append((stage_name, "error", validation_error))
-                has_errors = True
-            else:
-                summary.append((stage_name, "run", "inputs valid"))
+        has_errors = any(r.status == 'error' for r in validation_results)
 
         # Log structured summary table
         logger.info("")
@@ -771,17 +847,17 @@ class PipelineOrchestrator:
         logger.info("-" * 60)
         logger.info(f"  {'Stage':<25} {'Action':<12} {'Detail'}")
         logger.info(f"  {'-'*25} {'-'*12} {'-'*20}")
-        for stage_name, action, detail in summary:
-            if action == "error":
-                logger.error(f"  {stage_name:<25} {action:<12} {detail}")
+        for r in validation_results:
+            if r.status == "error":
+                logger.error(f"  {r.stage_name:<25} {r.status:<12} {r.message}")
             else:
-                logger.info(f"  {stage_name:<25} {action:<12} {detail}")
+                logger.info(f"  {r.stage_name:<25} {r.status:<12} {r.message}")
         logger.info("-" * 60)
 
-        # Count by action
-        counts = {}
-        for _, action, _ in summary:
-            counts[action] = counts.get(action, 0) + 1
+        # Count by status
+        counts: Dict[str, int] = {}
+        for r in validation_results:
+            counts[r.status] = counts.get(r.status, 0) + 1
 
         parts = []
         for action in ["run", "checkpoint", "skip", "error"]:
