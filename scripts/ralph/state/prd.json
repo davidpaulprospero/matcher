@@ -1,188 +1,190 @@
-﻿{
-    "sprintNumber":  73,
-    "focusArea":  "caption",
-    "branchName":  "ralph/sprint-73",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-73-001",
-                            "title":  "Generate sprint stories for caption focus area",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027caption\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027caption\u0027",
-                                                       "Add stories US-73-002 through US-73-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-73-NNN to be unique across sprints",
-                                                       "Mark this story (US-73-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "notes":  "Seed story - generated 11 stories (US-73-002 through US-73-012) covering caption system improvements: video-side chapter mapping, description relevance scoring, chapter-enriched embeddings, caption cache backward compatibility, caption quality tiered penalties, caption segment deduplication, caption fetcher retry logging, description-derived LLM reranker context, tag propagation to iterative match, caption timing gap detection, and chapter metadata in OTIO output."
-                        },
-                        {
-                            "id":  "US-73-002",
-                            "title":  "Map video caption segments to video chapters during caption fetch",
-                            "acceptanceCriteria":  [
-                                                       "In caption_stage.py _populate_text_metadata(), after propagating video_chapters to VideoSearchResult, also map each caption segment to its containing video chapter using timestamp overlap",
-                                                       "Each text_metadata entry gains \u0027chapter_index\u0027 and \u0027chapter_title\u0027 fields populated from the video\u0027s chapter list",
-                                                       "Segments spanning chapter boundaries are assigned to the chapter with greatest temporal overlap",
-                                                       "Segments outside all chapter boundaries get chapter_index=-1 and chapter_title=\u0027\u0027",
-                                                       "Unit test verifies chapter mapping with 3+ chapters and segments at boundaries, midpoints, and outside ranges"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "high",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-73-003",
-                            "title":  "Add description-based relevance scoring adjustment",
-                            "acceptanceCriteria":  [
-                                                       "New method apply_description_relevance() in src/matching/scoring.py extracts keywords from video description and compares to voiceover segment text",
-                                                       "Graduated boost: 1 keyword match +0.02, 2+ matches +0.04, 3+ matches +0.06, added to confidence_breakdown as \u0027description_relevance\u0027",
-                                                       "apply_all_adjustments() calls apply_description_relevance() with video_description parameter",
-                                                       "Description is truncated to first 200 chars before keyword extraction to avoid noise from long descriptions",
-                                                       "Unit test verifies graduated boost values and confidence_breakdown entry for 0, 1, 2, and 3+ keyword matches"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "notes":  "Implemented apply_description_relevance() with graduated boosts (+0.02/+0.04/+0.06), 200-char truncation, wired into apply_all_adjustments. 9 unit tests pass."
-                        },
-                        {
-                            "id":  "US-73-004",
-                            "title":  "Add chapter-enriched embedding text for video segments",
-                            "acceptanceCriteria":  [
-                                                       "In caption_stage.py _populate_text_metadata(), when title_enriched_embeddings is enabled AND the segment has a mapped chapter, format embedding_text as \u0027[{video_title} | {chapter_title}] {segment_text}\u0027",
-                                                       "When segment has no chapter (chapter_index=-1), fall back to existing \u0027[{video_title}] {segment_text}\u0027 format",
-                                                       "New config field context_enrichment.chapter_enriched_embeddings (bool, default true) controls this behavior",
-                                                       "Config field added to both ContextEnrichmentConfig dataclass and config.yaml with inline comment",
-                                                       "Unit test verifies embedding_text format with and without chapter, and with config toggle off"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "notes":  "Added chapter_enriched_embeddings config field (default true) to ContextEnrichmentConfig and config.yaml. Modified _populate_text_metadata to format embedding_text as \u0027[Title | Chapter] text\u0027 when segment has chapter, falling back to \u0027[Title] text\u0027. 4 new tests in test_title_enriched_embeddings.py covering chapter enrichment on/off and mixed scenarios."
-                        },
-                        {
-                            "id":  "US-73-005",
-                            "title":  "Add backward-compatible cache deserialization for CaptionResult metadata fields",
-                            "acceptanceCriteria":  [
-                                                       "CaptionResult.from_dict() (or equivalent deserialization) gracefully handles missing video_description, video_chapters, and video_tags keys by defaulting to \u0027\u0027 and [] respectively",
-                                                       "Existing cached caption results without these fields load without errors or warnings",
-                                                       "Round-trip test: serialize CaptionResult with metadata, deserialize, verify all fields preserved",
-                                                       "Round-trip test: serialize CaptionResult WITHOUT metadata fields (simulating old cache), deserialize, verify defaults applied",
-                                                       "Unit test covers both dict-based and JSON-string-based cache formats"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 5 criteria verified. CachedCaption.from_dict() is the equivalent deserialization path for CaptionResult. 16 tests cover: missing metadata defaults to empty, no warnings on old cache load, full round-trip with/without metadata, and both dict-based and JSON-string-based formats."
-                        },
-                        {
-                            "id":  "US-73-006",
-                            "title":  "Add tiered caption quality penalties to scoring based on quality level",
-                            "acceptanceCriteria":  [
-                                                       "apply_caption_quality_adjustment() in scoring.py uses graduated penalties: auto_generated=-0.05, low_quality=-0.08, missing_timing=-0.03 (currently may use flat values)",
-                                                       "Each penalty type appears as a separate entry in confidence_breakdown (e.g., \u0027caption_quality_auto\u0027, \u0027caption_quality_low\u0027, \u0027caption_timing_gap\u0027)",
-                                                       "When multiple quality issues exist on a single segment, penalties stack (up to configurable max_caption_penalty, default -0.12)",
-                                                       "Config fields for each penalty value added to MatchingConfig with defaults matching the values above",
-                                                       "Unit test verifies each penalty individually and stacking behavior with cap"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 5/5 criteria verified. 11 tests pass: individual penalties (auto=-0.05, low=-0.08, timing=-0.03), stacking within cap, stacking hitting cap (-0.16 capped to -0.12), edge cases, config fields in MatchingConfig + config.yaml."
-                        },
-                        {
-                            "id":  "US-73-007",
-                            "title":  "Detect and deduplicate overlapping caption segments",
-                            "acceptanceCriteria":  [
-                                                       "New function deduplicate_caption_segments() in src/caption/models.py takes a list of CaptionSegment and returns deduplicated list",
-                                                       "Segments with \u003e80% temporal overlap AND \u003e70% text similarity (normalized Levenshtein or token overlap) are merged, keeping the one with higher text quality (longer text, fewer repeated chars)",
-                                                       "Merged segments log the deduplication at DEBUG level with segment indices",
-                                                       "CaptionResult gains a post-processing step that calls deduplication after segment parsing",
-                                                       "Unit test with overlapping segments verifies merge behavior, and non-overlapping segments pass through unchanged"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 5/5 criteria verified. deduplicate_caption_segments() in src/caption/models.py with \u003e80% temporal + \u003e70% text similarity thresholds, keeps higher quality text. DEBUG logging with segment indices. CaptionResult.__post_init__ calls dedup. 25 tests pass covering: token overlap, temporal overlap, text quality, merge behavior, pass-through, reindexing, chained duplicates, debug logging, and CaptionResult post_init integration."
-                        },
-                        {
-                            "id":  "US-73-008",
-                            "title":  "Add structured retry logging to caption fetcher for budget diagnostics",
-                            "acceptanceCriteria":  [
-                                                       "Each caption fetch attempt logs a structured dict with keys: video_id, attempt_number, success (bool), error_type (str or None), duration_ms, method (\u0027captions\u0027, \u0027transcription\u0027)",
-                                                       "At end of caption stage, a summary log entry shows: total_attempts, success_count, failure_count, error_type_distribution (dict of error_type to count), avg_duration_ms",
-                                                       "Summary is also written to checkpoint under \u0027caption_stage_metrics\u0027 key for post-run analysis",
-                                                       "Existing CaptionRetryBudget logging is preserved; new logging supplements (does not replace) it",
-                                                       "Unit test verifies structured log entries are produced for success and failure cases"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "medium",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-73-009",
-                            "title":  "Inject video tags into iterative match gap-filling search queries",
-                            "acceptanceCriteria":  [
-                                                       "In gap_analyzer.py, when generating search queries for a gap, check if the matched video sources near the gap have video_tags available",
-                                                       "Extract up to 3 most relevant tags (by frequency across nearby matched segments) and append as query refinement terms",
-                                                       "New config field iterative_match.use_tag_queries (bool, default true) controls this behavior",
-                                                       "Tags containing generic terms (\u0027video\u0027, \u0027youtube\u0027, \u0027official\u0027) are filtered out via a stop-tag list",
-                                                       "Unit test verifies tag extraction from nearby matches and stop-tag filtering"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "Done. Added extract_tags_from_nearby_matches() in gap_analyzer.py with _STOP_TAGS filter. Strategy 5 in _generate_multi_strategy_queries appends tag-derived queries. Config field use_tag_queries (default true) added. 4 unit tests pass."
-                        },
-                        {
-                            "id":  "US-73-010",
-                            "title":  "Detect and report caption timing gaps and coverage holes",
-                            "acceptanceCriteria":  [
-                                                       "New function analyze_caption_coverage() in src/caption/models.py computes: total_video_duration, total_captioned_duration, coverage_ratio, gap_count, largest_gap_seconds",
-                                                       "Gaps are periods \u003e2 seconds between consecutive segment end_time and next start_time where no caption text exists",
-                                                       "CaptionResult gains a \u0027coverage_analysis\u0027 property that returns this analysis (computed lazily and cached)",
-                                                       "When coverage_ratio \u003c 0.7, a WARNING log is emitted with the video_id and gap details",
-                                                       "Unit test verifies coverage computation with full coverage, partial coverage, and large gaps"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "notes":  "All 5 criteria verified. analyze_caption_coverage() in src/caption/models.py computes all required fields. Gaps \u003e2s detected between consecutive segments. CaptionResult.coverage_analysis property is lazily computed and cached. WARNING emitted when coverage_ratio \u003c 0.7. 14 unit tests pass covering full/partial/large gaps."
-                        },
-                        {
-                            "id":  "US-73-011",
-                            "title":  "Propagate video chapter titles to OTIO clip metadata for editor visibility",
-                            "acceptanceCriteria":  [
-                                                       "In otio_builder.py, when building OTIO clips, if the source segment has a chapter_title, add it to the clip\u0027s metadata dict under key \u0027chapter\u0027",
-                                                       "In xml_export.py, include chapter title as a comment or marker on clips that have chapter metadata",
-                                                       "Clips without chapter metadata are unchanged (no empty \u0027chapter\u0027 key added)",
-                                                       "Chapter metadata survives OTIO serialization and deserialization round-trip",
-                                                       "Unit test verifies chapter metadata appears on clips and survives round-trip"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "notes":  "All 5 criteria verified. OTIO clips get chapter metadata, XML export includes comment elements, clips without chapters unchanged, round-trip tested."
-                        },
-                        {
-                            "id":  "US-73-012",
-                            "title":  "Add caption language confidence and fallback tracking",
-                            "acceptanceCriteria":  [
-                                                       "CaptionResult gains a \u0027language_confidence\u0027 field (float 0.0-1.0, default 1.0) indicating how confident the language detection is",
-                                                       "When caption language doesn\u0027t match the requested language, language_confidence is set to 0.5 and a fallback_language field records what was used",
-                                                       "caption_fetcher.py sets language_confidence based on whether manual captions (1.0), auto-generated in target language (0.8), or auto-generated in different language with translation (0.5) were used",
-                                                       "Scoring can optionally apply a small penalty for low language_confidence (new config: caption_quality.language_confidence_penalty, default 0.0 - disabled by default)",
-                                                       "Unit test verifies language_confidence values for each caption source type"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "notes":  "All 5 criteria met. language_confidence (float 0.0-1.0, default 1.0) and fallback_language fields added to both CaptionResult classes. caption_fetcher.py sets confidence based on source type: manual=1.0, auto target=0.8, auto translated=0.5 with fallback_language tracking. language_confidence_penalty config added (default 0.0 = disabled). apply_language_confidence_penalty scoring function wired into apply_all_adjustments. 19 unit tests covering all source types, penalty math, cache round-trip, backward compat."
-                        }
-                    ]
+{
+    "sprintNumber": 74,
+    "focusArea": "transcription",
+    "branchName": "ralph/sprint-74",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-74-001",
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'transcription' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'transcription'",
+                "Add stories US-74-002 through US-74-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-74-NNN to be unique across sprints",
+                "Mark this story (US-74-001) as passes: true when done"
+            ],
+            "passes": true,
+            "priority": "high",
+            "title": "Generate sprint stories for transcription focus area",
+            "notes": "Seed story completed. Generated 11 stories (US-74-002 through US-74-012) covering: video metadata extraction, context-enriched matching, chapter detection, listicle detection, cross-chapter grouping, iterative match context, context enrichment config, metadata cache integration, title-enriched embeddings, tag keyword boost, and description chapter parsing."
+        },
+        {
+            "id": "US-74-002",
+            "title": "Extract video metadata (description, chapters, tags) during caption fetch",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "CaptionFetcher.fetch_captions() populates video_description, video_chapters, and video_tags on CaptionResult when info_dict is available",
+                "Description is truncated to configurable max length (default 500 chars) before storing",
+                "Chapters are extracted as list of dicts with title, start_time, end_time keys",
+                "Tags are extracted as list of strings from info_dict['tags']",
+                "When info_dict fields are missing or None, fields default to empty string/list without errors",
+                "Unit tests verify extraction from mock info_dict with all fields present, partially present, and fully absent"
+            ],
+            "passes": true,
+            "notes": "Wired --write-info-json into _fetch_subtitle_with_format yt-dlp command. After successful subtitle parse, reads .info.json and calls enrich_with_metadata(). Graceful fallback to empty defaults on missing/corrupted info.json. 13 new tests verify all criteria."
+        },
+        {
+            "id": "US-74-003",
+            "title": "Add title-relevance scoring adjustment to match confidence",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "New scoring adjustment 'title_relevance' added to apply_all_adjustments() in scoring.py",
+                "Extracts keywords from voiceover segment text and video title, computes overlap",
+                "Graduated boost applied: 1 keyword match gives +0.03, 2+ matches gives +0.05, 3+ matches gives +0.08",
+                "Adjustment appears in confidence_breakdown dict under key 'title_relevance'",
+                "When video title is empty or unavailable, adjustment is 0.0 (no error)"
+            ],
+            "passes": false,
+            "notes": "Tier: Core quality improvement (Area 2). File: src/matching/scoring.py - add new adjustment in apply_all_adjustments() (~line 1772+). Follow existing adjustment pattern (e.g., visual_keyword_match). The video title is available through VideoSearchResult.title. Tests: tests/test_scoring*.py, tests/test_match*.py"
+        },
+        {
+            "id": "US-74-004",
+            "title": "Inject video context into LLM reranker prompts",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "LLM reranker prompt includes 'Video context: {title}. {first_sentence_of_description}' for each candidate",
+                "Description is truncated to first sentence or 100 chars, whichever is shorter",
+                "When description is empty, only title is included without trailing period",
+                "When both title and description are empty, no context line is added",
+                "Unit test verifies prompt construction with various title/description combinations"
+            ],
+            "passes": false,
+            "notes": "Tier: Core quality improvement (Area 2). File: src/matching/llm_reranker.py - modify _build_video_context() (~line 184) and _enrich_candidates_with_context() (~line 107). Currently only uses title and description but truncation/sentence logic may be missing. Tests: tests/test_match*.py"
+        },
+        {
+            "id": "US-74-005",
+            "title": "Add chapter-segment mapping for video chapters",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "New function maps each CaptionSegment to its containing VideoChapter by timestamp overlap",
+                "Segments spanning chapter boundaries are assigned to the chapter with the most temporal overlap",
+                "Mapping result stored as chapter_index and chapter_title on TranscriptSegment in state.py",
+                "When no chapters are available, all segments get chapter_index=None",
+                "Unit tests cover: single chapter, multi-chapter, boundary spanning, no chapters"
+            ],
+            "passes": false,
+            "notes": "Tier: Feature (Area 3). Files: src/stages/caption_stage.py (_map_segments_to_video_chapters at ~line 1854 already exists - verify it works correctly), src/state.py (TranscriptSegment already has chapter_index/chapter_title fields at ~line 49). May need to wire the mapping into the caption stage run() flow if not already called. Tests: tests/test_chapter_segment_mapping.py"
+        },
+        {
+            "id": "US-74-006",
+            "title": "Add chapter-topic-match scoring adjustment",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "New scoring adjustment 'chapter_topic_match' in apply_all_adjustments()",
+                "When both voiceover and video have chapter structure, computes topic keyword similarity",
+                "Topic match gives graduated boost +0.05 to +0.10 based on keyword overlap ratio",
+                "Topic mismatch (overlap=0 when both have chapters) gives penalty -0.05",
+                "Adjustment appears in confidence_breakdown under key 'chapter_topic_match'"
+            ],
+            "passes": false,
+            "notes": "Tier: Feature (Area 3). Depends on US-74-005 for chapter mapping. File: src/matching/scoring.py - add new adjustment following existing pattern. Chapter info available via TranscriptSegment.chapter_title and VideoSearchResult.video_chapters. Tests: tests/test_scoring*.py, tests/test_chapter*.py"
+        },
+        {
+            "id": "US-74-007",
+            "title": "Implement voiceover listicle detection",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "New module src/chapter_detection/listicle_detector.py with detect_listicle_structure() function",
+                "Detects ordinal markers (first, second, third, finally, lastly) at segment boundaries",
+                "Detects numbered markers (#1, number one, step 1, item 1) at segment starts",
+                "Detects transition markers (next up, moving on to, let's talk about) at segment starts",
+                "Returns list of ListicleGroup dataclass objects with group_id, item_label, start_segment_idx, end_segment_idx",
+                "Unit tests cover: ordinals, numbers, transitions, mixed styles, no listicle structure"
+            ],
+            "passes": false,
+            "notes": "Tier: Feature (Area 4). New file: src/chapter_detection/listicle_detector.py. ListicleGroup dataclass can go in src/chapter_detection/models.py or in the new module. Integration with existing src/chapter_detection/detector.py (EnhancedChapterDetector) as an additional detection pass - if YouTube chapters exist use those, fall back to listicle detection otherwise. Tests: tests/test_listicle*.py"
+        },
+        {
+            "id": "US-74-008",
+            "title": "Add context enrichment config section",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "New ContextEnrichmentConfig dataclass in src/config/sections/matching.py with fields: extract_video_description (bool), extract_video_chapters (bool), extract_video_tags (bool), max_description_length (int), title_enriched_embeddings (bool)",
+                "MatchingConfig includes context_enrichment field with __post_init__ conversion from dict",
+                "config.yaml updated with matching.context_enrichment section and defaults",
+                "Config accessible via config.matching_config.context_enrichment with getattr fallback",
+                "Unit test verifies config loads from YAML and handles missing section gracefully"
+            ],
+            "passes": false,
+            "notes": "Tier: Foundation config. Files: src/config/sections/matching.py (add ContextEnrichmentConfig dataclass), config.yaml (add matching.context_enrichment section). Follow existing pattern from other config sections - use __post_init__ for nested dataclass conversion per Rule 2. Tests: tests/test_config*.py, tests/test_cli_config_utils.py"
+        },
+        {
+            "id": "US-74-009",
+            "title": "Integrate metadata into transcription cache",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "TranscriptCache stores video_description, video_chapters, and video_tags alongside transcription segments",
+                "Cache lookup returns metadata fields when available (backward compatible - missing fields default to empty)",
+                "Cache hit preserves metadata from original transcription without re-fetching",
+                "Existing cached transcriptions without metadata load successfully with empty defaults",
+                "Unit tests verify: save with metadata, load with metadata, load legacy cache without metadata"
+            ],
+            "passes": false,
+            "notes": "Tier: Enhancement. File: src/transcription/cache.py (TranscriptCache class ~line 1). Currently cache only stores source_file and segments, not metadata. Add metadata fields to the cache serialization format. Must be backward compatible with existing cache files. Tests: tests/test_transcription*.py, tests/test_cache*.py"
+        },
+        {
+            "id": "US-74-010",
+            "title": "Add tag-based keyword boost to scoring",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "When video_tags are available on a candidate, they are fed into the existing keyword_boost mechanism",
+                "Tag keywords that overlap with voiceover segment keywords trigger the existing keyword boost",
+                "No new scoring code needed - tags are injected into the keyword matching system upstream",
+                "When video_tags is empty, behavior is unchanged from current",
+                "Unit test verifies tag-keyword overlap triggers boost"
+            ],
+            "passes": false,
+            "notes": "Tier: Enhancement (Area 2). File: src/matching/scoring.py - look at existing keyword_boost mechanism (~line 2423+) and ensure video_tags are included in the keyword pool. Tags come from VideoSearchResult.video_tags or CaptionResult.video_tags. Tests: tests/test_scoring*.py"
+        },
+        {
+            "id": "US-74-011",
+            "title": "Parse chapters from video description text",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "When info_dict['chapters'] is empty/missing, parse timestamp-title pairs from description text",
+                "Regex handles common YouTube formats: '0:00 Intro', '00:00 - Title', '1:23:45 Section Name'",
+                "Parsed chapters have correct start_time (seconds), end_time (inferred from next chapter or video end), and title",
+                "When description has no timestamp patterns, returns empty list without errors",
+                "Unit tests cover: standard format, dash separator, HH:MM:SS format, no timestamps, malformed timestamps"
+            ],
+            "passes": false,
+            "notes": "Tier: Enhancement (Area 1). File: src/caption_fetcher.py - add parse_chapters_from_description() function near enrich_with_metadata() (~line 2266). Called as fallback when info_dict['chapters'] is empty. Regex pattern: r'(?:^|\\n)\\s*(\\d{1,2}(?::\\d{2}){1,2})\\s*[-\\s]\\s*(.+)' for common YouTube description chapter formats. Tests: tests/test_caption_fetcher*.py"
+        },
+        {
+            "id": "US-74-012",
+            "title": "Add source consistency boost within voiceover chapters",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "New scoring adjustment 'chapter_source_consistency' in apply_all_adjustments()",
+                "Within a single voiceover chapter, candidates from the same video source as previous segment get +0.03 boost",
+                "Boost only applies when voiceover has detected chapter/listicle structure",
+                "consecutive_source_penalty is suppressed within chapter boundaries (coherence > diversity)",
+                "Adjustment appears in confidence_breakdown under key 'chapter_source_consistency'"
+            ],
+            "passes": false,
+            "notes": "Tier: Polish (Area 3). Depends on US-74-005 and US-74-006. File: src/matching/scoring.py - add new adjustment. Requires knowing the previous segment's matched source within the same voiceover chapter. May need to pass chapter context into the scoring function. Tests: tests/test_scoring*.py, tests/test_match*.py"
+        }
+    ]
 }

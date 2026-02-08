@@ -5029,6 +5029,7 @@ class CaptionFetcher:
             sub_flag,
             '--sub-lang', language,
             '--sub-format', subtitle_format,  # Request specific format (US-006)
+            '--write-info-json',  # US-74-002: Write metadata JSON for enrichment
             '-o', output_template,
             '--no-playlist',
             '--no-warnings',
@@ -5121,7 +5122,7 @@ class CaptionFetcher:
             # Set partial_recovery flag if segments were skipped but we still have valid results
             partial_recovery = parse_result.has_skipped and len(parse_result.segments) > 0
 
-            return CaptionResult(
+            caption_result = CaptionResult(
                 video_id=video_id,
                 segments=parse_result.segments,
                 language=language,
@@ -5130,6 +5131,17 @@ class CaptionFetcher:
                 skipped_segments=parse_result.skipped_segments,
                 partial_recovery=partial_recovery
             )
+
+            # US-74-002: Enrich with video metadata from info.json
+            info_json_files = list(temp_dir.glob(f"{video_id}*.info.json"))
+            if info_json_files:
+                try:
+                    info_dict = json.loads(info_json_files[0].read_text(encoding='utf-8'))
+                    caption_result.enrich_with_metadata(info_dict)
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.debug(f"Caption {video_id}: Could not parse info.json for metadata: {e}")
+
+            return caption_result
 
         except subprocess.TimeoutExpired:
             # US-59-009: Record timed-out attempt
