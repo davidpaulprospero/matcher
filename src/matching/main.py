@@ -467,6 +467,9 @@ def match_all_segments(
     if config.matching.use_local_for_review and matcher.local_provider:
         results = matcher.review_with_local_llm(results)
 
+    # US-77-007: Enforce minimum source diversity per chapter
+    results = matcher.enforce_chapter_source_diversity(results)
+
     # Report gaps
     gaps = [r for r in results if r.has_gap]
     if gaps:

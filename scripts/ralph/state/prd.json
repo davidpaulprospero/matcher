@@ -104,7 +104,7 @@
                             "id":  "US-77-007",
                             "title":  "Add match diversity enforcement across voiceover chapters",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "After initial matching completes, a post-processing pass checks if any voiceover chapter uses only a single video source for all segments",
                                                        "When a chapter has \u003e4 segments all from the same source, mark lowest-confidence segments as candidates for re-matching with source exclusion",
@@ -112,7 +112,7 @@
                                                        "A confidence_breakdown entry \u0027diversity_recheck\u0027 is added to segments that were re-matched",
                                                        "Tests verify: all-same-source chapter triggers re-match, chapter with adequate diversity is untouched, config min_source_diversity=1 disables the check"
                                                    ],
-                            "notes":  "Tier: feature (medium). Currently chapter_source_consistency boosts same-source within chapters (good), but there\u0027s no guard against pathological cases where an entire chapter maps to a single video. This creates monotonous timelines. Need a post-processing pass in src/matching/tiered_matcher.py after the main match loop. Source files: src/matching/tiered_matcher.py (new method after match loop), src/matching/scoring.py (confidence_breakdown entry), src/config/sections/matching.py:186-192 (add min_source_diversity field)."
+                            "notes":  "DONE. Added enforce_chapter_source_diversity() post-processing method to TieredMatcher. After main match loop, groups matches by chapter, detects single-source chapters with >4 segments, swaps lowest-confidence segments to alternatives from different sources. Added min_source_diversity field to ChapterGroupingConfig (default: 2, 1=disabled). Wired into match_all_segments in main.py after review_with_local_llm. 12 tests in test_chapter_diversity_enforcement.py covering all 5 acceptance criteria."
                         },
                         {
                             "id":  "US-77-008",

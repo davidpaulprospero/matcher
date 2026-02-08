@@ -1711,5 +1711,112 @@ class TieredMatcher:
 
         return matches
 
+    def enforce_chapter_source_diversity(self, matches: List[MatchResult]) -> List[MatchResult]:
+        """Post-processing pass to enforce minimum source diversity per chapter (US-77-007).
+
+        After initial matching, checks if any voiceover chapter uses only a single
+        video source for all segments. When a chapter has >4 segments all from the
+        same source, the lowest-confidence segments are swapped to their best
+        alternative from a different source.
+
+        Args:
+            matches: List of MatchResult from the main match loop
+
+        Returns:
+            The same list, mutated in-place where diversity swaps occurred
+        """
+        chapter_grouping = getattr(self.config.matching, 'chapter_grouping', None)
+        if not chapter_grouping:
+            return matches
+        if not getattr(chapter_grouping, 'enabled', True):
+            return matches
+
+        min_diversity = getattr(chapter_grouping, 'min_source_diversity', 2)
+        if min_diversity <= 1:
+            return matches
+
+        # Group match indices by voiceover chapter
+        chapter_segments: Dict[int, List[int]] = {}
+        for idx, result in enumerate(matches):
+            vo_seg = result.primary_match.voiceover_segment
+            ch_idx = getattr(vo_seg, 'chapter_index', None)
+            if ch_idx is None or ch_idx < 0:
+                continue
+            if ch_idx not in chapter_segments:
+                chapter_segments[ch_idx] = []
+            chapter_segments[ch_idx].append(idx)
+
+        swapped = 0
+        for ch_idx, seg_indices in chapter_segments.items():
+            if len(seg_indices) <= 4:
+                continue
+
+            # Count unique sources in this chapter
+            sources = {}
+            for idx in seg_indices:
+                src = matches[idx].primary_match.video_segment.source_file
+                if src not in sources:
+                    sources[src] = []
+                sources[src].append(idx)
+
+            if len(sources) >= min_diversity:
+                continue
+
+            # All segments (or nearly all) from a single source — need diversity
+            # Sort by confidence ascending to find lowest-confidence candidates
+            candidates_for_swap = sorted(
+                seg_indices,
+                key=lambda i: matches[i].primary_match.confidence
+            )
+
+            for idx in candidates_for_swap:
+                result = matches[idx]
+                current_source = result.primary_match.video_segment.source_file
+
+                # Try to find an alternative from a different source
+                best_alt = None
+                best_alt_conf = -1.0
+                for alt in result.alternatives:
+                    if alt.video_segment.source_file != current_source and alt.confidence > best_alt_conf:
+                        best_alt = alt
+                        best_alt_conf = alt.confidence
+
+                if best_alt is None:
+                    continue
+
+                # Swap: replace primary with the alternative
+                old_confidence = result.primary_match.confidence
+                result.primary_match = Match(
+                    voiceover_segment=result.primary_match.voiceover_segment,
+                    video_segment=best_alt.video_segment,
+                    video_scene=best_alt.video_scene,
+                    confidence=best_alt.confidence,
+                    reasoning=f"(diversity swap) {best_alt.reasoning}",
+                    embedding_similarity=getattr(best_alt, 'embedding_similarity', 0.0),
+                    confidence_breakdown=list(getattr(result.primary_match, 'confidence_breakdown', []))
+                )
+
+                # Add diversity_recheck entry to confidence_breakdown
+                diversity_entry = {
+                    'component': 'diversity_recheck',
+                    'adjustment': round(best_alt.confidence - old_confidence, 4),
+                    'reason': f"diversity_recheck: swapped source in chapter {ch_idx} (was {current_source})"
+                }
+                result.primary_match.confidence_breakdown.append(diversity_entry)
+                result.confidence_breakdown.append(diversity_entry)
+                swapped += 1
+
+                # Re-check: did we reach diversity target?
+                new_sources = set()
+                for i in seg_indices:
+                    new_sources.add(matches[i].primary_match.video_segment.source_file)
+                if len(new_sources) >= min_diversity:
+                    break
+
+        if swapped > 0:
+            logger.info(f"US-77-007 diversity enforcement: swapped {swapped} segment(s) across chapters")
+
+        return matches
+
 
 __all__ = ['TieredMatcher']

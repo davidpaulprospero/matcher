@@ -94,6 +94,8 @@ def _setup_mocks(MockTieredMatcher, MockEmbeddingSearch, vo_seg, vid_seg):
     mock_matcher = MockTieredMatcher.return_value
     mock_matcher.match_segment.return_value = _make_match_result(vo_seg, vid_seg)
     mock_matcher.local_provider = None
+    # US-77-007: diversity pass-through (returns input unchanged)
+    mock_matcher.enforce_chapter_source_diversity.side_effect = lambda x: x
 
     mock_search = MockEmbeddingSearch.from_matching_config.return_value
     mock_search.search.return_value = [(vid_seg, 0.9)]
@@ -200,6 +202,7 @@ class TestEmptyVoiceoverSegments:
 
         mock_matcher = MockTieredMatcher.return_value
         mock_matcher.local_provider = None
+        mock_matcher.enforce_chapter_source_diversity.side_effect = lambda x: x
 
         from src.matching.main import match_all_segments
 
@@ -237,6 +240,7 @@ class TestEmptyVideoSegments:
 
         mock_matcher = MockTieredMatcher.return_value
         mock_matcher.local_provider = None
+        mock_matcher.enforce_chapter_source_diversity.side_effect = lambda x: x
         mock_match = _make_match_result(
             vo_seg, _make_segment(0, "placeholder", source_file="fake.mp4")
         )
