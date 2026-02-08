@@ -670,3 +670,134 @@ class TestMixedNumberingNormalization:
         """_extract_marker_position returns None for transitions."""
         assert _extract_marker_position('transition', 'Next up') is None
         assert _extract_marker_position('transition', 'Moving on to') is None
+
+
+# ── Expected-count auto-correction ──────────────────────────
+
+class TestExpectedCountAutoCorrection:
+    """Tests for auto-correction when expected_count mismatches detected count."""
+
+    def test_rescan_finds_additional_markers(self):
+        """'top 5 reasons' header with only 3 start-of-text markers triggers
+        re-scan and finds 2 additional markers in mid-segment text beyond
+        the default max_chars_offset."""
+        # Segments: header + 3 clear start-of-text markers + 2 markers
+        # buried deeper in the text (beyond 50 chars but within 150)
+        segments = _make_segments([
+            "Here are the top 5 reasons to visit this country",
+            "Reason 1 the beaches are beautiful",
+            "Crystal clear waters and white sand everywhere",
+            "Reason 2 the food is incredible",
+            "Amazing local cuisine with fresh ingredients",
+            # Marker buried at char ~60 (beyond default 50)
+            "There are also wonderful mountains to explore and reason 3 the hiking trails are world class",
+            "You can hike for days without seeing anyone",
+            # Marker buried at char ~70
+            "The culture is rich with history and tradition and reason 4 the architecture is stunning",
+            "Beautiful buildings from centuries past",
+            # Another deep marker
+            "People are friendly and welcoming everywhere you go and reason 5 the nightlife is vibrant",
+        ])
+        groups = detect_listicle_groups(segments, max_chars_offset=50)
+        # Auto-correction should find the buried markers
+        assert len(groups) >= 4, f"Expected at least 4 groups after correction, got {len(groups)}"
+        # Verify expected_count is set on all groups
+        for g in groups:
+            assert g.expected_count == 5
+
+    def test_auto_correction_does_not_exceed_expected_plus_one(self):
+        """Auto-correction does not increase marker count beyond expected_count + 1."""
+        from src.chapter_detection.listicle_detector import _auto_correct_markers
+        # Simulate: expected 3 items, initial scan found 2 markers.
+        # Relaxed scan could find many more buried markers.
+        segments = _make_segments([
+            "3 ways to improve your health",
+            "First, eat more vegetables and fruits daily",
+            "They provide essential vitamins",
+            "Second, exercise regularly for fitness",
+            "At least thirty minutes per day",
+            # Buried markers the relaxed scan would find
+            "Sleeping well is key, and the third way is to get eight hours of rest every single night",
+            "Rest helps your body recover",
+            "Hydration matters, and the fourth way is to drink plenty of water throughout the entire day",
+            "Water flushes toxins from your body",
+            "Meditation helps, the fifth way is practicing mindfulness for at least ten minutes each morning",
+        ])
+        # Initial markers: just 'First' at seg 1 and 'Second' at seg 3
+        initial_markers = [
+            (1, 'ordinal', 'first', False, 0),
+            (3, 'ordinal', 'second', False, 0),
+        ]
+        corrected = _auto_correct_markers(
+            segments, initial_markers, expected_count=3, initial_max_chars_offset=50,
+        )
+        # Should not exceed expected_count(3) + 1 = 4
+        assert len(corrected) <= 4, f"Expected at most 4 markers, got {len(corrected)}"
+
+    def test_auto_correction_logs_warning_when_gap_remains(self, caplog):
+        """Auto-correction logs warning when it cannot close the gap."""
+        import logging
+        # Header says 10 but only 3 markers exist, even with relaxed scan
+        segments = _make_segments([
+            "Here are the top 10 tips for travel",
+            "First, pack light for your journey",
+            "Bring only the essentials",
+            "Second, learn basic phrases in the local language",
+            "It helps with making friends",
+            "Third, try the local street food",
+            "The best food is found at markets",
+            "There are many other tips to consider",
+            "Always be respectful of local customs",
+            "Enjoy every moment of your trip",
+        ])
+        with caplog.at_level(logging.WARNING, logger="src.chapter_detection.listicle_detector"):
+            groups = detect_listicle_groups(segments, max_chars_offset=50)
+        # 3 detected vs 10 expected → gap cannot be closed
+        assert any(
+            "could not close gap" in r.message
+            for r in caplog.records
+        ), f"Expected 'could not close gap' warning, got: {[r.message for r in caplog.records]}"
+
+    def test_auto_correction_runs_only_once(self, caplog):
+        """Auto-correction pass runs exactly once, not recursively."""
+        import logging
+        segments = _make_segments([
+            "Here are the top 8 reasons to visit",
+            "Reason 1 the scenery",
+            "Gorgeous views everywhere",
+            "Reason 2 the people",
+            "Friendly locals",
+            # Buried marker
+            "The weather is perfect, and reason 3 the climate is ideal",
+        ])
+        with caplog.at_level(logging.INFO, logger="src.chapter_detection.listicle_detector"):
+            detect_listicle_groups(segments, max_chars_offset=50)
+        # Count how many times "Auto-correction complete" appears
+        correction_logs = [
+            r for r in caplog.records if "Auto-correction complete" in r.message
+        ]
+        assert len(correction_logs) <= 1, (
+            f"Auto-correction ran {len(correction_logs)} times, expected at most 1"
+        )
+
+    def test_auto_correction_logs_before_after_counts(self, caplog):
+        """Auto-correction logs the before and after marker counts."""
+        import logging
+        segments = _make_segments([
+            "Here are the top 5 reasons to visit",
+            "Reason 1 the beautiful beaches",
+            "Sandy shores for miles",
+            "Reason 2 the delicious food",
+            "Fresh seafood daily",
+            # Buried marker beyond 50 chars
+            "The history here is fascinating and truly reason 3 the museums are incredible",
+        ])
+        with caplog.at_level(logging.INFO, logger="src.chapter_detection.listicle_detector"):
+            detect_listicle_groups(segments, max_chars_offset=50)
+        # Should have a log with before->after counts
+        correction_complete = [
+            r for r in caplog.records if "Auto-correction complete" in r.message
+        ]
+        assert len(correction_complete) == 1
+        msg = correction_complete[0].message
+        assert "markers" in msg and "->" in msg

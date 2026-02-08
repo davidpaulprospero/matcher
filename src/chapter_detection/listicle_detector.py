@@ -386,38 +386,23 @@ def _normalize_marker_sequence(groups: List['ListicleGroup']) -> List['ListicleG
     return result
 
 
-def detect_listicle_groups(
+def _scan_markers(
     segments: List[Any],
-    max_chars_offset: int = 50,
-) -> List[ListicleGroup]:
+    max_chars_offset: int,
+    case_insensitive_numbers: bool = False,
+) -> List[Tuple[int, str, str, bool, int]]:
     """
-    Detect listicle (list-style) structure in voiceover segments.
-
-    Scans segment text for ordinal markers, numbered markers, and transition
-    markers to identify list items. Each detected marker starts a new group
-    that extends until the next marker or end of segments.
-
-    Performs two passes:
-    1. Start-of-text markers (existing behavior)
-    2. Mid-segment markers within the first max_chars_offset characters
-
-    Mid-segment markers split the segment: text before the marker belongs to
-    the previous group.
+    Scan segments for listicle markers.
 
     Args:
-        segments: List of VoiceoverSegment objects (or dicts with 'text' field)
+        segments: List of VoiceoverSegment objects (or dicts with 'text' field).
         max_chars_offset: Maximum character offset for mid-segment detection.
-            Markers beyond this offset are ignored. Default 50.
+        case_insensitive_numbers: If True, also match number words
+            case-insensitively in mid-segment text (relaxed mode).
 
     Returns:
-        List[ListicleGroup] representing detected list items.
-        Empty list if no listicle structure detected.
-        Requires at least 2 markers to confirm listicle structure.
+        List of (position, marker_type, label, is_mid_segment, char_offset) tuples.
     """
-    if not segments:
-        return []
-
-    # (position, marker_type, label, is_mid_segment, char_offset)
     markers: List[Tuple[int, str, str, bool, int]] = []
 
     for i, segment in enumerate(segments):
@@ -452,21 +437,15 @@ def detect_listicle_groups(
             marker_type, label, char_offset = result
             markers.append((i, marker_type, label, True, char_offset))
 
-    # Need at least 2 markers to confirm listicle structure
-    if len(markers) < 2:
-        return []
+    return markers
 
-    # Scan all segments for a list header to get expected_count
-    expected_count: Optional[int] = None
-    for segment in segments:
-        text = _get_segment_text(segment)
-        if text:
-            count = detect_list_header(text)
-            if count is not None:
-                expected_count = count
-                break  # Use the first header found
 
-    # Build groups from markers
+def _build_groups_from_markers(
+    markers: List[Tuple[int, str, str, bool, int]],
+    segments: List[Any],
+    expected_count: Optional[int],
+) -> List[ListicleGroup]:
+    """Build ListicleGroup objects from detected markers."""
     groups: List[ListicleGroup] = []
 
     for idx, (pos, marker_type, label, is_mid, char_off) in enumerate(markers):
@@ -503,6 +482,166 @@ def detect_listicle_groups(
             expected_count=expected_count,
         )
         groups.append(group)
+
+    return groups
+
+
+def _auto_correct_markers(
+    segments: List[Any],
+    existing_markers: List[Tuple[int, str, str, bool, int]],
+    expected_count: int,
+    initial_max_chars_offset: int,
+) -> List[Tuple[int, str, str, bool, int]]:
+    """
+    Re-scan segments with relaxed detection thresholds to find missed markers.
+
+    Only runs once (no recursion). Relaxes by:
+    - Increasing max_chars_offset to 150 (from default 50)
+    - Scanning segments that didn't already have a marker
+
+    Args:
+        segments: Original segment list.
+        existing_markers: Markers from the initial scan.
+        expected_count: Expected number of items from list header.
+        initial_max_chars_offset: The max_chars_offset used in the initial scan.
+
+    Returns:
+        Merged marker list (existing + newly found), sorted by position.
+        Will not exceed expected_count + 1 total markers.
+    """
+    existing_positions = {m[0] for m in existing_markers}
+    relaxed_offset = max(150, initial_max_chars_offset * 3)
+
+    new_markers: List[Tuple[int, str, str, bool, int]] = []
+
+    for i, segment in enumerate(segments):
+        if i in existing_positions:
+            continue  # Already has a marker
+
+        text = _get_segment_text(segment)
+        if not text:
+            continue
+
+        # Relaxed scan: search further into the text
+        scan_text = text[:relaxed_offset] if relaxed_offset > 0 else ''
+        if not scan_text:
+            continue
+
+        # Try full-text scan for ordinals, numbered, transitions
+        result = _detect_ordinal(scan_text, scan_full_text=True)
+        if result is None:
+            result = _detect_numbered(scan_text, scan_full_text=True)
+        if result is None:
+            result = _detect_transition(scan_text, scan_full_text=True)
+
+        if result is not None:
+            marker_type, label, char_offset = result
+            # For relaxed scan, markers at start (offset 0) are also accepted
+            # since the initial pass may have been blocked by max_chars_offset
+            is_mid = char_offset > 0
+            new_markers.append((i, marker_type, label, is_mid, char_offset))
+
+    if not new_markers:
+        return existing_markers
+
+    # Merge existing and new markers, sorted by segment position
+    merged = list(existing_markers) + new_markers
+    merged.sort(key=lambda m: (m[0], m[4]))  # Sort by position, then char offset
+
+    # Deduplicate: keep only first marker per segment position
+    seen_positions: set = set()
+    deduped: List[Tuple[int, str, str, bool, int]] = []
+    for m in merged:
+        if m[0] not in seen_positions:
+            seen_positions.add(m[0])
+            deduped.append(m)
+
+    # Cap at expected_count + 1 to prevent over-detection
+    if len(deduped) > expected_count + 1:
+        deduped = deduped[:expected_count + 1]
+
+    return deduped
+
+
+def detect_listicle_groups(
+    segments: List[Any],
+    max_chars_offset: int = 50,
+) -> List[ListicleGroup]:
+    """
+    Detect listicle (list-style) structure in voiceover segments.
+
+    Scans segment text for ordinal markers, numbered markers, and transition
+    markers to identify list items. Each detected marker starts a new group
+    that extends until the next marker or end of segments.
+
+    Performs two passes:
+    1. Start-of-text markers (existing behavior)
+    2. Mid-segment markers within the first max_chars_offset characters
+
+    When a list header with expected_count is found and the detected marker
+    count differs by more than 1, an auto-correction pass re-scans with
+    relaxed thresholds (increased max_chars_offset). Auto-correction runs
+    only once (no recursion) and logs before/after marker counts.
+
+    Mid-segment markers split the segment: text before the marker belongs to
+    the previous group.
+
+    Args:
+        segments: List of VoiceoverSegment objects (or dicts with 'text' field)
+        max_chars_offset: Maximum character offset for mid-segment detection.
+            Markers beyond this offset are ignored. Default 50.
+
+    Returns:
+        List[ListicleGroup] representing detected list items.
+        Empty list if no listicle structure detected.
+        Requires at least 2 markers to confirm listicle structure.
+    """
+    if not segments:
+        return []
+
+    # Initial marker scan
+    markers = _scan_markers(segments, max_chars_offset)
+
+    # Scan all segments for a list header to get expected_count
+    expected_count: Optional[int] = None
+    for segment in segments:
+        text = _get_segment_text(segment)
+        if text:
+            count = detect_list_header(text)
+            if count is not None:
+                expected_count = count
+                break  # Use the first header found
+
+    # Auto-correction: if expected_count known and gap > 1, re-scan with relaxed thresholds
+    if expected_count is not None and len(markers) >= 2:
+        initial_count = len(markers)
+        if abs(initial_count - expected_count) > 1 and initial_count < expected_count:
+            logger.info(
+                "Auto-correction: expected %d items but detected %d, "
+                "re-scanning with relaxed thresholds",
+                expected_count, initial_count,
+            )
+            markers = _auto_correct_markers(
+                segments, markers, expected_count, max_chars_offset,
+            )
+            corrected_count = len(markers)
+            logger.info(
+                "Auto-correction complete: markers %d -> %d (expected %d)",
+                initial_count, corrected_count, expected_count,
+            )
+            if abs(corrected_count - expected_count) > 1:
+                logger.warning(
+                    "Auto-correction could not close gap: expected %d, "
+                    "detected %d after correction (was %d before)",
+                    expected_count, corrected_count, initial_count,
+                )
+
+    # Need at least 2 markers to confirm listicle structure
+    if len(markers) < 2:
+        return []
+
+    # Build groups from markers
+    groups = _build_groups_from_markers(markers, segments, expected_count)
 
     # Normalize mixed marker numbering to consistent sequence
     groups = _normalize_marker_sequence(groups)
