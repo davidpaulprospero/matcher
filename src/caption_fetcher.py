@@ -1972,6 +1972,19 @@ class CaptionResult:
     status: CaptionStatus = CaptionStatus.SUCCESS  # US-63-006: Structured status
     no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
     fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
+    # US-70-002: Video metadata for context-enriched matching
+    video_description: str = ""  # Full video description text
+    video_chapters: List[dict] = field(default_factory=list)  # Parsed chapter markers [{title, start_time, end_time}]
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+
+    def __post_init__(self):
+        """Ensure list fields are never None (dict-vs-object safety, Rule 2/6)."""
+        if self.video_chapters is None:
+            self.video_chapters = []
+        if self.video_tags is None:
+            self.video_tags = []
+        if self.video_description is None:
+            self.video_description = ""
 
     @property
     def skipped_segments_count(self) -> int:
@@ -2240,7 +2253,74 @@ class CaptionResult:
             'coverage_ratio': self.coverage_ratio,  # US-004
             'skipped_segments_count': self.skipped_segments_count,  # US-005
             'timing_validated': self.timing_validated.to_dict() if self.timing_validated else None,  # US-007
+            'video_description': self.video_description,  # US-70-002
+            'video_chapters': self.video_chapters,  # US-70-002
+            'video_tags': self.video_tags,  # US-70-002
         }
+
+    def enrich_with_metadata(self, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
+        """Populate video metadata fields from a yt-dlp info_dict (US-70-003).
+
+        Extracts description, chapters, and tags from a yt-dlp --dump-json dict.
+        Gracefully handles missing/None fields by defaulting to empty string/list.
+
+        Args:
+            info_dict: Dict from yt-dlp --dump-json output.
+            max_description_length: Maximum characters for video_description (default 500).
+        """
+        description, chapters, tags = extract_video_metadata_from_info_dict(
+            info_dict, max_description_length=max_description_length
+        )
+        self.video_description = description
+        self.video_chapters = chapters
+        self.video_tags = tags
+
+
+def extract_video_metadata_from_info_dict(
+    info_dict: Dict[str, Any],
+    max_description_length: int = 500
+) -> tuple:
+    """Extract video metadata from a yt-dlp info_dict (US-70-003).
+
+    Extracts description, chapters, and tags from the info_dict returned by
+    yt-dlp --dump-json. Gracefully handles missing/None fields.
+
+    Args:
+        info_dict: Dict from yt-dlp --dump-json output.
+        max_description_length: Maximum characters for description (default 500).
+
+    Returns:
+        Tuple of (video_description, video_chapters, video_tags):
+        - video_description: str, truncated to max_description_length
+        - video_chapters: list of {title, start_time, end_time} dicts
+        - video_tags: list of tag strings
+    """
+    # Extract description (truncated)
+    raw_description = info_dict.get('description') if info_dict else None
+    if raw_description and isinstance(raw_description, str):
+        video_description = raw_description[:max_description_length]
+    else:
+        video_description = ""
+
+    # Extract chapters (list of {title, start_time, end_time} dicts)
+    raw_chapters = info_dict.get('chapters') if info_dict else None
+    video_chapters: List[dict] = []
+    if raw_chapters and isinstance(raw_chapters, list):
+        for ch in raw_chapters:
+            if isinstance(ch, dict):
+                video_chapters.append({
+                    'title': ch.get('title', ''),
+                    'start_time': ch.get('start_time', 0.0),
+                    'end_time': ch.get('end_time', 0.0),
+                })
+
+    # Extract tags (list of strings)
+    raw_tags = info_dict.get('tags') if info_dict else None
+    video_tags: List[str] = []
+    if raw_tags and isinstance(raw_tags, list):
+        video_tags = [str(t) for t in raw_tags if t is not None]
+
+    return video_description, video_chapters, video_tags
 
 
 @dataclass
