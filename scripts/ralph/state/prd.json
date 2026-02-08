@@ -1,193 +1,192 @@
 {
-  "sprintNumber": 79,
-  "focusArea": "transcription",
-  "branchName": "ralph/sprint-79",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-79-001",
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'transcription' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'transcription'",
-        "Add stories US-79-002 through US-79-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-79-NNN to be unique across sprints",
-        "Mark this story (US-79-001) as passes: true when done"
-      ],
-      "passes": true,
-      "priority": "high",
-      "title": "Generate sprint stories for transcription focus area",
-      "notes": "Seed story - generated 11 transcription improvement stories covering GPU timeout safety, config wiring, retry budget, cache age management, error specificity, Whisper worker config, parallel processor progress logging, cache warmup validation, audio extraction async optimization, transcription metrics dashboard, and delta index staleness detection."
-    },
-    {
-      "id": "US-79-002",
-      "title": "Add configurable timeout guard to Whisper GPU transcription",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add `gpu_transcription_timeout: int = 300` field to TranscriptionConfig in src/config/sections/core.py with validation >= 30",
-        "Add `gpu_transcription_timeout` to config.yaml under transcription section with comment explaining default",
-        "Wrap `model.transcribe()` call in src/transcription/whisper_client.py `transcribe()` method with a threading.Timer-based timeout that raises TransientTranscriptionError on expiry",
-        "When timeout fires, log a WARNING with video_id, elapsed time, and configured timeout value",
-        "Add test: transcription that exceeds timeout raises TransientTranscriptionError",
-        "Add test: transcription that completes within timeout returns segments normally"
-      ],
-      "notes": "Auto-completed by pre-flight check (git-commit-detected). Commit: a083b87 chore: [US-79-002] Mark as complete in prd.json"
-    },
-    {
-      "id": "US-79-003",
-      "title": "Wire audio_extraction_timeout config to utils.extract_audio function",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "In src/transcription/parallel_processor.py, pass config.transcription.audio_extraction_timeout to extract_audio() calls instead of relying on the default parameter value",
-        "In src/transcription/parallel_processor.py transcribe_video() function, pass config timeout to extract_audio() call",
-        "Verify that changing audio_extraction_timeout in config.yaml actually changes the FFmpeg subprocess timeout",
-        "Add test: extract_audio uses config timeout value instead of hardcoded default",
-        "Add test: parallel_processor passes config timeout to extract_audio calls"
-      ],
-      "notes": "Wired audio_extraction_timeout from TranscriptionConfig to all 3 extract_audio() call sites in parallel_processor.py (transcribe_videos_parallel, transcribe_video, transcribe_voiceover_media). Added 5 new tests in TestConfigTimeoutPropagation. Fixed 18 pre-existing test failures from US-79-002."
-    },
-    {
-      "id": "US-79-004",
-      "title": "Add configurable max_retries to TranscriptionConfig",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add `max_retries: int = 2` field to TranscriptionConfig in src/config/sections/core.py with validation >= 0 and <= 5",
-        "Add `max_retries` to config.yaml under transcription section",
-        "Update transcribe_video() in src/transcription/parallel_processor.py to read max_retries from config instead of hardcoded parameter default",
-        "Add test: setting max_retries=0 in config disables retry (single attempt only)",
-        "Add test: setting max_retries=3 in config allows up to 3 retry attempts after initial failure"
-      ],
-      "notes": "Evidence gate: 3/5 criteria verified (60%). Minimum: 90%."
-    },
-    {
-      "id": "US-79-005",
-      "title": "Make cache max_age_days configurable in TranscriptionConfig",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add `cache_max_age_days: int = 30` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
-        "Add `cache_max_age_days` to config.yaml under transcription section",
-        "Update cleanup_stale_entries() in src/transcription/cache.py to accept and use config value instead of hardcoded max_age_days=30 parameter default",
-        "Add test: cache entries older than configured max_age_days are removed by cleanup",
-        "Add test: cache entries newer than configured max_age_days are preserved by cleanup"
-      ],
-      "notes": "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/cache.py (cleanup_stale_entries max_age_days param ~line 322), config.yaml. Currently cache expiry is hardcoded to 30 days. Different projects may need different retention (short test projects vs long-running production)."
-    },
-    {
-      "id": "US-79-006",
-      "title": "Replace broad exception handlers with specific exception types in transcription cache",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Replace `except Exception` in cache.py get() method (~lines 214-240) with specific exceptions: json.JSONDecodeError, FileNotFoundError, PermissionError, OSError",
-        "Replace `except Exception` in cache.py set() method (~lines 264-274) with specific exceptions: OSError, PermissionError, json.JSONDecodeError",
-        "Replace `except Exception` in cache.py cleanup methods (~lines 310-311, 346-347) with specific exceptions: OSError, FileNotFoundError",
-        "Log at WARNING level (not DEBUG) for unexpected exception types that fall through, preserving the exception class name",
-        "Add test: JSONDecodeError in cache get() returns None and logs at appropriate level",
-        "Add test: PermissionError in cache set() is caught and logged without crashing"
-      ],
-      "notes": "Replaced 7 bare except Exception handlers in cache.py with specific types (json.JSONDecodeError, OSError, PermissionError, FileNotFoundError, KeyError, TypeError). Added WARNING-level fallback for unexpected exceptions. Added 5 new tests in TestSpecificExceptionHandling class."
-    },
-    {
-      "id": "US-79-007",
-      "title": "Make Whisper num_workers and cpu_threads configurable",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add `whisper_num_workers: int = 1` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
-        "Add `whisper_cpu_threads: int = 4` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
-        "Add both fields to config.yaml under transcription section with comments explaining GPU serialization tradeoff",
-        "Update WhisperModel initialization in src/transcription/whisper_client.py get_model() to use config values instead of hardcoded num_workers=1, cpu_threads=4",
-        "Add test: custom whisper_num_workers value is passed to WhisperModel constructor",
-        "Add test: custom whisper_cpu_threads value is passed to WhisperModel constructor"
-      ],
-      "notes": "All 6 criteria verified. Config fields in core.py (lines 130-134), validation in __post_init__ (lines 203-215), WhisperClient wired at lines 269-270 of whisper_client.py, config.yaml updated, 12 tests passing in TestWhisperThreadingConfig."
-    },
-    {
-      "id": "US-79-008",
-      "title": "Replace print-based progress with structured logging in parallel processor",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Replace all print() calls in src/transcription/parallel_processor.py with logger.info() or logger.debug() calls using the module logger",
-        "Ensure Phase 1 (audio extraction) progress uses logger.info at configurable intervals instead of every-10th-item hardcoded check",
-        "Ensure Phase 2 (GPU transcription) progress uses logger.info instead of print with carriage return",
-        "Add a `progress_log_interval: int = 10` field to TranscriptionConfig controlling how often progress is logged (every N items)",
-        "Add test: progress logging uses logger, not print, verified via caplog fixture"
-      ],
-      "notes": "Replaced all print() with logger.info/debug. Added progress_log_interval config field (default 10). Fixed pre-existing US-79-007 test assertions. 36/36 tests pass."
-    },
-    {
-      "id": "US-79-009",
-      "title": "Add cache warmup validation with integrity check",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add a validate_entry() method to TranscriptCache that checks a cached entry has non-empty segments list, valid start_time/end_time on each segment, and non-empty text",
-        "Call validate_entry() during cache get() and discard invalid entries (log WARNING with video_id and reason)",
-        "Call validate_entry() during warmup_from_project() and skip invalid entries with a count summary log",
-        "Add test: cache entry with empty segments list is discarded on get()",
-        "Add test: cache entry with segments missing text field is discarded on get()",
-        "Add test: warmup_from_project skips invalid entries and logs count"
-      ],
-      "notes": "Done. Added validate_entry() method checking non-empty segments, valid start/end times, non-empty text. Wired into get() (discards with WARNING log) and warmup_from_project() (skips with count summary). 12 tests in test_transcript_cache_validation.py all pass."
-    },
-    {
-      "id": "US-79-010",
-      "title": "Add transcription batch retry budget tracking",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Create a TranscriptionRetryBudget class (similar to CaptionRetryBudget) in src/transcription/retry_budget.py that tracks total attempts, failures, and cumulative backoff time across a batch",
-        "Add `retry_budget_max_attempts: int = 50` and `retry_budget_max_backoff_seconds: float = 180.0` to TranscriptionConfig",
-        "Integrate TranscriptionRetryBudget into transcribe_videos_parallel() to stop retrying when budget is exhausted, logging which videos were skipped",
-        "Add budget summary to TranscriptionMetrics (total_attempts, failed_attempts, budget_exhausted_count)",
-        "Add test: batch processing stops retrying individual videos when budget is exhausted",
-        "Add test: budget summary is included in returned metrics"
-      ],
-      "notes": "Created TranscriptionRetryBudget class with thread-safe RLock, exhaustion detection (max_attempts and max_backoff_time), skip tracking. Added config fields to TranscriptionConfig with validation. Integrated budget into Phase 2 of transcribe_videos_parallel() with per-video retry loop and budget-aware skipping. Added budget_total_attempts, budget_failed_attempts, budget_exhausted_count to TranscriptionMetrics with set_retry_budget_summary() method. 19 new tests in test_transcription_retry_budget.py + updated 2 existing test assertions. 68 total tests pass."
-    },
-    {
-      "id": "US-79-011",
-      "title": "Add delta index staleness detection with automatic rebuild",
-      "priority": "low",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add a check_staleness() method to DeltaIndex in src/transcription/delta_index.py that compares indexed video count against actual cache entries and returns (is_stale: bool, indexed_count: int, cache_count: int)",
-        "When staleness is detected (cache has >10% more entries than index), trigger automatic rebuild with a WARNING log",
-        "Add staleness check to the start of transcribe_videos_parallel() before processing begins",
-        "Add test: stale index (fewer entries than cache) triggers rebuild",
-        "Add test: fresh index (matching or close to cache count) does not trigger rebuild"
-      ],
-      "notes": "Added check_staleness() and rebuild_from_cache() methods to DeltaAwareIndex. Staleness detection checks if cache has >10% more entries than index. Wired check into transcribe_videos_parallel() before processing begins. 9 new tests added (6 staleness, 3 rebuild). All 50 delta index tests pass."
-    },
-    {
-      "id": "US-79-012",
-      "title": "Add transcription metrics summary to pipeline checkpoint",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "After transcribe_videos_parallel() completes, store TranscriptionMetrics summary dict in checkpoint.json under a 'transcription_metrics' key",
-        "Summary must include: total_videos, cached_videos, transcribed_videos, failed_videos, total_duration_seconds, average_speed_ratio",
-        "When resuming from checkpoint, log the previous transcription metrics at INFO level for comparison",
-        "Add test: transcription metrics are persisted in checkpoint after batch processing",
-        "Add test: resumed pipeline logs previous transcription metrics from checkpoint"
-      ],
-      "notes": "Tier: LOW (observability). Files: src/transcription/metrics.py (TranscriptionMetrics class), src/transcription/parallel_processor.py (return_metrics=True path ~lines 300-329), src/checkpoint.py. Currently TranscriptionMetrics are computed and optionally returned but never persisted. After a pipeline run, there's no record of transcription performance. Persisting to checkpoint enables cross-run comparison and debugging slow transcription batches."
-    }
-  ]
+    "sprintNumber":  80,
+    "focusArea":  "config",
+    "branchName":  "ralph/sprint-80",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-80-001",
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the 'config' focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for 'config'",
+                                                       "Add stories US-80-002 through US-80-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-80-NNN to be unique across sprints",
+                                                       "Mark this story (US-80-001) as passes: true when done"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Generate sprint stories for config focus area",
+                            "notes":  "Generated 11 stories (US-80-002 through US-80-012) targeting config management and validation improvements. Stories cover: provider validation sync, _convert_nested_configs completeness, unknown field warnings, context enrichment validation, validate() coverage for new sections, config diff utility, effective config export, config merge re-validation, config load error DX, config section validation test coverage, and config freeze after load."
+                        },
+                        {
+                            "id":  "US-80-002",
+                            "title":  "Sync embedding provider validation between base.py and core.py",
+                            "acceptanceCriteria":  [
+                                "base.py _validate_enums() uses the same provider set as EmbeddingConfig.KNOWN_PROVIDERS from core.py instead of a hardcoded set",
+                                "Adding a new provider to KNOWN_PROVIDERS in core.py automatically includes it in base.py validation",
+                                "The 'ollama' provider no longer triggers a spurious validation error in validate()",
+                                "Test: validate() returns no embedding provider error when provider='ollama'",
+                                "Test: validate() still returns error for truly unknown providers like 'nonexistent'"
+                            ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "notes":  "Fixed: replaced hardcoded valid_providers set in base.py _validate_enums() with EmbeddingConfig.KNOWN_PROVIDERS from core.py. Added 'ollama' to parametrized valid provider test. Both valid and invalid provider tests pass."
+                        },
+                        {
+                            "id":  "US-80-003",
+                            "title":  "Extend _convert_nested_configs to handle all section dataclasses",
+                            "acceptanceCriteria":  [
+                                "_convert_nested_configs() converts all section fields that are dicts to their dataclass types, not just healing",
+                                "After merge_config() mutates a section to a dict, _convert_nested_configs() correctly restores it to the proper dataclass",
+                                "Test: config with matching section as raw dict is correctly converted to MatchingConfig after _convert_nested_configs()",
+                                "Test: config with download section as raw dict is correctly converted to DownloadConfig",
+                                "Test: already-converted dataclass sections are left unchanged (idempotent)"
+                            ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "notes":  "Fixed: _convert_nested_configs() now iterates all Config dataclass fields using default_factory + is_dataclass to generically convert dicts to proper types. Handles `from __future__ import annotations` (string types) by using default_factory instead of field.type. 5 new tests: matching dict, download dict, healing dict, already-converted unchanged, idempotent double-call. All 269 section validation tests pass."
+                        },
+                        {
+                            "id":  "US-80-004",
+                            "title":  "Warn on unknown YAML keys in critical config sections",
+                            "acceptanceCriteria":  [
+                                "Unknown keys in critical sections (download, matching, output, etc.) produce a WARNING-level log, not just debug",
+                                "Unknown keys in optional sections remain at debug level",
+                                "Test: loading config with unknown key 'matching.foo_bar' logs at WARNING level",
+                                "Test: loading config with unknown key 'broll.foo_bar' logs at DEBUG level only",
+                                "The warning message includes the section name, unknown key, and suggests the closest valid field name if one exists within edit distance 2"
+                            ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "notes":  "Fixed: Added `import difflib` to base.py. Modified `_build_dataclass` unknown key handling so critical sections (download, matching, output, etc.) log WARNING with typo suggestions via `difflib.get_close_matches`, while optional sections remain at DEBUG level. Added 5 tests in TestUnknownKeyWarnings class covering all acceptance criteria: WARNING for critical section unknown keys, DEBUG for optional section unknown keys, typo suggestion in warning message, no warning for valid keys, and correct suggestion for close matches. All 40 tests in the file pass."
+                        },
+                        {
+                            "id":  "US-80-005",
+                            "title":  "Add __post_init__ validation to ContextEnrichmentConfig",
+                            "acceptanceCriteria":  [
+                                "ContextEnrichmentConfig.__post_init__ validates max_description_length >= 0 and raises ValueError if negative",
+                                "ContextEnrichmentConfig.__post_init__ clamps max_description_length to 10000 with warning if exceeding reasonable limit",
+                                "ChapterGroupingConfig.__post_init__ validates relevance_boost_weight is 0.0-1.0",
+                                "ChapterGroupingConfig.__post_init__ validates coherence_penalty_threshold >= 1",
+                                "Test: ContextEnrichmentConfig(max_description_length=-1) raises ValueError",
+                                "Test: ChapterGroupingConfig(relevance_boost_weight=2.0) clamps to 1.0 with warning"
+                            ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "notes":  "Added __post_init__ to ContextEnrichmentConfig (ValueError for negative max_description_length, warn+clamp at 10000) and ChapterGroupingConfig (ValueError for coherence_penalty_threshold < 1 and negative relevance_boost_weight, warn+clamp relevance_boost_weight at 1.0). 12 tests pass."
+                        },
+                        {
+                            "id":  "US-80-006",
+                            "title":  "Extend validate() to cover context_enrichment and chapter_grouping constraints",
+                            "acceptanceCriteria":  [
+                                "validate() checks that chapter_grouping.chapter_topic_match_boost is a list of exactly 2 floats [min, max] with min <= max",
+                                "validate() checks that chapter_grouping.chapter_topic_mismatch_penalty is negative (it's a penalty)",
+                                "validate() checks that context_enrichment.max_description_length is positive",
+                                "validate() checks cross-section constraint: if context_enrichment.title_enriched_embeddings is true, embedding provider must be configured",
+                                "Test: validate() returns error when chapter_topic_match_boost=[0.10, 0.05] (min > max)"
+                            ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "notes":  "Added chapter_topic_match_boost and chapter_topic_mismatch_penalty fields to ChapterGroupingConfig. Extended _validate_constraints() with 5 checks: boost list validation, mismatch penalty negativity, max_description_length positivity, cross-section title_enriched_embeddings/provider check. 14 tests pass."
+                        },
+                        {
+                            "id":  "US-80-007",
+                            "title":  "Add config diff utility to compare two Config instances",
+                            "acceptanceCriteria":  [
+                                "New function config_diff(config_a, config_b) in src/config/utils.py returns dict of differences",
+                                "Diff output includes field path (e.g., 'matching.min_confidence'), old value, and new value",
+                                "Nested dataclass fields are recursively compared",
+                                "Fields with equal values are excluded from the diff",
+                                "Test: diff between default config and config with matching.min_confidence=0.8 shows only that field",
+                                "Test: diff between identical configs returns empty dict"
+                            ],
+                            "passes":  true,
+                            "priority":  "low",
+                            "notes":  "Added config_diff() to src/config/utils.py with recursive dataclass comparison. Skips private _fields. 9 tests in test_config_diff_us80_007.py all passing."
+                        },
+                        {
+                            "id":  "US-80-008",
+                            "title":  "Add effective config export to YAML",
+                            "acceptanceCriteria":  [
+                                "New method Config.to_dict() returns config as nested dict suitable for YAML serialization",
+                                "New method Config.to_yaml(path) writes the effective config to a YAML file",
+                                "Exported YAML can be loaded back with from_yaml() and produce an equivalent config (roundtrip)",
+                                "Sensitive fields (api_keys) are redacted in the export by default, with option to include them",
+                                "Test: config roundtrip through to_yaml/from_yaml preserves all non-sensitive field values"
+                            ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "notes":  "Tier: developer utility. Source: src/config/base.py — no to_dict() or to_yaml() method exists. Use dataclasses.asdict() as base, then filter sensitive fields. Useful for debugging ('what config is the pipeline actually using?') and for reproducible runs."
+                        },
+                        {
+                            "id":  "US-80-009",
+                            "title":  "Re-run validate() after merge_config to catch invalid overrides",
+                            "acceptanceCriteria":  [
+                                "merge_config() calls config.validate() after applying overrides and logs any new validation errors at WARNING level",
+                                "Invalid overrides (e.g., matching.min_confidence=2.0) produce a clear warning during merge, not a silent misconfiguration",
+                                "merge_config() does NOT raise on validation warnings (non-breaking), only logs them",
+                                "Test: merge_config with override matching.min_confidence=2.0 logs a warning about value > 1.0",
+                                "Test: merge_config with valid overrides produces no validation warnings"
+                            ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "notes":  "Tier: safety improvement. Source: src/cli/config_utils.py merge_config() function. Currently merges without re-validating. The section-level __post_init__ may catch some issues on re-run (_revalidate_modified_sections), but the cross-section constraints in Config.validate() are never re-checked after merge."
+                        },
+                        {
+                            "id":  "US-80-010",
+                            "title":  "Improve config loading error messages with YAML location context",
+                            "acceptanceCriteria":  [
+                                "When a YAML parsing error occurs, the error message includes the line number and column from the YAML file",
+                                "When _build_dataclass fails for a critical section, the error message includes which YAML keys were unexpected",
+                                "When a TypeError occurs during dataclass construction, the message suggests the correct field name if a close match exists",
+                                "Test: loading a config with invalid YAML syntax raises ConfigError with line number in message",
+                                "Test: loading a config with wrong field type (e.g., matching.min_confidence='abc') includes the field name and expected type"
+                            ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "notes":  "Tier: DX improvement. Source: src/config/base.py lines 337-370 (from_yaml) and lines 458-531 (_build_dataclass). Currently YAML parse errors surface raw yaml.YAMLError which can be cryptic. TypeError from dataclass construction shows the raw Python error. Wrap both with user-friendly messages."
+                        },
+                        {
+                            "id":  "US-80-011",
+                            "title":  "Add comprehensive config section validation test coverage",
+                            "acceptanceCriteria":  [
+                                "Test file tests/test_config_section_validation.py covers all 14 config section dataclasses with __post_init__",
+                                "Each section test verifies: (1) default construction works, (2) dict construction via **kwargs works, (3) invalid values raise ValueError or warn appropriately",
+                                "Test: DownloadConfig with negative max_concurrent raises ValueError",
+                                "Test: MatchingConfig with confidence thresholds out of order warns and clamps",
+                                "Test: TranscriptionConfig with invalid whisper_model warns about unknown model",
+                                "All tests pass with pytest tests/test_config_section_validation.py -v"
+                            ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "notes":  "Tier: test coverage. Source: tests/test_config_section_validation.py exists but may not cover all 14 section files (src/config/sections/*.py). Check existing coverage and fill gaps. Existing test files: test_config.py, test_config_dataclasses.py, test_config_post_init.py, test_config_post_init_edge_cases.py, test_config_section_validation.py. Focus on sections not yet covered."
+                        },
+                        {
+                            "id":  "US-80-012",
+                            "title":  "Add config freeze mechanism to prevent mutation after pipeline start",
+                            "acceptanceCriteria":  [
+                                "New method Config.freeze() marks config as immutable by setting an internal _frozen flag",
+                                "After freeze(), any __setattr__ on Config or its section dataclasses raises FrozenConfigError",
+                                "Pipeline.run() calls config.freeze() before entering the first stage",
+                                "Config.unfreeze() method exists for test scenarios that need mutation",
+                                "Test: setting config.matching.min_confidence after freeze() raises FrozenConfigError",
+                                "Test: config before freeze() allows normal attribute setting"
+                            ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "notes":  "Tier: safety/architecture. Source: src/config/base.py (Config class) and src/pipeline.py (Pipeline.run). Currently config is mutable throughout pipeline execution, which can cause subtle bugs if a stage modifies config that downstream stages depend on. Use __setattr__ override with _frozen check. FrozenConfigError subclass of ConfigError."
+                        }
+                    ]
 }
