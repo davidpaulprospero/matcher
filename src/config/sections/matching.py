@@ -192,6 +192,28 @@ class ContextEnrichmentConfig:
     chapter_enriched_embeddings: bool = True  # Include chapter title in embedding text when available
     description_enriched_embeddings: bool = True  # Append top description keywords to embedding text
 
+    def __post_init__(self):
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # ValueError for impossible values (negative length)
+        if self.max_description_length < 0:
+            raise ValueError(
+                f"ContextEnrichmentConfig.max_description_length="
+                f"{self.max_description_length} is negative. "
+                f"Must be >= 0. Check matching.context_enrichment."
+                f"max_description_length in config.yaml"
+            )
+
+        # Warn + clamp for soft limit (unreasonably large)
+        if self.max_description_length > 10000:
+            logger.warning(
+                "ContextEnrichmentConfig.max_description_length=%s exceeds "
+                "reasonable limit of 10000, clamped to 10000",
+                self.max_description_length,
+            )
+            self.max_description_length = 10000
+
 
 @dataclass
 class ChapterGroupingConfig:
@@ -206,6 +228,35 @@ class ChapterGroupingConfig:
     coherence_penalty_threshold: int = 5  # Max unique sources per chapter before penalty
     relevance_boost_weight: float = 0.1  # Weight for cross-chapter relevance boost (US-71-005)
     min_source_diversity: int = 2  # Min unique sources per chapter (US-77-007); 1 = disabled
+
+    def __post_init__(self):
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # ValueError for impossible values
+        if self.coherence_penalty_threshold < 1:
+            raise ValueError(
+                f"ChapterGroupingConfig.coherence_penalty_threshold="
+                f"{self.coherence_penalty_threshold} must be >= 1. "
+                f"Check matching.chapter_grouping.coherence_penalty_threshold "
+                f"in config.yaml"
+            )
+
+        # relevance_boost_weight: ValueError if negative, warn+clamp if > 1.0
+        if self.relevance_boost_weight < 0.0:
+            raise ValueError(
+                f"ChapterGroupingConfig.relevance_boost_weight="
+                f"{self.relevance_boost_weight} is negative. "
+                f"Must be in range [0.0, 1.0]. Check matching.chapter_grouping."
+                f"relevance_boost_weight in config.yaml"
+            )
+        if self.relevance_boost_weight > 1.0:
+            logger.warning(
+                "ChapterGroupingConfig.relevance_boost_weight=%s exceeds 1.0, "
+                "clamped to 1.0",
+                self.relevance_boost_weight,
+            )
+            self.relevance_boost_weight = 1.0
 
 
 @dataclass
