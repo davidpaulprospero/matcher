@@ -99,6 +99,8 @@ class GapSegment:
     position: float  # Start time in timeline
     pattern_type: str = ""  # Detected pattern
     keywords: List[str] = field(default_factory=list)
+    chapter_id: Optional[str] = None  # Containing chapter/listicle group
+    priority_boost: float = 0.0  # Boost for intro/conclusion chapters
 
 
 @dataclass
@@ -210,6 +212,78 @@ def analyze_gaps(
             analysis.other.append(gap.segment_index)
 
     return analysis
+
+
+# Default priority boosts for chapter positions
+INTRO_PRIORITY_BOOST = 0.2
+CONCLUSION_PRIORITY_BOOST = 0.15
+
+
+def annotate_gaps_with_chapters(
+    gaps: List[GapSegment],
+    total_segments: int,
+    chapters: Optional[List[Dict[str, Any]]] = None,
+    listicle_groups: Optional[List[Dict[str, Any]]] = None,
+    intro_boost: float = INTRO_PRIORITY_BOOST,
+    conclusion_boost: float = CONCLUSION_PRIORITY_BOOST,
+) -> List[GapSegment]:
+    """
+    Annotate gaps with chapter/listicle group info and apply priority boosts.
+
+    Gaps in introduction chapters (first 10% of segments) get a priority boost
+    of +0.2 (configurable). Gaps in conclusion chapters (last 10% of segments)
+    get +0.15 (configurable). Returns gaps sorted by effective priority
+    (confidence - priority_boost, ascending = highest priority first).
+
+    Args:
+        gaps: List of GapSegment objects to annotate.
+        total_segments: Total number of voiceover segments (for position %).
+        chapters: Optional chapter info from detection, each with
+            'title', 'start_segment', 'end_segment' keys.
+        listicle_groups: Optional listicle group info, each with
+            'group_id', 'start_segment', 'end_segment' keys.
+        intro_boost: Priority boost for intro chapter gaps.
+        conclusion_boost: Priority boost for conclusion chapter gaps.
+
+    Returns:
+        Gaps sorted by priority (highest priority first).
+    """
+    if not gaps or total_segments <= 0:
+        return gaps
+
+    intro_threshold = total_segments * 0.10
+    conclusion_threshold = total_segments * 0.90
+
+    for gap in gaps:
+        seg_idx = gap.segment_index
+
+        # Annotate chapter_id from chapters or listicle_groups
+        if chapters:
+            for ch in chapters:
+                ch_start = ch.get('start_segment', 0)
+                ch_end = ch.get('end_segment', total_segments)
+                if ch_start <= seg_idx < ch_end:
+                    gap.chapter_id = ch.get('title', f"chapter_{ch_start}")
+                    break
+
+        if gap.chapter_id is None and listicle_groups:
+            for grp in listicle_groups:
+                grp_start = grp.get('start_segment', 0)
+                grp_end = grp.get('end_segment', total_segments)
+                if grp_start <= seg_idx < grp_end:
+                    gap.chapter_id = grp.get('group_id', f"group_{grp_start}")
+                    break
+
+        # Apply priority boost based on segment position
+        if seg_idx < intro_threshold:
+            gap.priority_boost = intro_boost
+        elif seg_idx >= conclusion_threshold:
+            gap.priority_boost = conclusion_boost
+
+    # Sort by effective priority: lower (confidence - boost) = higher priority
+    gaps.sort(key=lambda g: g.confidence - g.priority_boost)
+
+    return gaps
 
 
 def _classify_gap_pattern(text: str, entity_names: Set[str]) -> str:

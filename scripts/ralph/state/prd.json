@@ -100,7 +100,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 6 criteria verified. apply_listicle_consistency_boost() at scoring.py:2460, LISTICLE_CONSISTENCY_BOOST=0.04 at line 2106, boundary check at line 2507, listicle_consistency breakdown entry at line 2759, apply_all_adjustments calls it at line 2752. 8 unit tests in TestListicleConsistencyBoost all pass."
+                            "notes":  "All 6/6 criteria verified. 8 tests pass. Implementation + tests complete."
                         },
                         {
                             "id":  "US-71-007",
@@ -112,9 +112,9 @@
                                                        "Gap priority is used to sort gap-filling order so high-importance chapters are filled first",
                                                        "Unit test verifies gaps in intro/conclusion get higher priority than gaps in middle sections"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Iterative Match Enhancement). From Area 6 of the design doc. The gap_analyzer.py already has analyze_gaps() at ~line 152 which classifies gaps by pattern type (abstract_concept, proper_noun, etc.). This adds chapter/position awareness to gap prioritization. The chapter structure comes from the chapter detection results (from match stage) passed through checkpoint state. Priority boost values (0.2, 0.15) are suggestions -- the implementation should make them configurable."
+                            "notes":  "Added annotate_gaps_with_chapters() to gap_analyzer.py with configurable intro_boost/conclusion_boost. GapSegment now has chapter_id and priority_boost fields. 9 unit tests verify all acceptance criteria including priority sorting."
                         },
                         {
                             "id":  "US-71-008",

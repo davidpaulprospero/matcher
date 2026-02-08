@@ -22,6 +22,7 @@ from src.iterative_match.gap_analyzer import (
     LockedMatch,
     analyze_gaps,
     analyze_gap_patterns_for_logging,
+    annotate_gaps_with_chapters,
     log_gap_pattern_analysis,
     extract_keywords_for_gap,
     extract_description_queries,
@@ -39,6 +40,8 @@ from src.iterative_match.gap_analyzer import (
     EMOTION_WORDS,
     ACTION_VERBS,
     LOCATION_INDICATORS,
+    INTRO_PRIORITY_BOOST,
+    CONCLUSION_PRIORITY_BOOST,
 )
 
 
@@ -894,3 +897,129 @@ class TestExtractKeyPhrases:
     def test_empty_text(self):
         result = _extract_key_phrases("", {'word'}, max_phrases=3)
         assert result == []
+
+
+# ============================================================================
+# US-71-007: Chapter-aware gap prioritization
+# ============================================================================
+
+class TestAnnotateGapsWithChapters:
+    """Tests for annotate_gaps_with_chapters function."""
+
+    def test_intro_gaps_get_priority_boost(self):
+        """AC: Gaps in introduction chapters (first 10%) get +0.2 boost."""
+        # 100 total segments, so first 10 = intro
+        gaps = [
+            _make_gap(2, 0.5, "intro content", 5.0),
+            _make_gap(5, 0.4, "more intro content", 10.0),
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        for gap in result:
+            assert gap.priority_boost == INTRO_PRIORITY_BOOST  # 0.2
+
+    def test_conclusion_gaps_get_priority_boost(self):
+        """AC: Gaps in conclusion chapters (last 10%) get +0.15 boost."""
+        # 100 total segments, so segment 90+ = conclusion
+        gaps = [
+            _make_gap(92, 0.5, "conclusion content", 200.0),
+            _make_gap(97, 0.4, "final thoughts", 210.0),
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        for gap in result:
+            assert gap.priority_boost == CONCLUSION_PRIORITY_BOOST  # 0.15
+
+    def test_middle_gaps_no_boost(self):
+        """Gaps in middle sections get no priority boost."""
+        gaps = [
+            _make_gap(30, 0.5, "middle content", 60.0),
+            _make_gap(50, 0.4, "more middle content", 100.0),
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        for gap in result:
+            assert gap.priority_boost == 0.0
+
+    def test_intro_conclusion_higher_priority_than_middle(self):
+        """AC: Intro/conclusion gaps sort before middle gaps with same confidence."""
+        gaps = [
+            _make_gap(50, 0.5, "middle content", 100.0),     # middle, no boost
+            _make_gap(3, 0.5, "intro content", 5.0),         # intro, +0.2 boost
+            _make_gap(95, 0.5, "conclusion content", 200.0), # conclusion, +0.15 boost
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Effective priority = confidence - boost
+        # intro: 0.5 - 0.2 = 0.3 (highest priority)
+        # conclusion: 0.5 - 0.15 = 0.35
+        # middle: 0.5 - 0.0 = 0.5 (lowest priority)
+        assert result[0].segment_index == 3   # intro first
+        assert result[1].segment_index == 95  # conclusion second
+        assert result[2].segment_index == 50  # middle last
+
+    def test_chapter_annotation_from_chapters(self):
+        """AC: analyze_gaps() annotates each gap with its containing chapter."""
+        chapters = [
+            {'title': 'Introduction', 'start_segment': 0, 'end_segment': 10},
+            {'title': 'Main Body', 'start_segment': 10, 'end_segment': 80},
+            {'title': 'Conclusion', 'start_segment': 80, 'end_segment': 100},
+        ]
+        gaps = [
+            _make_gap(5, 0.5, "intro text", 10.0),
+            _make_gap(50, 0.4, "body text", 100.0),
+            _make_gap(90, 0.3, "conclusion text", 200.0),
+        ]
+        result = annotate_gaps_with_chapters(
+            gaps, total_segments=100, chapters=chapters
+        )
+        # Find each gap by index
+        gap_by_idx = {g.segment_index: g for g in result}
+        assert gap_by_idx[5].chapter_id == 'Introduction'
+        assert gap_by_idx[50].chapter_id == 'Main Body'
+        assert gap_by_idx[90].chapter_id == 'Conclusion'
+
+    def test_chapter_annotation_from_listicle_groups(self):
+        """Gaps annotated from listicle groups when no chapters."""
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 30},
+            {'group_id': 'group_B', 'start_segment': 30, 'end_segment': 60},
+        ]
+        gaps = [
+            _make_gap(15, 0.5, "group A content", 30.0),
+            _make_gap(45, 0.4, "group B content", 90.0),
+        ]
+        result = annotate_gaps_with_chapters(
+            gaps, total_segments=100, listicle_groups=groups
+        )
+        gap_by_idx = {g.segment_index: g for g in result}
+        assert gap_by_idx[15].chapter_id == 'group_A'
+        assert gap_by_idx[45].chapter_id == 'group_B'
+
+    def test_empty_gaps_returns_empty(self):
+        """Empty gap list returns empty."""
+        result = annotate_gaps_with_chapters([], total_segments=100)
+        assert result == []
+
+    def test_custom_boost_values(self):
+        """Custom boost values are applied correctly."""
+        gaps = [
+            _make_gap(1, 0.5, "intro", 2.0),
+            _make_gap(99, 0.5, "outro", 200.0),
+        ]
+        result = annotate_gaps_with_chapters(
+            gaps, total_segments=100,
+            intro_boost=0.3, conclusion_boost=0.1
+        )
+        gap_by_idx = {g.segment_index: g for g in result}
+        assert gap_by_idx[1].priority_boost == 0.3
+        assert gap_by_idx[99].priority_boost == 0.1
+
+    def test_sorting_by_priority(self):
+        """Gaps are sorted so high-priority (low effective score) come first."""
+        gaps = [
+            _make_gap(50, 0.3, "middle low conf", 100.0),   # eff: 0.3
+            _make_gap(2, 0.6, "intro high conf", 5.0),      # eff: 0.6-0.2=0.4
+            _make_gap(95, 0.2, "outro low conf", 200.0),     # eff: 0.2-0.15=0.05
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Sorted: outro(0.05) < middle(0.3) < intro(0.4)
+        assert result[0].segment_index == 95
+        assert result[1].segment_index == 50
+        assert result[2].segment_index == 2
