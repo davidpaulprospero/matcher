@@ -1098,6 +1098,11 @@ def apply_title_relevance_adjustment(
 _TAG_KEYWORD_BOOST_PER_TAG = 0.02
 _TAG_KEYWORD_BOOST_CAP = 0.08
 
+# Tag overlap boost constants (US-78-003) — graduated step function
+_TAG_OVERLAP_BOOST_1 = 0.02   # 1 tag match
+_TAG_OVERLAP_BOOST_2 = 0.04   # 2 tag matches
+_TAG_OVERLAP_BOOST_3PLUS = 0.06  # 3+ tag matches
+
 
 def apply_tag_keyword_boost(
     confidence: float,
@@ -1140,6 +1145,59 @@ def apply_tag_keyword_boost(
 
     matched_words = ', '.join(sorted(overlap)[:5])
     reason = f"tag keyword boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
+    return min(1.0, confidence + boost), reason
+
+
+def apply_tag_overlap_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_tags: Optional[List[str]] = None,
+) -> Tuple[float, str]:
+    """
+    Apply graduated tag overlap boost to confidence score (US-78-003).
+
+    Computes keyword overlap between voiceover segment keywords and video tags.
+    Uses a graduated step function instead of linear per-tag scaling.
+
+    Graduated boost values:
+        1 tag match  -> +0.02
+        2 tag matches -> +0.04
+        3+ tag matches -> +0.06
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with text
+        video_tags: List of video tags/keywords from CaptionResult
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not video_tags:
+        return confidence, ""
+
+    vo_keywords = _extract_keywords(vo_segment.text)
+    if not vo_keywords:
+        return confidence, ""
+
+    tag_keywords = {t.lower().strip() for t in video_tags if t and len(t.strip()) >= 3}
+    if not tag_keywords:
+        return confidence, ""
+
+    overlap = vo_keywords & tag_keywords
+    match_count = len(overlap)
+
+    if match_count == 0:
+        return confidence, ""
+
+    if match_count >= 3:
+        boost = _TAG_OVERLAP_BOOST_3PLUS
+    elif match_count == 2:
+        boost = _TAG_OVERLAP_BOOST_2
+    else:
+        boost = _TAG_OVERLAP_BOOST_1
+
+    matched_words = ', '.join(sorted(overlap)[:5])
+    reason = f"tag overlap boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
     return min(1.0, confidence + boost), reason
 
 
@@ -3046,6 +3104,11 @@ class MatchScoring:
     TAG_KEYWORD_BOOST_PER_TAG = 0.02
     TAG_KEYWORD_BOOST_CAP = 0.08
 
+    # Tag overlap boost (US-78-003): graduated step function
+    TAG_OVERLAP_BOOST_1 = 0.02       # 1 tag match
+    TAG_OVERLAP_BOOST_2 = 0.04       # 2 tag matches
+    TAG_OVERLAP_BOOST_3PLUS = 0.06   # 3+ tag matches
+
     # Chapter coherence penalty (US-71-004)
     CHAPTER_COHERENCE_PENALTY_PER_SOURCE = -0.03  # Penalty per excess source
     CHAPTER_COHERENCE_PENALTY_CAP = -0.10  # Maximum penalty cap
@@ -3272,6 +3335,53 @@ class MatchScoring:
         matched_words = ', '.join(sorted(overlap)[:5])
         reason = f"tag keyword boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
         return confidence + boost, reason
+
+    def apply_tag_overlap_boost(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_tags: Optional[List[str]] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply graduated tag overlap boost to confidence score (US-78-003).
+
+        Uses a step function: 1 match -> +0.02, 2 -> +0.04, 3+ -> +0.06.
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Voiceover segment with text
+            video_tags: List of video tags/keywords from CaptionResult
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if not video_tags:
+            return confidence, ""
+
+        vo_keywords = self._extract_keywords(vo_segment.text)
+        if not vo_keywords:
+            return confidence, ""
+
+        tag_keywords = {t.lower().strip() for t in video_tags if t and len(t.strip()) >= 3}
+        if not tag_keywords:
+            return confidence, ""
+
+        overlap = vo_keywords & tag_keywords
+        match_count = len(overlap)
+
+        if match_count == 0:
+            return confidence, ""
+
+        if match_count >= 3:
+            boost = self.TAG_OVERLAP_BOOST_3PLUS
+        elif match_count == 2:
+            boost = self.TAG_OVERLAP_BOOST_2
+        else:
+            boost = self.TAG_OVERLAP_BOOST_1
+
+        matched_words = ', '.join(sorted(overlap)[:5])
+        reason = f"tag overlap boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
+        return min(1.0, confidence + boost), reason
 
     def apply_chapter_source_consistency(
         self,
@@ -3764,6 +3874,22 @@ class MatchScoring:
             if tag_reason:
                 reasons.append(tag_reason)
                 breakdown.append({'component': 'tag_keyword_boost', 'adjustment': round(confidence - prev, 4), 'reason': tag_reason})
+
+        # 9b. Tag overlap boost (US-78-003) — graduated step function
+        # Gated by config: matching.context_enrichment.extract_video_tags
+        extract_tags_enabled = True  # default
+        if self._mc:
+            ce = getattr(self._mc, 'context_enrichment', None)
+            if ce is not None:
+                extract_tags_enabled = getattr(ce, 'extract_video_tags', True) if not isinstance(ce, dict) else ce.get('extract_video_tags', True)
+        if video_tags and extract_tags_enabled:
+            prev = confidence
+            confidence, overlap_reason = self.apply_tag_overlap_boost(
+                confidence, vo_segment, video_tags
+            )
+            if overlap_reason:
+                reasons.append(overlap_reason)
+                breakdown.append({'component': 'tag_overlap', 'adjustment': round(confidence - prev, 4), 'reason': overlap_reason})
 
         # 10. Chapter coherence penalty (US-71-004)
         if chapter_source_counts is not None:
