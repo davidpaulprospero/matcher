@@ -158,6 +158,8 @@ class TieredMatcher:
 
         # US-75-006: Track unique video sources per voiceover chapter for coherence penalty
         self._chapter_source_counts: Dict[int, set] = {}
+        # US-75-010: Per-segment chapter index mapping (set by match_all_segments)
+        self.segment_chapter_map: Dict[int, int] = {}
         mc = self.config.matching
 
         # Matching thresholds

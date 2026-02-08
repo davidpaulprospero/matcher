@@ -42,7 +42,8 @@ def match_all_segments(
     video_topics: Optional[Dict[str, 'VideoTopics']] = None,
     location_chapters: Optional[List['LocationChapter']] = None,
     video_locations: Optional[Dict[str, 'GeoLocation']] = None,
-    video_metadata: Optional[Dict[str, Dict[str, Any]]] = None
+    video_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
+    listicle_groups: Optional[List] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -89,7 +90,8 @@ def match_all_segments(
     from .tiered_matcher import TieredMatcher
 
     matcher = TieredMatcher(config, cache, video_topics=video_topics,
-                            video_metadata=video_metadata)
+                            video_metadata=video_metadata,
+                            listicle_groups=listicle_groups)
 
     # Set up location-aware matching if provided
     if location_chapters:
@@ -276,6 +278,10 @@ def match_all_segments(
             end = getattr(ch, 'end_segment_idx', 0)
             for seg_idx in range(start, end + 1):
                 vo_segment_chapter_map[seg_idx] = ch_id
+
+    # US-75-010: Pass segment_chapter_map to TieredMatcher for per-segment chapter lookups
+    if vo_segment_chapter_map:
+        matcher.segment_chapter_map = vo_segment_chapter_map
 
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Log first segment to confirm loop started

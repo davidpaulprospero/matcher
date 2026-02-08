@@ -154,8 +154,8 @@
       "id": "US-75-010",
       "title": "Propagate chapter and listicle state from detection to match stage",
       "priority": "medium",
-      "passes": false,
-      "notes": "Tier: INFRASTRUCTURE. Chapter detection runs in caption_stage and produces chapter data. Listicle detection also runs there. The results need to flow into match_all_segments so TieredMatcher can use them for chapter_topic_match, chapter_source_consistency, chapter_coherence, and listicle_consistency. Currently match stage receives location_chapters but not the full chapter/listicle context needed for scoring. Files: src/stages/match.py (run method - where match_all_segments is called), src/stages/caption_stage.py (where chapters are detected), src/matching/main.py (match_all_segments signature), src/checkpoint.py (chapter data in checkpoint).",
+      "passes": true,
+      "notes": "Wired listicle_groups from match stage through match_all_segments to TieredMatcher constructor. Added segment_chapter_map as TieredMatcher instance attribute, set from vo_segment_chapter_map built in match_all_segments. chapter_source_counts already tracked internally. 14 unit tests in test_match_chapter_listicle_propagation.py.",
       "acceptanceCriteria": [
         "match_all_segments receives listicle_groups parameter from match stage",
         "TieredMatcher constructor accepts and stores listicle_groups",

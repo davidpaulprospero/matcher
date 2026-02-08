@@ -732,6 +732,9 @@ class MatchStage(Stage):
         if video_metadata:
             logger.info(f"US-75-009: Built video_metadata for {len(video_metadata)} videos")
 
+        # US-75-010: Pass listicle_groups from state to match_all_segments
+        listicle_groups = getattr(state, 'listicle_groups', None)
+
         matches = match_all_segments(
             voiceover_segments=vo_segments,
             video_segments=video_segments,
@@ -745,7 +748,8 @@ class MatchStage(Stage):
             video_topics=None,
             location_chapters=getattr(state, 'location_chapters', None),
             video_locations=None,
-            video_metadata=video_metadata
+            video_metadata=video_metadata,
+            listicle_groups=listicle_groups
         )
 
         return matches
