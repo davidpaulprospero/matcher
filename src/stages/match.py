@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
 from ..logger import get_global_logger
-from ..matching.scoring import get_multimodal_tracker
+from ..matching.scoring import get_multimodal_tracker, aggregate_chapter_diagnostics, log_chapter_diagnostics
 from ..matching.serialization import serialize_match_for_match_stage
 from ..utils import is_embeddings_empty
 
@@ -191,6 +191,13 @@ class MatchStage(Stage):
             # US-71-009: Serialize chapter/listicle data for checkpoint persistence
             chapter_data = self._serialize_chapter_data(state)
 
+            # US-76-006: Aggregate and log cross-chapter coherence diagnostics
+            chapter_diagnostics = aggregate_chapter_diagnostics(
+                matches=matches,
+                chapters=getattr(state, 'location_chapters', None),
+            )
+            log_chapter_diagnostics(chapter_diagnostics)
+
             checkpoint_data = {
                 'match_count': len(matches),
                 'avg_confidence': avg_conf,
@@ -199,6 +206,7 @@ class MatchStage(Stage):
                 'diversity_metrics': diversity_report.to_dict(),  # US-53-005: Source diversity per track
                 'trend_data': confidence_trend.to_dict(),  # US-63-010: Confidence trend for post-run analysis
                 'chapter_data': chapter_data,  # US-71-009: Chapter/listicle detection results
+                'chapter_diagnostics': chapter_diagnostics,  # US-76-006: Cross-chapter coherence diagnostics
             }
 
             return StageResult.ok(checkpoint_data, warnings)

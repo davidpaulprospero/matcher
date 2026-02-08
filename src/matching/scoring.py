@@ -1431,6 +1431,148 @@ def apply_listicle_consistency(
     return min(1.0, confidence + boost), reason
 
 
+def aggregate_chapter_diagnostics(
+    matches: List[Any],
+    chapters: Optional[List[Any]] = None,
+    coherence_threshold: int = _DEFAULT_COHERENCE_THRESHOLD,
+) -> dict:
+    """
+    Aggregate cross-chapter coherence diagnostics after a full matching pass (US-76-006).
+
+    Builds per-chapter source counts from match results and computes scatter
+    metrics. Returns a summary dict suitable for checkpoint persistence and
+    logging.
+
+    Args:
+        matches: List of Match/MatchResult objects from matching.
+        chapters: Optional list of chapter objects (ChapterCandidate or dicts).
+        coherence_threshold: Number of unique sources before a chapter is
+            considered "scattered" (default 5).
+
+    Returns:
+        Dict with keys:
+            total_chapters (int): Number of distinct chapters detected in matches.
+            avg_source_consistency (float): Mean (1 / unique_source_count) across
+                chapters — higher means more consistent.
+            chapters_exceeding_threshold (int): Count of chapters with more unique
+                sources than *coherence_threshold*.
+            top_scattered (list[dict]): Up to 3 most-scattered chapters, each with
+                'chapter_index', 'source_count', and 'sources' keys.
+            per_chapter (dict[int, dict]): Per-chapter detail with 'source_count'
+                and 'sources' — intended for DEBUG logging.
+    """
+    # Build chapter_index -> set(source) from matches
+    chapter_sources: dict = {}
+
+    for m in matches or []:
+        # Handle MatchResult (has primary_match) and plain Match
+        match_obj = getattr(m, 'primary_match', m) if m else None
+        if match_obj is None:
+            continue
+
+        vo_seg = getattr(match_obj, 'voiceover_segment', None)
+        vid_seg = getattr(match_obj, 'video_segment', None)
+        if vo_seg is None or vid_seg is None:
+            continue
+
+        chapter_idx = getattr(vo_seg, 'chapter_index', None)
+        if chapter_idx is None or chapter_idx < 0:
+            continue
+
+        source = getattr(vid_seg, 'source_file', None)
+        if not source:
+            continue
+
+        if chapter_idx not in chapter_sources:
+            chapter_sources[chapter_idx] = set()
+        chapter_sources[chapter_idx].add(source)
+
+    total_chapters = len(chapter_sources)
+
+    if total_chapters == 0:
+        return {
+            'total_chapters': 0,
+            'avg_source_consistency': 1.0,
+            'chapters_exceeding_threshold': 0,
+            'top_scattered': [],
+            'per_chapter': {},
+        }
+
+    # Per-chapter detail
+    per_chapter: dict = {}
+    for ch_idx, sources in chapter_sources.items():
+        per_chapter[ch_idx] = {
+            'source_count': len(sources),
+            'sources': sorted(sources),
+        }
+
+    # Avg source consistency: mean of 1/source_count (1.0 = single source = perfect)
+    consistency_values = [1.0 / len(s) for s in chapter_sources.values()]
+    avg_consistency = sum(consistency_values) / len(consistency_values)
+
+    # Chapters exceeding threshold
+    exceeding = sum(
+        1 for s in chapter_sources.values() if len(s) > coherence_threshold
+    )
+
+    # Top 3 most scattered (highest source_count)
+    sorted_chapters = sorted(
+        chapter_sources.items(), key=lambda x: len(x[1]), reverse=True
+    )
+    top_scattered = []
+    for ch_idx, sources in sorted_chapters[:3]:
+        top_scattered.append({
+            'chapter_index': ch_idx,
+            'source_count': len(sources),
+            'sources': sorted(sources),
+        })
+
+    return {
+        'total_chapters': total_chapters,
+        'avg_source_consistency': round(avg_consistency, 4),
+        'chapters_exceeding_threshold': exceeding,
+        'top_scattered': top_scattered,
+        'per_chapter': per_chapter,
+    }
+
+
+def log_chapter_diagnostics(diagnostics: dict) -> None:
+    """
+    Log chapter diagnostics at INFO (summary) and DEBUG (per-chapter) levels (US-76-006).
+
+    Args:
+        diagnostics: Dict returned by aggregate_chapter_diagnostics().
+    """
+    total = diagnostics.get('total_chapters', 0)
+    if total == 0:
+        logger.info("Chapter diagnostics: no chapters detected in matches")
+        return
+
+    avg_cons = diagnostics.get('avg_source_consistency', 0)
+    exceeding = diagnostics.get('chapters_exceeding_threshold', 0)
+    top = diagnostics.get('top_scattered', [])
+
+    scattered_summary = ""
+    if top:
+        parts = [f"ch{t['chapter_index']}({t['source_count']} srcs)" for t in top]
+        scattered_summary = f", top scattered: {', '.join(parts)}"
+
+    logger.info(
+        f"Chapter diagnostics: {total} chapters, "
+        f"avg_consistency={avg_cons:.2f}, "
+        f"{exceeding} exceeding threshold"
+        f"{scattered_summary}"
+    )
+
+    # DEBUG: per-chapter detail
+    per_chapter = diagnostics.get('per_chapter', {})
+    for ch_idx, detail in sorted(per_chapter.items()):
+        logger.debug(
+            f"  chapter {ch_idx}: {detail['source_count']} sources "
+            f"({', '.join(detail['sources'][:5])}{'...' if len(detail['sources']) > 5 else ''})"
+        )
+
+
 def _extract_entity_texts(segment: SRTSegment) -> List[str]:
     """
     Extract entity text values from a segment.

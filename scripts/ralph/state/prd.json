@@ -94,7 +94,7 @@
       "id": "US-76-006",
       "title": "Add cross-chapter coherence diagnostics logging",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "After apply_all_adjustments completes for a full matching pass, a summary log line reports: total chapters detected, avg source consistency score, chapters exceeding coherence_penalty_threshold, and top 3 most-scattered chapters",
         "Diagnostic info is added to the match stage's checkpoint data under a 'chapter_diagnostics' key",
@@ -103,7 +103,7 @@
         "Unit test: checkpoint data contains chapter_diagnostics dict with expected keys",
         "Unit test: diagnostics gracefully handle zero chapters (no chapter detection)"
       ],
-      "notes": "Tier: diagnostics. Source files: src/matching/scoring.py (after apply_all_adjustments around line 3400 -- add diagnostic aggregation), src/stages/match.py (where match results are saved to checkpoint -- add chapter_diagnostics). Currently chapter_coherence_penalty fires per-candidate but no aggregated view exists. Test file: tests/test_matching_scoring.py or new test_chapter_diagnostics.py."
+      "notes": "Added aggregate_chapter_diagnostics() and log_chapter_diagnostics() to scoring.py. Wired into match stage checkpoint data under 'chapter_diagnostics' key. INFO log shows total chapters, avg consistency, exceeding count, top 3 scattered. DEBUG log shows per-chapter source detail. 16 tests in test_chapter_diagnostics.py all pass."
     },
     {
       "id": "US-76-007",
