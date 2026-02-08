@@ -1,0 +1,221 @@
+"""
+Listicle Structure Detection in Voiceover Narration
+
+Detects list-style structure in voiceover segments by identifying:
+- Ordinal markers: 'first', 'second', 'third', 'finally', 'lastly'
+- Numbered markers: '#1', 'number one', 'step 1', 'item 1'
+- Transition markers: 'next up', 'moving on to', "let's talk about"
+
+Returns ListicleGroup objects representing each detected list item.
+"""
+
+import re
+from typing import List, Optional, Tuple, Any
+
+from .models import ListicleGroup
+
+
+# Ordinal words mapped to their sequence position (for ordering)
+ORDINAL_WORDS = {
+    'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+    'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
+    'firstly': 1, 'secondly': 2, 'thirdly': 3,
+    'finally': -1,  # Terminal marker
+    'lastly': -1,   # Terminal marker
+    'last': -1,     # Terminal marker
+}
+
+# Patterns for ordinal markers at segment boundaries
+# Match at start of text (with optional leading punctuation/whitespace)
+ORDINAL_PATTERN = re.compile(
+    r'^\s*(?:and\s+)?(?:the\s+)?(' +
+    '|'.join(re.escape(w) for w in ORDINAL_WORDS) +
+    r')\b',
+    re.IGNORECASE
+)
+
+# Patterns for numbered markers: #1, number 1, step 1, item 1, no. 1, etc.
+NUMBERED_PATTERNS = [
+    re.compile(r'^\s*#\s*(\d+)\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:number|num\.?)\s+(\w+)\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:step|item|point|reason|tip|thing|way)\s+(\w+)\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:no\.?|n°)\s*(\d+)\b', re.IGNORECASE),
+]
+
+# Number words for "number one", "step two", etc.
+NUMBER_WORDS = {
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+}
+
+# Transition marker patterns
+TRANSITION_PATTERNS = [
+    re.compile(r'^\s*next\s+up\b', re.IGNORECASE),
+    re.compile(r'^\s*moving\s+on\s+to\b', re.IGNORECASE),
+    re.compile(r"^\s*let'?s\s+talk\s+about\b", re.IGNORECASE),
+    re.compile(r"^\s*let'?s\s+move\s+on\s+to\b", re.IGNORECASE),
+    re.compile(r'^\s*now\s+(?:for|let\'?s\s+look\s+at)\b', re.IGNORECASE),
+    re.compile(r'^\s*another\s+(?:thing|reason|way|tip|point)\b', re.IGNORECASE),
+    re.compile(r'^\s*on\s+to\s+(?:the\s+)?(?:next|our\s+next)\b', re.IGNORECASE),
+]
+
+
+def _extract_topic_keywords(text: str, max_keywords: int = 5) -> List[str]:
+    """Extract simple topic keywords from segment text."""
+    # Remove common stop words and short words
+    stop_words = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
+        'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
+        'neither', 'each', 'every', 'all', 'any', 'few', 'more', 'most',
+        'other', 'some', 'such', 'no', 'only', 'own', 'same', 'than',
+        'too', 'very', 'just', 'also', 'now', 'then', 'here', 'there',
+        'when', 'where', 'why', 'how', 'what', 'which', 'who', 'whom',
+        'this', 'that', 'these', 'those', 'it', 'its', 'of', 'in', 'to',
+        'for', 'with', 'on', 'at', 'from', 'by', 'about', 'as', 'into',
+        'through', 'during', 'before', 'after', 'above', 'below', 'up',
+        'down', 'out', 'off', 'over', 'under', 'again', 'further',
+        'we', 'you', 'he', 'she', 'they', 'me', 'him', 'her', 'us', 'them',
+        'my', 'your', 'his', 'our', 'their', 'i',
+    }
+    words = re.findall(r'[a-zA-Z]+', text.lower())
+    keywords = [w for w in words if w not in stop_words and len(w) > 3]
+    # Return unique keywords preserving order
+    seen = set()
+    unique = []
+    for w in keywords:
+        if w not in seen:
+            seen.add(w)
+            unique.append(w)
+    return unique[:max_keywords]
+
+
+def _detect_ordinal(text: str) -> Optional[Tuple[str, str]]:
+    """
+    Detect ordinal marker at start of text.
+
+    Returns (marker_type, label) or None.
+    marker_type is 'ordinal'.
+    """
+    match = ORDINAL_PATTERN.match(text)
+    if match:
+        word = match.group(1).lower()
+        return ('ordinal', word)
+    return None
+
+
+def _detect_numbered(text: str) -> Optional[Tuple[str, str]]:
+    """
+    Detect numbered marker at start of text.
+
+    Returns (marker_type, label) or None.
+    marker_type is 'numbered'.
+    """
+    for pattern in NUMBERED_PATTERNS:
+        match = pattern.match(text)
+        if match:
+            value = match.group(1)
+            # Reconstruct the full label from the pattern match
+            full_match = match.group(0).strip()
+            return ('numbered', full_match)
+    return None
+
+
+def _detect_transition(text: str) -> Optional[Tuple[str, str]]:
+    """
+    Detect transition marker at start of text.
+
+    Returns (marker_type, label) or None.
+    marker_type is 'transition'.
+    """
+    for pattern in TRANSITION_PATTERNS:
+        match = pattern.match(text)
+        if match:
+            return ('transition', match.group(0).strip())
+    return None
+
+
+def _get_segment_text(segment: Any) -> str:
+    """Extract text from a segment, handling both objects and dicts."""
+    if isinstance(segment, dict):
+        return segment.get('text', '')
+    return getattr(segment, 'text', '')
+
+
+def _get_segment_index(segment: Any, position: int) -> int:
+    """Extract index from a segment, falling back to position."""
+    if isinstance(segment, dict):
+        return segment.get('index', position)
+    return getattr(segment, 'index', position)
+
+
+def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
+    """
+    Detect listicle (list-style) structure in voiceover segments.
+
+    Scans segment text for ordinal markers, numbered markers, and transition
+    markers to identify list items. Each detected marker starts a new group
+    that extends until the next marker or end of segments.
+
+    Args:
+        segments: List of VoiceoverSegment objects (or dicts with 'text' field)
+
+    Returns:
+        List[ListicleGroup] representing detected list items.
+        Empty list if no listicle structure detected.
+        Requires at least 2 markers to confirm listicle structure.
+    """
+    if not segments:
+        return []
+
+    # First pass: find all marker positions
+    markers: List[Tuple[int, str, str]] = []  # (position, marker_type, label)
+
+    for i, segment in enumerate(segments):
+        text = _get_segment_text(segment)
+        if not text:
+            continue
+
+        # Try each marker type in priority order
+        result = _detect_ordinal(text)
+        if result is None:
+            result = _detect_numbered(text)
+        if result is None:
+            result = _detect_transition(text)
+
+        if result is not None:
+            marker_type, label = result
+            markers.append((i, marker_type, label))
+
+    # Need at least 2 markers to confirm listicle structure
+    if len(markers) < 2:
+        return []
+
+    # Second pass: build groups from markers
+    groups: List[ListicleGroup] = []
+
+    for idx, (pos, marker_type, label) in enumerate(markers):
+        # Determine end of this group: next marker start - 1, or end of segments
+        if idx + 1 < len(markers):
+            end_pos = markers[idx + 1][0] - 1
+        else:
+            end_pos = len(segments) - 1
+
+        # Collect topic keywords from all segments in this group
+        all_text = ' '.join(
+            _get_segment_text(segments[j])
+            for j in range(pos, min(end_pos + 1, len(segments)))
+        )
+        topic_keywords = _extract_topic_keywords(all_text)
+
+        group = ListicleGroup(
+            group_id=idx,
+            item_label=label,
+            start_segment_idx=_get_segment_index(segments[pos], pos),
+            end_segment_idx=_get_segment_index(segments[end_pos], end_pos),
+            topic_keywords=topic_keywords,
+        )
+        groups.append(group)
+
+    return groups

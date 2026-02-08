@@ -181,6 +181,39 @@ class MissedChapter:
 
 
 @dataclass
+class ListicleGroup:
+    """
+    A detected listicle item within a voiceover narration.
+
+    Represents a single item in a list-style narration (e.g., "Top 10 reasons...",
+    "Step 1... Step 2..."). Groups consecutive segments that belong to the same
+    listicle item.
+    """
+    group_id: int = 0                      # Sequential ID within the listicle
+    item_label: str = ""                   # Detected label (e.g., "first", "#3", "step 2")
+    start_segment_idx: int = 0
+    end_segment_idx: int = 0
+    topic_keywords: List[str] = field(default_factory=list)  # Key topics in this item
+
+    @property
+    def segment_count(self) -> int:
+        return self.end_segment_idx - self.start_segment_idx + 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ListicleGroup":
+        return cls(
+            group_id=data.get('group_id', 0),
+            item_label=data.get('item_label', ''),
+            start_segment_idx=data.get('start_segment_idx', 0),
+            end_segment_idx=data.get('end_segment_idx', 0),
+            topic_keywords=data.get('topic_keywords', []),
+        )
+
+
+@dataclass
 class DetectionResult:
     """Complete result from chapter detection pipeline."""
     chapters: List[ChapterCandidate]
