@@ -1,4 +1,4 @@
-{
+﻿{
   "sprintNumber": 73,
   "focusArea": "caption",
   "branchName": "ralph/sprint-73",
@@ -154,7 +154,7 @@
       ],
       "passes": true,
       "priority": "low",
-      "notes": "Implementation: analyze_caption_coverage() in src/caption/models.py with CoverageAnalysis dataclass. CaptionResult.coverage_analysis property with lazy caching via object.__setattr__. WARNING log on <0.7 coverage. 14 unit tests covering full/partial/large gaps/edge cases."
+      "notes": "All 5 criteria verified. analyze_caption_coverage() in src/caption/models.py computes all required fields. Gaps >2s detected between consecutive segments. CaptionResult.coverage_analysis property is lazily computed and cached. WARNING emitted when coverage_ratio < 0.7. 14 unit tests pass covering full/partial/large gaps."
     },
     {
       "id": "US-73-011",
@@ -166,9 +166,9 @@
         "Chapter metadata survives OTIO serialization and deserialization round-trip",
         "Unit test verifies chapter metadata appears on clips and survives round-trip"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "low",
-      "notes": "Tier: Output polish. Files: src/otio/otio_builder.py, src/otio/xml_export.py. When editors open the timeline in DaVinci Resolve, knowing which YouTube chapter a clip came from helps them understand the source context. This is metadata-only - no behavioral change to matching or scoring."
+      "notes": "Added chapter metadata to OTIO clips (metadata[\"chapter\"]) and XML export (<comment> element). 7/7 tests pass. Chapter survives OTIO round-trip serialization."
     },
     {
       "id": "US-73-012",
