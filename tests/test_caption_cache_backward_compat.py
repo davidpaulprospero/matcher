@@ -52,7 +52,7 @@ def _make_new_cache_dict(**overrides) -> dict:
 
 
 class TestCachedCaptionBackwardCompat:
-    """CachedCaption.from_dict() handles missing metadata fields gracefully."""
+    """CachedCaption.from_dict() (equivalent deserialization for CaptionResult) handles missing metadata fields gracefully."""
 
     def test_old_cache_without_metadata_defaults_empty(self):
         """Old cache entries without metadata fields load with empty defaults."""
@@ -71,6 +71,45 @@ class TestCachedCaptionBackwardCompat:
             data = _make_old_cache_dict()
             CachedCaption.from_dict(data)
         assert len(caplog.records) == 0
+
+    def test_caption_result_deserialization_handles_missing_metadata(self):
+        """CaptionResult deserialization (via CachedCaption.from_dict) gracefully handles
+        missing video_description, video_chapters, and video_tags by defaulting to '' and []."""
+        data = _make_old_cache_dict()
+        # No video_description, video_chapters, or video_tags keys at all
+        assert 'video_description' not in data
+        assert 'video_chapters' not in data
+        assert 'video_tags' not in data
+
+        # Deserialize through the full path: dict -> CachedCaption -> CaptionResult
+        cached = CachedCaption.from_dict(data)
+        result = cached.to_caption_result()
+
+        # CaptionResult gets safe defaults
+        assert result.video_description == ''
+        assert result.video_chapters == []
+        assert result.video_tags == []
+        # Core fields still intact
+        assert result.video_id == 'abc123'
+        assert len(result.segments) == 1
+
+    def test_existing_cached_results_without_metadata_load_clean(self, caplog):
+        """Existing cached caption results without metadata fields load without errors or warnings.
+        Simulates loading an old cache entry created before US-70-002 metadata fields were added."""
+        import logging
+        data = _make_old_cache_dict()
+        with caplog.at_level(logging.DEBUG):
+            cached = CachedCaption.from_dict(data)
+            result = cached.to_caption_result()
+
+        # No warnings or errors at any log level
+        warning_or_error = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_or_error) == 0
+        # Result is valid and usable
+        assert result.video_id == 'abc123'
+        assert result.video_description == ''
+        assert result.video_chapters == []
+        assert result.video_tags == []
 
     def test_new_cache_with_metadata_preserves_fields(self):
         """New cache entries with metadata fields are preserved."""
