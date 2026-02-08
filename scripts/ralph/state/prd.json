@@ -109,8 +109,8 @@
       "id": "US-75-007",
       "title": "Wire listicle_consistency adjustment into TieredMatcher scoring pipeline",
       "priority": "medium",
-      "passes": false,
-      "notes": "Tier: WIRE-UP. Listicle detector (src/chapter_detection/listicle_detector.py) and bridge (src/chapter_detection/bridge.py) exist and produce ListicleGroup objects. The scoring function for listicle consistency exists in apply_all_adjustments but is unreachable. Listicle groups need to be passed through from detection to the TieredMatcher scoring calls. Files: src/matching/tiered_matcher.py (scoring block), src/matching/scoring.py (listicle_consistency section in apply_all_adjustments), src/chapter_detection/listicle_detector.py, src/chapter_detection/bridge.py.",
+      "passes": true,
+      "notes": "Standalone apply_listicle_consistency function created in scoring.py. Wired into all 3 TieredMatcher scoring paths (obvious, high-embedding, LLM). TieredMatcher.__init__ accepts listicle_groups parameter. 10 unit tests pass in test_listicle_consistency_us75007.py.",
       "acceptanceCriteria": [
         "TieredMatcher receives listicle_groups from the match stage",
         "listicle_consistency adjustment fires for segments within detected listicle groups",
