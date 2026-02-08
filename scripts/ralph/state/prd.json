@@ -107,7 +107,7 @@
                             "id":  "US-70-007",
                             "title":  "Enrich LLM reranker prompt with video title and description context",
                             "priority":  "high",
-                            "passes":  true,
+                            "passes":  false,
                             "acceptanceCriteria":  [
                                                        "LLMReranker.rerank() in src/matching/llm_reranker.py includes video title in candidate descriptions sent to LLM",
                                                        "When video description is available, first sentence (up to 100 chars) is appended as context: \u0027Video context: {title}. {first_sentence}\u0027",
@@ -115,13 +115,13 @@
                                                        "When title/description are empty, format falls back to current behavior (caption text only)",
                                                        "Unit tests verify prompt construction with and without video context"
                                                    ],
-                            "notes":  "All 11 tests pass. Implementation uses _build_video_context() and _enrich_candidates_with_context() methods."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-70-008",
                             "title":  "Prepend video title to caption text for title-enriched embeddings",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "In src/stages/caption_stage.py _populate_text_metadata(), when context_enrichment.title_enriched_embeddings is True, prepend \u0027[{video_title}] \u0027 to segment text before embedding computation",
                                                        "Original caption text is preserved separately for display/matching - only embedding input is modified",
@@ -129,7 +129,7 @@
                                                        "Config toggle matching.context_enrichment.title_enriched_embeddings controls this behavior with getattr fallback",
                                                        "Unit tests verify embedding text construction with and without title prefix"
                                                    ],
-                            "notes":  "Tier: core (Area 2). Files: src/stages/caption_stage.py (lines 1700-1778, _populate_text_metadata method). The title prefix gives the embedding model richer context about what the video segment is about, improving semantic search quality. Must ensure the original text field is not mutated - only the text sent to the embedding model should have the prefix. VideoSearchResult.title is available in the caption stage context."
+                            "notes":  "All 5/5 criteria verified. Added optional config parameter to _populate_text_metadata() in caption_stage.py. When matching.context_enrichment.title_enriched_embeddings is True, builds title lookup from state.video_search_results and adds embedding_text field with '[{title}] {text}' format to text_metadata entries. Original text preserved - match stage uses getattr(seg, 'embedding_text', seg.text) for embedding computation. 9 unit tests verify all edge cases (disabled, no config, empty title, multiple videos, dict search results). All 78 existing caption tests pass."
                         },
                         {
                             "id":  "US-70-009",
