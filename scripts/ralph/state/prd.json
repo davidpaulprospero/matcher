@@ -64,7 +64,7 @@
             "id": "US-76-004",
             "title": "Enable and validate description-enriched embeddings",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Config default for description_enriched_embeddings changed from false to true in ContextEnrichmentConfig",
                 "config.yaml updated to set description_enriched_embeddings: true",
@@ -73,7 +73,7 @@
                 "Unit test: embedding text unchanged when video has no description (empty string)",
                 "Unit test: description keywords are extracted using _extract_topic_keywords (reuse from listicle_detector or equivalent)"
             ],
-            "notes": "Tier: quality improvement. Source files: src/config/sections/matching.py (line 182 -- change default to True), config.yaml (context_enrichment section around line 590 -- change to true), src/stages/caption_stage.py (lines 1763-1770 and 1844+ where description_enriched flag is read and applied). The feature code already exists at caption_stage.py:1844 but is disabled by default. This story enables it and adds proper keyword extraction instead of raw description text. Test files: tests/test_title_enriched_embeddings.py (extend for description)."
+            "notes": "Enabled description_enriched_embeddings by default (config + yaml), changed embedding format to [desc: kw1 kw2 kw3] with top 3 keywords, updated/added tests (12 pass)"
         },
         {
             "id": "US-76-005",

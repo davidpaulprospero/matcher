@@ -1842,9 +1842,9 @@ class CaptionStage(Stage):
                         embed_text = f'[{video_title}] {seg_text}'
                     # US-75-011: Append description keywords when enabled
                     if description_enriched and video_description:
-                        desc_kw = self._extract_description_keywords(video_description)
+                        desc_kw = self._extract_description_keywords(video_description, max_keywords=3)
                         if desc_kw:
-                            embed_text = f'{embed_text} [{" ".join(desc_kw)}]'
+                            embed_text = f'{embed_text} [desc: {" ".join(desc_kw)}]'
                     entry['embedding_text'] = embed_text
                 text_metadata.append(entry)
 

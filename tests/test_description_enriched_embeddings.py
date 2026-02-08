@@ -89,8 +89,12 @@ class TestDescriptionEnrichedEmbeddings:
         embed = entry['embedding_text']
         # Should start with title prefix
         assert embed.startswith('[Wildlife Documentary]')
-        # Should contain keyword bracket suffix
-        assert embed.count('[') >= 2  # title bracket + keyword bracket
+        # Should contain [desc: ...] suffix with top 3 keywords
+        assert '[desc:' in embed
+        # Extract the desc bracket content
+        desc_part = embed.split('[desc: ')[1].rstrip(']')
+        desc_keywords = desc_part.split()
+        assert len(desc_keywords) <= 3  # Top 3 keywords max
         # Original text preserved
         assert entry['text'] == 'hello world'
 
@@ -219,3 +223,46 @@ class TestDescriptionEnrichedEmbeddings:
             'subscribe to the channel and like this video'
         )
         assert keywords == []
+
+    @pytest.mark.fast
+    def test_integration_uses_top_3_keywords_with_desc_prefix(self):
+        """Integration: _populate_text_metadata appends top 3 description keywords with [desc:] prefix."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='Nature Film')
+            ]
+        )
+        description = (
+            'conservation conservation conservation conservation '
+            'wildlife wildlife wildlife '
+            'elephants elephants '
+            'giraffes '
+            'rhinos'
+        )
+        caption_results = _make_caption_results(
+            'abc123',
+            [{'text': 'hello world', 'start': 0, 'end': 5}],
+            video_description=description,
+        )
+        config = _make_config(title_enriched=True, description_enriched=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        embed = entry['embedding_text']
+        # Should contain exactly [desc: kw1 kw2 kw3] with top 3 by frequency
+        assert '[desc: conservation wildlife elephants]' in embed
+        # Should NOT contain 4th or 5th keywords
+        assert 'giraffes' not in embed
+        assert 'rhinos' not in embed
+
+    @pytest.mark.fast
+    def test_extract_description_keywords_returns_frequency_ordered(self):
+        """_extract_description_keywords returns keywords ordered by frequency (reusable extraction)."""
+        stage = _get_stage()
+        keywords = stage._extract_description_keywords(
+            'photography photography landscape landscape landscape travel',
+            max_keywords=3,
+        )
+        assert keywords == ['landscape', 'photography', 'travel']

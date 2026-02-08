@@ -588,7 +588,7 @@ matching:
     parse_description_chapters: true   # Parse chapter timestamps from description text
     title_enriched_embeddings: true    # Include title+description in embedding generation
     chapter_enriched_embeddings: true  # Include chapter title in embedding text (e.g. '[Title | Chapter] text')
-    description_enriched_embeddings: false  # Append top description keywords to embedding text (changes cache)
+    description_enriched_embeddings: true   # Append top description keywords to embedding text (changes cache)
 
   # Chapter-level source grouping (US-70-011)
   # Within voiceover chapters, reusing the same video source is desirable for continuity.
