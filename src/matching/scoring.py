@@ -2090,10 +2090,9 @@ class MatchScoring:
     # Chapter source consistency default (US-70-011)
     DEFAULT_SOURCE_CONSISTENCY_BOOST = 0.03
 
-    # Tag keyword boost thresholds (US-71-003)
-    TAG_KEYWORD_BOOST_1 = 0.02   # 1 tag match
-    TAG_KEYWORD_BOOST_2 = 0.04   # 2 tag matches
-    TAG_KEYWORD_BOOST_3_PLUS = 0.06  # 3+ tag matches
+    # Tag keyword boost (US-72-005): +0.02 per matching tag, capped at +0.08
+    TAG_KEYWORD_BOOST_PER_TAG = 0.02
+    TAG_KEYWORD_BOOST_CAP = 0.08
 
     # Chapter coherence penalty (US-71-004)
     CHAPTER_COHERENCE_PENALTY_PER_SOURCE = -0.03  # Penalty per excess source
@@ -2257,12 +2256,7 @@ class MatchScoring:
         if match_count == 0:
             return confidence, ""
 
-        if match_count >= 3:
-            boost = self.TAG_KEYWORD_BOOST_3_PLUS
-        elif match_count == 2:
-            boost = self.TAG_KEYWORD_BOOST_2
-        else:
-            boost = self.TAG_KEYWORD_BOOST_1
+        boost = min(match_count * self.TAG_KEYWORD_BOOST_PER_TAG, self.TAG_KEYWORD_BOOST_CAP)
 
         matched_words = ', '.join(sorted(overlap)[:5])
         reason = f"tag keyword boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"

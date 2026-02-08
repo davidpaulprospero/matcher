@@ -2078,17 +2078,30 @@ class TestTagKeywordBoost:
         assert "2 tags" in reason
 
     @pytest.mark.fast
-    def test_three_plus_tag_matches_boost(self, mock_config):
-        """3+ tag matches gives +0.06 boost."""
+    def test_three_tag_matches_boost(self, mock_config):
+        """3 tag matches gives +0.06 boost (3 * 0.02)."""
         scoring = MatchScoring(mock_config)
         vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
                         text="Tokyo travel guide panoramic")
         adjusted, reason = scoring.apply_tag_keyword_boost(
-            0.7, vo, video_tags=["tokyo", "travel", "guide", "panoramic"]
+            0.7, vo, video_tags=["tokyo", "travel", "guide"]
         )
         assert adjusted == pytest.approx(0.76, abs=0.001)
         assert "tag keyword boost +0.06" in reason
-        assert "3+" in reason or "tags" in reason
+        assert "3 tags" in reason
+
+    @pytest.mark.fast
+    def test_five_tag_matches_capped(self, mock_config):
+        """5 tag matches caps at +0.08 (not 5 * 0.02 = 0.10)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide panoramic scenic")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "travel", "guide", "panoramic", "scenic"]
+        )
+        assert adjusted == pytest.approx(0.78, abs=0.001)
+        assert "tag keyword boost +0.08" in reason
+        assert "5 tags" in reason
 
     @pytest.mark.fast
     def test_case_insensitive_tag_matching(self, mock_config):

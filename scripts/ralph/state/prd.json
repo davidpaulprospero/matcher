@@ -88,7 +88,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Pre-implemented in US-71-003. apply_tag_keyword_boost() exists with graduated boost (+0.02/+0.04/+0.06), lowercase normalization, confidence_breakdown integration, called from apply_all_adjustments(). 10 unit tests all passing."
+                            "notes":  "Updated to linear +0.02 per tag capped at +0.08. Tests cover 0, 1, 2, 3, 5 tags. Called from apply_all_adjustments with video_tags. Tags/keywords lowercased."
                         },
                         {
                             "id":  "US-72-006",
