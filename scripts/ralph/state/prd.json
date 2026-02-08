@@ -145,7 +145,7 @@
                             "id":  "US-77-010",
                             "title":  "Add confidence calibration using segment duration ratio",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "A new scoring adjustment apply_duration_ratio_calibration in src/matching/scoring.py adjusts confidence based on the ratio of video segment duration to voiceover segment duration",
                                                        "When video segment is \u003e3x longer than voiceover segment, apply a -0.03 penalty (excessive content, likely poor fit)",
@@ -154,7 +154,7 @@
                                                        "The adjustment appears in confidence_breakdown as \u0027duration_ratio_calibration\u0027",
                                                        "Tests verify: ratio 1.0 gives no penalty, ratio 5.0 gives -0.03, ratio 0.1 gives -0.05, missing duration data gives no penalty"
                                                    ],
-                            "notes":  "Tier: feature (small). apply_duration_penalty at src/matching/scoring.py:137 exists but uses speed_ratio (playback speed matching). This new adjustment is about content duration fit - a 2-second voiceover matched to a 30-second video segment is suspicious. Source files: src/matching/scoring.py (new function after ~line 560), src/matching/tiered_matcher.py (call in all 3 match paths), src/matching/scoring.py:3470 (add to apply_all_adjustments)."
+                            "notes":  "DONE. Added apply_duration_ratio_calibration() standalone function to scoring.py. Wired into apply_all_adjustments as step 12b (before confidence floor). Ratio >3.0x applies -0.03 penalty (excessive), <0.3x applies -0.05 penalty (too short). Gracefully handles missing/zero durations. 13 tests in test_duration_ratio_calibration.py covering all 6 acceptance criteria. All 76 scoring tests pass."
                         },
                         {
                             "id":  "US-77-011",

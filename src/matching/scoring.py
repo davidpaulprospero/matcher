@@ -601,6 +601,54 @@ def apply_current_project_boost(
     return penalized, reason
 
 
+def apply_duration_ratio_calibration(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+) -> Tuple[float, str]:
+    """
+    Apply confidence calibration based on the ratio of video segment duration
+    to voiceover segment duration.
+
+    A 2-second voiceover matched to a 30-second video is suspicious (excessive content).
+    A 30-second voiceover matched to a 3-second video needs heavy padding.
+
+    Args:
+        confidence: Original confidence score
+        vo_segment: Voiceover segment with duration info
+        video_segment: Video segment with duration info
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    vo_duration = getattr(vo_segment, 'duration', 0.0)
+    vid_duration = getattr(video_segment, 'duration', 0.0)
+
+    # If either duration is missing or zero, skip calibration
+    if not vo_duration or vo_duration <= 0 or not vid_duration or vid_duration <= 0:
+        return confidence, ""
+
+    ratio = vid_duration / vo_duration
+
+    if ratio > 3.0:
+        # Video much longer than voiceover — excessive content, likely poor fit
+        penalty = 0.03
+        adjusted = max(0.0, confidence - penalty)
+        reason = f"duration ratio calibration: -{penalty} (ratio={ratio:.1f}x, excessive)"
+        logger.info(f"Duration ratio calibration: {confidence:.2f} -> {adjusted:.2f} ({reason})")
+        return adjusted, reason
+    elif ratio < 0.3:
+        # Video much shorter than voiceover — will need heavy padding
+        penalty = 0.05
+        adjusted = max(0.0, confidence - penalty)
+        reason = f"duration ratio calibration: -{penalty} (ratio={ratio:.1f}x, too short)"
+        logger.info(f"Duration ratio calibration: {confidence:.2f} -> {adjusted:.2f} ({reason})")
+        return adjusted, reason
+
+    # Ratio between 0.3 and 3.0 — acceptable range, no adjustment
+    return confidence, ""
+
+
 def compute_duration_penalty(vo_segment: SRTSegment, video_segment: SRTSegment, config) -> float:
     """
     Compute confidence penalty based on speed change required.
@@ -3555,7 +3603,7 @@ class MatchScoring:
                -> chapter_topic_match
                -> chapter_source_consistency -> tag_keyword_boost
                -> chapter_coherence_penalty -> cross_chapter_relevance
-               -> listicle_consistency
+               -> listicle_consistency -> duration_ratio_calibration
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -3733,6 +3781,15 @@ class MatchScoring:
             if listicle_reason:
                 reasons.append(listicle_reason)
                 breakdown.append({'component': 'listicle_consistency', 'adjustment': round(confidence - prev, 4), 'reason': listicle_reason})
+
+        # 12b. Duration ratio calibration (US-77-010)
+        prev = confidence
+        confidence, duration_ratio_reason = apply_duration_ratio_calibration(
+            confidence, vo_segment, video_segment
+        )
+        if duration_ratio_reason:
+            reasons.append(duration_ratio_reason)
+            breakdown.append({'component': 'duration_ratio_calibration', 'adjustment': round(confidence - prev, 4), 'reason': duration_ratio_reason})
 
         # 13. Enforce minimum confidence floor (US-46-004, US-77-006)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
