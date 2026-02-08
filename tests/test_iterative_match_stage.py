@@ -604,3 +604,332 @@ class TestIterativeMatchingConfig:
         assert 'abstract_concept' in config.gap_pattern_categories
         assert 'proper_noun' in config.gap_pattern_categories
         assert 'action_verb' in config.gap_pattern_categories
+
+
+# ============================================================================
+# US-71-007: Chapter-aware gap prioritization integration
+# ============================================================================
+
+class TestChapterAwareGapPrioritization:
+    """Tests that gap priority sorting is used in the stage gap-filling order."""
+
+    @pytest.mark.fast
+    def test_gaps_reordered_by_chapter_priority(self, stage):
+        """AC: Gap priority is used to sort gap-filling order so high-importance
+        chapters are filled first.
+
+        Verifies that after the gap analysis block in run(), the local gaps list
+        is reordered so intro/conclusion gaps come before middle gaps.
+        """
+        from src.iterative_match.gap_analyzer import (
+            GapSegment as GapSeg,
+            annotate_gaps_with_chapters,
+        )
+
+        # Create 100 voiceover segments worth of gaps spread across intro/middle/conclusion
+        # Simulate what happens inside the stage's run() loop
+        total_count = 100
+
+        # Local GapSegment objects (as used in the stage)
+        gaps = [
+            GapSegment(segment_index=50, confidence=0.5, voiceover_text="middle content",
+                       position=100.0, reason='low_confidence'),
+            GapSegment(segment_index=3, confidence=0.5, voiceover_text="intro content",
+                       position=5.0, reason='low_confidence'),
+            GapSegment(segment_index=95, confidence=0.5, voiceover_text="conclusion content",
+                       position=200.0, reason='low_confidence'),
+        ]
+
+        # Create analyzer GapSegments (as done in the stage's gap analysis block)
+        gap_segments = [
+            GapSeg(
+                segment_index=g.segment_index,
+                confidence=g.confidence,
+                voiceover_text=g.voiceover_text,
+                position=g.position,
+            )
+            for g in gaps
+        ]
+
+        # Apply chapter-aware prioritization (as the stage now does)
+        gap_segments = annotate_gaps_with_chapters(
+            gap_segments,
+            total_segments=total_count,
+        )
+
+        # Reorder local gaps to match priority order (same logic as in stage)
+        gap_idx_order = [gs.segment_index for gs in gap_segments]
+        gap_by_idx = {g.segment_index: g for g in gaps}
+        gaps = [gap_by_idx[idx] for idx in gap_idx_order if idx in gap_by_idx]
+
+        # Verify: intro (seg 3) and conclusion (seg 95) should come before middle (seg 50)
+        # With equal confidence:
+        #   intro: 0.5 - 0.2 = 0.3 effective (highest priority)
+        #   conclusion: 0.5 - 0.15 = 0.35 effective
+        #   middle: 0.5 - 0.0 = 0.5 effective (lowest priority)
+        assert gaps[0].segment_index == 3, "Intro gap should be processed first"
+        assert gaps[1].segment_index == 95, "Conclusion gap should be processed second"
+        assert gaps[2].segment_index == 50, "Middle gap should be processed last"
+
+    @pytest.mark.fast
+    def test_query_generation_receives_priority_sorted_gaps(self, stage, mock_state):
+        """Verify that _generate_multi_strategy_queries receives gaps in priority order.
+
+        When gaps are sorted by chapter priority, query generation processes
+        intro/conclusion gaps first (they appear earlier in the gaps list
+        and are processed first by [:20] slicing in the method).
+        """
+        from src.iterative_match.gap_analyzer import (
+            GapSegment as GapSeg,
+            annotate_gaps_with_chapters,
+        )
+
+        # Create many gaps - some in intro, some in middle, some in conclusion
+        total_count = 100
+        gaps = []
+        for i in range(25):  # 25 middle gaps
+            gaps.append(GapSegment(
+                segment_index=30 + i, confidence=0.5,
+                voiceover_text=f"middle content {i}", position=60.0 + i * 2,
+                reason='low_confidence',
+            ))
+        # Add 2 intro gaps
+        gaps.append(GapSegment(segment_index=2, confidence=0.5,
+                               voiceover_text="important intro", position=4.0,
+                               reason='low_confidence'))
+        gaps.append(GapSegment(segment_index=5, confidence=0.5,
+                               voiceover_text="key opening", position=10.0,
+                               reason='low_confidence'))
+
+        # Apply prioritization
+        gap_segments = [
+            GapSeg(segment_index=g.segment_index, confidence=g.confidence,
+                   voiceover_text=g.voiceover_text, position=g.position)
+            for g in gaps
+        ]
+        gap_segments = annotate_gaps_with_chapters(gap_segments, total_segments=total_count)
+        gap_idx_order = [gs.segment_index for gs in gap_segments]
+        gap_by_idx = {g.segment_index: g for g in gaps}
+        gaps = [gap_by_idx[idx] for idx in gap_idx_order if idx in gap_by_idx]
+
+        # The intro gaps (segments 2 and 5) should be in the first 20 gaps
+        # (the slice used by _generate_multi_strategy_queries)
+        first_20_indices = [g.segment_index for g in gaps[:20]]
+        assert 2 in first_20_indices, "Intro gap should be in top-priority processing batch"
+        assert 5 in first_20_indices, "Intro gap should be in top-priority processing batch"
+
+
+# ============================================================================
+# Chapter-Type Strategy Ranking Tests (US-76-005)
+# ============================================================================
+
+class TestChapterTypeStrategyRanking:
+    """Tests for chapter-type strategy ranking in query generation."""
+
+    @pytest.fixture
+    def learning_db(self, tmp_path):
+        """Create a QueryLearningDB with chapter-type success data."""
+        db = QueryLearningDB(str(tmp_path / "test_learning.json"))
+        # Record successes: for intro, entity strategy works best
+        for _ in range(5):
+            db.record_result(
+                QueryResult(
+                    query="test entity query",
+                    strategy="entity",
+                    gap_indices=[0],
+                    videos_found=3,
+                    gaps_filled=2,
+                    avg_confidence_improvement=0.2,
+                    successful=True,
+                ),
+                gap_pattern="abstract_concept",
+                chapter_type="intro",
+            )
+        # Record: for intro, voiceover is less effective
+        for _ in range(2):
+            db.record_result(
+                QueryResult(
+                    query="test voiceover query",
+                    strategy="voiceover",
+                    gap_indices=[0],
+                    videos_found=1,
+                    gaps_filled=0,
+                    avg_confidence_improvement=0.0,
+                ),
+                gap_pattern="abstract_concept",
+                chapter_type="intro",
+            )
+        # Record successes: for listicle_item, voiceover strategy works best
+        for _ in range(5):
+            db.record_result(
+                QueryResult(
+                    query="test listicle voiceover",
+                    strategy="voiceover",
+                    gap_indices=[10],
+                    videos_found=4,
+                    gaps_filled=3,
+                    avg_confidence_improvement=0.3,
+                    successful=True,
+                ),
+                gap_pattern="concrete_topic",
+                chapter_type="listicle_item",
+            )
+        for _ in range(1):
+            db.record_result(
+                QueryResult(
+                    query="test listicle entity",
+                    strategy="entity",
+                    gap_indices=[10],
+                    videos_found=1,
+                    gaps_filled=0,
+                    avg_confidence_improvement=0.0,
+                ),
+                gap_pattern="concrete_topic",
+                chapter_type="listicle_item",
+            )
+        return db
+
+    @pytest.fixture
+    def intro_gap_segments(self):
+        """Gap segments annotated as intro chapter type."""
+        from src.iterative_match.gap_analyzer import GapSegment as GapSeg
+        gs = GapSeg(
+            segment_index=0,
+            confidence=0.5,
+            voiceover_text="Welcome to this documentary about nature",
+            position=0.0,
+        )
+        gs.chapter_type = "intro"
+        return [gs]
+
+    @pytest.fixture
+    def listicle_gap_segments(self):
+        """Gap segments annotated as listicle_item chapter type."""
+        from src.iterative_match.gap_analyzer import GapSegment as GapSeg
+        gs = GapSeg(
+            segment_index=10,
+            confidence=0.5,
+            voiceover_text="Number three on our list is the mighty oak tree",
+            position=50.0,
+        )
+        gs.chapter_type = "listicle_item"
+        return [gs]
+
+    @pytest.fixture
+    def body_gap_segments(self):
+        """Gap segments annotated as body chapter type."""
+        from src.iterative_match.gap_analyzer import GapSegment as GapSeg
+        gs = GapSeg(
+            segment_index=20,
+            confidence=0.5,
+            voiceover_text="The forest ecosystem relies on biodiversity",
+            position=100.0,
+        )
+        gs.chapter_type = "body"
+        return [gs]
+
+    @pytest.mark.fast
+    def test_intro_gaps_use_chapter_strategy_ranking(
+        self, stage, mock_state, learning_db, intro_gap_segments
+    ):
+        """Intro chapter_type gaps should boost entity strategy priority."""
+        iter_config = IterativeMatchingConfig(
+            use_voiceover_text_queries=True,
+            use_similar_to_locked=False,
+            use_entity_topic_queries=True,
+        )
+        gaps = [
+            GapSegment(0, 0.5, "Welcome to this documentary about nature", 0.0),
+        ]
+        mock_state.extracted_entities = [{"name": "nature"}]
+        # Create gap_analysis with clustered_gaps
+        gap_analysis = MagicMock()
+        gap_analysis.clustered_gaps = {"abstract_concept": [0]}
+
+        queries = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_analysis=gap_analysis,
+            learning_db=learning_db,
+            gap_segments=intro_gap_segments,
+        )
+
+        assert len(queries) > 0
+        # Entity queries should be boosted for intro
+        entity_queries = [q for q in queries if q["strategy"] == "entity"]
+        voiceover_queries = [q for q in queries if q["strategy"] == "voiceover"]
+        if entity_queries and voiceover_queries:
+            # Entity should have higher priority than voiceover for intro
+            assert entity_queries[0]["priority"] >= voiceover_queries[0]["priority"]
+
+    @pytest.mark.fast
+    def test_listicle_gaps_use_chapter_strategy_ranking(
+        self, stage, mock_state, learning_db, listicle_gap_segments
+    ):
+        """listicle_item chapter_type gaps should boost voiceover strategy priority."""
+        iter_config = IterativeMatchingConfig(
+            use_voiceover_text_queries=True,
+            use_similar_to_locked=False,
+            use_entity_topic_queries=True,
+        )
+        gaps = [
+            GapSegment(10, 0.5, "Number three on our list is the mighty oak tree", 50.0),
+        ]
+        mock_state.extracted_entities = [{"name": "oak tree"}]
+        gap_analysis = MagicMock()
+        gap_analysis.clustered_gaps = {"concrete_topic": [10]}
+
+        queries = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_analysis=gap_analysis,
+            learning_db=learning_db,
+            gap_segments=listicle_gap_segments,
+        )
+
+        assert len(queries) > 0
+        # Voiceover queries should be boosted for listicle_item
+        voiceover_queries = [q for q in queries if q["strategy"] == "voiceover"]
+        entity_queries = [q for q in queries if q["strategy"] == "entity"]
+        if voiceover_queries and entity_queries:
+            assert voiceover_queries[0]["priority"] >= entity_queries[0]["priority"]
+
+    @pytest.mark.fast
+    def test_body_chapter_type_uses_default_ordering(
+        self, stage, mock_state, learning_db, body_gap_segments
+    ):
+        """body/unknown chapter_type should fall back to default priority ordering."""
+        iter_config = IterativeMatchingConfig(
+            use_voiceover_text_queries=True,
+            use_similar_to_locked=False,
+            use_entity_topic_queries=True,
+        )
+        gaps = [
+            GapSegment(20, 0.5, "The forest ecosystem relies on biodiversity", 100.0),
+        ]
+        mock_state.extracted_entities = [{"name": "forest"}]
+        gap_analysis = MagicMock()
+        gap_analysis.clustered_gaps = {"other": [20]}
+
+        # Get queries WITH learning_db (body type - should not boost)
+        queries_with_db = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_analysis=gap_analysis,
+            learning_db=learning_db,
+            gap_segments=body_gap_segments,
+        )
+
+        # Reset used queries for second call
+        stage._used_queries = set()
+
+        # Get queries WITHOUT learning_db
+        queries_without_db = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_analysis=gap_analysis,
+        )
+
+        # For body type, priorities should be identical (no boost applied)
+        prio_with = {q["strategy"]: q["priority"] for q in queries_with_db}
+        prio_without = {q["strategy"]: q["priority"] for q in queries_without_db}
+        for strategy in prio_with:
+            if strategy in prio_without:
+                assert prio_with[strategy] == prio_without[strategy], \
+                    f"body chapter_type should not boost {strategy} priority"

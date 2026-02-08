@@ -340,7 +340,8 @@ class IterativeMatchStage(Stage):
 
                 # 4. Generate search queries
                 queries = self._generate_multi_strategy_queries(
-                    gaps, locked, state, iter_config, pass_num, gap_analysis
+                    gaps, locked, state, iter_config, pass_num, gap_analysis,
+                    learning_db=learning_db, gap_segments=gap_segments,
                 )
 
                 if not queries:
@@ -784,7 +785,9 @@ class IterativeMatchStage(Stage):
         state: 'PipelineState',
         config: Any,
         pass_num: int,
-        gap_analysis: Any = None
+        gap_analysis: Any = None,
+        learning_db: Any = None,
+        gap_segments: Any = None,
     ) -> List[Dict[str, Any]]:
         """
         Generate queries using multiple strategies.
@@ -801,6 +804,8 @@ class IterativeMatchStage(Stage):
             config: Iterative matching config
             pass_num: Current pass number
             gap_analysis: Optional gap pattern analysis
+            learning_db: Optional QueryLearningDB for strategy ranking
+            gap_segments: Optional annotated gap segments with chapter_type
 
         Returns:
             List of query dictionaries
@@ -946,6 +951,39 @@ class IterativeMatchStage(Stage):
                 if vq_key not in seen_queries and vq_key not in self._used_queries:
                     seen_queries.add(vq_key)
                     unique_queries.append(vq)
+
+        # US-76-005: Boost priority using chapter-type strategy ranking
+        if learning_db and gap_segments:
+            # Build chapter_type lookup from annotated gap_segments
+            chapter_type_by_idx: Dict[int, str] = {}
+            for gs in gap_segments:
+                chapter_type_by_idx[gs.segment_index] = getattr(gs, 'chapter_type', 'body')
+
+            for q in unique_queries:
+                gap_indices = q.get('gap_indices', [])
+                if not gap_indices:
+                    continue
+                chapter_type = chapter_type_by_idx.get(gap_indices[0], 'body')
+                # Only apply ranking for non-default chapter types
+                if chapter_type in ('body', 'unknown'):
+                    continue
+                strategy = q.get('strategy', '')
+                gap_pattern = 'other'
+                if gap_analysis:
+                    for p, indices in gap_analysis.clustered_gaps.items():
+                        if gap_indices[0] in indices:
+                            gap_pattern = p
+                            break
+                ranking = learning_db.get_strategy_ranking_for_chapter(
+                    gap_pattern, chapter_type
+                )
+                if strategy in ranking:
+                    rank_pos = ranking.index(strategy)
+                    # Top-ranked strategies get +2, second +1 priority boost
+                    if rank_pos == 0:
+                        q['priority'] = q.get('priority', 0) + 2
+                    elif rank_pos == 1:
+                        q['priority'] = q.get('priority', 0) + 1
 
         # Sort by priority
         unique_queries.sort(key=lambda x: x.get('priority', 0), reverse=True)
