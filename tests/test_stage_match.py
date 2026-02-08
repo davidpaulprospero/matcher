@@ -1882,3 +1882,87 @@ class TestNoStalePipelineStateAttributes:
         assert result.success is True
         assert len(state.matches) == 2
         assert result.data['match_count'] == 2
+
+
+# ============================================================================
+# Test Listicle Detection Integration (US-71-002)
+# ============================================================================
+
+class TestListicleDetectionIntegration:
+    """Test that listicle detection is called during match stage execution."""
+
+    @pytest.mark.fast
+    @patch('src.stages.match.MatchStage._run_matching')
+    @patch('src.chapter_detection.listicle_detector.detect_listicle_groups')
+    def test_detect_listicle_called_with_voiceover_segments(
+        self, mock_detect, mock_matching,
+        mock_config, mock_checkpoint, mock_voiceover_segments, mock_text_metadata
+    ):
+        """Verify detect_listicle_groups is called during match stage with voiceover segments."""
+        mock_detect.return_value = []
+        mock_matching.return_value = [
+            Match(segment_index=0, video_file='v1.mp4', video_start=0.0,
+                  video_end=3.0, confidence=0.8, strategy='primary'),
+        ]
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = mock_text_metadata
+
+        stage.run(state, mock_config, mock_checkpoint)
+
+        mock_detect.assert_called_once_with(mock_voiceover_segments)
+
+    @pytest.mark.fast
+    def test_listicle_groups_stored_on_state(self, mock_config, mock_checkpoint):
+        """Verify detected ListicleGroup objects are stored on pipeline state."""
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="First, let's look at mountains"),
+            VoiceoverSegment(index=1, start=3.0, end=6.0, text="The peaks are beautiful"),
+            VoiceoverSegment(index=2, start=6.0, end=9.0, text="Second, the rivers are stunning"),
+            VoiceoverSegment(index=3, start=9.0, end=12.0, text="Third, the forests are dense"),
+        ]
+
+        # Call the helper directly (avoids needing to mock entire matching pipeline)
+        stage._detect_and_store_listicle_groups(state)
+
+        assert len(state.listicle_groups) >= 2
+        assert all(isinstance(g, ListicleGroup) for g in state.listicle_groups)
+
+    @pytest.mark.fast
+    def test_no_listicle_structure_proceeds_normally(self, mock_config, mock_checkpoint):
+        """Verify when no listicle structure detected, state.listicle_groups is empty."""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="The beach is lovely"),
+            VoiceoverSegment(index=1, start=3.0, end=6.0, text="Waves crash on the shore"),
+        ]
+
+        stage._detect_and_store_listicle_groups(state)
+
+        assert state.listicle_groups == []
+
+    @pytest.mark.fast
+    def test_listicle_detection_failure_non_fatal(self, mock_config, mock_checkpoint):
+        """Verify listicle detection failure doesn't crash match stage."""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Test"),
+        ]
+
+        # Call directly with a broken detector to test exception handling
+        with patch(
+            'src.chapter_detection.listicle_detector.detect_listicle_groups',
+            side_effect=RuntimeError("test error")
+        ):
+            stage._detect_and_store_listicle_groups(state)
+
+        # Should not raise, and listicle_groups should be empty
+        assert state.listicle_groups == []

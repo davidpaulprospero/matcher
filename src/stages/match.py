@@ -84,6 +84,9 @@ class MatchStage(Stage):
                 warnings.append("No voiceover segments")
                 return StageResult.ok({'matches': []}, warnings)
 
+            # US-71-002: Detect listicle structure in voiceover segments
+            self._detect_and_store_listicle_groups(state)
+
             # In simplified pipeline, text_metadata comes from CAPTION stage
             # Embeddings are optional for caption-first matching
 
@@ -358,6 +361,31 @@ class MatchStage(Stage):
 
         state.text_metadata.extend(text_metadata)
         logger.info(f"Recovered {len(text_metadata)} text_metadata entries from caption_results")
+
+    def _detect_and_store_listicle_groups(self, state: 'PipelineState') -> None:
+        """Detect listicle structure in voiceover segments and store on state.
+
+        US-71-002: Runs listicle detection before scoring so downstream stages
+        can use the group information for scoring adjustments.
+        """
+        from ..chapter_detection.listicle_detector import detect_listicle_groups
+
+        try:
+            groups = detect_listicle_groups(state.voiceover_segments)
+            state.listicle_groups = groups
+
+            if groups:
+                labels = [g.item_label for g in groups]
+                logger.info(
+                    f"Listicle structure detected: {len(groups)} groups "
+                    f"(labels: {', '.join(labels)})"
+                )
+                print(f"  Listicle structure detected: {len(groups)} groups")
+            else:
+                logger.debug("No listicle structure detected in voiceover segments")
+        except Exception as e:
+            logger.warning(f"Listicle detection failed (non-fatal): {e}")
+            state.listicle_groups = []
 
     def _print_settings(self, config: 'Config'):
         """Print matching settings"""

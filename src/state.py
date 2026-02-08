@@ -309,6 +309,7 @@ class PipelineState:
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
     location_chapters: List[Any] = field(default_factory=list)
+    listicle_groups: List[Any] = field(default_factory=list)  # US-71-002: Detected ListicleGroup objects from match stage
     stage_timings: Dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self):
