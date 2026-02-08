@@ -88,7 +88,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Updated to linear +0.02 per tag capped at +0.08. Tests cover 0, 1, 2, 3, 5 tags. Called from apply_all_adjustments with video_tags. Tags/keywords lowercased."
+                            "notes":  "Pre-implemented in US-71-003. All 6 criteria verified: apply_tag_keyword_boost() at scoring.py:2221 with +0.02/tag capped at +0.08, confidence_breakdown entry with component 'tag_keyword_boost', lowercased tags and keywords, called from apply_all_adjustments() at line 2718. 11 tests pass covering 0/1/2/3/5 tags plus case-insensitive, short-tag filtering, and breakdown integration."
                         },
                         {
                             "id":  "US-72-006",
