@@ -66,6 +66,7 @@ function Improve-InterviewContext {
             "config_structure" { Invoke-ConfigStructureScan -ProjectRoot $projectRoot }
             "pipeline_stages" { Invoke-PipelineStagesScan -ProjectRoot $projectRoot }
             "error_patterns" { Invoke-ErrorPatternsScan -ProjectRoot $projectRoot }
+            "matching_infrastructure" { Invoke-MatchingInfrastructureScan -ProjectRoot $projectRoot }
             default { $null }
         }
 
@@ -95,6 +96,9 @@ function Improve-InterviewContext {
     }
     if ($scanResults.ContainsKey("download_system") -and $scanResults["download_system"].found) {
         $findings.relevantCode += $scanResults["download_system"].data.downloadFiles
+    }
+    if ($scanResults.ContainsKey("matching_infrastructure") -and $scanResults["matching_infrastructure"].found) {
+        $findings.relevantCode += $scanResults["matching_infrastructure"].data.matchingFiles
     }
     if ($scanResults.ContainsKey("config_structure") -and $scanResults["config_structure"].found) {
         $findings.configOptions = $scanResults["config_structure"].data.configSections
@@ -325,6 +329,8 @@ function Get-KeywordSuggestedAreas {
         "rate.?limit|throttle|quota|too.?many|429" = @("rate-limiting", "caption")
         "mullvad|vpn|ip.?rotat|geograph|server.?switch" = @("mullvad-vpn", "rate-limiting")
         "fetch|cache|async|concurrent" = @("speed", "architecture")
+        "chapter|listicle|group|coherence|section|numbered" = @("listicle-matching", "quality")
+        "context|title|description|metadata|enrich" = @("context-matching", "caption")
     }
 
     foreach ($pattern in $keywordMap.Keys) {
@@ -1131,6 +1137,78 @@ function Invoke-ErrorPatternsScan {
     }
 }
 
+function Invoke-MatchingInfrastructureScan {
+    <#
+    .SYNOPSIS
+        Analyze matching pipeline, confidence scoring, chapter detection, and context usage
+    .PARAMETER ProjectRoot
+        Root directory of the project
+    .RETURNS
+        Hashtable with scanId, found (bool), and data
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ProjectRoot
+    )
+
+    $matchingFiles = @(
+        "src/matching/scoring.py",
+        "src/matching/llm_reranker.py",
+        "src/matching/tiered_matcher.py",
+        "src/matching/embedding_search.py",
+        "src/stages/match.py",
+        "src/stages/iterative_match.py",
+        "src/caption/models.py",
+        "src/caption_fetcher.py",
+        "src/state.py",
+        "src/config/sections/matching.py"
+    )
+
+    $chapterFiles = @(
+        "src/chapter_detection/",
+        "src/chapter_detection/detector.py",
+        "src/chapter_detection/listicle_detector.py"
+    )
+
+    $foundMatchingFiles = @()
+    foreach ($file in $matchingFiles) {
+        $fullPath = Join-Path $ProjectRoot $file
+        if (Test-Path $fullPath) {
+            $foundMatchingFiles += $file
+        }
+    }
+
+    $foundChapterFiles = @()
+    foreach ($file in $chapterFiles) {
+        $fullPath = Join-Path $ProjectRoot $file
+        if (Test-Path $fullPath) {
+            $foundChapterFiles += $file
+        }
+    }
+
+    # Check what metadata is currently extracted from yt-dlp
+    $contextUsage = @()
+    $captionFetcherPath = Join-Path $ProjectRoot "src/caption_fetcher.py"
+    if (Test-Path $captionFetcherPath) {
+        $content = Get-Content $captionFetcherPath -Raw -ErrorAction SilentlyContinue
+        if ($content -match "description") { $contextUsage += "description (referenced)" }
+        if ($content -match "chapters") { $contextUsage += "chapters (referenced)" }
+        if ($content -match "tags") { $contextUsage += "tags (referenced)" }
+        if ($content -match "title") { $contextUsage += "title (referenced)" }
+    }
+
+    return @{
+        scanId = "matching_infrastructure"
+        found = ($foundMatchingFiles.Count -gt 0)
+        data = @{
+            matchingFiles = $foundMatchingFiles
+            chapterFiles = $foundChapterFiles
+            contextUsage = $contextUsage
+            scoringComponents = @($foundMatchingFiles | Where-Object { $_ -match "scoring|reranker|matcher" })
+        }
+    }
+}
+
 # ============================================================================
 # LLM SCAN ORCHESTRATION
 # ============================================================================
@@ -1310,6 +1388,7 @@ function Get-KeywordScanDecisions {
         "config|setting|yaml|option" = "config_structure"
         "pipeline|stage|flow|order|bottleneck" = "pipeline_stages"
         "error|crash|exception|bug|broken|debug" = "error_patterns"
+        "match|scor|confiden|chapter|listicle|context|title|description" = "matching_infrastructure"
     }
 
     foreach ($pattern in $keywordMap.Keys) {
@@ -1368,6 +1447,7 @@ function Get-AreasForScan {
         "config_structure" = @("config")
         "pipeline_stages" = @("pipeline", "architecture")
         "error_patterns" = @("healing", "quality", "agents")
+        "matching_infrastructure" = @("context-matching", "listicle-matching", "quality")
     }
 
     if ($fallbackMap.ContainsKey($ScanId)) {
@@ -1583,6 +1663,22 @@ Error Handling:
 - Healing infrastructure files: $healingFiles
 - Review recent error patterns in logs
 - Improve resilience and recovery mechanisms
+"@
+    }
+
+    # Matching Infrastructure Section
+    if ($ScanResults.ContainsKey("matching_infrastructure") -and $ScanResults["matching_infrastructure"].found) {
+        $data = $ScanResults["matching_infrastructure"].data
+        $matchFiles = if ($data.matchingFiles) { $data.matchingFiles -join ", " } else { "none found" }
+        $chapterFiles = if ($data.chapterFiles -and $data.chapterFiles.Count -gt 0) { $data.chapterFiles -join ", " } else { "none yet" }
+        $contextUsage = if ($data.contextUsage -and $data.contextUsage.Count -gt 0) { $data.contextUsage -join ", " } else { "none detected" }
+        $sections += @"
+Matching & Scoring Infrastructure:
+- Matching files: $matchFiles
+- Chapter detection modules: $chapterFiles
+- Current context usage: $contextUsage
+- Review scoring adjustments and confidence breakdown
+- Identify integration points for video metadata context
 "@
     }
 

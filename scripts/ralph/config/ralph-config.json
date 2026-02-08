@@ -6,7 +6,7 @@
         "core": {
             "name": "Core Infrastructure",
             "emoji": "U+1F527",
-            "areas": ["pipeline", "config", "architecture"],
+            "areas": ["pipeline", "config", "architecture", "diagnostics", "checkpoint"],
             "description": "Pipeline stages, orchestration, configuration"
         },
         "acquisition": {
@@ -18,7 +18,7 @@
         "processing": {
             "name": "Content Processing",
             "emoji": "U+2699",
-            "areas": ["quality", "speed", "compilation", "iterative-phase"],
+            "areas": ["quality", "speed", "compilation", "iterative-phase", "listicle-matching", "context-matching"],
             "description": "Matching, performance, keyword modes"
         },
         "output": {
@@ -36,7 +36,7 @@
         "meta": {
             "name": "Development & Testing",
             "emoji": "U+1F9EA",
-            "areas": ["testing", "unit-tests", "integration-tests", "mutation-tests", "documentation", "ux"],
+            "areas": ["testing", "unit-tests", "integration-tests", "mutation-tests", "documentation", "ux", "ralph-improvements", "tools-and-scripts"],
             "description": "Tests (unit, integration, mutation), docs, CLI experience"
         }
     },
@@ -62,7 +62,13 @@
         {"id": "mutation-tests", "name": "Mutation Testing", "category": "meta", "description": "Verify test quality catches changes"},
         {"id": "documentation", "name": "Documentation", "category": "meta", "description": "API docs, README, inline comments"},
         {"id": "ux", "name": "CLI Experience", "category": "meta", "description": "Prompts, progress feedback, error messages"},
-        {"id": "cli-paths", "name": "CLI Path Refinement", "category": "core", "description": "CLI arg path validation, early error detection, --output-only/--match-only path preloading, tilde expansion, double path resolution fix, Windows extended path handling, config search order clarity. Automated bug prevention: validate paths at boundary so bad paths never cascade into AttributeError/KeyError deep in pipeline stages — catches the #1 bug class (dict-vs-object from stale/missing checkpoint paths) before it happens"}
+        {"id": "cli-paths", "name": "CLI Path Refinement", "category": "core", "description": "CLI arg path validation, early error detection, --output-only/--match-only path preloading, tilde expansion, double path resolution fix, Windows extended path handling, config search order clarity. Automated bug prevention: validate paths at boundary so bad paths never cascade into AttributeError/KeyError deep in pipeline stages — catches the #1 bug class (dict-vs-object from stale/missing checkpoint paths) before it happens"},
+        {"id": "listicle-matching", "name": "Listicle Matching / Chapter Detection", "category": "processing", "description": "Detect chapters in source videos (YouTube chapter markers + description parsing), detect listicle structure in voiceover narration, cross-reference video/voiceover chapters for segment grouping and thematic coherence"},
+        {"id": "context-matching", "name": "Context-Enriched Matching", "category": "processing", "description": "Extract and use video titles, descriptions, tags, and YouTube chapters as context signals in embedding computation, LLM reranking, and confidence scoring"},
+        {"id": "diagnostics", "name": "Diagnostics", "category": "core", "description": "Pipeline diagnostics, logging improvements, error reporting, debug tooling, health checks, and observability"},
+        {"id": "checkpoint", "name": "Checkpoint / Progress Saving", "category": "core", "description": "Checkpoint persistence, progress saving, resume reliability, backup/restore, checkpoint validation and healing"},
+        {"id": "ralph-improvements", "name": "Ralph Improvements", "category": "meta", "description": "Ralph Loop enhancements: story generation, sprint management, stall detection, metrics, prompt engineering, autonomy improvements"},
+        {"id": "tools-and-scripts", "name": "Tools and Scripts", "category": "meta", "description": "Utility scripts, CLI tools, helper scripts in scripts/, developer tooling, automation"}
     ],
     "categoryOrder": ["core", "acquisition", "processing", "output", "intelligence", "meta"],
     "autonomy": {
@@ -118,7 +124,13 @@
         "ux": ["tests/test_cli*.py", "tests/test_prompts*.py"],
         "compilation": ["test_keyword*.py", "test_compilation*.py"],
         "iterative-phase": ["test_iterative_match*.py", "test_stage_iterative_match*.py"],
-        "client-learning": ["test_client*.py", "test_profile*.py"]
+        "client-learning": ["test_client*.py", "test_profile*.py"],
+        "listicle-matching": ["test_match*.py", "test_iterative_match*.py", "test_stage_match*.py", "test_chapter*.py", "test_listicle*.py"],
+        "context-matching": ["test_match*.py", "test_scoring*.py", "test_context*.py", "test_caption*.py"],
+        "diagnostics": ["test_pipeline*.py", "test_checkpoint*.py", "test_cli*.py"],
+        "checkpoint": ["test_checkpoint*.py", "test_pipeline*.py"],
+        "ralph-improvements": ["scripts/ralph/tests/*.Tests.ps1"],
+        "tools-and-scripts": ["tests/test_cli*.py"]
     },
     "relevantFiles": {
         "quality": ["src/matching/", "src/stages/match.py", "src/stages/iterative_match.py", "src/embeddings.py"],
@@ -141,7 +153,13 @@
         "documentation": ["CLAUDE.md", "README.md", "REFACTORING.md", "docs/"],
         "ux": ["src/cli/", "main.py"],
         "compilation": ["src/keyword_extractor/", "src/stages/analyze.py", "src/compilation/"],
-        "iterative-phase": ["src/iterative_match/", "src/iterative_match/gap_analyzer.py", "src/iterative_match/query_learning.py", "src/stages/iterative_match.py"]
+        "iterative-phase": ["src/iterative_match/", "src/iterative_match/gap_analyzer.py", "src/iterative_match/query_learning.py", "src/stages/iterative_match.py"],
+        "listicle-matching": ["src/matching/", "src/stages/match.py", "src/stages/iterative_match.py", "src/iterative_match/", "src/chapter_detection/", "src/caption/models.py", "src/caption_fetcher.py", "src/iterative_match/gap_analyzer.py"],
+        "context-matching": ["src/matching/", "src/matching/scoring.py", "src/matching/llm_reranker.py", "src/matching/tiered_matcher.py", "src/caption/models.py", "src/caption_fetcher.py", "src/state.py", "src/stages/caption_stage.py", "src/config/sections/matching.py", "config.yaml"],
+        "diagnostics": ["src/pipeline.py", "src/checkpoint.py", "src/cli/", "main.py", "src/agents/"],
+        "checkpoint": ["src/checkpoint.py", "src/pipeline.py", "src/stages/"],
+        "ralph-improvements": ["scripts/ralph/ralph.ps1", "scripts/ralph/launcher.ps1", "scripts/ralph/config/ralph-config.json", "scripts/ralph/state/"],
+        "tools-and-scripts": ["scripts/", "src/cli/", "main.py"]
     },
     "flags": {
         "autoGeneratePesterTests": false,
