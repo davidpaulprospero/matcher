@@ -77,7 +77,7 @@
             "id": "US-78-005",
             "title": "Add caption coverage gap summary to stage output",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "Caption stage logs a structured summary after processing each batch: total videos, captioned count, avg coverage ratio, videos with gaps >10s",
                 "Summary includes top 3 largest gaps with video_id and gap duration for debugging",
@@ -85,7 +85,7 @@
                 "Summary is logged at INFO level (not DEBUG) so it appears in normal pipeline output",
                 "Unit test verifies summary generation with mock CaptionResults having varying coverage ratios"
             ],
-            "notes": "Tier: Diagnostics. CoverageAnalysis exists (models.py lines 443-464) and is computed per-video, but the aggregate summary is never surfaced to the user. When caption coverage is poor, the pipeline silently proceeds with bad data. This makes coverage issues visible without requiring --verbose. Files: src/stages/caption_stage.py (batch processing section), src/caption/models.py (CoverageAnalysis class), tests/test_stage_caption*.py"
+            "notes": "Added _log_coverage_gap_summary method to CaptionStage. Logs structured summary at INFO level with total_videos, captioned_count, avg_coverage_ratio, videos_with_gaps_over_10s, and top_3_largest_gaps. Uses analyze_caption_coverage from caption/models.py. 5 unit tests in test_caption_coverage_gap_summary.py all pass."
         },
         {
             "id": "US-78-006",
