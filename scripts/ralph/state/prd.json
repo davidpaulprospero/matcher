@@ -43,13 +43,13 @@
                                                        "Add test: transcription that exceeds timeout raises TransientTranscriptionError",
                                                        "Add test: transcription that completes within timeout returns segments normally"
                                                    ],
-                            "notes":  "All 6 criteria verified. Config field added with >=30 validation in core.py:115,163-167. config.yaml updated at line 192. Timeout implemented using ThreadPoolExecutor with future.result(timeout=) in whisper_client.py:336-351 (functionally equivalent to Timer-based, but actually works for blocking C extensions). WARNING logged with audio name, elapsed time, and timeout value. 7 tests pass in TestGPUTranscriptionTimeout class including timeout and normal-completion tests."
+                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: a083b87 chore: [US-79-002] Mark as complete in prd.json"
                         },
                         {
                             "id":  "US-79-003",
                             "title":  "Wire audio_extraction_timeout config to utils.extract_audio function",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "In src/transcription/parallel_processor.py, pass config.transcription.audio_extraction_timeout to extract_audio() calls instead of relying on the default parameter value",
                                                        "In src/transcription/parallel_processor.py transcribe_video() function, pass config timeout to extract_audio() call",
@@ -57,7 +57,7 @@
                                                        "Add test: extract_audio uses config timeout value instead of hardcoded default",
                                                        "Add test: parallel_processor passes config timeout to extract_audio calls"
                                                    ],
-                            "notes":  "Tier: HIGH (config correctness). Files: src/transcription/parallel_processor.py (~lines 201, 341-462), src/transcription/utils.py (extract_audio ~line 19-86), src/config/sections/core.py (audio_extraction_timeout ~line 109). TranscriptionConfig defines audio_extraction_timeout=60 but extract_audio() uses its own default parameter value. The config value is never propagated - changing it in config.yaml has no effect."
+                            "notes":  "Wired audio_extraction_timeout from TranscriptionConfig to all 3 extract_audio() call sites in parallel_processor.py (transcribe_videos_parallel, transcribe_video, transcribe_voiceover_media). Added 5 new tests in TestConfigTimeoutPropagation. Fixed 18 pre-existing test failures from US-79-002."
                         },
                         {
                             "id":  "US-79-004",
