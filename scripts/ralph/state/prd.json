@@ -91,7 +91,7 @@
             "id": "US-78-006",
             "title": "Add retry budget exhaustion diagnostics with actionable suggestions",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "When retry budget is exhausted, log message includes: (1) which limit was hit (attempts vs backoff_time), (2) dominant error category, (3) suggested config change",
                 "Suggestion is context-aware: RATE_LIMIT errors suggest increasing backoff or enabling VPN, NETWORK errors suggest checking connectivity, TIMEOUT errors suggest increasing timeout",
@@ -99,7 +99,7 @@
                 "Existing exhaustion log at budget check point calls get_exhaustion_diagnostics()",
                 "Unit test verifies correct diagnostics for each of the 3 error categories (RATE_LIMIT, NETWORK, TIMEOUT)"
             ],
-            "notes": "Tier: Diagnostics/UX. CaptionRetryBudget (src/caption/retry_budget.py) already tracks error_counts by category (US-37-006) and logs 'EXHAUSTED' messages, but the log doesn't help users understand WHY or WHAT to do. This adds actionable remediation. Files: src/caption/retry_budget.py (exhaustion check around lines 300-400), tests/test_caption*.py"
+            "notes": "Added get_exhaustion_diagnostics() method with context-aware suggestions for RATE_LIMIT, NETWORK, TIMEOUT, PARSE, UNAVAILABLE errors. Wired into budget_exhausted() logging. 10 new tests, all 334 pass."
         },
         {
             "id": "US-78-007",
