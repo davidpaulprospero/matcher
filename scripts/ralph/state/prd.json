@@ -48,7 +48,7 @@
             "id": "US-77-003",
             "title": "Wire temporal coherence scoring into TieredMatcher",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "compute_temporal_coherence from src/matching/scoring.py is called in all 3 match paths in src/matching/tiered_matcher.py",
                 "Previous match's video source_file is tracked and passed for temporal continuity detection",
@@ -57,7 +57,7 @@
                 "Context-switch penalty is applied when consecutive segments switch to different video sources",
                 "When temporal_coherence_enabled=False in config, no adjustment is applied"
             ],
-            "notes": "Tier: feature (medium). The function compute_temporal_coherence exists at src/matching/scoring.py:676 and handles same-source boost and context-switch penalty, but is NEVER called from tiered_matcher.py. Need to: (1) track previous_match (source_file) on TieredMatcher, (2) call in all 3 match paths, (3) add to breakdown. Tests exist in tests/test_temporal_coherence.py testing the function in isolation. Source files: src/matching/scoring.py:676-760, src/matching/tiered_matcher.py:907-944, 1109-1146, 1364-1401."
+            "notes": "DONE. Added _apply_temporal_coherence helper method and _previous_match_segment tracking to TieredMatcher. Imported compute_temporal_coherence from scoring.py. Wired into all 3 match paths (obvious, high-similarity, LLM) right after semantic coherence. Records 'temporal_coherence' in breakdown. Updates _previous_match_segment after each match for continuity. All 39 temporal coherence tests pass, all 33 chapter/contract tests pass."
         },
         {
             "id": "US-77-004",

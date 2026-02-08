@@ -47,6 +47,7 @@ from .scoring import (
     apply_cross_chapter_relevance_boost,  # US-75-006
     apply_listicle_consistency,  # US-75-007
     compute_semantic_coherence,  # US-77-002
+    compute_temporal_coherence,  # US-77-003
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -165,6 +166,8 @@ class TieredMatcher:
         self._chapter_confidence_map: Dict[int, float] = {}
         # US-77-002: Semantic coherence - store previous match embedding for topic flow
         self._previous_match_embedding: Optional[Any] = None
+        # US-77-003: Temporal coherence - store previous match segment for source continuity
+        self._previous_match_segment: Optional[SRTSegment] = None
         self._embedding_lookup: Dict[int, int] = {}  # id(segment) -> index in video_embeddings
         self._video_embeddings: Optional[List] = None  # Reference to video embeddings list
         mc = self.config.matching
@@ -713,6 +716,27 @@ class TieredMatcher:
 
         return adjusted_confidence, reason
 
+    def _apply_temporal_coherence(
+        self, adjusted_confidence: float, best_seg: SRTSegment,
+        confidence_breakdown: list
+    ) -> Tuple[float, str]:
+        """
+        Apply temporal coherence scoring and update previous match segment (US-77-003).
+
+        Returns (adjusted_confidence, reason).
+        """
+        prev = adjusted_confidence
+        adjusted_confidence, reason = compute_temporal_coherence(
+            adjusted_confidence, best_seg, self._previous_match_segment,
+            None, self.config
+        )
+        _record_breakdown(confidence_breakdown, 'temporal_coherence', prev, adjusted_confidence, reason)
+
+        # Update previous match segment for next iteration
+        self._previous_match_segment = best_seg
+
+        return adjusted_confidence, reason
+
     def _get_video_title(self, segment: SRTSegment) -> Optional[str]:
         """Resolve video title from video_metadata using segment's source_file."""
         if not self.video_metadata:
@@ -1009,6 +1033,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
+            # US-77-003: Apply temporal coherence (source continuity between adjacent matches)
+            adjusted_confidence, temporal_coherence_reason = self._apply_temporal_coherence(
+                adjusted_confidence, best_seg, confidence_breakdown
+            )
+
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -1213,6 +1242,11 @@ class TieredMatcher:
 
             # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
             adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+                adjusted_confidence, best_seg, confidence_breakdown
+            )
+
+            # US-77-003: Apply temporal coherence (source continuity between adjacent matches)
+            adjusted_confidence, temporal_coherence_reason = self._apply_temporal_coherence(
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
@@ -1473,6 +1507,11 @@ class TieredMatcher:
 
         # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
         adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+            adjusted_confidence, best_seg, confidence_breakdown
+        )
+
+        # US-77-003: Apply temporal coherence (source continuity between adjacent matches)
+        adjusted_confidence, temporal_coherence_reason = self._apply_temporal_coherence(
             adjusted_confidence, best_seg, confidence_breakdown
         )
 
