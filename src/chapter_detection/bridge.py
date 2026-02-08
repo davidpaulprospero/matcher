@@ -10,7 +10,7 @@ US-71-010, US-72-003
 """
 
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable
 
 from .models import ChapterCandidate, ListicleGroup
 
@@ -177,16 +177,21 @@ def build_segment_chapter_map(chapters: List[ChapterCandidate]) -> Dict[int, int
 def compute_relevance_matrix(
     voiceover_chapters: List[ChapterCandidate],
     video_chapters: List[ChapterCandidate],
+    embedding_fn: Optional[Callable[[str, str], float]] = None,
 ) -> List[List[float]]:
     """
     Compute a cross-chapter relevance matrix for candidate boosting (US-72-009).
 
-    Each cell [i][j] is the Jaccard similarity between voiceover chapter i's
-    topic keywords and video chapter j's topic keywords, normalized to 0.0-1.0.
+    Each cell [i][j] is a similarity score between voiceover chapter i and
+    video chapter j. When embedding_fn is provided, the score is a weighted
+    blend: 0.6 * Jaccard keyword similarity + 0.4 * embedding cosine similarity.
+    When embedding_fn is None, pure Jaccard similarity is used.
 
     Args:
         voiceover_chapters: Voiceover ChapterCandidate objects with topics lists
         video_chapters: Video ChapterCandidate objects with topics lists
+        embedding_fn: Optional callable(text_a, text_b) -> float cosine similarity
+                      in [0.0, 1.0]. When provided, blends with Jaccard.
 
     Returns:
         2D list of floats (vo_chapters x video_chapters), each in [0.0, 1.0].
@@ -199,18 +204,28 @@ def compute_relevance_matrix(
     vo_keywords = [ch.topics if ch.topics else [] for ch in voiceover_chapters]
     vid_keywords = [ch.topics if ch.topics else [] for ch in video_chapters]
 
-    # Delegate to Jaccard computation
+    # Build chapter text representations for embedding similarity
+    if embedding_fn is not None:
+        vo_texts = [' '.join(kw) for kw in vo_keywords]
+        vid_texts = [' '.join(kw) for kw in vid_keywords]
+
+    # Compute matrix with optional embedding blend
     matrix = []
-    for vo_kw in vo_keywords:
+    for i, vo_kw in enumerate(vo_keywords):
         vo_set = {k.lower() for k in vo_kw} if vo_kw else set()
         row = []
-        for vid_kw in vid_keywords:
+        for j, vid_kw in enumerate(vid_keywords):
             vid_set = {k.lower() for k in vid_kw} if vid_kw else set()
             union = vo_set | vid_set
-            if not union:
-                row.append(0.0)
+            jaccard = (len(vo_set & vid_set) / len(union)) if union else 0.0
+
+            if embedding_fn is not None:
+                cosine_sim = embedding_fn(vo_texts[i], vid_texts[j])
+                score = 0.6 * jaccard + 0.4 * cosine_sim
             else:
-                row.append(len(vo_set & vid_set) / len(union))
+                score = jaccard
+
+            row.append(score)
         matrix.append(row)
 
     return matrix

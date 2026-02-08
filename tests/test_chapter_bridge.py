@@ -578,3 +578,36 @@ class TestComputeRelevanceMatrix:
         assert matrix[1][0] == pytest.approx(0.0)
         # vo[1] vs vid[1]: {tokyo,japan}/4 = 0.5
         assert matrix[1][1] == pytest.approx(2.0 / 4.0)
+
+    # --- Embedding blend tests (US-76-009) ---
+
+    def test_blended_score_with_mock_embedding_fn(self):
+        """With mock embedding_fn, blended score is 0.6*Jaccard + 0.4*cosine."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['dogs', 'fish'])]
+        # Jaccard: intersection=1 (dogs), union=3 -> 1/3
+        # Mock embedding returns 0.8
+        mock_emb = lambda a, b: 0.8
+        matrix = compute_relevance_matrix(vo, vid, embedding_fn=mock_emb)
+        expected = 0.6 * (1.0 / 3.0) + 0.4 * 0.8
+        assert matrix[0][0] == pytest.approx(expected)
+
+    def test_no_embedding_fn_unchanged_behavior(self):
+        """Without embedding_fn, output is identical to pure Jaccard."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['dogs', 'fish'])]
+        matrix_no_emb = compute_relevance_matrix(vo, vid)
+        matrix_none = compute_relevance_matrix(vo, vid, embedding_fn=None)
+        assert matrix_no_emb == matrix_none
+        # Pure Jaccard: 1/3
+        assert matrix_no_emb[0][0] == pytest.approx(1.0 / 3.0)
+
+    def test_embedding_1_jaccard_0_produces_04(self):
+        """Embedding similarity 1.0 with Jaccard 0.0 produces score 0.4."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['fish', 'birds'])]
+        # Jaccard: 0 intersection -> 0.0
+        # Embedding: always returns 1.0
+        mock_emb = lambda a, b: 1.0
+        matrix = compute_relevance_matrix(vo, vid, embedding_fn=mock_emb)
+        assert matrix[0][0] == pytest.approx(0.4)

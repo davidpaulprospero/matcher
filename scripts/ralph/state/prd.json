@@ -139,7 +139,7 @@
                             "id":  "US-76-009",
                             "title":  "Add embedding similarity to cross-chapter relevance matrix",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "compute_relevance_matrix accepts an optional embedding_fn parameter that computes cosine similarity between chapter text embeddings",
                                                        "When embedding_fn is provided, relevance score is a weighted blend: 0.6 * Jaccard keyword similarity + 0.4 * embedding cosine similarity",
@@ -148,7 +148,7 @@
                                                        "Unit test: without embedding_fn, output is identical to current Jaccard-only behavior",
                                                        "Unit test: embedding similarity of 1.0 with Jaccard 0.0 produces score of 0.4"
                                                    ],
-                            "notes":  "Tier: quality improvement. Source files: src/chapter_detection/bridge.py (lines 169-208 compute_relevance_matrix -- currently pure Jaccard). The existing compute_relevance_matrix is called from src/stages/match.py. Adding embedding_fn as optional parameter maintains backward compat. The caller in match.py can pass the project\u0027s embedding function if available. Test file: tests/test_chapter_bridge.py (TestComputeRelevanceMatrix class starting around line 401)."
+                            "notes":  "Done. Added Optional[Callable] embedding_fn param to compute_relevance_matrix in bridge.py. Blends 0.6*Jaccard + 0.4*cosine when provided. 3 new tests added, all 15 tests pass."
                         },
                         {
                             "id":  "US-76-010",
