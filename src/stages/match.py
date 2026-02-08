@@ -87,6 +87,9 @@ class MatchStage(Stage):
             # US-71-002: Detect listicle structure in voiceover segments
             self._detect_and_store_listicle_groups(state)
 
+            # US-71-010: Bridge listicle groups to chapter structure for unified handling
+            self._build_unified_chapters(state)
+
             # In simplified pipeline, text_metadata comes from CAPTION stage
             # Embeddings are optional for caption-first matching
 
@@ -393,6 +396,34 @@ class MatchStage(Stage):
         except Exception as e:
             logger.warning(f"Listicle detection failed (non-fatal): {e}")
             state.listicle_groups = []
+
+    def _build_unified_chapters(self, state: 'PipelineState') -> None:
+        """Bridge listicle groups into chapter structure for unified scoring.
+
+        US-71-010: Converts listicle groups to ChapterCandidate objects and merges
+        them with existing YouTube/location chapters. YouTube chapters take
+        precedence for overlapping segment ranges. The unified list is stored
+        on state.location_chapters so all chapter-aware scoring adjustments
+        work uniformly.
+        """
+        from ..chapter_detection.bridge import build_unified_chapters
+
+        listicle_groups = getattr(state, 'listicle_groups', []) or []
+        location_chapters = getattr(state, 'location_chapters', []) or []
+
+        if not listicle_groups and not location_chapters:
+            return
+
+        try:
+            unified = build_unified_chapters(location_chapters, listicle_groups)
+            state.location_chapters = unified
+            if unified:
+                logger.info(
+                    f"US-71-010 unified chapters: {len(unified)} "
+                    f"(from {len(location_chapters)} YouTube + {len(listicle_groups)} listicle)"
+                )
+        except Exception as e:
+            logger.warning(f"Unified chapter bridge failed (non-fatal): {e}")
 
     def _serialize_chapter_data(self, state: 'PipelineState') -> Dict[str, Any]:
         """US-71-009: Serialize chapter/listicle data for checkpoint persistence.

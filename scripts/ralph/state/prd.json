@@ -154,9 +154,9 @@
                                                        "The unified chapter list is available to scoring adjustments via the same interface as regular chapters",
                                                        "Unit test verifies conversion from listicle groups to chapters and merge behavior with overlapping ranges"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Integration). Currently, listicle detection (src/chapter_detection/listicle_detector.py) and chapter detection (src/chapter_detection/detector.py) produce separate data structures. The design doc Area 3+4 says \u0027Both can coexist (voiceover structure + video chapter structure)\u0027. This story creates the bridge so scoring adjustments (chapter_topic_match, chapter_source_consistency) work uniformly regardless of whether structure came from YouTube chapters or listicle detection. VoiceoverChapter model is in src/chapter_detection/models.py."
+                            "notes":  "Created src/chapter_detection/bridge.py with listicle_groups_to_chapters, merge_chapters, build_unified_chapters, build_segment_chapter_map. Integrated _build_unified_chapters into match stage after listicle detection. YouTube chapters take precedence for overlapping ranges. 27 unit tests in test_chapter_bridge.py all pass."
                         },
                         {
                             "id":  "US-71-011",
