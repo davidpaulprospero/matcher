@@ -51,6 +51,10 @@ def mock_config():
     config.transcription.vad_filter = True
     config.transcription.min_silence_duration_ms = 200
     config.transcription.speech_pad_ms = 10
+    config.transcription.audio_extraction_workers = 4
+    config.transcription.auto_cleanup_after_batch = True
+    config.transcription.gpu_transcription_timeout = 300
+    config.transcription.audio_extraction_timeout = 60
     return config
 
 
@@ -149,7 +153,7 @@ class TestProgressPrinting:
         mock_transcript_cache = MockTranscriptCache.return_value
         mock_transcript_cache.get.return_value = None
 
-        mock_extract.side_effect = lambda vp, _: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, _, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
         mock_whisper = MockWhisperClient.return_value
         mock_whisper.transcribe.return_value = sample_raw_segments
 
@@ -183,7 +187,7 @@ class TestProgressPrinting:
         mock_transcript_cache = MockTranscriptCache.return_value
         mock_transcript_cache.get.return_value = None
 
-        mock_extract.side_effect = lambda vp, _: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, _, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
         mock_whisper = MockWhisperClient.return_value
         mock_whisper.transcribe.return_value = sample_raw_segments
 
@@ -252,7 +256,7 @@ class TestParallelProcessingEdgeCases:
         mock_transcript_cache = MockTranscriptCache.return_value
         mock_transcript_cache.get.return_value = None
 
-        mock_extract.side_effect = lambda vp, _: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, _, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
         mock_whisper = MockWhisperClient.return_value
         mock_whisper.transcribe.return_value = sample_raw_segments
 
@@ -285,7 +289,7 @@ class TestParallelProcessingEdgeCases:
         mock_transcript_cache = MockTranscriptCache.return_value
         mock_transcript_cache.get.return_value = None
 
-        mock_extract.side_effect = lambda vp, _: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, _, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
         mock_whisper = MockWhisperClient.return_value
         mock_whisper.transcribe.return_value = sample_raw_segments
 
@@ -315,7 +319,7 @@ class TestParallelProcessingEdgeCases:
         mock_transcript_cache = MockTranscriptCache.return_value
         mock_transcript_cache.get.return_value = None
 
-        mock_extract.side_effect = lambda vp, _: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, _, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
         mock_whisper = MockWhisperClient.return_value
         mock_whisper.transcribe.return_value = sample_raw_segments
 
@@ -589,7 +593,8 @@ class TestConfigEdgeCases:
         # Should use defaults via getattr
         MockWhisperClient.assert_called_once_with(
             model_name="base",  # default
-            compute_type="auto"  # default
+            compute_type="auto",  # default
+            gpu_transcription_timeout=300
         )
 
 
@@ -896,7 +901,7 @@ class TestTranscriptionWithLongVideoNames:
         mock_transcript_cache = MockTranscriptCache.return_value
         mock_transcript_cache.get.return_value = None
 
-        mock_extract.side_effect = lambda vp, _: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, _, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
         mock_whisper = MockWhisperClient.return_value
         mock_whisper.transcribe.return_value = sample_raw_segments
 
@@ -1140,7 +1145,8 @@ class TestVoiceoverMediaLanguageSettings:
         # Verify model settings were passed
         MockWhisperClient.assert_called_once_with(
             model_name="large-v3",
-            compute_type="float16"
+            compute_type="float16",
+            gpu_transcription_timeout=300
         )
 
 

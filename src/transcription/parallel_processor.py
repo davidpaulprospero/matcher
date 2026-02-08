@@ -129,6 +129,11 @@ def transcribe_videos_parallel(
     if config:
         gpu_transcription_timeout = getattr(config.transcription, 'gpu_transcription_timeout', 300)
 
+    # Get audio extraction timeout (US-79-003)
+    audio_extraction_timeout = 60  # Default 60 seconds
+    if config:
+        audio_extraction_timeout = getattr(config.transcription, 'audio_extraction_timeout', 60)
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
@@ -203,7 +208,7 @@ def transcribe_videos_parallel(
         phase1_start = time.time()
 
         def extract_audio_task(video_path):
-            audio_path = extract_audio(video_path, str(temp_dir))
+            audio_path = extract_audio(video_path, str(temp_dir), timeout=audio_extraction_timeout)
             return video_path, audio_path
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -348,7 +353,8 @@ def transcribe_video(
     speech_pad_ms: int = 10,
     max_retries: int = 2,
     base_delay: float = 1.0,
-    gpu_transcription_timeout: int = 300
+    gpu_transcription_timeout: int = 300,
+    audio_extraction_timeout: int = 60
 ) -> List[TranscriptSegment]:
     """
     Transcribe a single video file with retry logic for transient errors.
@@ -370,6 +376,7 @@ def transcribe_video(
         max_retries: Maximum retry attempts for transient errors (default 2)
         base_delay: Base delay for exponential backoff in seconds (default 1.0)
         gpu_transcription_timeout: Max seconds for a single transcribe() call (US-79-002)
+        audio_extraction_timeout: Max seconds for FFmpeg audio extraction (US-79-003)
     """
     video_path = str(video_path)
     video_name = Path(video_path).name
@@ -390,7 +397,7 @@ def transcribe_video(
         ]
 
     # Extract audio
-    audio_path = extract_audio(video_path, temp_dir)
+    audio_path = extract_audio(video_path, temp_dir, timeout=audio_extraction_timeout)
     if not audio_path:
         logger.warning(f"  Could not extract audio: {video_name}")
         return []
@@ -513,7 +520,8 @@ def transcribe_voiceover_media(
     cache_dir: str = None,
     word_timestamps: bool = True,
     vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
-    gpu_transcription_timeout: int = 300
+    gpu_transcription_timeout: int = 300,
+    audio_extraction_timeout: int = 60
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
@@ -558,7 +566,7 @@ def transcribe_voiceover_media(
         else:
             temp_dir = media_path.parent
 
-        audio_path = extract_audio(str(media_path), str(temp_dir))
+        audio_path = extract_audio(str(media_path), str(temp_dir), timeout=audio_extraction_timeout)
 
         if not audio_path:
             logger.error(f"Could not extract audio from {media_path}")

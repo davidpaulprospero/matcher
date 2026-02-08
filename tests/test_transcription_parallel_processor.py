@@ -133,7 +133,7 @@ class TestTranscribeVideosParallel:
         mock_transcript_cache.get.return_value = None
 
         # Mock audio extraction
-        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/cache/temp_audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, temp_dir, **kwargs: f"/fake/cache/temp_audio/{Path(vp).stem}.wav"
 
         # Mock WhisperClient
         mock_whisper = MockWhisperClient.return_value
@@ -178,7 +178,7 @@ class TestTranscribeVideosParallel:
         ]
 
         # Mock audio extraction for uncached videos
-        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, temp_dir, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
 
         # Mock transcription
         mock_whisper = MockWhisperClient.return_value
@@ -253,7 +253,7 @@ class TestTranscribeVideosParallel:
         mock_transcript_cache.get.return_value = None
 
         # Mock extraction failure for video1, success for video2
-        def extract_side_effect(vp, temp_dir):
+        def extract_side_effect(vp, temp_dir, **kwargs):
             if "video1" in vp:
                 raise RuntimeError("Extraction failed")
             return f"/fake/audio/{Path(vp).stem}.wav"
@@ -369,7 +369,8 @@ class TestTranscribeVideosParallel:
         # Should initialize WhisperClient with defaults
         MockWhisperClient.assert_called_once_with(
             model_name="base",
-            compute_type="auto"
+            compute_type="auto",
+            gpu_transcription_timeout=300
         )
 
         # Should call transcribe with default settings
@@ -429,7 +430,7 @@ class TestTranscribeVideo:
         assert all(isinstance(seg, TranscriptSegment) for seg in result)
 
         # Should extract audio
-        mock_extract.assert_called_once_with("/video1.mp4", None)
+        mock_extract.assert_called_once_with("/video1.mp4", None, timeout=60)
 
         # Should transcribe
         mock_whisper.transcribe.assert_called_once()
@@ -511,7 +512,8 @@ class TestTranscribeVideo:
         # Should initialize WhisperClient with custom settings
         MockWhisperClient.assert_called_once_with(
             model_name="medium",
-            compute_type="int8"
+            compute_type="int8",
+            gpu_transcription_timeout=300
         )
 
         # Should transcribe with custom settings
@@ -542,7 +544,8 @@ class TestTranscribeVoiceoverAudio:
         # Should initialize with defaults
         MockWhisperClient.assert_called_once_with(
             model_name="base",
-            compute_type="auto"
+            compute_type="auto",
+            gpu_transcription_timeout=300
         )
 
         # Should transcribe with vad_filter=True (voiceover needs VAD for gap detection)
@@ -573,7 +576,8 @@ class TestTranscribeVoiceoverAudio:
         # Should initialize with custom settings
         MockWhisperClient.assert_called_once_with(
             model_name="large",
-            compute_type="float16"
+            compute_type="float16",
+            gpu_transcription_timeout=300
         )
 
         # Should transcribe with language
@@ -798,7 +802,7 @@ class TestParallelErrorRecovery:
         mock_transcript_cache.get.return_value = None
 
         # Mock extraction failure for video1, success for video2
-        def extract_side_effect(vp, temp_dir):
+        def extract_side_effect(vp, temp_dir, **kwargs):
             if "video1" in vp:
                 raise RuntimeError("Extraction failed with details")
             return f"/fake/audio/{Path(vp).stem}.wav"
@@ -839,7 +843,7 @@ class TestParallelErrorRecovery:
         mock_transcript_cache.get.return_value = None
 
         # Mock successful extraction for both
-        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, temp_dir, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
 
         # Mock transcription failure for video1 only
         mock_whisper = MockWhisperClient.return_value
