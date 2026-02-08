@@ -98,7 +98,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 5 criteria met. Config fields added to MatchingConfig with correct defaults. config.yaml synced. 13 tests pass (11 behavior + 2 config validation)."
+                            "notes":  "All 5/5 criteria verified. 11 tests pass: individual penalties (auto=-0.05, low=-0.08, timing=-0.03), stacking within cap, stacking hitting cap (-0.16 capped to -0.12), edge cases, config fields in MatchingConfig + config.yaml."
                         },
                         {
                             "id":  "US-73-007",
@@ -110,9 +110,9 @@
                                                        "CaptionResult gains a post-processing step that calls deduplication after segment parsing",
                                                        "Unit test with overlapping segments verifies merge behavior, and non-overlapping segments pass through unchanged"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier: Data quality. Files: src/caption/models.py (CaptionResult, CaptionSegment). Some YouTube captions (especially auto-generated) produce overlapping segments with near-identical text, inflating segment count and creating duplicate matches downstream. Deduplication at the caption level prevents this from propagating."
+                            "notes":  "All 5 criteria verified. deduplicate_caption_segments() in models.py uses token overlap (Jaccard >0.7) and temporal overlap (>0.8) to merge duplicates, keeping higher quality text. DEBUG logging on each merge. CaptionResult.__post_init__ calls dedup automatically. 25 unit tests pass covering: helper functions, merge behavior, non-overlapping passthrough, quality selection, reindexing, chained duplicates, logging, and CaptionResult integration."
                         },
                         {
                             "id":  "US-73-008",

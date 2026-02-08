@@ -7,11 +7,14 @@ and related data structures.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .enums import CaptionStatus, StreamState
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -310,6 +313,132 @@ class TestFetchSummary:
         return f"Test fetch: {success_rate} success, avg {avg_time_str}, {format_str} format"
 
 
+def _token_overlap(text_a: str, text_b: str) -> float:
+    """Calculate token-level overlap ratio between two strings.
+
+    Returns the ratio of shared tokens to total unique tokens (Jaccard similarity).
+    """
+    tokens_a = set(text_a.lower().split())
+    tokens_b = set(text_b.lower().split())
+    if not tokens_a and not tokens_b:
+        return 1.0
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
+def _temporal_overlap_ratio(seg_a: 'CaptionSegment', seg_b: 'CaptionSegment') -> float:
+    """Calculate temporal overlap ratio between two segments.
+
+    Returns the ratio of overlap duration to the shorter segment's duration.
+    """
+    overlap_start = max(seg_a.start_time, seg_b.start_time)
+    overlap_end = min(seg_a.end_time, seg_b.end_time)
+    overlap_duration = max(0.0, overlap_end - overlap_start)
+
+    dur_a = max(0.0, seg_a.end_time - seg_a.start_time)
+    dur_b = max(0.0, seg_b.end_time - seg_b.start_time)
+    shorter_duration = min(dur_a, dur_b)
+
+    if shorter_duration <= 0:
+        return 0.0
+    return overlap_duration / shorter_duration
+
+
+def _text_quality_score(text: str) -> float:
+    """Score text quality: longer text with fewer repeated chars is better."""
+    if not text:
+        return 0.0
+    length = len(text)
+    unique_chars = len(set(text))
+    # Ratio of unique chars penalizes repeated content
+    uniqueness = unique_chars / length if length > 0 else 0.0
+    return length * uniqueness
+
+
+def deduplicate_caption_segments(
+    segments: List['CaptionSegment'],
+    temporal_threshold: float = 0.8,
+    text_threshold: float = 0.7,
+) -> List['CaptionSegment']:
+    """Remove overlapping near-duplicate caption segments.
+
+    Segments with >80% temporal overlap AND >70% text similarity are merged,
+    keeping the one with higher text quality (longer text, fewer repeated chars).
+
+    Args:
+        segments: List of CaptionSegment to deduplicate.
+        temporal_threshold: Minimum temporal overlap ratio to consider duplicate (default 0.8).
+        text_threshold: Minimum text similarity (token overlap) to consider duplicate (default 0.7).
+
+    Returns:
+        Deduplicated list of CaptionSegment with updated indices.
+    """
+    if len(segments) <= 1:
+        return segments
+
+    # Sort by start_time for efficient pairwise comparison
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+    keep = [True] * len(sorted_segs)
+
+    for i in range(len(sorted_segs)):
+        if not keep[i]:
+            continue
+        for j in range(i + 1, len(sorted_segs)):
+            if not keep[j]:
+                continue
+            # Early exit: if next segment starts well after current ends, no overlap possible
+            if sorted_segs[j].start_time >= sorted_segs[i].end_time + 1.0:
+                break
+
+            temporal = _temporal_overlap_ratio(sorted_segs[i], sorted_segs[j])
+            if temporal < temporal_threshold:
+                continue
+
+            text_sim = _token_overlap(sorted_segs[i].text, sorted_segs[j].text)
+            if text_sim < text_threshold:
+                continue
+
+            # Both thresholds met — mark the lower-quality one for removal
+            quality_i = _text_quality_score(sorted_segs[i].text)
+            quality_j = _text_quality_score(sorted_segs[j].text)
+
+            if quality_j > quality_i:
+                # j is better, remove i
+                logger.debug(
+                    "Dedup: removing segment %d (%.1fs-%.1fs) in favor of %d (%.1fs-%.1fs) "
+                    "[temporal=%.2f, text=%.2f]",
+                    sorted_segs[i].index, sorted_segs[i].start_time, sorted_segs[i].end_time,
+                    sorted_segs[j].index, sorted_segs[j].start_time, sorted_segs[j].end_time,
+                    temporal, text_sim,
+                )
+                keep[i] = False
+                break  # i is removed, no need to compare further
+            else:
+                # i is better or equal, remove j
+                logger.debug(
+                    "Dedup: removing segment %d (%.1fs-%.1fs) in favor of %d (%.1fs-%.1fs) "
+                    "[temporal=%.2f, text=%.2f]",
+                    sorted_segs[j].index, sorted_segs[j].start_time, sorted_segs[j].end_time,
+                    sorted_segs[i].index, sorted_segs[i].start_time, sorted_segs[i].end_time,
+                    temporal, text_sim,
+                )
+                keep[j] = False
+
+    result = [seg for seg, k in zip(sorted_segs, keep) if k]
+
+    removed_count = len(segments) - len(result)
+    if removed_count > 0:
+        logger.debug("Dedup: removed %d duplicate segments from %d total", removed_count, len(segments))
+        # Re-index
+        for idx, seg in enumerate(result):
+            seg.index = idx
+
+    return result
+
+
 @dataclass
 class CaptionResult:
     """Result of a caption fetch operation.
@@ -348,13 +477,18 @@ class CaptionResult:
     video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
 
     def __post_init__(self):
-        """Ensure list fields are never None (dict-vs-object safety, Rule 2/6)."""
+        """Ensure list fields are never None (dict-vs-object safety, Rule 2/6).
+        Also deduplicate overlapping caption segments after parsing.
+        """
         if self.video_chapters is None:
             self.video_chapters = []
         if self.video_tags is None:
             self.video_tags = []
         if self.video_description is None:
             self.video_description = ""
+        # US-73-007: Deduplicate overlapping caption segments
+        if self.segments and len(self.segments) > 1:
+            self.segments = deduplicate_caption_segments(self.segments)
 
     @property
     def skipped_segments_count(self) -> int:
