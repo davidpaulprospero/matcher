@@ -1,190 +1,190 @@
-﻿{
-    "sprintNumber":  71,
-    "focusArea":  "listicle-matching",
-    "branchName":  "ralph/sprint-71",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-71-001",
-                            "title":  "Generate sprint stories for listicle-matching focus area",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027listicle-matching\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027listicle-matching\u0027",
-                                                       "Add stories US-71-002 through US-71-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-71-NNN to be unique across sprints",
-                                                       "Mark this story (US-71-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "notes":  "Seed story. Generated 11 stories covering listicle pipeline integration, tag-based scoring, chapter coherence, cross-chapter grouping, listicle-aware scoring, chapter-aware gap analysis, list header count detection, chapter-segment mapping persistence, listicle-to-chapter bridge, chapter-constrained embedding boost, and chapter-type query learning."
-                        },
-                        {
-                            "id":  "US-71-002",
-                            "title":  "Integrate listicle detector into match stage pipeline",
-                            "acceptanceCriteria":  [
-                                                       "Match stage (src/stages/match.py) calls detect_listicle_structure() on voiceover segments before scoring",
-                                                       "Detected ListicleGroup objects are stored on pipeline state (e.g., state.listicle_groups) so downstream stages can access them",
-                                                       "When listicle structure is detected, a log message reports the count and labels of detected groups",
-                                                       "When no listicle structure is detected, matching proceeds unchanged with no errors",
-                                                       "Unit test verifies detect_listicle_structure is called during match stage execution with mock segments"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "notes":  "Tier 1 (Foundation). Wired detect_listicle_groups() into MatchStage.run() via _detect_and_store_listicle_groups() helper. Added listicle_groups field to PipelineState in src/state.py. Logs count and labels when groups detected, gracefully handles errors. 4 unit tests added to tests/test_stage_match.py::TestListicleDetectionIntegration — all pass."
-                        },
-                        {
-                            "id":  "US-71-003",
-                            "title":  "Add tag-based keyword boost to matching scorer",
-                            "acceptanceCriteria":  [
-                                                       "src/matching/scoring.py has a new apply_tag_keyword_boost() method that compares voiceover segment keywords against video tags",
-                                                       "Tag overlap scoring uses graduated boost: 1 tag match -\u003e +0.02, 2 matches -\u003e +0.04, 3+ matches -\u003e +0.06",
-                                                       "The adjustment appears in confidence_breakdown as \u0027tag_keyword_boost\u0027 entry",
-                                                       "apply_all_adjustments() calls apply_tag_keyword_boost() in the adjustment chain",
-                                                       "Unit test verifies graduated boost values for 0, 1, 2, and 3+ tag matches"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "notes":  "Added apply_tag_keyword_boost() with graduated boost (0.02/0.04/0.06). Wired as step 9 in apply_all_adjustments. 10 tests pass."
-                        },
-                        {
-                            "id":  "US-71-004",
-                            "title":  "Add chapter coherence penalty for scattered source usage",
-                            "acceptanceCriteria":  [
-                                                       "src/matching/scoring.py has a new apply_chapter_coherence_penalty() method",
-                                                       "When a voiceover chapter uses segments from \u003e5 different video sources, a penalty of -0.03 is applied per excess source",
-                                                       "The penalty is capped at -0.10 to avoid over-penalizing",
-                                                       "The adjustment appears in confidence_breakdown as \u0027chapter_coherence\u0027 entry",
-                                                       "Config option matching.chapter_grouping.coherence_penalty_threshold (default 5) controls the threshold",
-                                                       "Unit test verifies penalty triggers at threshold and caps correctly"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 6 criteria met. Implementation + 11 unit tests pass (threshold trigger, cap at -0.10, config option, breakdown entry, disabled check)."
-                        },
-                        {
-                            "id":  "US-71-005",
-                            "title":  "Build cross-chapter relevance matrix for candidate boosting",
-                            "acceptanceCriteria":  [
-                                                       "New function compute_relevance_matrix() in src/matching/scoring.py or src/chapter_detection/ computes voiceover_chapter x video_chapter topic overlap scores",
-                                                       "Relevance scores are normalized to 0-1 range based on keyword intersection over union",
-                                                       "Config option matching.chapter_grouping.relevance_boost_weight (default 0.1) controls the boost magnitude",
-                                                       "Candidates from high-relevance video chapters get a soft boost proportional to relevance score * weight",
-                                                       "Unit test verifies matrix computation with known keyword sets produces expected overlap scores"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "medium",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-71-006",
-                            "title":  "Add listicle-aware scoring adjustment for within-group consistency",
-                            "acceptanceCriteria":  [
-                                                       "src/matching/scoring.py has a new apply_listicle_consistency_boost() method",
-                                                       "Segments within the same ListicleGroup that match from the same video source get a +0.04 boost",
-                                                       "Segments at listicle group boundaries (first segment of a new group) get no boost or penalty",
-                                                       "The adjustment appears in confidence_breakdown as \u0027listicle_consistency\u0027 entry",
-                                                       "apply_all_adjustments() calls apply_listicle_consistency_boost() when listicle_groups are available",
-                                                       "Unit test verifies boost applied within groups and not across group boundaries"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 6/6 criteria verified. 8 tests pass. Implementation + tests complete."
-                        },
-                        {
-                            "id":  "US-71-007",
-                            "title":  "Add chapter-aware gap prioritization to iterative match",
-                            "acceptanceCriteria":  [
-                                                       "src/iterative_match/gap_analyzer.py analyze_gaps() annotates each gap with its containing voiceover chapter/listicle group",
-                                                       "Gaps in introduction chapters (first 10% of segments) get priority_boost of +0.2",
-                                                       "Gaps in conclusion chapters (last 10% of segments) get priority_boost of +0.15",
-                                                       "Gap priority is used to sort gap-filling order so high-importance chapters are filled first",
-                                                       "Unit test verifies gaps in intro/conclusion get higher priority than gaps in middle sections"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 5/5 criteria verified: (1) chapter annotation in analyze_gaps, (2) intro +0.2 boost, (3) conclusion +0.15 boost, (4) priority sorting for gap-filling order, (5) 9 unit tests passing."
-                        },
-                        {
-                            "id":  "US-71-008",
-                            "title":  "Add list header count detection to listicle detector",
-                            "acceptanceCriteria":  [
-                                                       "src/chapter_detection/listicle_detector.py detects list header patterns like \u0027top 10\u0027, \u00275 reasons\u0027, \u00273 ways\u0027, \u0027seven tips\u0027",
-                                                       "When a list header is detected, the expected_count is stored on the detection result",
-                                                       "The detector logs a warning when detected item count differs from expected_count by more than 1",
-                                                       "Both numeric (\u00275 reasons\u0027) and word-form (\u0027five reasons\u0027) counts are recognized",
-                                                       "Unit test verifies detection of at least 4 different header patterns with correct expected_count extraction"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "low",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-71-009",
-                            "title":  "Persist chapter-segment mapping in checkpoint for output stage",
-                            "acceptanceCriteria":  [
-                                                       "Chapter detection results (VideoChapter list and ListicleGroup list) are serialized to checkpoint.json after match stage",
-                                                       "Chapter data survives pipeline resume -- loading checkpoint restores chapter/listicle structures",
-                                                       "Output stage can read chapter/listicle data from checkpoint to annotate timeline markers",
-                                                       "Backward compatibility: loading a checkpoint without chapter data produces empty lists, not errors",
-                                                       "Unit test verifies round-trip serialization of VideoChapter and ListicleGroup through checkpoint"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "Added chapter_data field to CheckpointData, serialize chapters/listicle groups in match stage save, restore on resume, backward compat with empty dict, 8 unit tests pass."
-                        },
-                        {
-                            "id":  "US-71-010",
-                            "title":  "Bridge listicle groups to voiceover chapter structure for unified handling",
-                            "acceptanceCriteria":  [
-                                                       "New function in src/chapter_detection/ converts ListicleGroup objects into VoiceoverChapter objects for unified downstream handling",
-                                                       "Converted chapters have topic_keywords populated from the ListicleGroup topic_keywords field",
-                                                       "When both YouTube chapters and listicle groups are detected, they are merged with YouTube chapters taking precedence for overlapping ranges",
-                                                       "The unified chapter list is available to scoring adjustments via the same interface as regular chapters",
-                                                       "Unit test verifies conversion from listicle groups to chapters and merge behavior with overlapping ranges"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "notes":  "All 5 criteria verified. 32 unit tests pass covering conversion, topic_keywords population, merge with overlap precedence, unified interface, and segment chapter map."
-                        },
-                        {
-                            "id":  "US-71-011",
-                            "title":  "Add chapter-constrained candidate boost to embedding search",
-                            "acceptanceCriteria":  [
-                                                       "src/matching/embedding_search.py applies a soft boost to candidates whose video chapter has high relevance to the current voiceover chapter",
-                                                       "The boost is proportional to relevance_score * relevance_boost_weight (default 0.1)",
-                                                       "Candidates without chapter information receive no boost or penalty (neutral treatment)",
-                                                       "The boost is applied as a score adjustment after FAISS similarity retrieval, not as a filter",
-                                                       "Unit test verifies candidates from relevant video chapters rank higher than equal-similarity candidates from irrelevant chapters"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "notes":  "All 5 criteria verified. _apply_chapter_boost in embedding_search.py applies soft boost proportional to relevance_score * relevance_boost_weight (default 0.1) after FAISS retrieval. Neutral treatment for candidates without chapter info. 6 unit tests in TestChapterConstrainedBoost — all pass."
-                        },
-                        {
-                            "id":  "US-71-012",
-                            "title":  "Add chapter-type-aware query learning to iterative match",
-                            "acceptanceCriteria":  [
-                                                       "src/iterative_match/query_learning.py tracks query success rates bucketed by chapter type (intro, body, conclusion, listicle_item)",
-                                                       "When generating new queries for a gap, the chapter type of the gap is used to prefer historically successful query patterns for that type",
-                                                       "Chapter type classification uses simple position-based heuristics: first 10% = intro, last 10% = conclusion, listicle items from detector, remainder = body",
-                                                       "Query learning data persists across iterative match rounds within the same pipeline run",
-                                                       "Unit test verifies that query patterns successful for \u0027intro\u0027 chapters are preferred when filling intro gaps"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "low",
-                            "notes":  "Tier 3 (Iterative Match Enhancement). From Area 6 of the design doc. The query_learning.py at src/iterative_match/query_learning.py already tracks query success/failure but does not differentiate by chapter type. This adds a chapter_type dimension to the learning storage. The chapter type comes from the voiceover chapter structure detected in the match stage (US-71-002/US-71-010). Simple position heuristics avoid dependency on chapter detection for basic classification."
-                        }
-                    ]
+{
+  "sprintNumber": 71,
+  "focusArea": "listicle-matching",
+  "branchName": "ralph/sprint-71",
+  "projectContext": {
+    "sourceDir": "src/",
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short"
+  },
+  "userStories": [
+    {
+      "id": "US-71-001",
+      "title": "Generate sprint stories for listicle-matching focus area",
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'listicle-matching' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'listicle-matching'",
+        "Add stories US-71-002 through US-71-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-71-NNN to be unique across sprints",
+        "Mark this story (US-71-001) as passes: true when done"
+      ],
+      "passes": true,
+      "priority": "high",
+      "notes": "Seed story. Generated 11 stories covering listicle pipeline integration, tag-based scoring, chapter coherence, cross-chapter grouping, listicle-aware scoring, chapter-aware gap analysis, list header count detection, chapter-segment mapping persistence, listicle-to-chapter bridge, chapter-constrained embedding boost, and chapter-type query learning."
+    },
+    {
+      "id": "US-71-002",
+      "title": "Integrate listicle detector into match stage pipeline",
+      "acceptanceCriteria": [
+        "Match stage (src/stages/match.py) calls detect_listicle_structure() on voiceover segments before scoring",
+        "Detected ListicleGroup objects are stored on pipeline state (e.g., state.listicle_groups) so downstream stages can access them",
+        "When listicle structure is detected, a log message reports the count and labels of detected groups",
+        "When no listicle structure is detected, matching proceeds unchanged with no errors",
+        "Unit test verifies detect_listicle_structure is called during match stage execution with mock segments"
+      ],
+      "passes": true,
+      "priority": "high",
+      "notes": "Tier 1 (Foundation). Wired detect_listicle_groups() into MatchStage.run() via _detect_and_store_listicle_groups() helper. Added listicle_groups field to PipelineState in src/state.py. Logs count and labels when groups detected, gracefully handles errors. 4 unit tests added to tests/test_stage_match.py::TestListicleDetectionIntegration \u2014 all pass."
+    },
+    {
+      "id": "US-71-003",
+      "title": "Add tag-based keyword boost to matching scorer",
+      "acceptanceCriteria": [
+        "src/matching/scoring.py has a new apply_tag_keyword_boost() method that compares voiceover segment keywords against video tags",
+        "Tag overlap scoring uses graduated boost: 1 tag match -> +0.02, 2 matches -> +0.04, 3+ matches -> +0.06",
+        "The adjustment appears in confidence_breakdown as 'tag_keyword_boost' entry",
+        "apply_all_adjustments() calls apply_tag_keyword_boost() in the adjustment chain",
+        "Unit test verifies graduated boost values for 0, 1, 2, and 3+ tag matches"
+      ],
+      "passes": true,
+      "priority": "high",
+      "notes": "Added apply_tag_keyword_boost() with graduated boost (0.02/0.04/0.06). Wired as step 9 in apply_all_adjustments. 10 tests pass."
+    },
+    {
+      "id": "US-71-004",
+      "title": "Add chapter coherence penalty for scattered source usage",
+      "acceptanceCriteria": [
+        "src/matching/scoring.py has a new apply_chapter_coherence_penalty() method",
+        "When a voiceover chapter uses segments from >5 different video sources, a penalty of -0.03 is applied per excess source",
+        "The penalty is capped at -0.10 to avoid over-penalizing",
+        "The adjustment appears in confidence_breakdown as 'chapter_coherence' entry",
+        "Config option matching.chapter_grouping.coherence_penalty_threshold (default 5) controls the threshold",
+        "Unit test verifies penalty triggers at threshold and caps correctly"
+      ],
+      "passes": true,
+      "priority": "medium",
+      "notes": "All 6 criteria met. Implementation + 11 unit tests pass (threshold trigger, cap at -0.10, config option, breakdown entry, disabled check)."
+    },
+    {
+      "id": "US-71-005",
+      "title": "Build cross-chapter relevance matrix for candidate boosting",
+      "acceptanceCriteria": [
+        "New function compute_relevance_matrix() in src/matching/scoring.py or src/chapter_detection/ computes voiceover_chapter x video_chapter topic overlap scores",
+        "Relevance scores are normalized to 0-1 range based on keyword intersection over union",
+        "Config option matching.chapter_grouping.relevance_boost_weight (default 0.1) controls the boost magnitude",
+        "Candidates from high-relevance video chapters get a soft boost proportional to relevance score * weight",
+        "Unit test verifies matrix computation with known keyword sets produces expected overlap scores"
+      ],
+      "passes": false,
+      "priority": "medium",
+      "notes": "HARD STORY: Skipped after 3_failures - pending decomposition"
+    },
+    {
+      "id": "US-71-006",
+      "title": "Add listicle-aware scoring adjustment for within-group consistency",
+      "acceptanceCriteria": [
+        "src/matching/scoring.py has a new apply_listicle_consistency_boost() method",
+        "Segments within the same ListicleGroup that match from the same video source get a +0.04 boost",
+        "Segments at listicle group boundaries (first segment of a new group) get no boost or penalty",
+        "The adjustment appears in confidence_breakdown as 'listicle_consistency' entry",
+        "apply_all_adjustments() calls apply_listicle_consistency_boost() when listicle_groups are available",
+        "Unit test verifies boost applied within groups and not across group boundaries"
+      ],
+      "passes": true,
+      "priority": "medium",
+      "notes": "All 6/6 criteria verified. 8 tests pass. Implementation + tests complete."
+    },
+    {
+      "id": "US-71-007",
+      "title": "Add chapter-aware gap prioritization to iterative match",
+      "acceptanceCriteria": [
+        "src/iterative_match/gap_analyzer.py analyze_gaps() annotates each gap with its containing voiceover chapter/listicle group",
+        "Gaps in introduction chapters (first 10% of segments) get priority_boost of +0.2",
+        "Gaps in conclusion chapters (last 10% of segments) get priority_boost of +0.15",
+        "Gap priority is used to sort gap-filling order so high-importance chapters are filled first",
+        "Unit test verifies gaps in intro/conclusion get higher priority than gaps in middle sections"
+      ],
+      "passes": true,
+      "priority": "medium",
+      "notes": "All 5/5 criteria verified: (1) chapter annotation in analyze_gaps, (2) intro +0.2 boost, (3) conclusion +0.15 boost, (4) priority sorting for gap-filling order, (5) 9 unit tests passing."
+    },
+    {
+      "id": "US-71-008",
+      "title": "Add list header count detection to listicle detector",
+      "acceptanceCriteria": [
+        "src/chapter_detection/listicle_detector.py detects list header patterns like 'top 10', '5 reasons', '3 ways', 'seven tips'",
+        "When a list header is detected, the expected_count is stored on the detection result",
+        "The detector logs a warning when detected item count differs from expected_count by more than 1",
+        "Both numeric ('5 reasons') and word-form ('five reasons') counts are recognized",
+        "Unit test verifies detection of at least 4 different header patterns with correct expected_count extraction"
+      ],
+      "passes": false,
+      "priority": "low",
+      "notes": "HARD STORY: Skipped after 3_failures - pending decomposition"
+    },
+    {
+      "id": "US-71-009",
+      "title": "Persist chapter-segment mapping in checkpoint for output stage",
+      "acceptanceCriteria": [
+        "Chapter detection results (VideoChapter list and ListicleGroup list) are serialized to checkpoint.json after match stage",
+        "Chapter data survives pipeline resume -- loading checkpoint restores chapter/listicle structures",
+        "Output stage can read chapter/listicle data from checkpoint to annotate timeline markers",
+        "Backward compatibility: loading a checkpoint without chapter data produces empty lists, not errors",
+        "Unit test verifies round-trip serialization of VideoChapter and ListicleGroup through checkpoint"
+      ],
+      "passes": true,
+      "priority": "medium",
+      "notes": "Added chapter_data field to CheckpointData, serialize chapters/listicle groups in match stage save, restore on resume, backward compat with empty dict, 8 unit tests pass."
+    },
+    {
+      "id": "US-71-010",
+      "title": "Bridge listicle groups to voiceover chapter structure for unified handling",
+      "acceptanceCriteria": [
+        "New function in src/chapter_detection/ converts ListicleGroup objects into VoiceoverChapter objects for unified downstream handling",
+        "Converted chapters have topic_keywords populated from the ListicleGroup topic_keywords field",
+        "When both YouTube chapters and listicle groups are detected, they are merged with YouTube chapters taking precedence for overlapping ranges",
+        "The unified chapter list is available to scoring adjustments via the same interface as regular chapters",
+        "Unit test verifies conversion from listicle groups to chapters and merge behavior with overlapping ranges"
+      ],
+      "passes": true,
+      "priority": "medium",
+      "notes": "All 5 criteria verified. 32 unit tests pass covering conversion, topic_keywords population, merge with overlap precedence, unified interface, and segment chapter map."
+    },
+    {
+      "id": "US-71-011",
+      "title": "Add chapter-constrained candidate boost to embedding search",
+      "acceptanceCriteria": [
+        "src/matching/embedding_search.py applies a soft boost to candidates whose video chapter has high relevance to the current voiceover chapter",
+        "The boost is proportional to relevance_score * relevance_boost_weight (default 0.1)",
+        "Candidates without chapter information receive no boost or penalty (neutral treatment)",
+        "The boost is applied as a score adjustment after FAISS similarity retrieval, not as a filter",
+        "Unit test verifies candidates from relevant video chapters rank higher than equal-similarity candidates from irrelevant chapters"
+      ],
+      "passes": false,
+      "priority": "low",
+      "notes": "HARD STORY: Skipped after 3_failures - pending decomposition"
+    },
+    {
+      "id": "US-71-012",
+      "title": "Add chapter-type-aware query learning to iterative match",
+      "acceptanceCriteria": [
+        "src/iterative_match/query_learning.py tracks query success rates bucketed by chapter type (intro, body, conclusion, listicle_item)",
+        "When generating new queries for a gap, the chapter type of the gap is used to prefer historically successful query patterns for that type",
+        "Chapter type classification uses simple position-based heuristics: first 10% = intro, last 10% = conclusion, listicle items from detector, remainder = body",
+        "Query learning data persists across iterative match rounds within the same pipeline run",
+        "Unit test verifies that query patterns successful for 'intro' chapters are preferred when filling intro gaps"
+      ],
+      "passes": true,
+      "priority": "low",
+      "notes": "Added chapter_type field to GapSegment, position-based heuristics in annotate_gaps_with_chapters, chapter_strategy_success EMA tracking in QueryLearningDB, get_best_strategy_for_chapter with 60/40 blending, wired into stage. 64 tests pass (17 new)."
+    }
+  ]
 }
