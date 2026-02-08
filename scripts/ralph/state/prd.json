@@ -71,7 +71,7 @@
                                                        "getattr() fallback access pattern works when config is loaded from older config files missing this section",
                                                        "py_compile succeeds on src/config/sections/matching.py"
                                                    ],
-                            "notes":  "All 5/5 criteria verified. ContextEnrichmentConfig dataclass added with 6 fields (all defaults). MatchingConfig.context_enrichment field with None default and __post_init__ dict-to-dataclass conversion. config.yaml updated with matching.context_enrichment section. getattr fallback works (None->default ContextEnrichmentConfig). py_compile passes."
+                            "notes":  "All 5/5 criteria verified. ContextEnrichmentConfig dataclass added with 6 fields (all defaults). MatchingConfig.context_enrichment field with None default and __post_init__ dict-to-dataclass conversion. config.yaml updated with matching.context_enrichment section. getattr fallback works (None-\u003edefault ContextEnrichmentConfig). py_compile passes."
                         },
                         {
                             "id":  "US-70-005",
@@ -101,7 +101,7 @@
                                                        "No adjustment applied when video title is empty or None (graceful no-op)",
                                                        "Unit tests verify graduated boost values and confidence_breakdown entry format"
                                                    ],
-                            "notes":  "Tier: core (Area 2 - biggest quality impact). Files: src/matching/scoring.py (MatchScoring class at lines 1867-2043, apply_all_adjustments at lines 2044-2052). Follow existing adjustment pattern: apply_topic_penalty, apply_broll_boost, etc. Video title is already available via VideoSearchResult.title. Keywords can be extracted by simple word tokenization + stopword removal, reusing any existing keyword extraction from tiered_matcher._extract_matched_keywords() (lines 322-354)."
+                            "notes":  "All 6/6 criteria verified. apply_title_relevance_adjustment() at line 2071 with graduated boosts (0.03/0.05/0.08), _extract_keywords helper, breakdown entry as title_relevance component, called from apply_all_adjustments when video_title present, graceful no-op for empty/None. 10 unit tests pass covering all boost levels, breakdown format, stopwords, case-insensitivity."
                         },
                         {
                             "id":  "US-70-007",
