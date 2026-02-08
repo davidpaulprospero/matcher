@@ -25,6 +25,7 @@ from src.iterative_match.gap_analyzer import (
     annotate_gaps_with_chapters,
     log_gap_pattern_analysis,
     extract_keywords_for_gap,
+    derive_queries_from_descriptions,
     extract_description_queries,
     _classify_gap_pattern,
     _has_location_pattern,
@@ -1023,3 +1024,110 @@ class TestAnnotateGapsWithChapters:
         assert result[0].segment_index == 95
         assert result[1].segment_index == 50
         assert result[2].segment_index == 2
+
+
+# ============================================================================
+# US-72-011: Description-derived search queries for gap filling
+# ============================================================================
+
+class TestDeriveQueriesFromDescriptions:
+    """Tests for derive_queries_from_descriptions function."""
+
+    def test_extracts_queries_from_descriptions(self):
+        """AC: Extracts key phrases from descriptions of matched videos."""
+        matched_videos = [
+            {'description': 'This film covers Solar Energy Revolution in Germany and Wind Power advances.'},
+            {'description': 'Renewable Energy Solutions including Solar Energy panels deployed worldwide.'},
+        ]
+        gap = _make_gap(0, 0.3, "energy sources and renewable technology")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=3)
+        assert len(result) > 0
+        assert len(result) <= 3
+
+    def test_empty_matched_videos(self):
+        """AC: Empty description handling - empty matched videos returns empty."""
+        gap = _make_gap(0, 0.3, "some text about energy")
+        result = derive_queries_from_descriptions([], gap)
+        assert result == []
+
+    def test_no_descriptions_in_videos(self):
+        """AC: Videos without description field return empty."""
+        matched_videos = [
+            {'title': 'Video 1'},
+            {'title': 'Video 2', 'description': ''},
+        ]
+        gap = _make_gap(0, 0.3, "some text")
+        result = derive_queries_from_descriptions(matched_videos, gap)
+        assert result == []
+
+    def test_short_descriptions_handled(self):
+        """Very short descriptions are filtered out."""
+        matched_videos = [
+            {'description': 'short'},
+            {'description': 'OK'},
+        ]
+        gap = _make_gap(0, 0.3, "something longer")
+        result = derive_queries_from_descriptions(matched_videos, gap)
+        assert isinstance(result, list)
+
+    def test_max_queries_default_three(self):
+        """AC: Returns top 3 noun phrases by default."""
+        matched_videos = [
+            {'description': 'The Arctic Ocean Expedition explored Ice Sheet dynamics '
+                            'and Polar Bear habitats near Greenland Ice Cap during Climate Research.'},
+        ]
+        gap = _make_gap(0, 0.3, "arctic ice melting")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=3)
+        assert len(result) <= 3
+
+    def test_quoted_phrases_extracted(self):
+        """Quoted phrases in descriptions are extracted as noun phrases."""
+        matched_videos = [
+            {'description': 'The documentary explores "Deep Ocean Currents" and their impact.'},
+        ]
+        gap = _make_gap(0, 0.3, "ocean current patterns")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        assert len(result) > 0
+        # The quoted phrase should be among the results
+        all_lower = ' '.join(result).lower()
+        assert 'deep ocean currents' in all_lower
+
+    def test_capitalized_sequences_extracted(self):
+        """Capitalized word sequences are extracted as noun phrases."""
+        matched_videos = [
+            {'description': 'Studying Marine Biology at Great Barrier Reef.'},
+        ]
+        gap = _make_gap(0, 0.3, "marine life reef studies")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        assert len(result) > 0
+        all_lower = ' '.join(result).lower()
+        assert 'great barrier reef' in all_lower or 'marine biology' in all_lower
+
+    def test_config_toggle_field_exists(self):
+        """AC: Config toggle use_description_queries exists in IterativeMatchingConfig."""
+        from src.config.sections.iterative_matching import IterativeMatchingConfig
+        config = IterativeMatchingConfig()
+        assert hasattr(config, 'use_description_queries')
+        assert config.use_description_queries is True
+
+    def test_urls_filtered_from_descriptions(self):
+        """URLs in descriptions don't pollute extracted phrases."""
+        matched_videos = [
+            {'description': 'Visit https://example.com for Solar Panel Installation tips.'},
+        ]
+        gap = _make_gap(0, 0.3, "solar panel setup")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        for q in result:
+            assert 'http' not in q.lower()
+            assert 'example' not in q.lower()
+
+    def test_fallback_to_tfidf_when_no_noun_phrases(self):
+        """Falls back to TF-IDF extraction when no capitalized sequences found."""
+        matched_videos = [
+            {'description': 'understanding the world of quantum computing and its applications in modern science'},
+            {'description': 'quantum computing breakthroughs transform data processing capabilities worldwide'},
+        ]
+        gap = _make_gap(0, 0.3, "quantum computers")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=3)
+        # Should still return something via fallback
+        assert len(result) > 0

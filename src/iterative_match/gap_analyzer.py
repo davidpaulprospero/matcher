@@ -924,6 +924,89 @@ _DESCRIPTION_STOP_WORDS = {
 }
 
 
+def derive_queries_from_descriptions(
+    matched_videos: List[Dict[str, Any]],
+    gap_segment: 'GapSegment',
+    max_queries: int = 3,
+) -> List[str]:
+    """
+    Derive search queries from descriptions of already-matched videos,
+    targeted to a specific gap segment.
+
+    Extracts top noun phrases from video descriptions using simple regex
+    (capitalized word sequences and quoted phrases), then filters for
+    relevance to the gap segment's voiceover text.
+
+    Args:
+        matched_videos: List of matched video dicts with 'description' field.
+        gap_segment: The gap segment to derive queries for.
+        max_queries: Maximum number of queries to return (default 3).
+
+    Returns:
+        List of query strings derived from descriptions.
+    """
+    if not matched_videos:
+        return []
+
+    # Collect descriptions from matched videos
+    descriptions = []
+    for video in matched_videos:
+        desc = ''
+        if isinstance(video, dict):
+            desc = video.get('description', '') or ''
+        else:
+            desc = getattr(video, 'description', '') or ''
+        if desc and len(desc.strip()) > 10:
+            descriptions.append(desc)
+
+    if not descriptions:
+        return []
+
+    # Extract noun phrases using regex: capitalized word sequences, quoted phrases
+    noun_phrases: List[str] = []
+    seen_lower: set = set()
+
+    for desc in descriptions:
+        # Remove URLs
+        clean = re.sub(r'https?://\S+', '', desc)
+
+        # 1. Quoted phrases (single or double quotes)
+        quoted = re.findall(r'["\u201c]([^"\u201d]{3,50})["\u201d]', clean)
+        for phrase in quoted:
+            phrase_stripped = phrase.strip()
+            if phrase_stripped.lower() not in seen_lower and len(phrase_stripped.split()) <= 5:
+                seen_lower.add(phrase_stripped.lower())
+                noun_phrases.append(phrase_stripped)
+
+        # 2. Capitalized word sequences (2-4 consecutive capitalized words)
+        cap_sequences = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b', clean)
+        for seq in cap_sequences:
+            if seq.lower() not in seen_lower and seq.lower() not in _DESCRIPTION_STOP_WORDS:
+                seen_lower.add(seq.lower())
+                noun_phrases.append(seq)
+
+    if not noun_phrases:
+        # Fallback: use extract_description_queries for TF-IDF-like extraction
+        return extract_description_queries(descriptions, max_queries=max_queries)
+
+    # Score phrases by relevance to the gap segment's voiceover text
+    gap_words = set(gap_segment.voiceover_text.lower().split())
+    gap_words = {w.strip('.,!?;:"\'-()[]') for w in gap_words}
+    gap_words = {w for w in gap_words if len(w) > 3}
+
+    scored: List[tuple] = []
+    for phrase in noun_phrases:
+        phrase_words = set(phrase.lower().split())
+        # Score: overlap with gap text + phrase length bonus
+        overlap = len(phrase_words & gap_words)
+        score = overlap * 2.0 + len(phrase_words) * 0.5
+        scored.append((phrase, score))
+
+    # Sort by score descending, take top N
+    scored.sort(key=lambda x: -x[1])
+    return [phrase for phrase, _ in scored[:max_queries]]
+
+
 def extract_description_queries(
     descriptions: List[str],
     max_queries: int = 10,
