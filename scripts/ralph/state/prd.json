@@ -1,7 +1,7 @@
 {
-    "sprintNumber": 69,
-    "focusArea": "config",
-    "branchName": "ralph/sprint-69",
+    "sprintNumber": 70,
+    "focusArea": "context-matching",
+    "branchName": "ralph/sprint-70",
     "projectContext": {
         "sourceDir": "src/",
         "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,183 +11,184 @@
     },
     "userStories": [
         {
-            "id": "US-69-001",
-            "title": "Generate sprint stories for config focus area",
-            "priority": "high",
-            "passes": true,
+            "id": "US-70-001",
             "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'config' focus area",
+                "Read scripts/ralph/config/ralph-config.json to understand the 'context-matching' focus area",
                 "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                 "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                 "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'config'",
-                "Add stories US-69-002 through US-69-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Analyze the codebase to find 8-12 specific improvements for 'context-matching'",
+                "Add stories US-70-002 through US-70-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                 "Each story MUST have 4-6 testable acceptance criteria",
                 "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                 "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-69-NNN to be unique across sprints",
-                "Mark this story (US-69-001) as passes: true when done"
+                "IMPORTANT: Story IDs MUST follow format US-70-NNN to be unique across sprints",
+                "Mark this story (US-70-001) as passes: true when done"
             ],
-            "notes": "Seed story. Generated 11 config improvement stories (US-69-002 through US-69-012) covering: section_mapping gaps, dict-to-dataclass conversion, validation standardization, config.yaml sync, and test coverage."
+            "passes": true,
+            "priority": "high",
+            "title": "Generate sprint stories for context-matching focus area",
+            "notes": "Seed story - generated 11 implementation stories (US-70-002 through US-70-012) covering video metadata extraction, context-enriched matching, chapter detection, listicle detection, cross-chapter grouping, and iterative match enhancements."
         },
         {
-            "id": "US-69-002",
-            "title": "Add missing section_mapping entries for broll, global_cache, and silent_video",
+            "id": "US-70-002",
+            "title": "Add video metadata fields to CaptionResult and state dataclasses",
             "priority": "high",
             "passes": true,
             "acceptanceCriteria": [
-                "Add 'broll': (BrollConfig, 'broll') to section_mapping dict in src/config/base.py",
-                "Add 'global_cache': (GlobalCacheConfig, 'global_cache') to section_mapping dict in src/config/base.py",
-                "Add 'silent_video': (SilentVideoConfig, 'silent_video') to section_mapping dict in src/config/base.py",
-                "Write test that loads a config.yaml with broll section and verifies BrollConfig fields are populated",
-                "Write test that loads a config.yaml with global_cache section and verifies GlobalCacheConfig fields are populated",
-                "Write test that loads a config.yaml with silent_video section and verifies SilentVideoConfig fields are populated"
+                "CaptionResult in src/caption/models.py has new fields: video_description (str, default ''), video_chapters (List[dict], default []), video_tags (List[str], default [])",
+                "VideoSearchResult in src/state.py has new field: description (str, default '')",
+                "DownloadedVideo in src/state.py has new field: description (str, default '')",
+                "Existing CaptionResult serialization/deserialization is backward compatible - cached results without new fields load without error",
+                "New fields have __post_init__ handling if needed for dict-vs-object safety (Rule 2, Rule 6)",
+                "Unit tests verify CaptionResult round-trip serialization with and without new fields"
             ],
-            "notes": "Tier: CRITICAL. DONE: Added 3 entries to section_mapping in base.py (broll, global_cache, silent_video). Added TestMissingSectionMappingEntries class with 4 tests in test_config_base_coverage.py verifying YAML values populate fields and defaults work. All tests pass."
+            "notes": "Added video_description, video_chapters, video_tags to CaptionResult; description to VideoSearchResult and DownloadedVideo. __post_init__ safety for None values. 15 tests pass, backward compatible."
         },
         {
-            "id": "US-69-003",
-            "title": "Add dict-to-dataclass conversion in KeywordConfig.__post_init__",
+            "id": "US-70-003",
+            "title": "Extract video description, chapters, and tags from yt-dlp info_dict",
             "priority": "high",
-            "passes": true,
+            "passes": false,
             "acceptanceCriteria": [
-                "KeywordConfig.__post_init__ converts list_detection from dict to ListDetectionConfig when isinstance(self.list_detection, dict)",
-                "Existing None-to-default conversion is preserved (list_detection=None creates ListDetectionConfig())",
-                "Write test that constructs KeywordConfig with list_detection={'enabled': False} and verifies it becomes a ListDetectionConfig instance",
-                "Write test that constructs KeywordConfig with list_detection=None and verifies default ListDetectionConfig is created",
-                "Write test that constructs KeywordConfig with list_detection=ListDetectionConfig(enabled=False) and verifies it passes through unchanged"
+                "caption_fetcher.py extracts info_dict['description'] (truncated to max_description_length, default 500 chars) and stores it in CaptionResult.video_description",
+                "caption_fetcher.py extracts info_dict['chapters'] (list of {title, start_time, end_time} dicts) and stores in CaptionResult.video_chapters",
+                "caption_fetcher.py extracts info_dict['tags'] (list of strings) and stores in CaptionResult.video_tags",
+                "When info_dict fields are missing or None, extraction gracefully defaults to empty string/list without raising errors",
+                "Unit tests verify extraction from a mock info_dict with all fields present, partially present, and completely absent"
             ],
-            "notes": "Tier: HIGH. DONE: Added `elif isinstance(self.list_detection, dict)` branch in KeywordConfig.__post_init__ to convert dict to ListDetectionConfig(**dict). Added 3 tests in TestKeywordConfigPostInit class in test_config_post_init.py covering dict, None, and dataclass pass-through. All 3 tests pass."
+            "notes": "Tier: foundation (Area 1). Files: src/caption_fetcher.py (large file ~388KB - locate the info_dict / --dump-json handling section where video metadata is processed). Depends on US-70-002 for the CaptionResult fields. The info_dict is already fetched by yt-dlp; we just need to read description/chapters/tags from it instead of discarding them."
         },
         {
-            "id": "US-69-004",
-            "title": "Standardize config validation to use ValueError for out-of-range values",
-            "priority": "medium",
-            "passes": true,
+            "id": "US-70-004",
+            "title": "Add context_enrichment config section for matching",
+            "priority": "high",
+            "passes": false,
             "acceptanceCriteria": [
-                "MatchingConfig.__post_init__ raises ValueError instead of silently clamping for clearly invalid values (e.g., negative confidence thresholds)",
-                "EmbeddingConfig.__post_init__ raises ValueError instead of silently clamping for clearly invalid values",
-                "Add a docstring comment block in src/config/base.py documenting the validation convention: ValueError for invalid types/impossible values, warn+clamp for soft limits",
-                "Write test verifying MatchingConfig raises ValueError for negative confidence_threshold",
-                "Write test verifying EmbeddingConfig raises ValueError for negative dimensions"
+                "New ContextEnrichmentConfig dataclass in src/config/sections/matching.py with fields: extract_video_description (bool, True), extract_video_chapters (bool, True), extract_video_tags (bool, True), max_description_length (int, 500), parse_description_chapters (bool, True), title_enriched_embeddings (bool, True)",
+                "MatchingConfig has new field context_enrichment of type ContextEnrichmentConfig with __post_init__ dict-to-dataclass conversion",
+                "config.yaml has matching.context_enrichment section with all fields and comments",
+                "getattr() fallback access pattern works when config is loaded from older config files missing this section",
+                "py_compile succeeds on src/config/sections/matching.py"
             ],
-            "notes": "Tier: MEDIUM. DONE: MatchingConfig raises ValueError for negative confidence thresholds and non-positive integer fields (embedding_candidates, etc). EmbeddingConfig raises ValueError for negative batch_size, max_retries, retry_delay, and max_workers. Values > 1.0 for confidence are warn+clamped. Validation convention docstring added to base.py. 19 new tests added to test_config_section_validation.py."
+            "notes": "Tier: foundation (Area 1). Files: src/config/sections/matching.py (lines 166-445, MatchingConfig dataclass - add ContextEnrichmentConfig and wire it in with __post_init__), config.yaml (matching section around line 331). Follow Rule 1: update BOTH config dataclass AND config.yaml. Follow Rule 6: handle dict-vs-object in __post_init__."
         },
         {
-            "id": "US-69-005",
-            "title": "Add __post_init__ validation to DeduplicationConfig",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "DeduplicationConfig.__post_init__ validates hash_threshold is in range 0-64",
-                "DeduplicationConfig.__post_init__ validates frame_timeout is positive",
-                "DeduplicationConfig raises ValueError for hash_threshold=-1 or hash_threshold=65",
-                "DeduplicationConfig raises ValueError for frame_timeout=0 or frame_timeout=-5",
-                "Write tests for all four invalid value cases above"
-            ],
-            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to DeduplicationConfig in src/config/sections/output.py. Validates hash_threshold in 0-64 range and frame_timeout > 0, raising ValueError for invalid values. Added TestDeduplicationConfigValueErrorValidation class with 5 tests (4 invalid cases + boundary values) in test_config_section_validation.py. All 203 config validation tests pass."
-        },
-        {
-            "id": "US-69-006",
-            "title": "Add __post_init__ validation to VisionConfig and SceneDetectionConfig",
+            "id": "US-70-005",
+            "title": "Parse YouTube chapters from video description text",
             "priority": "medium",
             "passes": false,
             "acceptanceCriteria": [
-                "VisionConfig.__post_init__ validates coverage_threshold is in range 0.0-1.0",
-                "VisionConfig.__post_init__ validates max_api_calls_per_run is positive",
-                "SceneDetectionConfig.__post_init__ validates threshold is positive",
-                "SceneDetectionConfig.__post_init__ validates min_scene_len is positive",
-                "Write tests for VisionConfig with coverage_threshold=1.5 (raises ValueError)",
-                "Write tests for SceneDetectionConfig with threshold=-1 (raises ValueError)"
+                "New function parse_description_chapters(description: str) -> List[dict] that extracts timestamp-title pairs from description text",
+                "Handles common YouTube description chapter formats: '0:00 Introduction', '01:23 Topic Name', '1:02:30 Long Topic'",
+                "Returns list of {title: str, start_time: float, end_time: float} dicts with end_time computed from next chapter's start_time",
+                "Returns empty list when no chapter pattern is detected or description is empty/None",
+                "caption_fetcher.py calls this function when info_dict['chapters'] is empty/missing and parse_description_chapters config is True",
+                "Unit tests cover: standard format, HH:MM:SS format, mixed formats, no chapters, malformed timestamps"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/media.py (VisionConfig, SceneDetectionConfig). Neither has __post_init__. coverage_threshold is a ratio (0-1), max_api_calls_per_run should be >0, scene detection threshold and min_scene_len should be >0. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: foundation (Area 1). Files: src/caption_fetcher.py (add parse function near info_dict handling), or new utility in src/caption/. Many YouTube videos have chapters only in the description, not in the structured chapters field. Regex pattern: r'(?:^|\\n)\\s*(\\d{1,2}:?\\d{2}(?::\\d{2})?)\\s+(.+?)(?=\\n|$)'. Config gate: context_enrichment.parse_description_chapters."
         },
         {
-            "id": "US-69-007",
-            "title": "Add __post_init__ validation to EnhancedFeaturesConfig and LLMTitleFilterConfig",
+            "id": "US-70-006",
+            "title": "Add title keyword overlap scoring to confidence adjustments",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "New method apply_title_relevance_adjustment() in MatchScoring class (src/matching/scoring.py) computes keyword overlap between voiceover segment text and video title",
+                "Graduated boost applied: 1 keyword match -> +0.03, 2 matches -> +0.05, 3+ matches -> +0.08",
+                "Adjustment recorded in confidence_breakdown as {'component': 'title_relevance', 'adjustment': <value>, 'reason': <detail>}",
+                "apply_all_adjustments() calls apply_title_relevance_adjustment() when video title is available",
+                "No adjustment applied when video title is empty or None (graceful no-op)",
+                "Unit tests verify graduated boost values and confidence_breakdown entry format"
+            ],
+            "notes": "Tier: core (Area 2 - biggest quality impact). Files: src/matching/scoring.py (MatchScoring class at lines 1867-2043, apply_all_adjustments at lines 2044-2052). Follow existing adjustment pattern: apply_topic_penalty, apply_broll_boost, etc. Video title is already available via VideoSearchResult.title. Keywords can be extracted by simple word tokenization + stopword removal, reusing any existing keyword extraction from tiered_matcher._extract_matched_keywords() (lines 322-354)."
+        },
+        {
+            "id": "US-70-007",
+            "title": "Enrich LLM reranker prompt with video title and description context",
+            "priority": "high",
+            "passes": false,
+            "acceptanceCriteria": [
+                "LLMReranker.rerank() in src/matching/llm_reranker.py includes video title in candidate descriptions sent to LLM",
+                "When video description is available, first sentence (up to 100 chars) is appended as context: 'Video context: {title}. {first_sentence}'",
+                "Candidate format changes from simple pipe-separated text to include metadata prefix",
+                "When title/description are empty, format falls back to current behavior (caption text only)",
+                "Unit tests verify prompt construction with and without video context"
+            ],
+            "notes": "Tier: core (Area 2). Files: src/matching/llm_reranker.py (line 176, content construction for LLM prompt). Currently uses: content = voiceover_text + '|' + '|'.join(c[0].text for c in candidates[:5]). Need to inject video context per candidate. Video title comes from the SRTSegment's source metadata or from the match context passed through tiered_matcher."
+        },
+        {
+            "id": "US-70-008",
+            "title": "Prepend video title to caption text for title-enriched embeddings",
             "priority": "medium",
             "passes": false,
             "acceptanceCriteria": [
-                "EnhancedFeaturesConfig.__post_init__ validates min_confidence is in range 0.0-1.0",
-                "EnhancedFeaturesConfig.__post_init__ validates max_retries is positive",
-                "EnhancedFeaturesConfig.__post_init__ validates face_preference is one of 'neutral', 'more', 'none'",
-                "LLMTitleFilterConfig.__post_init__ validates min_relevance is in range 0.0-1.0",
-                "LLMTitleFilterConfig.__post_init__ validates batch_size is positive",
-                "Write tests covering invalid values for each validated field"
+                "In src/stages/caption_stage.py _populate_text_metadata(), when context_enrichment.title_enriched_embeddings is True, prepend '[{video_title}] ' to segment text before embedding computation",
+                "Original caption text is preserved separately for display/matching - only embedding input is modified",
+                "When video title is empty or config is disabled, behavior is identical to current (no prefix added)",
+                "Config toggle matching.context_enrichment.title_enriched_embeddings controls this behavior with getattr fallback",
+                "Unit tests verify embedding text construction with and without title prefix"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/download.py (EnhancedFeaturesConfig lines ~91-123, LLMTitleFilterConfig lines ~125-133). Neither has __post_init__. min_confidence and min_relevance are score thresholds (0-1), face_preference is an enum-like string. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: core (Area 2). Files: src/stages/caption_stage.py (lines 1700-1778, _populate_text_metadata method). The title prefix gives the embedding model richer context about what the video segment is about, improving semantic search quality. Must ensure the original text field is not mutated - only the text sent to the embedding model should have the prefix. VideoSearchResult.title is available in the caption stage context."
         },
         {
-            "id": "US-69-008",
-            "title": "Add __post_init__ validation to RemixConfig and ZeroDownloadRemixConfig",
+            "id": "US-70-009",
+            "title": "Map caption segments to YouTube chapters for chapter-aware scoring",
             "priority": "medium",
             "passes": false,
             "acceptanceCriteria": [
-                "RemixConfig.__post_init__ validates min_relevance_score is in range 0.0-1.0",
-                "RemixConfig.__post_init__ validates max_workers is positive",
-                "RemixConfig.__post_init__ validates auto_accept_filter is one of 'filtered', 'all', 'prompt'",
-                "ZeroDownloadRemixConfig.__post_init__ validates max_retries is positive",
-                "ZeroDownloadRemixConfig.__post_init__ validates max_keywords_per_batch is positive",
-                "Write tests covering invalid values for each validated field"
+                "New function map_segments_to_chapters(segments, chapters) returns a dict mapping segment index to chapter index/title",
+                "Segments spanning chapter boundaries are assigned to the chapter with the most temporal overlap",
+                "Segments outside all chapter ranges are assigned chapter_index=-1 (no chapter)",
+                "New scoring adjustment apply_chapter_topic_match() in MatchScoring adds +0.05 to +0.10 boost when voiceover and video chapter topics match, -0.05 penalty for mismatch",
+                "Adjustment recorded in confidence_breakdown as 'chapter_topic_match' entry",
+                "Unit tests cover: exact boundary segments, spanning segments, segments outside chapters, empty chapters list"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/download.py (RemixConfig lines ~36-73, ZeroDownloadRemixConfig lines ~75-89). Neither has __post_init__. min_relevance_score is a score threshold (0-1), auto_accept_filter is an enum-like string with known valid values. Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: enhancement (Area 3). Files: src/matching/scoring.py (add apply_chapter_topic_match method to MatchScoring class), new utility function can go in src/chapter_detection/models.py or src/chapter_detection/. Depends on US-70-002/003 for chapter data availability. Chapter topic matching uses keyword overlap between chapter titles and voiceover segment keywords."
         },
         {
-            "id": "US-69-009",
-            "title": "Add __post_init__ validation to VarietyConfig",
+            "id": "US-70-010",
+            "title": "Detect listicle structure in voiceover narration",
             "priority": "medium",
             "passes": false,
             "acceptanceCriteria": [
-                "VarietyConfig.__post_init__ validates min_time_distance is non-negative (>=0)",
-                "VarietyConfig.__post_init__ validates min_embedding_distance is in range 0.0-2.0",
-                "VarietyConfig.__post_init__ validates timeline_variety_window is positive",
-                "VarietyConfig.__post_init__ validates max_source_repeats_in_window is positive",
-                "Write tests for VarietyConfig with min_time_distance=-1 (raises ValueError)",
-                "Write tests for VarietyConfig with timeline_variety_window=0 (raises ValueError)"
+                "New module src/chapter_detection/listicle_detector.py with detect_listicle_groups(segments) function",
+                "Detects ordinal markers ('first', 'second', 'third', 'finally', 'lastly') at segment boundaries",
+                "Detects numbered markers ('#1', 'number one', 'step 1', 'item 1') at segment starts",
+                "Detects transition markers ('next up', 'moving on to', 'let\\'s talk about') between segments",
+                "Returns List[ListicleGroup] where ListicleGroup has: group_id, item_label, start_segment_idx, end_segment_idx, topic_keywords",
+                "Unit tests verify detection of each marker type and edge case of mixed numbering styles"
             ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/output.py (VarietyConfig lines 30-42). No __post_init__ exists. min_time_distance is seconds (>=0), min_embedding_distance is cosine distance (0-2), timeline_variety_window is seconds (>0), max_source_repeats_in_window is a count (>0). Tests: tests/test_config_section_validation.py"
+            "notes": "Tier: enhancement (Area 4). Files: new src/chapter_detection/listicle_detector.py. The chapter_detection/ directory already exists with detector.py, models.py, chunking.py, and passes/. ListicleGroup dataclass can go in src/chapter_detection/models.py. Integration with existing chapter detection (detector.py) is a separate story. This story focuses on the detection logic only."
         },
         {
-            "id": "US-69-010",
-            "title": "Handle duration_tiers loading through _build_dataclass for consistent error handling",
+            "id": "US-70-011",
+            "title": "Add chapter-level source consistency boost to scoring",
+            "priority": "medium",
+            "passes": false,
+            "acceptanceCriteria": [
+                "New method apply_chapter_source_consistency() in MatchScoring class applies +0.03 boost when candidate video source matches previous segment's source within the same voiceover chapter",
+                "consecutive_source_penalty is suppressed (not applied) for segments within the same voiceover chapter boundary when chapter_grouping is enabled",
+                "When chapter structure is not available, existing consecutive_source_penalty behavior is unchanged",
+                "New config field matching.chapter_grouping.source_consistency_boost (float, default 0.03) controls boost amount",
+                "Adjustment recorded in confidence_breakdown as 'chapter_source_consistency' entry",
+                "Unit tests verify boost application within chapters and penalty suppression logic"
+            ],
+            "notes": "Tier: enhancement (Area 3/5). Files: src/matching/scoring.py (apply_consecutive_source_penalty and MatchScoring class), src/config/sections/matching.py (add chapter_grouping config section with ChapterGroupingConfig dataclass), config.yaml. Depends on chapter detection (US-70-009/010) for knowing chapter boundaries. The insight is that within a coherent section about one topic, using multiple clips from the same video is actually desirable, not penalizable."
+        },
+        {
+            "id": "US-70-012",
+            "title": "Add description-derived search queries to iterative gap filling",
             "priority": "low",
             "passes": false,
             "acceptanceCriteria": [
-                "duration_tiers loading in Config._from_dict uses the same error handling path as other sections",
-                "Malformed duration_tiers in YAML raises ConfigError with descriptive message instead of silently falling back",
-                "Write test that loads config with malformed duration_tiers dict and verifies ConfigError is raised",
-                "Write test that loads config with valid duration_tiers dict and verifies DurationTiersConfig is correctly populated",
-                "Existing _build_duration_tiers method is either integrated into the standard path or wrapped with try/except ConfigError"
+                "gap_analyzer.py extracts key phrases from video descriptions of already-matched videos when analyzing gaps",
+                "Extracted phrases are used to generate additional targeted search queries for gap-filling iterations",
+                "New config field iterative_match.use_description_queries (bool, default True) controls this behavior",
+                "When no descriptions are available or config is disabled, gap analysis behavior is unchanged",
+                "Unit tests verify query generation from mock descriptions and graceful no-op when descriptions are absent"
             ],
-            "notes": "Tier: LOW. Files: src/config/base.py (lines 418-420). duration_tiers is handled separately from section_mapping with cls._build_duration_tiers(data['duration_tiers']) which bypasses the _build_dataclass error handling. If duration_tiers config is malformed, it may raise raw KeyError/TypeError instead of ConfigError. Tests: tests/test_config_build_dataclass_errors.py"
-        },
-        {
-            "id": "US-69-011",
-            "title": "Add MultiStyleConfig validation and StockFootageConfig validation",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "MultiStyleConfig.__post_init__ validates styles list is non-empty when enabled=True",
-                "MultiStyleConfig.__post_init__ warns if enabled=True and styles contains only 'default'",
-                "StockFootageConfig.__post_init__ validates min/max duration fields are positive and min < max",
-                "Write test for MultiStyleConfig(enabled=True, styles=[]) raises ValueError",
-                "Write test for StockFootageConfig with min_duration > max_duration raises ValueError"
-            ],
-            "notes": "Tier: LOW. Files: src/config/sections/output.py (MultiStyleConfig lines 126-131), src/config/sections/media.py (StockFootageConfig). MultiStyleConfig has no __post_init__; enabling with empty styles would cause runtime errors. StockFootageConfig has duration range fields that should be validated for min < max. Tests: tests/test_config_section_validation.py"
-        },
-        {
-            "id": "US-69-012",
-            "title": "Add comprehensive config round-trip test for all section_mapping entries",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Write a parametrized test that iterates over all entries in Config._from_dict section_mapping",
-                "Each parametrized case loads a minimal YAML with one non-default value for that section and verifies it is applied",
-                "Test covers all sections including newly added broll, global_cache, silent_video from US-69-002",
-                "Test verifies that unknown YAML keys in a section are logged as warnings (not silently dropped or causing errors)",
-                "Write a separate test that loads the real config.yaml and verifies all sections parse without errors"
-            ],
-            "notes": "Tier: LOW. Files: src/config/base.py (section_mapping lines 382-410), tests/test_config*.py. Existing tests cover individual sections but no single parametrized test ensures every section_mapping entry actually works end-to-end. This catches regressions when new sections are added but not mapped. Tests: tests/test_config_base_coverage.py"
+            "notes": "Tier: polish (Area 6). Files: src/iterative_match/gap_analyzer.py (analyze_gaps function at lines 152-212), src/config/sections/iterative_matching.py (add use_description_queries field). Depends on US-70-002/003 for description availability. Key phrase extraction can use simple NLP: extract noun phrases or TF-IDF keywords from descriptions. This enriches the iterative match search space beyond the voiceover text alone."
         }
     ]
 }

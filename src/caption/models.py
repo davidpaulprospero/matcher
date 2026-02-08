@@ -342,6 +342,19 @@ class CaptionResult:
     status: CaptionStatus = CaptionStatus.SUCCESS  # US-63-006: Structured status
     no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
     fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
+    # US-70-002: Video metadata for context-enriched matching
+    video_description: str = ""  # Full video description text
+    video_chapters: List[dict] = field(default_factory=list)  # Parsed chapter markers [{title, start_time, end_time}]
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+
+    def __post_init__(self):
+        """Ensure list fields are never None (dict-vs-object safety, Rule 2/6)."""
+        if self.video_chapters is None:
+            self.video_chapters = []
+        if self.video_tags is None:
+            self.video_tags = []
+        if self.video_description is None:
+            self.video_description = ""
 
     @property
     def skipped_segments_count(self) -> int:
@@ -582,4 +595,7 @@ class CaptionResult:
             'coverage_ratio': self.coverage_ratio,  # US-004
             'skipped_segments_count': self.skipped_segments_count,  # US-005
             'timing_validated': self.timing_validated.to_dict() if self.timing_validated else None,  # US-007
+            'video_description': self.video_description,  # US-70-002
+            'video_chapters': self.video_chapters,  # US-70-002
+            'video_tags': self.video_tags,  # US-70-002
         }

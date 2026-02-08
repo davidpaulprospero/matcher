@@ -77,6 +77,7 @@ class DownloadedVideo:
     source: str = ""  # 'download', 'global_cache', etc.
     video_hash: str = ""
     face_score: float = 0.5
+    description: str = ""  # US-70-002: Video description for context-enriched matching
 
 
 @dataclass
@@ -258,6 +259,7 @@ class VideoSearchResult:
     duration: float = 0.0
     duration_tier: str = ""
     keyword: str = ""
+    description: str = ""  # US-70-002: Video description for context-enriched matching
 
 
 @dataclass
