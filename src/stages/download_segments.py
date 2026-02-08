@@ -464,7 +464,7 @@ class DownloadVideoSegmentsStage(Stage):
                         f"videos recovered from previous session"
                     )
 
-            downloaded_segments, download_stats = self._download_segments(
+            downloaded_segments, download_stats, throughput_samples = self._download_segments(
                 segments_to_download,
                 output_dir,
                 buffer_seconds,
@@ -563,14 +563,16 @@ class DownloadVideoSegmentsStage(Stage):
                 if rq.items or rq._failed_ids:
                     checkpoint_data['retry_queue'] = rq.to_checkpoint_dict()
 
-            # Stage metrics for pipeline observability (US-49-009 + US-49-012)
+            # Stage metrics for pipeline observability (US-49-009 + US-49-012 + US-81-007)
             metrics = StageMetrics(
                 items_processed=download_stats.succeeded + download_stats.cached,
                 items_failed=download_stats.failed,
                 duration_seconds=elapsed,
                 error_categories=download_stats.error_categories,
                 escalation_summary=escalation_summary,
+                throughput_samples=throughput_samples,
             )
+            metrics.compute_throughput()
 
             return StageResult.ok(checkpoint_data, warnings, metrics)
 
@@ -697,6 +699,8 @@ class DownloadVideoSegmentsStage(Stage):
         total = len(segments)
         stats = SegmentDownloadStats(total=total)
         ctx = self._prepare_download_context(stats)
+        # US-81-007: Track per-item throughput samples
+        _throughput_samples: List[float] = []
 
         # US-81-003: Track completed/failed IDs via shared partial_progress dict
         if partial_progress is None:
@@ -710,6 +714,7 @@ class DownloadVideoSegmentsStage(Stage):
         _did_network_request = False
 
         for idx, seg in enumerate(segments, 1):
+            _item_start = time.monotonic()  # US-81-007: per-item timing
             # Sleep between network requests (skip before first, skip after cache hits)
             if _did_network_request and current_delay > 0:
                 time.sleep(current_delay)
@@ -740,6 +745,10 @@ class DownloadVideoSegmentsStage(Stage):
                     ctx.consecutive_bot_detections = 0
                     if ctx.escalation_mgr:
                         ctx.escalation_mgr.clear_tier_floor()
+                # US-81-007: Record throughput for cache hit
+                _cache_elapsed = time.monotonic() - _item_start
+                if _cache_elapsed > 0:
+                    _throughput_samples.append(1.0 / _cache_elapsed)
                 self._print_progress(idx, total, stats)
                 if progress_callback:
                     progress_callback(idx, total, downloaded)
@@ -775,6 +784,11 @@ class DownloadVideoSegmentsStage(Stage):
                 partial_progress['failed_ids'].append(seg_key)
             self._print_progress(idx, total, stats)
 
+            # US-81-007: Record per-item throughput sample
+            _item_elapsed = time.monotonic() - _item_start
+            if _item_elapsed > 0:
+                _throughput_samples.append(1.0 / _item_elapsed)
+
             # Adaptive delay: back off on failure, reset on success
             if result.get('success'):
                 current_delay = base_delay
@@ -794,7 +808,7 @@ class DownloadVideoSegmentsStage(Stage):
         # US-49-009: Log structured error summary with actionable diagnostics
         self._log_error_summary(stats)
 
-        return downloaded, stats
+        return downloaded, stats, _throughput_samples
 
     def _prepare_download_context(
         self, stats: SegmentDownloadStats

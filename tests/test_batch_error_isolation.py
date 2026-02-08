@@ -122,7 +122,7 @@ class TestDownloadStageBatchErrorIsolation:
         with patch.object(stage, '_collect_matched_segments', return_value=[
             {'video_id': f'vid{i}', 'start': 0.0, 'end': 10.0} for i in range(5)
         ]), \
-            patch.object(stage, '_download_segments', return_value=(fake_downloaded, download_stats)), \
+            patch.object(stage, '_download_segments', return_value=(fake_downloaded, download_stats, [])), \
             patch.object(stage, '_print_summary'), \
             patch.object(stage, '_update_matches_with_local_paths'), \
             patch.object(stage, '_log_escalation_summary'), \

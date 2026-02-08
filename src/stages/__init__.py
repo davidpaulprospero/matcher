@@ -37,6 +37,9 @@ class StageMetrics:
         failed: Whether the stage failed (True) or succeeded (False)
         error_categories: Per-category error counts (e.g. {'bot_detection': 5, 'network': 2})
         escalation_summary: Escalation tier breakdown (US-49-012)
+        items_per_second: Overall throughput (items_processed / duration)
+        peak_items_per_second: Peak throughput from sliding window samples
+        throughput_samples: Per-item throughput samples for sliding window analysis
     """
     items_processed: int = 0
     items_failed: int = 0
@@ -44,6 +47,34 @@ class StageMetrics:
     failed: bool = False
     error_categories: Dict[str, int] = field(default_factory=dict)
     escalation_summary: Dict[str, Any] = field(default_factory=dict)
+    items_per_second: float = 0.0
+    peak_items_per_second: float = 0.0
+    throughput_samples: List[float] = field(default_factory=list)
+
+    def compute_throughput(self) -> None:
+        """Compute items_per_second from throughput_samples using sliding window.
+
+        Uses a sliding window of the last 10 samples for recent throughput,
+        and tracks peak throughput across all windows.
+        """
+        if not self.throughput_samples:
+            # Fall back to overall average
+            if self.duration_seconds > 0 and self.items_processed > 0:
+                self.items_per_second = self.items_processed / self.duration_seconds
+            return
+
+        window_size = 10
+        peak = 0.0
+        for i in range(len(self.throughput_samples)):
+            window = self.throughput_samples[max(0, i - window_size + 1):i + 1]
+            window_avg = sum(window) / len(window) if window else 0.0
+            if window_avg > peak:
+                peak = window_avg
+
+        # Recent throughput = average of last `window_size` samples
+        recent = self.throughput_samples[-window_size:]
+        self.items_per_second = sum(recent) / len(recent) if recent else 0.0
+        self.peak_items_per_second = peak
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary for serialization."""
@@ -57,6 +88,12 @@ class StageMetrics:
             d['error_categories'] = dict(self.error_categories)
         if self.escalation_summary:
             d['escalation_summary'] = dict(self.escalation_summary)
+        if self.items_per_second > 0:
+            d['items_per_second'] = round(self.items_per_second, 3)
+        if self.peak_items_per_second > 0:
+            d['peak_items_per_second'] = round(self.peak_items_per_second, 3)
+        if self.throughput_samples:
+            d['throughput_samples'] = [round(s, 3) for s in self.throughput_samples]
         return d
 
     @classmethod
@@ -69,6 +106,9 @@ class StageMetrics:
             failed=data.get('failed', False),
             error_categories=data.get('error_categories', {}),
             escalation_summary=data.get('escalation_summary', {}),
+            items_per_second=data.get('items_per_second', 0.0),
+            peak_items_per_second=data.get('peak_items_per_second', 0.0),
+            throughput_samples=data.get('throughput_samples', []),
         )
 
 

@@ -352,27 +352,33 @@ class PipelineOrchestrator:
             skipped_stages: Set of stage names that were restored from checkpoint.
         """
         logger.info("")
-        logger.info("=" * 60)
+        logger.info("=" * 70)
         logger.info("Pipeline Timing Summary")
-        logger.info("=" * 60)
-        logger.info(f"  {'Stage':<25} {'Duration':>10} {'% of Total':>12}")
-        logger.info(f"  {'-'*25} {'-'*10} {'-'*12}")
+        logger.info("=" * 70)
+        logger.info(f"  {'Stage':<25} {'Duration':>10} {'% of Total':>12} {'Throughput':>16}")
+        logger.info(f"  {'-'*25} {'-'*10} {'-'*12} {'-'*16}")
 
         for stage in self.stages:
             name = stage.name
+            # US-81-007: Format throughput column from stage_metrics
+            throughput_str = ''
+            metrics = self.stage_metrics.get(name)
+            if metrics and hasattr(metrics, 'items_per_second') and metrics.items_per_second > 0:
+                throughput_str = f"{metrics.items_per_second:.1f} items/sec"
+
             if name in skipped_stages:
-                logger.info(f"  {name:<25} {'skipped':>10} {'-':>12}")
+                logger.info(f"  {name:<25} {'skipped':>10} {'-':>12} {'-':>16}")
             elif name in self.stage_timings:
                 elapsed = self.stage_timings[name]
                 pct = (elapsed / total_duration * 100) if total_duration > 0 else 0.0
-                logger.info(f"  {name:<25} {elapsed:>9.1f}s {pct:>11.1f}%")
+                logger.info(f"  {name:<25} {elapsed:>9.1f}s {pct:>11.1f}% {throughput_str:>16}")
             else:
                 # Stage was filtered out (skip_stages / only_stages)
-                logger.info(f"  {name:<25} {'--':>10} {'-':>12}")
+                logger.info(f"  {name:<25} {'--':>10} {'-':>12} {'-':>16}")
 
-        logger.info(f"  {'-'*25} {'-'*10} {'-'*12}")
+        logger.info(f"  {'-'*25} {'-'*10} {'-'*12} {'-'*16}")
         logger.info(f"  {'TOTAL':<25} {total_duration:>9.1f}s {'100.0%':>12}")
-        logger.info("=" * 60)
+        logger.info("=" * 70)
 
         # Persist timing summary to checkpoint stage_metrics
         self.checkpoint.save_stage_timing_summary(

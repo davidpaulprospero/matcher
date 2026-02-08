@@ -1405,11 +1405,19 @@ class CaptionStage(Stage):
                 checkpoint_data['retry_budget'] = retry_budget.to_dict()
 
             # US-81-002: Stage metrics for pipeline observability
+            # US-81-007: Compute throughput samples from per-video fetch times
             items_processed = success_count + skip_count
+            throughput_samples = []
+            if metrics.video_fetch_times:
+                for fetch_time in metrics.video_fetch_times.values():
+                    if fetch_time > 0:
+                        throughput_samples.append(1.0 / fetch_time)
             stage_metrics = StageMetrics(
                 items_processed=items_processed,
                 items_failed=fetch_failed_count,
+                throughput_samples=throughput_samples,
             )
+            stage_metrics.compute_throughput()
 
             return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 

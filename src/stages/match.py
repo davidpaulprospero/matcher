@@ -10,10 +10,11 @@ Stage 4 of the simplified 7-stage pipeline:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from . import Stage, StageResult, register_stage, validate_required_state_attrs
+from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
 from ..logger import get_global_logger
 from ..matching.scoring import get_multimodal_tracker, aggregate_chapter_diagnostics, log_chapter_diagnostics
 from ..matching.serialization import serialize_match_for_match_stage
@@ -124,11 +125,13 @@ class MatchStage(Stage):
             multimodal_tracker = get_multimodal_tracker()
             multimodal_tracker.reset()
 
-            # Run matching
+            # Run matching (US-81-007: time the matching for throughput metrics)
+            match_start_time = time.monotonic()
             matches = self._run_matching(
                 vo_segments, video_segments, all_video_paths,
                 state, config, delta_enabled, force_rematch
             )
+            match_duration = time.monotonic() - match_start_time
 
             state.matches = matches
 
@@ -211,7 +214,18 @@ class MatchStage(Stage):
                 'chapter_diagnostics': chapter_diagnostics,  # US-76-006: Cross-chapter coherence diagnostics
             }
 
-            return StageResult.ok(checkpoint_data, warnings)
+            # US-81-007: Throughput metrics for match stage
+            stage_metrics = StageMetrics(
+                items_processed=len(matches),
+                duration_seconds=match_duration,
+            )
+            # Match processes all segments as a batch; compute overall throughput
+            if match_duration > 0 and len(matches) > 0:
+                overall_rate = len(matches) / match_duration
+                stage_metrics.items_per_second = overall_rate
+                stage_metrics.peak_items_per_second = overall_rate
+
+            return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 
         except Exception as e:
             logger.exception(f"Match stage failed: {e}")
