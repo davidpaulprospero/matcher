@@ -370,7 +370,9 @@ class TestTranscribeVideosParallel:
         MockWhisperClient.assert_called_once_with(
             model_name="base",
             compute_type="auto",
-            gpu_transcription_timeout=300
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should call transcribe with default settings
@@ -513,7 +515,9 @@ class TestTranscribeVideo:
         MockWhisperClient.assert_called_once_with(
             model_name="medium",
             compute_type="int8",
-            gpu_transcription_timeout=300
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should transcribe with custom settings
@@ -545,7 +549,9 @@ class TestTranscribeVoiceoverAudio:
         MockWhisperClient.assert_called_once_with(
             model_name="base",
             compute_type="auto",
-            gpu_transcription_timeout=300
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should transcribe with vad_filter=True (voiceover needs VAD for gap detection)
@@ -577,7 +583,9 @@ class TestTranscribeVoiceoverAudio:
         MockWhisperClient.assert_called_once_with(
             model_name="large",
             compute_type="float16",
-            gpu_transcription_timeout=300
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should transcribe with language
@@ -1183,3 +1191,80 @@ class TestTranscriptionRetry:
 
         # Should NOT have called CUDA cache clear (no retry for permanent errors)
         mock_clear_cache.assert_not_called()
+
+
+class TestProgressLogging:
+    """Test that progress uses structured logging, not print (US-79-008)"""
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.get_audio_duration')
+    @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @patch('pathlib.Path.unlink')
+    @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
+    def test_progress_uses_logger_not_print(
+        self, mock_mkdir, mock_unlink, mock_rmtree, mock_duration,
+        mock_extract, MockWhisperClient, MockTranscriptCache,
+        mock_cache, mock_config, sample_raw_segments, caplog
+    ):
+        """Progress logging uses logger.info, not print, verified via caplog"""
+        import logging
+
+        video_paths = ["/video1.mp4", "/video2.mp4"]
+
+        # Mock: no cached results
+        mock_transcript_cache = MockTranscriptCache.return_value
+        mock_transcript_cache.get.return_value = None
+
+        # Mock: audio extraction returns paths
+        mock_extract.side_effect = ["/tmp/video1.wav", "/tmp/video2.wav"]
+        mock_duration.return_value = 10.0
+
+        # Mock: whisper returns segments
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.return_value = sample_raw_segments
+
+        # Set progress_log_interval on config
+        mock_config.transcription.progress_log_interval = 1
+
+        with caplog.at_level(logging.INFO, logger='src.transcription.parallel_processor'):
+            results = transcribe_videos_parallel(
+                video_paths, mock_cache, mock_config,
+                show_progress=True
+            )
+
+        # Verify results were produced
+        assert len(results) == 2
+
+        # Verify progress messages appear in logger output
+        log_messages = [r.message for r in caplog.records
+                        if r.name == 'src.transcription.parallel_processor']
+        assert any('Phase 1' in m for m in log_messages), \
+            f"Expected 'Phase 1' in log messages, got: {log_messages}"
+        assert any('Phase 2' in m for m in log_messages), \
+            f"Expected 'Phase 2' in log messages, got: {log_messages}"
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
+    def test_no_print_calls_in_source(
+        self, MockWhisperClient, MockTranscriptCache
+    ):
+        """Verify parallel_processor.py contains no print() calls"""
+        import inspect
+        import src.transcription.parallel_processor as pp
+
+        source = inspect.getsource(pp)
+        # Check that print( doesn't appear (except in comments/strings)
+        lines = source.split('\n')
+        print_lines = [
+            line.strip() for line in lines
+            if 'print(' in line
+            and not line.strip().startswith('#')
+            and not line.strip().startswith("'")
+            and not line.strip().startswith('"')
+        ]
+        assert len(print_lines) == 0, \
+            f"Found print() calls in parallel_processor.py: {print_lines}"

@@ -133,6 +133,11 @@ class TranscriptionConfig:
     # Default 4 is conservative; systems with many cores can increase
     whisper_cpu_threads: int = 4
 
+    # Progress logging interval (US-79-008)
+    # Log progress every N items during batch transcription phases
+    # Must be >= 1
+    progress_log_interval: int = 10
+
     # Known Whisper model names
     KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
     # Known compute types for faster-whisper
@@ -212,6 +217,13 @@ class TranscriptionConfig:
             raise ValueError(
                 f"TranscriptionConfig.whisper_cpu_threads={self.whisper_cpu_threads} "
                 f"must be >= 1. Check transcription.whisper_cpu_threads in config.yaml"
+            )
+
+        # Validate progress_log_interval (US-79-008)
+        if self.progress_log_interval < 1:
+            raise ValueError(
+                f"TranscriptionConfig.progress_log_interval={self.progress_log_interval} "
+                f"must be >= 1. Check transcription.progress_log_interval in config.yaml"
             )
 
         # Validate and set audio_extraction_workers (US-60-010)

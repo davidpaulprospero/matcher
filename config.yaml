@@ -212,6 +212,10 @@ transcription:
   # Default 4 is conservative; increase to match available cores on CPU-heavy workloads
   # Must be >= 1
   whisper_cpu_threads: 4
+  # progress_log_interval: Log progress every N items during batch transcription
+  # Controls Phase 1 (audio extraction) and Phase 2 (GPU transcription) progress frequency
+  # Must be >= 1
+  progress_log_interval: 10
 
 # -----------------------------------------------------------------------------
 # EMBEDDINGS

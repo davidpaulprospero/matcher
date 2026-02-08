@@ -146,6 +146,11 @@ def transcribe_videos_parallel(
         whisper_num_workers = getattr(config.transcription, 'whisper_num_workers', 1)
         whisper_cpu_threads = getattr(config.transcription, 'whisper_cpu_threads', 4)
 
+    # Get progress logging interval (US-79-008)
+    progress_log_interval = 10  # Default every 10 items
+    if config:
+        progress_log_interval = getattr(config.transcription, 'progress_log_interval', 10)
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
@@ -199,7 +204,7 @@ def transcribe_videos_parallel(
             logger.info(f"Skipped {len(cached_videos)} cached videos (skip_if_cached=True)")
 
         if show_progress:
-            print(f"  Video index: {len(cached_videos)} cached, {len(uncached_videos)} new", flush=True)
+            logger.info(f"Video index: {len(cached_videos)} cached, {len(uncached_videos)} new")
 
         if not uncached_videos:
             # Log metrics summary even when all cached (US-60-009)
@@ -216,7 +221,7 @@ def transcribe_videos_parallel(
         # PHASE 1: Parallel audio extraction (CPU-bound)
         # =========================================================================
         if show_progress:
-            print(f"  Phase 1: Extracting audio ({max_workers} workers)...", flush=True)
+            logger.info(f"Phase 1: Extracting audio ({max_workers} workers)...")
 
         audio_files = {}  # video_path -> audio_path
         phase1_start = time.time()
@@ -239,8 +244,8 @@ def transcribe_videos_parallel(
                     completed += 1
                     if audio_path:
                         audio_files[video_path] = audio_path
-                    if show_progress and completed % 10 == 0:
-                        print(f"    Extracted {completed}/{total_videos} audio files...", flush=True)
+                    if show_progress and completed % progress_log_interval == 0:
+                        logger.info(f"Extracted {completed}/{total_videos} audio files")
                 except Exception as e:
                     completed += 1
                     # Log full traceback for debugging parallel processing issues
@@ -248,13 +253,13 @@ def transcribe_videos_parallel(
 
         phase1_time = time.time() - phase1_start
         if show_progress:
-            print(f"  ✓ Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)", flush=True)
+            logger.info(f"Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)")
 
         # =========================================================================
         # PHASE 2: Sequential GPU transcription (mutex protected)
         # =========================================================================
         if show_progress:
-            print(f"  Phase 2: Transcribing with shared model (sequential GPU)...", flush=True)
+            logger.info("Phase 2: Transcribing with shared model (sequential GPU)...")
 
         phase2_start = time.time()
         total = len(audio_files)
@@ -262,11 +267,11 @@ def transcribe_videos_parallel(
         for i, (video_path, audio_path) in enumerate(audio_files.items()):
             video_name = Path(video_path).stem[:40]
 
-            if show_progress:
+            if show_progress and (i + 1) % progress_log_interval == 0 or i == 0 or i == total - 1:
                 pct = ((i + 1) / total) * 100
                 elapsed = time.time() - phase2_start
                 eta = (elapsed / (i + 1)) * (total - i - 1) if i > 0 else 0
-                print(f"\r  [{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s    ", end='', flush=True)
+                logger.info(f"[{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s")
 
             # Get audio duration for speed ratio calculation (US-60-009)
             audio_duration = get_audio_duration(audio_path) or 0.0
@@ -315,12 +320,9 @@ def transcribe_videos_parallel(
                 # Non-critical: temp file cleanup failure won't affect results
                 logger.debug(f"Could not remove temp audio file {audio_path}: {e}")
 
-        if show_progress:
-            print()  # New line after progress
-
         phase2_time = time.time() - phase2_start
         if show_progress:
-            print(f"  ✓ Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)", flush=True)
+            logger.info(f"Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)")
 
         # Record phase times in metrics (US-60-009)
         metrics.set_phase_times(phase1_time, phase2_time)
@@ -333,8 +335,10 @@ def transcribe_videos_parallel(
             f"Speed: {summary['avg_speed_ratio']:.1f}x realtime"
         )
         if show_progress and summary['transcribed_count'] > 0:
-            print(f"  📊 Speed: {summary['avg_speed_ratio']:.1f}x realtime "
-                  f"({summary['total_duration_s']:.0f}s audio in {summary['total_time_s']:.0f}s)", flush=True)
+            logger.info(
+                f"Speed: {summary['avg_speed_ratio']:.1f}x realtime "
+                f"({summary['total_duration_s']:.0f}s audio in {summary['total_time_s']:.0f}s)"
+            )
 
         # Clean up temp directory
         try:
