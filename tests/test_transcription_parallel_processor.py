@@ -44,6 +44,15 @@ def mock_config():
     config.transcription.min_silence_duration_ms = 200
     config.transcription.speech_pad_ms = 10
     config.transcription.audio_extraction_workers = 4  # Fix for ThreadPoolExecutor
+    config.transcription.auto_cleanup_after_batch = True  # US-60-011
+    config.transcription.gpu_transcription_timeout = 300  # US-79-002
+    config.transcription.audio_extraction_timeout = 60  # US-79-003
+    config.transcription.max_retries = 2  # US-79-004
+    config.transcription.whisper_num_workers = 1  # US-79-007
+    config.transcription.whisper_cpu_threads = 4  # US-79-007
+    config.transcription.progress_log_interval = 10  # US-79-008
+    config.transcription.retry_budget_max_attempts = 50  # US-79-010
+    config.transcription.retry_budget_max_backoff_seconds = 180.0  # US-79-010
     return config
 
 
@@ -308,8 +317,8 @@ class TestTranscribeVideosParallel:
                 show_progress=False
             )
 
-        # Should have logged with logger.exception() (includes traceback)
-        assert mock_logger.exception.called
+        # Should have logged with logger.error() (permanent errors in retry loop)
+        assert mock_logger.error.called
 
         # Should return empty result for failed video
         assert "/video1.mp4" in results
@@ -871,8 +880,8 @@ class TestParallelErrorRecovery:
                 show_progress=False
             )
 
-        # Should have logged with logger.exception() (includes traceback)
-        assert mock_logger.exception.called, "Expected logger.exception() to be called for traceback"
+        # Should have logged with logger.error() (permanent errors in retry loop)
+        assert mock_logger.error.called, "Expected logger.error() to be called for permanent error"
 
         # Failed video should have empty results
         assert results["/video1.mp4"] == []

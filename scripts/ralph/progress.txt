@@ -1,0 +1,15 @@
+﻿
+## Pre-flight Auto-Complete - [US-79-002] Add configurable timeout guard to Whisper GPU transcription
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration 10 - [US-79-010] Add transcription batch retry budget tracking
+- Created TranscriptionRetryBudget class in src/transcription/retry_budget.py (thread-safe RLock)
+- Added retry_budget_max_attempts (50) and retry_budget_max_backoff_seconds (180.0) to TranscriptionConfig
+- Integrated budget into Phase 2 of transcribe_videos_parallel() with per-video retry loop
+- Added budget_total_attempts, budget_failed_attempts, budget_exhausted_count to TranscriptionMetrics
+- 19 new tests in test_transcription_retry_budget.py, all pass
+- Updated 2 existing test assertions (logger.exception -> logger.error for permanent errors)
+- Gotcha: threading.Lock deadlocks in get_summary() -> is_exhausted(); must use RLock
+- Files: src/transcription/retry_budget.py, src/transcription/parallel_processor.py, src/transcription/metrics.py, src/config/sections/core.py, src/transcription/__init__.py, tests/test_transcription_retry_budget.py, tests/test_transcription_parallel_processor.py

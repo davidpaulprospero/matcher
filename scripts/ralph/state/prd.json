@@ -150,7 +150,7 @@
       "id": "US-79-010",
       "title": "Add transcription batch retry budget tracking",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Create a TranscriptionRetryBudget class (similar to CaptionRetryBudget) in src/transcription/retry_budget.py that tracks total attempts, failures, and cumulative backoff time across a batch",
         "Add `retry_budget_max_attempts: int = 50` and `retry_budget_max_backoff_seconds: float = 180.0` to TranscriptionConfig",
@@ -159,7 +159,7 @@
         "Add test: batch processing stops retrying individual videos when budget is exhausted",
         "Add test: budget summary is included in returned metrics"
       ],
-      "notes": "Tier: MEDIUM (reliability). Files: new src/transcription/retry_budget.py, src/transcription/parallel_processor.py (transcribe_videos_parallel ~lines 54-329), src/transcription/metrics.py, src/config/sections/core.py. Caption system has CaptionRetryBudget (src/caption/retry_budget.py) which prevents infinite retry loops. Transcription has no equivalent - a batch with many failing videos wastes time retrying endlessly within the hardcoded 2-retry limit per video, with no global budget."
+      "notes": "Created TranscriptionRetryBudget class with thread-safe RLock, exhaustion detection (max_attempts and max_backoff_time), skip tracking. Added config fields to TranscriptionConfig with validation. Integrated budget into Phase 2 of transcribe_videos_parallel() with per-video retry loop and budget-aware skipping. Added budget_total_attempts, budget_failed_attempts, budget_exhausted_count to TranscriptionMetrics with set_retry_budget_summary() method. 19 new tests in test_transcription_retry_budget.py + updated 2 existing test assertions. 68 total tests pass."
     },
     {
       "id": "US-79-011",

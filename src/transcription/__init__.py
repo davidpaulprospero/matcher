@@ -39,6 +39,7 @@ from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
 from .utils import extract_audio, write_srt, extract_video_id, format_timestamp_srt, get_audio_duration
 from .metrics import TranscriptionMetrics
+from .retry_budget import TranscriptionRetryBudget
 from .exceptions import (
     TranscriptionError,
     TransientTranscriptionError,
@@ -72,6 +73,9 @@ __all__ = [
 
     # Metrics (US-60-009)
     'TranscriptionMetrics',
+
+    # Retry budget (US-79-010)
+    'TranscriptionRetryBudget',
 
     # Modular components
     'WhisperClient',

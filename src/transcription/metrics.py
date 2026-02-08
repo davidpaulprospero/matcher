@@ -74,6 +74,12 @@ class TranscriptionMetrics:
     phase1_extraction_time_s: float = 0.0
     phase2_transcription_time_s: float = 0.0
 
+    # Retry budget summary (US-79-010)
+    budget_total_attempts: int = 0
+    budget_failed_attempts: int = 0
+    budget_exhausted_count: int = 0  # Number of videos skipped due to budget exhaustion
+    budget_summary: Optional[Dict[str, Any]] = None
+
     def record_cache_hit(self, video_path: str) -> None:
         """Record a cache hit (transcription loaded from cache).
 
@@ -117,6 +123,22 @@ class TranscriptionMetrics:
         """
         self.failed_count += 1
         logger.debug(f"Transcription failed for {video_path}")
+
+    def set_retry_budget_summary(self, summary: Dict[str, Any]) -> None:
+        """Set retry budget summary from TranscriptionRetryBudget (US-79-010).
+
+        Args:
+            summary: Dict from TranscriptionRetryBudget.get_summary().
+        """
+        self.budget_total_attempts = summary.get('total_attempts', 0)
+        self.budget_failed_attempts = summary.get('failed_attempts', 0)
+        self.budget_exhausted_count = summary.get('videos_skipped', 0)
+        self.budget_summary = summary
+        logger.debug(
+            f"Retry budget summary: {self.budget_total_attempts} attempts, "
+            f"{self.budget_failed_attempts} failures, "
+            f"{self.budget_exhausted_count} skipped"
+        )
 
     def set_phase_times(
         self,
@@ -201,6 +223,9 @@ class TranscriptionMetrics:
             'success_rate': self.success_rate,
             'phase1_time_s': round(self.phase1_extraction_time_s, 1),
             'phase2_time_s': round(self.phase2_transcription_time_s, 1),
+            'budget_total_attempts': self.budget_total_attempts,
+            'budget_failed_attempts': self.budget_failed_attempts,
+            'budget_exhausted_count': self.budget_exhausted_count,
         }
 
     def get_slowest_videos(self, n: int = 5) -> List[tuple]:
@@ -287,6 +312,9 @@ class TranscriptionMetrics:
             'video_transcription_times': dict(self.video_transcription_times),
             'phase1_extraction_time_s': self.phase1_extraction_time_s,
             'phase2_transcription_time_s': self.phase2_transcription_time_s,
+            'budget_total_attempts': self.budget_total_attempts,
+            'budget_failed_attempts': self.budget_failed_attempts,
+            'budget_exhausted_count': self.budget_exhausted_count,
         }
 
     @classmethod
@@ -313,4 +341,7 @@ class TranscriptionMetrics:
             video_transcription_times=data.get('video_transcription_times', {}),
             phase1_extraction_time_s=data.get('phase1_extraction_time_s', 0.0),
             phase2_transcription_time_s=data.get('phase2_transcription_time_s', 0.0),
+            budget_total_attempts=data.get('budget_total_attempts', 0),
+            budget_failed_attempts=data.get('budget_failed_attempts', 0),
+            budget_exhausted_count=data.get('budget_exhausted_count', 0),
         )

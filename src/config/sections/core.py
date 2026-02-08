@@ -138,6 +138,15 @@ class TranscriptionConfig:
     # Must be >= 1
     progress_log_interval: int = 10
 
+    # Batch retry budget (US-79-010)
+    # Maximum total transcription attempts across all videos in a batch
+    # Prevents infinite retry loops when many videos fail
+    # Set to 0 for unlimited attempts
+    retry_budget_max_attempts: int = 50
+    # Maximum cumulative backoff time (seconds) before budget exhaustion
+    # Set to 0 for unlimited backoff
+    retry_budget_max_backoff_seconds: float = 180.0
+
     # Known Whisper model names
     KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
     # Known compute types for faster-whisper
@@ -224,6 +233,20 @@ class TranscriptionConfig:
             raise ValueError(
                 f"TranscriptionConfig.progress_log_interval={self.progress_log_interval} "
                 f"must be >= 1. Check transcription.progress_log_interval in config.yaml"
+            )
+
+        # Validate retry_budget_max_attempts (US-79-010)
+        if self.retry_budget_max_attempts < 0:
+            raise ValueError(
+                f"TranscriptionConfig.retry_budget_max_attempts={self.retry_budget_max_attempts} "
+                f"must be >= 0. Check transcription.retry_budget_max_attempts in config.yaml"
+            )
+
+        # Validate retry_budget_max_backoff_seconds (US-79-010)
+        if self.retry_budget_max_backoff_seconds < 0:
+            raise ValueError(
+                f"TranscriptionConfig.retry_budget_max_backoff_seconds={self.retry_budget_max_backoff_seconds} "
+                f"must be >= 0. Check transcription.retry_budget_max_backoff_seconds in config.yaml"
             )
 
         # Validate and set audio_extraction_workers (US-60-010)

@@ -21,6 +21,7 @@ from .cache import TranscriptCache
 from .utils import extract_audio, write_srt, get_audio_duration
 from .exceptions import is_transient_error
 from .metrics import TranscriptionMetrics
+from .retry_budget import TranscriptionRetryBudget
 from src.state import TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,18 @@ def transcribe_videos_parallel(
     if config:
         progress_log_interval = getattr(config.transcription, 'progress_log_interval', 10)
 
+    # Initialize batch retry budget (US-79-010)
+    retry_budget_max_attempts = 50
+    retry_budget_max_backoff_seconds = 180.0
+    if config:
+        retry_budget_max_attempts = getattr(config.transcription, 'retry_budget_max_attempts', 50)
+        retry_budget_max_backoff_seconds = getattr(config.transcription, 'retry_budget_max_backoff_seconds', 180.0)
+
+    retry_budget = TranscriptionRetryBudget(
+        max_attempts=retry_budget_max_attempts,
+        max_backoff_time=retry_budget_max_backoff_seconds,
+    )
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
@@ -273,45 +286,99 @@ def transcribe_videos_parallel(
                 eta = (elapsed / (i + 1)) * (total - i - 1) if i > 0 else 0
                 logger.info(f"[{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s")
 
+            # Check retry budget before attempting (US-79-010)
+            if retry_budget.is_exhausted():
+                reason = retry_budget.exhaustion_reason()
+                logger.warning(
+                    f"TranscriptionRetryBudget: EXHAUSTED ({reason}), "
+                    f"skipping {video_name} and remaining videos"
+                )
+                retry_budget.record_skip(video_path)
+                results[video_path] = []
+                metrics.record_failure(video_path)
+                continue
+
             # Get audio duration for speed ratio calculation (US-60-009)
             audio_duration = get_audio_duration(audio_path) or 0.0
             transcription_start = time.time()
 
-            try:
-                # Transcribe with WhisperClient (GPU-locked)
-                raw_segments = whisper_client.transcribe(
-                    audio_path,
-                    language=language,
-                    vad_filter=vad_filter,
-                    min_silence_duration_ms=min_silence_duration_ms,
-                    speech_pad_ms=speech_pad_ms
-                )
+            # Retry loop with budget tracking (US-79-010)
+            succeeded = False
+            for attempt in range(max_retries + 1):
+                retry_budget.record_attempt(video_path)
 
-                transcription_time = time.time() - transcription_start
-
-                # Cache the result
-                transcript_cache.set(video_path, raw_segments)
-
-                # Convert to TranscriptSegment
-                results[video_path] = [
-                    TranscriptSegment(
-                        index=j,
-                        start_time=seg['start'],
-                        end_time=seg['end'],
-                        text=seg['text'],
-                        source_file=video_path
+                # Re-check budget before retry attempts (not first attempt)
+                if attempt > 0 and retry_budget.is_exhausted():
+                    reason = retry_budget.exhaustion_reason()
+                    logger.warning(
+                        f"TranscriptionRetryBudget: EXHAUSTED during retries for {video_name} "
+                        f"({reason}), skipping"
                     )
-                    for j, seg in enumerate(raw_segments)
-                ]
+                    retry_budget.record_skip(video_path)
+                    break
 
-                # Record metrics (US-60-009)
-                metrics.record_transcription(video_path, audio_duration, transcription_time)
+                try:
+                    # Transcribe with WhisperClient (GPU-locked)
+                    raw_segments = whisper_client.transcribe(
+                        audio_path,
+                        language=language,
+                        vad_filter=vad_filter,
+                        min_silence_duration_ms=min_silence_duration_ms,
+                        speech_pad_ms=speech_pad_ms
+                    )
 
-            except Exception as e:
-                # Log full traceback for debugging transcription issues
-                logger.exception(f"  Transcription error for {video_name}: {e}")
+                    transcription_time = time.time() - transcription_start
+                    retry_budget.record_success(video_path)
+
+                    # Cache the result
+                    transcript_cache.set(video_path, raw_segments)
+
+                    # Convert to TranscriptSegment
+                    results[video_path] = [
+                        TranscriptSegment(
+                            index=j,
+                            start_time=seg['start'],
+                            end_time=seg['end'],
+                            text=seg['text'],
+                            source_file=video_path
+                        )
+                        for j, seg in enumerate(raw_segments)
+                    ]
+
+                    # Record metrics (US-60-009)
+                    metrics.record_transcription(video_path, audio_duration, transcription_time)
+                    succeeded = True
+                    break  # Success, exit retry loop
+
+                except Exception as e:
+                    retry_budget.record_failure(video_path)
+
+                    # Check if error is transient (worth retrying)
+                    if not is_transient_error(e):
+                        logger.error(f"  Transcription failed for {video_name} (permanent error): {e}")
+                        break
+
+                    # Transient error — retry with backoff if attempts remain
+                    if attempt < max_retries:
+                        delay = 1.0 * (2 ** attempt)  # Exponential backoff: 1s, 2s
+                        retry_budget.record_backoff(delay)
+                        logger.warning(
+                            f"Retrying transcription for {video_name} "
+                            f"(attempt {attempt + 1}/{max_retries + 1}): {e}"
+                        )
+                        _clear_cuda_cache()
+                        time.sleep(delay)
+                    else:
+                        logger.error(
+                            f"  Transcription failed for {video_name} "
+                            f"after {max_retries + 1} attempts: {e}"
+                        )
+
+            if not succeeded:
                 results[video_path] = []
-                metrics.record_failure(video_path)
+                # Only record failure if not already recorded via budget skip
+                if video_path not in [v for v in retry_budget.skipped_video_ids]:
+                    metrics.record_failure(video_path)
 
             # Clean up audio file
             try:
@@ -326,6 +393,15 @@ def transcribe_videos_parallel(
 
         # Record phase times in metrics (US-60-009)
         metrics.set_phase_times(phase1_time, phase2_time)
+
+        # Record retry budget summary in metrics (US-79-010)
+        budget_summary = retry_budget.get_summary()
+        metrics.set_retry_budget_summary(budget_summary)
+        if budget_summary['is_exhausted']:
+            logger.warning(
+                f"TranscriptionRetryBudget exhausted: {budget_summary['exhaustion_reason']}. "
+                f"Skipped {budget_summary['videos_skipped']} videos."
+            )
 
         # Log metrics summary at end of batch transcription (US-60-009)
         summary = metrics.get_summary_dict()
