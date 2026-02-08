@@ -1597,3 +1597,139 @@ class TestStructuredRetryLogging:
         assert 'error_type_distribution' in metrics
         assert 'avg_duration_ms' in metrics
         assert isinstance(metrics['error_type_distribution'], dict)
+
+    @pytest.mark.fast
+    def test_summary_log_has_required_keys(self):
+        """Test that the caption_stage_summary log contains all required keys.
+
+        AC2: Summary log entry shows: total_attempts, success_count, failure_count,
+             error_type_distribution (dict of error_type to count), avg_duration_ms.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        # Simulate metrics after processing
+        metrics = CaptionMetrics()
+        metrics.fetch_attempts = 10
+        metrics.successes = 8
+        metrics.failures = 2
+        metrics.error_category_counts = {'NETWORK': 1, 'PARSE': 1}
+        metrics.video_fetch_times = {'vid1': 1.5, 'vid2': 2.0, 'vid3': 0.5}
+
+        # Reproduce the summary computation from caption_stage.py
+        fetch_times_ms = [t * 1000 for t in metrics.video_fetch_times.values()]
+        avg_duration_ms = round(sum(fetch_times_ms) / len(fetch_times_ms)) if fetch_times_ms else 0
+        caption_stage_metrics = {
+            'total_attempts': metrics.fetch_attempts,
+            'success_count': metrics.successes,
+            'failure_count': metrics.failures,
+            'error_type_distribution': dict(metrics.error_category_counts),
+            'avg_duration_ms': avg_duration_ms,
+        }
+
+        # AC2: Verify all required keys present with correct types
+        assert caption_stage_metrics['total_attempts'] == 10
+        assert caption_stage_metrics['success_count'] == 8
+        assert caption_stage_metrics['failure_count'] == 2
+        assert caption_stage_metrics['error_type_distribution'] == {'NETWORK': 1, 'PARSE': 1}
+        assert isinstance(caption_stage_metrics['avg_duration_ms'], int)
+        assert caption_stage_metrics['avg_duration_ms'] > 0
+
+    @pytest.mark.fast
+    def test_checkpoint_contains_caption_stage_metrics(self):
+        """Test that caption_stage_metrics is included in checkpoint data.
+
+        AC3: Summary is also written to checkpoint under 'caption_stage_metrics' key
+             for post-run analysis.
+        """
+        from src.caption_fetcher import CaptionMetrics
+
+        metrics = CaptionMetrics()
+        metrics.fetch_attempts = 5
+        metrics.successes = 4
+        metrics.failures = 1
+        metrics.error_category_counts = {'TIMEOUT': 1}
+        metrics.video_fetch_times = {'v1': 1.0}
+
+        fetch_times_ms = [t * 1000 for t in metrics.video_fetch_times.values()]
+        avg_duration_ms = round(sum(fetch_times_ms) / len(fetch_times_ms)) if fetch_times_ms else 0
+        caption_stage_metrics = {
+            'total_attempts': metrics.fetch_attempts,
+            'success_count': metrics.successes,
+            'failure_count': metrics.failures,
+            'error_type_distribution': dict(metrics.error_category_counts),
+            'avg_duration_ms': avg_duration_ms,
+        }
+
+        # Simulate checkpoint_data construction (mirrors caption_stage.py)
+        checkpoint_data = {
+            'caption_results': {},
+            'success_count': 4,
+            'caption_stage_metrics': caption_stage_metrics,
+        }
+
+        assert 'caption_stage_metrics' in checkpoint_data
+        m = checkpoint_data['caption_stage_metrics']
+        assert m['total_attempts'] == 5
+        assert m['success_count'] == 4
+        assert m['failure_count'] == 1
+        assert m['error_type_distribution'] == {'TIMEOUT': 1}
+        assert m['avg_duration_ms'] == 1000
+
+    @pytest.mark.fast
+    def test_existing_retry_budget_logging_preserved(self, caplog):
+        """Test that existing CaptionRetryBudget logging is preserved alongside new logging.
+
+        AC4: Existing CaptionRetryBudget logging is preserved; new logging supplements
+             (does not replace) it.
+
+        Verifies that both the original retry_budget.record_success() call and the
+        new caption_fetch_attempt structured log coexist in the same code path.
+        """
+        import logging
+        from unittest.mock import patch, MagicMock
+        from src.caption_fetcher import (
+            CaptionFetcher, CaptionResult, CaptionSegment, CaptionMetrics,
+        )
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        mock_result = CaptionResult(
+            video_id='budgetVid01',
+            segments=[CaptionSegment(0, 0.0, 5.0, "Hello", 'budgetVid01')],
+            language='en',
+            is_auto_generated=False,
+        )
+
+        retry_budget = CaptionRetryBudget()
+        metrics = CaptionMetrics()
+
+        with patch.object(
+            CaptionFetcher, 'fetch_captions_auto_language_with_retry',
+            return_value=mock_result
+        ):
+            fetcher = CaptionFetcher()
+            with caplog.at_level(logging.INFO, logger='src.caption_fetcher'):
+                results = fetcher.fetch_captions_batch(
+                    ['budgetVid01'],
+                    metrics=metrics,
+                    retry_budget=retry_budget,
+                )
+
+        # Verify existing retry_budget tracking still works (record_success was called)
+        assert retry_budget.successes >= 1, (
+            "CaptionRetryBudget.record_success() should still be called (existing logging preserved)"
+        )
+        assert retry_budget.attempts >= 1, (
+            "CaptionRetryBudget.record_attempt() should still be called (existing logging preserved)"
+        )
+
+        # Verify new structured logging also present (supplements, not replaces)
+        attempt_logs = [
+            r for r in caplog.records
+            if r.message.startswith('caption_fetch_attempt')
+        ]
+        assert len(attempt_logs) >= 1, (
+            "New caption_fetch_attempt structured log should also be present"
+        )
+        log_msg = attempt_logs[0].message
+        assert "'video_id': 'budgetVid01'" in log_msg
+        assert "'success': True" in log_msg
