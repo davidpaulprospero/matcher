@@ -18,6 +18,7 @@ from .strategies import StrategyMatcher
 from .embedding_search import EmbeddingSearch
 from ..utils import SRTSegment, MatchResult, ProgressBar
 from ..embeddings import validate_embedding_integrity
+from ..chapter_detection.bridge import compute_relevance_matrix
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -216,6 +217,62 @@ def match_all_segments(
             mc, video_embeddings, video_segments, embedding_index
         )
 
+    # Compute cross-chapter relevance matrix (US-72-009)
+    relevance_matrix = None
+    cg = getattr(mc, 'chapter_grouping', None)
+    chapter_grouping_enabled = getattr(cg, 'enabled', True) if cg else False
+    relevance_boost_weight = getattr(cg, 'relevance_boost_weight', 0.1) if cg else 0.1
+
+    if chapter_grouping_enabled and location_chapters:
+        # Build video chapter keyword lists from video segments grouped by chapter_index
+        vid_chapter_keywords: Dict[int, set] = {}
+        for seg in video_segments:
+            ch_idx = getattr(seg, 'chapter_index', None)
+            if ch_idx is not None and ch_idx >= 0:
+                if ch_idx not in vid_chapter_keywords:
+                    vid_chapter_keywords[ch_idx] = set()
+                for kw in (seg.topics or []):
+                    vid_chapter_keywords[ch_idx].add(kw)
+
+        if vid_chapter_keywords:
+            from ..chapter_detection.models import ChapterCandidate as CC
+            # Convert location_chapters to ChapterCandidate if needed
+            vo_chapters = []
+            for ch in location_chapters:
+                if isinstance(ch, CC):
+                    vo_chapters.append(ch)
+                elif isinstance(ch, dict):
+                    vo_chapters.append(CC.from_dict(ch))
+                elif hasattr(ch, 'topics'):
+                    vo_chapters.append(CC(topics=getattr(ch, 'topics', [])))
+
+            # Build video pseudo-chapters from segment topic groups
+            max_vid_ch = max(vid_chapter_keywords.keys())
+            vid_chapters = []
+            for idx in range(max_vid_ch + 1):
+                kws = list(vid_chapter_keywords.get(idx, set()))
+                vid_chapters.append(CC(topics=kws))
+
+            relevance_matrix = compute_relevance_matrix(vo_chapters, vid_chapters)
+            if relevance_matrix:
+                logger.info(
+                    f"US-72-009 cross-chapter relevance matrix: "
+                    f"{len(vo_chapters)}x{len(vid_chapters)} "
+                    f"(boost_weight={relevance_boost_weight})"
+                )
+
+    # Build voiceover segment -> chapter index mapping for embedding boost
+    vo_segment_chapter_map: Dict[int, int] = {}
+    if location_chapters:
+        for ch in location_chapters:
+            ch_id = getattr(ch, 'chapter_id', None)
+            if ch_id is None:
+                continue
+            start = getattr(ch, 'start_segment_idx', 0)
+            end = getattr(ch, 'end_segment_idx', 0)
+            for seg_idx in range(start, end + 1):
+                vo_segment_chapter_map[seg_idx] = ch_id
+
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Log first segment to confirm loop started
         if i == 0:
@@ -225,7 +282,13 @@ def match_all_segments(
         current_timeline_pos = vo_seg.start_time - timeline_start
 
         # Stage 1: Get candidates from embedding search for variety
-        all_candidates = embedding_search.search(vo_emb)
+        vo_chapter_idx = vo_segment_chapter_map.get(i, -1)
+        all_candidates = embedding_search.search(
+            vo_emb,
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=vo_chapter_idx,
+            relevance_boost_weight=relevance_boost_weight,
+        )
 
         # Add pre-computed B-roll segments to candidates (they may not be in top embedding matches)
         # Uses pre-computed all_broll_segments list (computed once outside loop)

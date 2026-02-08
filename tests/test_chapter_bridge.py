@@ -17,6 +17,7 @@ from src.chapter_detection.bridge import (
     build_unified_chapters,
     build_segment_chapter_map,
     assign_chapter_indices,
+    compute_relevance_matrix,
     _ranges_overlap,
 )
 from src.state import TranscriptSegment
@@ -390,3 +391,119 @@ class TestAssignChapterIndices:
         assign_chapter_indices(segments, chapters)
         assert segments[0].chapter_index == 0
         assert segments[0].chapter_title == ''
+
+
+# --- compute_relevance_matrix (US-72-009) ---
+
+class TestComputeRelevanceMatrix:
+    """Tests for compute_relevance_matrix() in bridge.py (US-72-009)."""
+
+    def test_identical_topics_gives_score_1(self):
+        """ChapterCandidates with identical topics produce 1.0."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs', 'pets'])]
+        vid = [_make_chapter(0, 0, 4, topics=['cats', 'dogs', 'pets'])]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert len(matrix) == 1
+        assert len(matrix[0]) == 1
+        assert matrix[0][0] == pytest.approx(1.0)
+
+    def test_disjoint_topics_gives_score_0(self):
+        """No overlap produces 0.0."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['cars', 'trucks'])]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert matrix[0][0] == pytest.approx(0.0)
+
+    def test_partial_overlap_jaccard(self):
+        """Partial overlap: intersection=1, union=3 -> 1/3."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['dogs', 'fish'])]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert matrix[0][0] == pytest.approx(1.0 / 3.0)
+
+    def test_case_insensitive(self):
+        """Keywords compared case-insensitively."""
+        vo = [_make_chapter(0, 0, 4, topics=['CATS', 'Dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert matrix[0][0] == pytest.approx(1.0)
+
+    def test_matrix_dimensions(self):
+        """Matrix shape is (num_vo_chapters x num_vid_chapters)."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['a', 'b']),
+            _make_chapter(1, 5, 9, topics=['c', 'd']),
+            _make_chapter(2, 10, 14, topics=['e']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['a']),
+            _make_chapter(1, 5, 9, topics=['c', 'e']),
+        ]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert len(matrix) == 3
+        assert all(len(row) == 2 for row in matrix)
+
+    def test_empty_voiceover_chapters_returns_empty(self):
+        """Empty voiceover chapter list returns empty matrix."""
+        vid = [_make_chapter(0, 0, 4, topics=['a'])]
+        assert compute_relevance_matrix([], vid) == []
+
+    def test_empty_video_chapters_returns_empty(self):
+        """Empty video chapter list returns empty matrix."""
+        vo = [_make_chapter(0, 0, 4, topics=['a'])]
+        assert compute_relevance_matrix(vo, []) == []
+
+    def test_both_empty_returns_empty(self):
+        """Both empty returns empty matrix."""
+        assert compute_relevance_matrix([], []) == []
+
+    def test_empty_topics_gives_zero(self):
+        """Chapters with empty topics produce 0.0."""
+        vo = [_make_chapter(0, 0, 4, topics=[])]
+        vid = [_make_chapter(0, 0, 4, topics=['a'])]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert matrix[0][0] == pytest.approx(0.0)
+
+    def test_both_empty_topics_gives_zero(self):
+        """Both chapters with empty topics produce 0.0."""
+        vo = [_make_chapter(0, 0, 4, topics=[])]
+        vid = [_make_chapter(0, 0, 4, topics=[])]
+        matrix = compute_relevance_matrix(vo, vid)
+        assert matrix[0][0] == pytest.approx(0.0)
+
+    def test_all_values_normalized_0_to_1(self):
+        """All values in the matrix must be in [0.0, 1.0]."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['a', 'b', 'c']),
+            _make_chapter(1, 5, 9, topics=['d']),
+            _make_chapter(2, 10, 14, topics=['e', 'f']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['a', 'x']),
+            _make_chapter(1, 5, 9, topics=['b', 'c', 'd', 'e']),
+            _make_chapter(2, 10, 14, topics=['f']),
+        ]
+        matrix = compute_relevance_matrix(vo, vid)
+        for row in matrix:
+            for val in row:
+                assert 0.0 <= val <= 1.0, f"Value {val} out of range"
+
+    def test_multi_chapter_specific_values(self):
+        """Verify specific cells in a multi-chapter matrix."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['paris', 'france', 'eiffel']),
+            _make_chapter(1, 5, 9, topics=['tokyo', 'japan', 'sushi']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['paris', 'france', 'wine']),
+            _make_chapter(1, 5, 9, topics=['tokyo', 'ramen', 'japan']),
+        ]
+        matrix = compute_relevance_matrix(vo, vid)
+        # vo[0] vs vid[0]: {paris,france}/4 = 0.5
+        assert matrix[0][0] == pytest.approx(2.0 / 4.0)
+        # vo[0] vs vid[1]: no overlap
+        assert matrix[0][1] == pytest.approx(0.0)
+        # vo[1] vs vid[0]: no overlap
+        assert matrix[1][0] == pytest.approx(0.0)
+        # vo[1] vs vid[1]: {tokyo,japan}/4 = 0.5
+        assert matrix[1][1] == pytest.approx(2.0 / 4.0)

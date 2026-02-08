@@ -166,6 +166,48 @@ def build_segment_chapter_map(chapters: List[ChapterCandidate]) -> Dict[int, int
     return mapping
 
 
+def compute_relevance_matrix(
+    voiceover_chapters: List[ChapterCandidate],
+    video_chapters: List[ChapterCandidate],
+) -> List[List[float]]:
+    """
+    Compute a cross-chapter relevance matrix for candidate boosting (US-72-009).
+
+    Each cell [i][j] is the Jaccard similarity between voiceover chapter i's
+    topic keywords and video chapter j's topic keywords, normalized to 0.0-1.0.
+
+    Args:
+        voiceover_chapters: Voiceover ChapterCandidate objects with topics lists
+        video_chapters: Video ChapterCandidate objects with topics lists
+
+    Returns:
+        2D list of floats (vo_chapters x video_chapters), each in [0.0, 1.0].
+        Empty list if either input is empty.
+    """
+    if not voiceover_chapters or not video_chapters:
+        return []
+
+    # Extract keyword lists from ChapterCandidate.topics
+    vo_keywords = [ch.topics if ch.topics else [] for ch in voiceover_chapters]
+    vid_keywords = [ch.topics if ch.topics else [] for ch in video_chapters]
+
+    # Delegate to Jaccard computation
+    matrix = []
+    for vo_kw in vo_keywords:
+        vo_set = {k.lower() for k in vo_kw} if vo_kw else set()
+        row = []
+        for vid_kw in vid_keywords:
+            vid_set = {k.lower() for k in vid_kw} if vid_kw else set()
+            union = vo_set | vid_set
+            if not union:
+                row.append(0.0)
+            else:
+                row.append(len(vo_set & vid_set) / len(union))
+        matrix.append(row)
+
+    return matrix
+
+
 def _compute_overlap(seg_start: float, seg_end: float, ch_start: float, ch_end: float) -> float:
     """Compute the overlap duration between a segment and a chapter time range."""
     overlap_start = max(seg_start, ch_start)
