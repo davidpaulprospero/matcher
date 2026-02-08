@@ -73,7 +73,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "high",
-                            "notes":  "Pre-implemented in US-70-006. apply_title_relevance_adjustment() with graduated boost (0.03/0.05/0.08), breakdown entry, empty/None skip, called from apply_all_adjustments(). 10 unit tests pass covering 0/1/2/3+ matches, empty/None title, breakdown format, stopwords, case-insensitive."
+                            "notes":  "Pre-implemented in US-70-006. All 6 criteria verified: apply_title_relevance_adjustment() at line 2130, graduated boost constants (0.03/0.05/0.08) at lines 2081-2083, confidence_breakdown entry at line 2698, empty/None title handled at line 2150, called from apply_all_adjustments() at line 2693, 10 unit tests all passing."
                         },
                         {
                             "id":  "US-72-005",
