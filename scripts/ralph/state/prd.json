@@ -112,21 +112,20 @@
                                                        "A confidence_breakdown entry \u0027diversity_recheck\u0027 is added to segments that were re-matched",
                                                        "Tests verify: all-same-source chapter triggers re-match, chapter with adequate diversity is untouched, config min_source_diversity=1 disables the check"
                                                    ],
-                            "notes":  "DONE. Added enforce_chapter_source_diversity() post-processing method to TieredMatcher. After main match loop, groups matches by chapter, detects single-source chapters with >4 segments, swaps lowest-confidence segments to alternatives from different sources. Added min_source_diversity field to ChapterGroupingConfig (default: 2, 1=disabled). Wired into match_all_segments in main.py after review_with_local_llm. 12 tests in test_chapter_diversity_enforcement.py covering all 5 acceptance criteria."
+                            "notes":  "DONE. Added enforce_chapter_source_diversity() post-processing method to TieredMatcher. After main match loop, groups matches by chapter, detects single-source chapters with \u003e4 segments, swaps lowest-confidence segments to alternatives from different sources. Added min_source_diversity field to ChapterGroupingConfig (default: 2, 1=disabled). Wired into match_all_segments in main.py after review_with_local_llm. 12 tests in test_chapter_diversity_enforcement.py covering all 5 acceptance criteria."
                         },
                         {
                             "id":  "US-77-008",
                             "title":  "Add scoring adjustment audit summary to match stage output",
                             "priority":  "medium",
                             "passes":  true,
-                            "notes":  "Added compute_scoring_audit_summary() and log_scoring_audit_summary() to tiered_matcher.py. Called from match_all_segments in main.py after diversity enforcement. Logs total segments, avg confidence, per-adjustment fire counts and avg magnitudes, top-3 most impactful, and unused adjustments at INFO level. 12 tests in test_scoring_audit_summary.py cover all acceptance criteria.",
+                            "notes":  "Tier: feature (small). Currently confidence_breakdown is per-segment and only visible in debug logs. There\u0027s no aggregate view of which scoring adjustments are actually contributing across all segments. This makes tuning difficult. Need to: (1) collect all confidence_breakdown dicts after matching, (2) compute aggregate stats, (3) log summary. Source files: src/matching/tiered_matcher.py (add summary method called after match loop), src/stages/match.py (call summary after tiered_matcher returns).",
                             "acceptanceCriteria":  [
                                                        "After match stage completes, a summary log line reports: total segments matched, average confidence, count of each scoring adjustment that fired (title_relevance, chapter_topic_match, etc.)",
                                                        "Adjustments that never fired are reported as \u0027unused\u0027 to help identify dead config",
                                                        "The summary is logged at INFO level and includes the top-3 most impactful adjustments by average magnitude",
                                                        "Tests verify: summary includes all active adjustment names, unused adjustments are flagged, average magnitudes are computed correctly"
-                                                   ],
-                            "notes":  "Tier: feature (small). Currently confidence_breakdown is per-segment and only visible in debug logs. There\u0027s no aggregate view of which scoring adjustments are actually contributing across all segments. This makes tuning difficult. Need to: (1) collect all confidence_breakdown dicts after matching, (2) compute aggregate stats, (3) log summary. Source files: src/matching/tiered_matcher.py (add summary method called after match loop), src/stages/match.py (call summary after tiered_matcher returns)."
+                                                   ]
                         },
                         {
                             "id":  "US-77-009",
@@ -154,7 +153,7 @@
                                                        "The adjustment appears in confidence_breakdown as \u0027duration_ratio_calibration\u0027",
                                                        "Tests verify: ratio 1.0 gives no penalty, ratio 5.0 gives -0.03, ratio 0.1 gives -0.05, missing duration data gives no penalty"
                                                    ],
-                            "notes":  "DONE. Added apply_duration_ratio_calibration() standalone function to scoring.py. Wired into apply_all_adjustments as step 12b (before confidence floor). Ratio >3.0x applies -0.03 penalty (excessive), <0.3x applies -0.05 penalty (too short). Gracefully handles missing/zero durations. 13 tests in test_duration_ratio_calibration.py covering all 6 acceptance criteria. All 76 scoring tests pass."
+                            "notes":  "Implementation in scoring.py:604-649, wired at scoring.py:3787. 13 tests in test_duration_ratio_calibration.py all pass. Breakdown component: duration_ratio_calibration."
                         },
                         {
                             "id":  "US-77-011",
