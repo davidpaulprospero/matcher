@@ -98,8 +98,8 @@
                                                        "Topic mismatch (overlap=0 when both have chapters) gives penalty -0.05",
                                                        "Adjustment appears in confidence_breakdown under key \u0027chapter_topic_match\u0027"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier: Feature (Area 3). Depends on US-74-005 for chapter mapping. File: src/matching/scoring.py - add new adjustment following existing pattern. Chapter info available via TranscriptSegment.chapter_title and VideoSearchResult.video_chapters. Tests: tests/test_scoring*.py, tests/test_chapter*.py"
+                            "passes":  true,
+                            "notes":  "Pre-implemented in US-72-007 (commit 705cd74). apply_chapter_topic_match() in scoring.py:2361 with constants CHAPTER_TOPIC_BOOST_PARTIAL=0.05, CHAPTER_TOPIC_BOOST_STRONG=0.10, CHAPTER_TOPIC_MISMATCH_PENALTY=-0.05. Wired into apply_all_adjustments() step 7. All 8 tests pass in TestChapterTopicMatch."
                         },
                         {
                             "id":  "US-74-007",
