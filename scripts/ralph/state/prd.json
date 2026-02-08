@@ -159,7 +159,7 @@
                             "id":  "US-77-011",
                             "title":  "Add entity match boost propagation to confidence breakdown",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "apply_entity_match_boost at src/matching/scoring.py:802 records its graduated boost values in confidence_breakdown with detailed reason text",
                                                        "The breakdown entry includes: matched entity names, match type (exact/partial), and boost value applied",
@@ -167,20 +167,20 @@
                                                        "The entity match information is included in the scoring audit summary (US-77-008)",
                                                        "Tests verify: exact entity match shows entity name in breakdown, partial match shows match type, zero-entity case adds no entry"
                                                    ],
-                            "notes":  "Tier: bugfix (small). apply_entity_match_boost at src/matching/scoring.py:802 already applies graduated boosts (+0.03/+0.06/+0.10) but may not record full details in confidence_breakdown including which entities matched and the match type. This makes debugging entity matching difficult. Need to check current breakdown output and enhance it. Source files: src/matching/scoring.py:802-930."
+                            "notes":  "Enhanced apply_entity_match_boost with exact/partial match type detection. Wired into all 3 tiered_matcher paths via _record_breakdown. Added entity_match_boost to ALL_KNOWN_ADJUSTMENTS. 6 new tests + 30 total pass."
                         },
                         {
                             "id":  "US-77-012",
                             "title":  "Add low-confidence segment reporting with suggested remediation",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "After matching, segments with confidence below LOW_CONFIDENCE_WARNING_THRESHOLD (0.15) are collected and logged at WARNING level",
                                                        "Each low-confidence warning includes: segment index, voiceover text preview (first 50 chars), confidence value, top 3 negative adjustments from confidence_breakdown",
                                                        "When \u003e20% of segments are low-confidence, a summary WARNING suggests enabling iterative matching or adjusting scoring weights",
                                                        "Tests verify: segment at 0.10 triggers warning, segment at 0.20 does not, \u003e20% threshold triggers summary warning, empty match list produces no warnings"
                                                    ],
-                            "notes":  "Tier: feature (small). LOW_CONFIDENCE_WARNING_THRESHOLD exists at src/matching/scoring.py:2893 as 0.15 but is only used for individual debug-level logging. There\u0027s no aggregate low-confidence reporting that helps users understand match quality at a glance. Source files: src/matching/tiered_matcher.py (add reporting method after match loop), src/matching/scoring.py:2893 (threshold constant)."
+                            "notes":  "Added report_low_confidence_segments() to tiered_matcher.py. Collects segments below 0.15 threshold, logs WARNING with segment index, text preview (50 chars), confidence, top 3 negative adjustments from confidence_breakdown. >20% summary warns about iterative matching. 16 tests in test_low_confidence_reporting.py. Wired into main.py after analyze_low_confidence_segments call."
                         }
                     ]
 }

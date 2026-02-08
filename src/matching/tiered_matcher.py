@@ -238,6 +238,85 @@ def log_scoring_audit_summary(summary: Dict[str, Any]) -> None:
     logger.info("=" * 60)
 
 
+def report_low_confidence_segments(
+    results: List[Any],
+    threshold: float = 0.15,
+) -> List[Dict[str, Any]]:
+    """Report segments with confidence below LOW_CONFIDENCE_WARNING_THRESHOLD.
+
+    Collects segments below the threshold, logs each at WARNING with:
+    - Segment index, voiceover text preview (first 50 chars), confidence
+    - Top 3 negative adjustments from confidence_breakdown
+
+    When >20% of segments are low-confidence, logs a summary WARNING
+    suggesting enabling iterative matching or adjusting scoring weights.
+
+    Args:
+        results: List of MatchResult objects from the matching loop.
+        threshold: Confidence threshold (default 0.15 = LOW_CONFIDENCE_WARNING_THRESHOLD).
+
+    Returns:
+        List of dicts describing each low-confidence segment (for testing).
+    """
+    if not results:
+        return []
+
+    low_segments: List[Dict[str, Any]] = []
+
+    for i, result in enumerate(results):
+        if not result or not hasattr(result, 'primary_match') or not result.primary_match:
+            continue
+        match = result.primary_match
+        conf = match.confidence
+        if conf >= threshold:
+            continue
+
+        # Voiceover text preview
+        vo_text = ''
+        vo_seg = getattr(match, 'voiceover_segment', None)
+        if vo_seg:
+            vo_text = getattr(vo_seg, 'text', '') or ''
+        text_preview = vo_text[:50]
+
+        # Top 3 negative adjustments from confidence_breakdown
+        breakdown = getattr(result, 'confidence_breakdown', None) or []
+        negative_adjustments = sorted(
+            [e for e in breakdown if e.get('adjustment', 0) < 0],
+            key=lambda e: e.get('adjustment', 0),
+        )[:3]
+
+        neg_summary = '; '.join(
+            f"{e.get('component', '?')}={e.get('adjustment', 0):+.4f}"
+            for e in negative_adjustments
+        ) if negative_adjustments else 'none'
+
+        seg_info = {
+            'segment_index': i,
+            'text_preview': text_preview,
+            'confidence': conf,
+            'top_negative_adjustments': negative_adjustments,
+        }
+        low_segments.append(seg_info)
+
+        logger.warning(
+            f"Low-confidence segment #{i}: conf={conf:.3f}, "
+            f"text=\"{text_preview}\", "
+            f"top negative adjustments: [{neg_summary}]"
+        )
+
+    # Summary warning when >20% are low-confidence
+    total = len([r for r in results if r and hasattr(r, 'primary_match') and r.primary_match])
+    if total > 0 and len(low_segments) / total > 0.20:
+        pct = len(low_segments) / total * 100
+        logger.warning(
+            f"Low-confidence summary: {len(low_segments)}/{total} segments ({pct:.0f}%) "
+            f"below {threshold}. Consider enabling iterative matching (--high-matches) "
+            f"or adjusting scoring weights."
+        )
+
+    return low_segments
+
+
 class TieredMatcher:
     """
     Two-stage matcher with embedding search + LLM reranking.

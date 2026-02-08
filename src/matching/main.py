@@ -581,6 +581,10 @@ def match_all_segments(
     # Analyze low confidence segments
     analyze_low_confidence_segments(results)
 
+    # Report very low confidence segments with breakdown (US-77-012)
+    from .tiered_matcher import report_low_confidence_segments
+    report_low_confidence_segments(results)
+
     # Log cache statistics for performance analysis
     try:
         from .similarity_cache import log_all_cache_stats
