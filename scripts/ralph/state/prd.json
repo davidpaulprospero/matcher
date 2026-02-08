@@ -1,7 +1,7 @@
 {
-  "sprintNumber": 71,
-  "focusArea": "listicle-matching",
-  "branchName": "ralph/sprint-71",
+  "sprintNumber": 72,
+  "focusArea": "quality",
+  "branchName": "ralph/sprint-72",
   "projectContext": {
     "sourceDir": "src/",
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,180 +11,188 @@
   },
   "userStories": [
     {
-      "id": "US-71-001",
-      "title": "Generate sprint stories for listicle-matching focus area",
+      "id": "US-72-001",
+      "title": "Generate sprint stories for quality focus area",
       "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'listicle-matching' focus area",
+        "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
         "Read scripts/ralph/session/prompt.md for project context and architecture notes",
         "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
         "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'listicle-matching'",
-        "Add stories US-71-002 through US-71-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Analyze the codebase to find 8-12 specific improvements for 'quality'",
+        "Add stories US-72-002 through US-72-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
         "Each story MUST have 4-6 testable acceptance criteria",
         "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
         "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-71-NNN to be unique across sprints",
-        "Mark this story (US-71-001) as passes: true when done"
+        "IMPORTANT: Story IDs MUST follow format US-72-NNN to be unique across sprints",
+        "Mark this story (US-72-001) as passes: true when done"
       ],
       "passes": true,
       "priority": "high",
-      "notes": "Seed story. Generated 11 stories covering listicle pipeline integration, tag-based scoring, chapter coherence, cross-chapter grouping, listicle-aware scoring, chapter-aware gap analysis, list header count detection, chapter-segment mapping persistence, listicle-to-chapter bridge, chapter-constrained embedding boost, and chapter-type query learning."
+      "notes": "Seed story completed. Generated 11 stories (US-72-002 through US-72-012) covering the full context-enriched matching and chapter detection feature set. Stories follow the dependency chain: metadata propagation (foundation) -> context-enriched matching + chapter detection (parallel) -> cross-chapter grouping + iterative match (downstream)."
     },
     {
-      "id": "US-71-002",
-      "title": "Integrate listicle detector into match stage pipeline",
+      "id": "US-72-002",
+      "title": "Propagate video chapters and tags from CaptionResult to state dataclasses",
       "acceptanceCriteria": [
-        "Match stage (src/stages/match.py) calls detect_listicle_structure() on voiceover segments before scoring",
-        "Detected ListicleGroup objects are stored on pipeline state (e.g., state.listicle_groups) so downstream stages can access them",
-        "When listicle structure is detected, a log message reports the count and labels of detected groups",
-        "When no listicle structure is detected, matching proceeds unchanged with no errors",
-        "Unit test verifies detect_listicle_structure is called during match stage execution with mock segments"
+        "Add `video_chapters: List[dict] = field(default_factory=list)` field to VideoSearchResult in src/state.py",
+        "Add `video_tags: List[str] = field(default_factory=list)` field to VideoSearchResult in src/state.py",
+        "Add `video_chapters: List[dict] = field(default_factory=list)` field to DownloadedVideo in src/state.py",
+        "Add `video_tags: List[str] = field(default_factory=list)` field to DownloadedVideo in src/state.py",
+        "In src/stages/caption_stage.py `_populate_text_metadata()`, copy video_chapters and video_tags from CaptionResult to the corresponding VideoSearchResult in state",
+        "Unit test: verify VideoSearchResult serializes/deserializes with new fields (backward compat with existing checkpoint data that lacks these fields)"
       ],
       "passes": true,
       "priority": "high",
-      "notes": "Tier 1 (Foundation). Wired detect_listicle_groups() into MatchStage.run() via _detect_and_store_listicle_groups() helper. Added listicle_groups field to PipelineState in src/state.py. Logs count and labels when groups detected, gracefully handles errors. 4 unit tests added to tests/test_stage_match.py::TestListicleDetectionIntegration \u2014 all pass."
+      "notes": "Added video_chapters and video_tags to VideoSearchResult and DownloadedVideo in state.py. Added serialization in caption_stage.py success dict. Added propagation in _populate_text_metadata from caption_results to VSR. 10 tests pass (backward compat, roundtrip, propagation)."
     },
     {
-      "id": "US-71-003",
-      "title": "Add tag-based keyword boost to matching scorer",
+      "id": "US-72-003",
+      "title": "Add chapter_index field to TranscriptSegment for segment-to-chapter mapping",
       "acceptanceCriteria": [
-        "src/matching/scoring.py has a new apply_tag_keyword_boost() method that compares voiceover segment keywords against video tags",
-        "Tag overlap scoring uses graduated boost: 1 tag match -> +0.02, 2 matches -> +0.04, 3+ matches -> +0.06",
-        "The adjustment appears in confidence_breakdown as 'tag_keyword_boost' entry",
-        "apply_all_adjustments() calls apply_tag_keyword_boost() in the adjustment chain",
-        "Unit test verifies graduated boost values for 0, 1, 2, and 3+ tag matches"
+        "Add `chapter_index: Optional[int] = None` field to TranscriptSegment in src/state.py",
+        "Add `chapter_title: str = ''` field to TranscriptSegment in src/state.py",
+        "Create helper function `assign_chapter_indices(segments, chapters)` that maps each segment to its containing chapter by timestamp overlap",
+        "Handle edge case: segment spanning two chapters is assigned to the chapter with >50% overlap",
+        "Handle edge case: segments outside any chapter range get chapter_index=None",
+        "Unit test: assign_chapter_indices with segments fully inside, spanning, and outside chapter boundaries"
       ],
-      "passes": true,
+      "passes": false,
       "priority": "high",
-      "notes": "Added apply_tag_keyword_boost() with graduated boost (0.02/0.04/0.06). Wired as step 9 in apply_all_adjustments. 10 tests pass."
+      "notes": "Tier 1 (Foundation). Source files: src/state.py (TranscriptSegment ~line 48). The helper function should live in src/chapter_detection/bridge.py (file already exists). This enables chapter-aware scoring by tagging each segment with its video chapter context. Depends on US-72-002 for chapter data being available in state."
     },
     {
-      "id": "US-71-004",
-      "title": "Add chapter coherence penalty for scattered source usage",
+      "id": "US-72-004",
+      "title": "Add title keyword overlap scoring to confidence breakdown",
       "acceptanceCriteria": [
-        "src/matching/scoring.py has a new apply_chapter_coherence_penalty() method",
-        "When a voiceover chapter uses segments from >5 different video sources, a penalty of -0.03 is applied per excess source",
-        "The penalty is capped at -0.10 to avoid over-penalizing",
-        "The adjustment appears in confidence_breakdown as 'chapter_coherence' entry",
-        "Config option matching.chapter_grouping.coherence_penalty_threshold (default 5) controls the threshold",
-        "Unit test verifies penalty triggers at threshold and caps correctly"
+        "In src/matching/scoring.py, implement `apply_title_relevance_adjustment()` that extracts keywords from voiceover text and video title",
+        "Graduated boost: 1 keyword match gives +0.03, 2 matches gives +0.05, 3+ matches gives +0.08",
+        "Add result to confidence_breakdown list as {'component': 'title_relevance', 'adjustment': float, 'reason': str}",
+        "Skip adjustment when video title is empty or unavailable (adjustment = 0.0)",
+        "Call the method from apply_all_adjustments() with video title passed from match candidates",
+        "Unit test: verify graduated boost values for 0, 1, 2, and 3+ keyword matches"
       ],
-      "passes": true,
-      "priority": "medium",
-      "notes": "All 6 criteria met. Implementation + 11 unit tests pass (threshold trigger, cap at -0.10, config option, breakdown entry, disabled check)."
+      "passes": false,
+      "priority": "high",
+      "notes": "Tier 2 (Context-Enriched Matching). Source files: src/matching/scoring.py (apply_all_adjustments ~line 2586). Keywords should be extracted by splitting on whitespace and filtering stopwords. Use a simple stopword set (the, a, an, is, are, in, on, at, to, for, of, and, or, but, with). The apply_title_relevance_adjustment method may already exist as a stub — check before creating."
     },
     {
-      "id": "US-71-005",
-      "title": "Build cross-chapter relevance matrix for candidate boosting",
+      "id": "US-72-005",
+      "title": "Feed video tags into existing keyword boost mechanism in scoring",
       "acceptanceCriteria": [
-        "New function compute_relevance_matrix() in src/matching/scoring.py or src/chapter_detection/ computes voiceover_chapter x video_chapter topic overlap scores",
-        "Relevance scores are normalized to 0-1 range based on keyword intersection over union",
-        "Config option matching.chapter_grouping.relevance_boost_weight (default 0.1) controls the boost magnitude",
-        "Candidates from high-relevance video chapters get a soft boost proportional to relevance score * weight",
-        "Unit test verifies matrix computation with known keyword sets produces expected overlap scores"
+        "In src/matching/scoring.py, implement `apply_tag_keyword_boost()` that checks voiceover segment keywords against video tags",
+        "Reuse the existing keyword_boost logic: if voiceover keywords overlap with video tags, apply +0.02 per matching tag (capped at +0.08)",
+        "Add result to confidence_breakdown as {'component': 'tag_keyword_boost', 'adjustment': float, 'reason': str}",
+        "Tags must be lowercased before comparison; keywords extracted from voiceover text also lowercased",
+        "Call from apply_all_adjustments() passing video_tags from candidate metadata",
+        "Unit test: verify tag overlap scoring with 0, 1, 2, 3, and 5 (cap) matching tags"
       ],
       "passes": false,
       "priority": "medium",
-      "notes": "HARD STORY: Skipped after 3_failures - pending decomposition"
+      "notes": "Tier 2 (Context-Enriched Matching). Source files: src/matching/scoring.py. Video tags come from state (US-72-002 propagates them). The tag_keyword_boost method may already exist as a stub. This is lower impact than title_relevance but still useful — tags like 'cooking', 'recipe', 'kitchen' directly signal topic relevance."
     },
     {
-      "id": "US-71-006",
-      "title": "Add listicle-aware scoring adjustment for within-group consistency",
+      "id": "US-72-006",
+      "title": "Enrich LLM reranker candidate descriptions with video context",
       "acceptanceCriteria": [
-        "src/matching/scoring.py has a new apply_listicle_consistency_boost() method",
-        "Segments within the same ListicleGroup that match from the same video source get a +0.04 boost",
-        "Segments at listicle group boundaries (first segment of a new group) get no boost or penalty",
-        "The adjustment appears in confidence_breakdown as 'listicle_consistency' entry",
-        "apply_all_adjustments() calls apply_listicle_consistency_boost() when listicle_groups are available",
-        "Unit test verifies boost applied within groups and not across group boundaries"
-      ],
-      "passes": true,
-      "priority": "medium",
-      "notes": "All 6/6 criteria verified. 8 tests pass. Implementation + tests complete."
-    },
-    {
-      "id": "US-71-007",
-      "title": "Add chapter-aware gap prioritization to iterative match",
-      "acceptanceCriteria": [
-        "src/iterative_match/gap_analyzer.py analyze_gaps() annotates each gap with its containing voiceover chapter/listicle group",
-        "Gaps in introduction chapters (first 10% of segments) get priority_boost of +0.2",
-        "Gaps in conclusion chapters (last 10% of segments) get priority_boost of +0.15",
-        "Gap priority is used to sort gap-filling order so high-importance chapters are filled first",
-        "Unit test verifies gaps in intro/conclusion get higher priority than gaps in middle sections"
-      ],
-      "passes": true,
-      "priority": "medium",
-      "notes": "All 5/5 criteria verified: (1) chapter annotation in analyze_gaps, (2) intro +0.2 boost, (3) conclusion +0.15 boost, (4) priority sorting for gap-filling order, (5) 9 unit tests passing."
-    },
-    {
-      "id": "US-71-008",
-      "title": "Add list header count detection to listicle detector",
-      "acceptanceCriteria": [
-        "src/chapter_detection/listicle_detector.py detects list header patterns like 'top 10', '5 reasons', '3 ways', 'seven tips'",
-        "When a list header is detected, the expected_count is stored on the detection result",
-        "The detector logs a warning when detected item count differs from expected_count by more than 1",
-        "Both numeric ('5 reasons') and word-form ('five reasons') counts are recognized",
-        "Unit test verifies detection of at least 4 different header patterns with correct expected_count extraction"
+        "In src/matching/llm_reranker.py, verify _enrich_candidates_with_context() properly builds context from video_metadata dict",
+        "Context string format must be: 'Video context: {title}. {first_sentence_of_description}'",
+        "Description truncated to first sentence or 100 chars, whichever is shorter",
+        "When video_metadata is empty or title is missing, skip enrichment gracefully (no error, no context prefix)",
+        "Wire video_metadata dict construction in the calling code (src/stages/match.py or src/matching/tiered_matcher.py) using state.video_search_results",
+        "Unit test: verify enrichment output format, truncation behavior, and graceful handling of missing metadata"
       ],
       "passes": false,
-      "priority": "low",
-      "notes": "HARD STORY: Skipped after 3_failures - pending decomposition"
-    },
-    {
-      "id": "US-71-009",
-      "title": "Persist chapter-segment mapping in checkpoint for output stage",
-      "acceptanceCriteria": [
-        "Chapter detection results (VideoChapter list and ListicleGroup list) are serialized to checkpoint.json after match stage",
-        "Chapter data survives pipeline resume -- loading checkpoint restores chapter/listicle structures",
-        "Output stage can read chapter/listicle data from checkpoint to annotate timeline markers",
-        "Backward compatibility: loading a checkpoint without chapter data produces empty lists, not errors",
-        "Unit test verifies round-trip serialization of VideoChapter and ListicleGroup through checkpoint"
-      ],
-      "passes": true,
       "priority": "medium",
-      "notes": "Added chapter_data field to CheckpointData, serialize chapters/listicle groups in match stage save, restore on resume, backward compat with empty dict, 8 unit tests pass."
+      "notes": "Tier 2 (Context-Enriched Matching). Source files: src/matching/llm_reranker.py (_enrich_candidates_with_context ~line 206), src/matching/tiered_matcher.py, src/stages/match.py. The reranker already accepts video_metadata parameter but the calling code may not be constructing and passing it. Verify the full pipeline: state -> tiered_matcher -> llm_reranker."
     },
     {
-      "id": "US-71-010",
-      "title": "Bridge listicle groups to voiceover chapter structure for unified handling",
+      "id": "US-72-007",
+      "title": "Implement chapter-aware scoring adjustment for topic match/mismatch",
       "acceptanceCriteria": [
-        "New function in src/chapter_detection/ converts ListicleGroup objects into VoiceoverChapter objects for unified downstream handling",
-        "Converted chapters have topic_keywords populated from the ListicleGroup topic_keywords field",
-        "When both YouTube chapters and listicle groups are detected, they are merged with YouTube chapters taking precedence for overlapping ranges",
-        "The unified chapter list is available to scoring adjustments via the same interface as regular chapters",
-        "Unit test verifies conversion from listicle groups to chapters and merge behavior with overlapping ranges"
+        "In src/matching/scoring.py, implement `apply_chapter_topic_match()` that compares voiceover chapter keywords with video chapter title keywords",
+        "Topic match boost: +0.05 for partial match (1-2 shared keywords), +0.10 for strong match (3+ shared keywords)",
+        "Topic mismatch penalty: -0.05 when voiceover chapter has keywords but zero overlap with video chapter",
+        "No adjustment when either side lacks chapter data (chapter_index is None)",
+        "Add result to confidence_breakdown as {'component': 'chapter_topic_match', 'adjustment': float, 'reason': str}",
+        "Unit test: verify all 4 cases - no chapter data, partial match, strong match, mismatch"
       ],
-      "passes": true,
+      "passes": false,
       "priority": "medium",
-      "notes": "All 5 criteria verified. 32 unit tests pass covering conversion, topic_keywords population, merge with overlap precedence, unified interface, and segment chapter map."
+      "notes": "Tier 3 (Video-Side Chapter Detection). Source files: src/matching/scoring.py. Depends on US-72-003 for chapter_index on segments and US-72-002 for video_chapters in state. The chapter_topic_match method may already exist as a stub. Keywords from video chapter titles should be extracted the same way as title keywords (split + filter stopwords)."
     },
     {
-      "id": "US-71-011",
-      "title": "Add chapter-constrained candidate boost to embedding search",
+      "id": "US-72-008",
+      "title": "Add chapter-level source consistency boost to scoring",
       "acceptanceCriteria": [
-        "src/matching/embedding_search.py applies a soft boost to candidates whose video chapter has high relevance to the current voiceover chapter",
-        "The boost is proportional to relevance_score * relevance_boost_weight (default 0.1)",
-        "Candidates without chapter information receive no boost or penalty (neutral treatment)",
-        "The boost is applied as a score adjustment after FAISS similarity retrieval, not as a filter",
-        "Unit test verifies candidates from relevant video chapters rank higher than equal-similarity candidates from irrelevant chapters"
+        "In src/matching/scoring.py, implement `apply_chapter_source_consistency()` that gives +0.03 boost when a candidate comes from the same video source as the previous segment in the same voiceover chapter",
+        "Only apply when both current and previous segments have a valid chapter_index and they match",
+        "Within chapter boundaries, this boost should coexist with (not replace) consecutive_source_penalty — net effect may be positive or negative",
+        "Add result to confidence_breakdown as {'component': 'chapter_source_consistency', 'adjustment': float, 'reason': str}",
+        "Unit test: verify boost applies within same chapter, does not apply across chapter boundaries, does not apply when chapter_index is None"
+      ],
+      "passes": false,
+      "priority": "medium",
+      "notes": "Tier 3 (Chapter Detection). Source files: src/matching/scoring.py (apply_all_adjustments). This requires knowing the previous segment's match result and chapter_index — the adjustment method needs context about neighboring segments. Config value: chapter_grouping.source_consistency_boost (default 0.03)."
+    },
+    {
+      "id": "US-72-009",
+      "title": "Compute cross-chapter relevance matrix for candidate boosting",
+      "acceptanceCriteria": [
+        "Create function `compute_relevance_matrix(voiceover_chapters, video_chapters)` in src/chapter_detection/bridge.py that returns a 2D list of relevance scores",
+        "Relevance score per pair: keyword overlap ratio between voiceover chapter topic_keywords and video chapter title keywords, normalized to 0.0-1.0",
+        "Handle edge cases: empty keyword lists return 0.0 relevance, empty chapter lists return empty matrix",
+        "Wire the matrix into embedding_search.search() via the existing relevance_matrix parameter in src/stages/match.py or src/matching/tiered_matcher.py",
+        "Config toggle: matching.chapter_grouping.enabled (default true) controls whether matrix is computed and passed",
+        "Unit test: verify matrix dimensions, score normalization, edge cases, and that embedding_search receives the matrix"
       ],
       "passes": false,
       "priority": "low",
-      "notes": "HARD STORY: Skipped after 3_failures - pending decomposition"
+      "notes": "Tier 4 (Cross-Chapter Grouping). Source files: src/chapter_detection/bridge.py, src/matching/embedding_search.py (search method ~line 88 already accepts relevance_matrix), src/matching/tiered_matcher.py. Depends on US-72-002 (video chapters in state) and US-72-003 (chapter indices on segments). The embedding_search already has _apply_chapter_boost() — this story just computes and passes the matrix."
     },
     {
-      "id": "US-71-012",
+      "id": "US-72-010",
+      "title": "Add chapter coherence penalty for scattered source usage within voiceover chapters",
+      "acceptanceCriteria": [
+        "In src/matching/scoring.py, implement `apply_chapter_coherence_penalty()` that tracks unique video chapters used within each voiceover chapter",
+        "When a voiceover chapter uses segments from >5 different video chapters, apply -0.03 penalty to additional candidates from new video chapters",
+        "Threshold configurable via matching.chapter_grouping.coherence_penalty_threshold (default 5)",
+        "Add result to confidence_breakdown as {'component': 'chapter_coherence_penalty', 'adjustment': float, 'reason': str}",
+        "No penalty when voiceover chapter structure is not detected (chapter_index is None)",
+        "Unit test: verify penalty triggers at threshold, doesn't trigger below threshold, and is absent without chapter data"
+      ],
+      "passes": false,
+      "priority": "low",
+      "notes": "Tier 4 (Cross-Chapter Grouping). Source files: src/matching/scoring.py. This is a quality-of-result polish adjustment. Requires tracking state across segments within a chapter — the scoring context needs to accumulate which video chapters have been used per voiceover chapter. Depends on US-72-003 for chapter_index."
+    },
+    {
+      "id": "US-72-011",
+      "title": "Add description-derived search queries for iterative match gap filling",
+      "acceptanceCriteria": [
+        "In src/iterative_match/gap_analyzer.py, add method `derive_queries_from_descriptions(matched_videos, gap_segment)` that extracts key phrases from descriptions of already-matched videos",
+        "Extract top 3 noun phrases from video descriptions using simple regex (capitalized word sequences or quoted phrases)",
+        "Return these as additional query suggestions alongside existing gap analysis queries",
+        "Config toggle: iterative_match.use_description_queries (default true in config.yaml)",
+        "Add config field to IterativeMatchingConfig in src/config/sections/matching.py",
+        "Unit test: verify query extraction from sample descriptions, empty description handling, and config toggle"
+      ],
+      "passes": false,
+      "priority": "low",
+      "notes": "Tier 5 (Enhanced Iterative Matching). Source files: src/iterative_match/gap_analyzer.py, src/config/sections/matching.py (IterativeMatchingConfig), config.yaml. Depends on US-72-002 for description data being available. Simple regex-based phrase extraction is sufficient — no need for NLP libraries."
+    },
+    {
+      "id": "US-72-012",
       "title": "Add chapter-type-aware query learning to iterative match",
       "acceptanceCriteria": [
-        "src/iterative_match/query_learning.py tracks query success rates bucketed by chapter type (intro, body, conclusion, listicle_item)",
-        "When generating new queries for a gap, the chapter type of the gap is used to prefer historically successful query patterns for that type",
-        "Chapter type classification uses simple position-based heuristics: first 10% = intro, last 10% = conclusion, listicle items from detector, remainder = body",
-        "Query learning data persists across iterative match rounds within the same pipeline run",
-        "Unit test verifies that query patterns successful for 'intro' chapters are preferred when filling intro gaps"
+        "In src/iterative_match/query_learning.py, add `chapter_type: str = ''` field to QueryResult dataclass",
+        "Chapter types: 'intro', 'body', 'conclusion', 'listicle_item', 'unknown' (derived from chapter position and listicle detection)",
+        "In QueryLearningDB, track success rates per chapter_type in addition to existing per-strategy tracking",
+        "When generating new queries, prefer strategies that historically performed well for the current chapter_type",
+        "Add method `get_preferred_strategies(chapter_type, top_n=3)` that returns best strategies for a chapter type",
+        "Unit test: verify chapter_type tracking, per-type success rates, and strategy preference ordering"
       ],
-      "passes": true,
+      "passes": false,
       "priority": "low",
-      "notes": "Added chapter_type field to GapSegment, position-based heuristics in annotate_gaps_with_chapters, chapter_strategy_success EMA tracking in QueryLearningDB, get_best_strategy_for_chapter with 60/40 blending, wired into stage. 64 tests pass (17 new)."
+      "notes": "Tier 5 (Enhanced Iterative Matching). Source files: src/iterative_match/query_learning.py (QueryResult, QueryLearningDB). Depends on US-72-003 for chapter indices. Chapter type classification: first chapter = 'intro', last chapter = 'conclusion', chapters with listicle markers = 'listicle_item', others = 'body'. This was already partially implemented in sprint-71 (US-71-012) — check existing code before implementing."
     }
   ]
 }

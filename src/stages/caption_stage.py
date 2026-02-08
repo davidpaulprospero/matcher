@@ -1037,6 +1037,8 @@ class CaptionStage(Stage):
                             'video_duration': video_duration,  # US-004
                             'coverage_ratio': coverage_ratio,  # US-004
                             'timing_penalty': timing_penalty,  # US-008 Sprint 7
+                            'video_chapters': getattr(result, 'video_chapters', []),  # US-72-002
+                            'video_tags': getattr(result, 'video_tags', []),  # US-72-002
                         }
 
                         # US-004: Update metrics with coverage info
@@ -1754,10 +1756,30 @@ class CaptionStage(Stage):
                 if vid and ttl:
                     title_lookup[vid] = ttl
 
+        # US-72-002: Build VSR lookup for propagating caption metadata to state
+        vsr_lookup: Dict[str, Any] = {}
+        if hasattr(state, 'video_search_results'):
+            for vsr in state.video_search_results:
+                vid = getattr(vsr, 'video_id', None) if not isinstance(vsr, dict) else vsr.get('video_id')
+                if vid:
+                    vsr_lookup[vid] = vsr
+
         for video_id, result in caption_results.items():
             # Skip unavailable/errored captions
             if result.get('unavailable') or result.get('error'):
                 continue
+
+            # US-72-002: Propagate video_chapters and video_tags to VideoSearchResult
+            chapters = result.get('video_chapters', [])
+            tags = result.get('video_tags', [])
+            if video_id in vsr_lookup:
+                vsr = vsr_lookup[video_id]
+                if isinstance(vsr, dict):
+                    vsr['video_chapters'] = chapters
+                    vsr['video_tags'] = tags
+                else:
+                    vsr.video_chapters = chapters
+                    vsr.video_tags = tags
 
             segments = result.get('segments', [])
             language = result.get('language', 'en')

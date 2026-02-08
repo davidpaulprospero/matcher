@@ -78,6 +78,8 @@ class DownloadedVideo:
     video_hash: str = ""
     face_score: float = 0.5
     description: str = ""  # US-70-002: Video description for context-enriched matching
+    video_chapters: List[dict] = field(default_factory=list)  # US-72-002: Chapter markers from captions
+    video_tags: List[str] = field(default_factory=list)  # US-72-002: Video tags from captions
 
 
 @dataclass
@@ -260,6 +262,8 @@ class VideoSearchResult:
     duration_tier: str = ""
     keyword: str = ""
     description: str = ""  # US-70-002: Video description for context-enriched matching
+    video_chapters: List[dict] = field(default_factory=list)  # US-72-002: Chapter markers from captions
+    video_tags: List[str] = field(default_factory=list)  # US-72-002: Video tags from captions
 
 
 @dataclass
