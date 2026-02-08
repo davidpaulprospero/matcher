@@ -1546,6 +1546,10 @@ download:
   # Unlike socket_timeout (HTTP sockets only), this covers the entire download
   # including ffmpeg merging/remuxing. 0 = no stall detection.
   segment_stall_timeout: 120
+  # Save incremental checkpoint every N segment downloads for partial resume.
+  # On interruption, already-downloaded segments are skipped on --resume.
+  # 0 = checkpoint after every download (more I/O, maximum resilience).
+  segment_checkpoint_every_n: 10
 
   # Bot-detection tier floor: after N consecutive 403/bot-detection errors across
   # ALL video IDs (stage-level), new downloads start at max escalation tier instead

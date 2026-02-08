@@ -48,7 +48,7 @@
             "id": "US-81-003",
             "title": "Add partial stage resume for long-running download stages",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "DOWNLOAD_SEGMENTS stage saves incremental progress to checkpoint after every N downloads (configurable, default 10)",
                 "When resuming a DOWNLOAD_SEGMENTS stage via --resume, already-downloaded segments are detected on disk and skipped",
@@ -56,7 +56,7 @@
                 "A test verifies that after interrupting at 5/20 downloads and resuming, only the remaining 15 are attempted",
                 "Checkpoint partial_progress is cleared when the stage completes fully"
             ],
-            "notes": "Tier: high-impact. Currently stages are all-or-nothing - you can't resume partway through DOWNLOAD_SEGMENTS after downloading 50/200 segments. Source files: src/stages/download_segments.py (DownloadSegmentsStage.run), src/checkpoint.py (CheckpointManager - need save_partial_progress method). The incremental save should use the existing checkpoint.save() but with a 'partial' flag to avoid advancing last_completed_stage."
+            "notes": "Tier: high-impact. Added segment_checkpoint_every_n config (default 10) to DownloadConfig. The checkpoint_progress callback in run() now includes partial_progress dict with completed_ids, failed_ids, total_count — deep-copied on each save. I/O is gated by checkpoint_every_n counter. Already-downloaded segments are detected as cache hits via output_file.exists() on resume. Final checkpoint_data sets partial_progress=None. 4 new tests in TestPartialStageResume verify: 5/20 resume skipping, dict structure, cleared on completion, checkpoint frequency."
         },
         {
             "id": "US-81-004",

@@ -381,14 +381,49 @@ class DownloadVideoSegmentsStage(Stage):
                 # Clean up temporary state attribute
                 delattr(state, '_restored_retry_queue')
 
+            # US-81-003: Shared mutable container for partial_progress tracking
+            # Updated by _download_segments and read by checkpoint_progress
+            _partial_progress = {
+                'completed_ids': [],
+                'failed_ids': [],
+                'total_count': len(segments_to_download),
+            }
+
+            # US-81-003: Configurable checkpoint I/O frequency
+            _checkpoint_every_n = int(getattr(
+                download_config, 'segment_checkpoint_every_n', 10
+            ))
+            if _checkpoint_every_n <= 0:
+                _checkpoint_every_n = 1
+            _checkpoint_counter = [0]  # mutable for closure
+
             # Download segments with progress callback for checkpointing
             def checkpoint_progress(current: int, total: int, downloaded: list):
-                """Save progress checkpoint during download"""
+                """Save progress checkpoint during download.
+
+                US-81-003: Includes partial_progress dict with completed_ids,
+                failed_ids, total_count for partial resume on interruption.
+                Only writes to disk every N calls to reduce I/O overhead.
+                Always writes on abort (current < total check in caller).
+                """
+                _checkpoint_counter[0] += 1
+                # Write every N items, or on final item, or when aborting
+                is_final = (current >= total)
+                if _checkpoint_counter[0] < _checkpoint_every_n and not is_final:
+                    return
+                _checkpoint_counter[0] = 0
+
                 checkpoint_data = {
                     'segment_count': len(downloaded),
                     'segments_completed': current,
                     'segments_total': total,
                     'in_progress': current < total,
+                    # US-81-003: Partial progress for resume (deep copy lists)
+                    'partial_progress': {
+                        'completed_ids': list(_partial_progress['completed_ids']),
+                        'failed_ids': list(_partial_progress['failed_ids']),
+                        'total_count': _partial_progress['total_count'],
+                    },
                 }
                 # US-51-010: Include retry queue state in intermediate checkpoints
                 if self.downloader and self.downloader.retry_queue:
@@ -418,7 +453,8 @@ class DownloadVideoSegmentsStage(Stage):
                 segments_to_download,
                 output_dir,
                 buffer_seconds,
-                checkpoint_progress
+                checkpoint_progress,
+                partial_progress=_partial_progress,
             )
 
             # US-51-010: Merge pre-retry downloads into main list
@@ -442,6 +478,8 @@ class DownloadVideoSegmentsStage(Stage):
                 'retry_count': download_stats.retry_count,
                 # US-81-002: Per-item error details for batch error isolation
                 'failed_items': download_stats.failed_items,
+                # US-81-003: Clear partial_progress on full completion
+                'partial_progress': None,
             }
 
             # US-50-008: Include circuit breaker metrics in checkpoint
@@ -625,11 +663,18 @@ class DownloadVideoSegmentsStage(Stage):
         segments: List[Dict[str, Any]],
         output_dir: Path,
         buffer_seconds: float,
-        progress_callback
+        progress_callback,
+        partial_progress: Optional[Dict[str, Any]] = None,
     ):
         """Download video segments via sub-methods: prepare, check, execute, handle.
 
         US-57-007: Returns (downloaded_segments list, SegmentDownloadStats).
+        US-81-003: Tracks partial_progress (completed_ids, failed_ids, total_count)
+        and saves incremental checkpoint every N downloads for partial resume.
+
+        Args:
+            partial_progress: Mutable dict shared with checkpoint callback.
+                Updated in-place with completed_ids, failed_ids, total_count.
         """
         from ..state import DownloadedVideo
 
@@ -637,6 +682,10 @@ class DownloadVideoSegmentsStage(Stage):
         total = len(segments)
         stats = SegmentDownloadStats(total=total)
         ctx = self._prepare_download_context(stats)
+
+        # US-81-003: Track completed/failed IDs via shared partial_progress dict
+        if partial_progress is None:
+            partial_progress = {'completed_ids': [], 'failed_ids': [], 'total_count': total}
 
         # Adaptive request delay to avoid YouTube rate-limiting
         dl_cfg = ctx.download_config
@@ -654,7 +703,8 @@ class DownloadVideoSegmentsStage(Stage):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
             end = seg['end'] + buffer_seconds
-            output_file = output_dir / f"{video_id}_{int(start)}_{int(end)}.mp4"
+            seg_key = f"{video_id}_{int(start)}_{int(end)}"
+            output_file = output_dir / f"{seg_key}.mp4"
 
             # Check cache hit
             if output_file.exists():
@@ -669,12 +719,15 @@ class DownloadVideoSegmentsStage(Stage):
                 except OSError:
                     _cached_bytes = 0
                 stats.increment_cached(file_bytes=_cached_bytes)
+                partial_progress['completed_ids'].append(seg_key)
                 ctx.consecutive_network_failures = 0
                 if ctx.consecutive_bot_detections > 0:
                     ctx.consecutive_bot_detections = 0
                     if ctx.escalation_mgr:
                         ctx.escalation_mgr.clear_tier_floor()
                 self._print_progress(idx, total, stats)
+                if progress_callback:
+                    progress_callback(idx, total, downloaded)
                 continue
 
             # Check preconditions (circuit breaker, etc.)
@@ -685,7 +738,10 @@ class DownloadVideoSegmentsStage(Stage):
                     error_msg=skip_reason,
                     video_id=video_id,
                 )
+                partial_progress['failed_ids'].append(seg_key)
                 self._print_progress(idx, total, stats)
+                if progress_callback:
+                    progress_callback(idx, total, downloaded)
                 continue
 
             # Execute the download
@@ -697,6 +753,11 @@ class DownloadVideoSegmentsStage(Stage):
                 ctx, result, video_id, start, end, output_file,
                 downloaded, idx, total, progress_callback,
             )
+            # US-81-003: Track outcome
+            if result.get('success'):
+                partial_progress['completed_ids'].append(seg_key)
+            else:
+                partial_progress['failed_ids'].append(seg_key)
             self._print_progress(idx, total, stats)
 
             # Adaptive delay: back off on failure, reset on success

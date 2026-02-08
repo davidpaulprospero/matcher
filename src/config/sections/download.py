@@ -1361,6 +1361,10 @@ class DownloadConfig:
     # Unlike socket_timeout (covers HTTP sockets only), this covers the entire
     # ydl.download() call including ffmpeg merging/remuxing. 0 = no stall detection.
     segment_stall_timeout: int = 120
+    # US-81-003: Save incremental checkpoint every N segment downloads.
+    # Enables partial resume for long-running DOWNLOAD_SEGMENTS stages.
+    # 0 = checkpoint after every download (maximum resilience, more I/O).
+    segment_checkpoint_every_n: int = 10
 
     # Bot-detection tier floor: after N consecutive 403/bot-detection errors across
     # ALL video IDs (stage-level), new downloads start at max escalation tier instead
