@@ -170,7 +170,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "low",
-                            "notes":  "Added _apply_chapter_boost() to EmbeddingSearch with relevance_matrix, voiceover_chapter_index, relevance_boost_weight params on search(). 6 unit tests verify boost proportionality, neutral treatment for no-chapter segments, and post-retrieval (not filter) behavior."
+                            "notes":  "All 5/5 criteria verified: (1) _apply_chapter_boost in embedding_search.py applies soft boost, (2) boost = relevance_score * relevance_boost_weight (default 0.1), (3) no chapter_index = neutral (no boost/penalty), (4) boost applied after FAISS retrieval not as filter, (5) 6 unit tests in TestChapterConstrainedBoost all pass."
                         },
                         {
                             "id":  "US-71-012",
