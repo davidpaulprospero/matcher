@@ -2015,6 +2015,65 @@ class TestChapterSourceConsistency:
         consistency_entry = next(b for b in breakdown if b['component'] == 'chapter_source_consistency')
         assert consistency_entry['adjustment'] == pytest.approx(0.03, abs=0.001)
 
+    @pytest.mark.fast
+    def test_no_boost_when_chapter_index_is_none(self, config_with_chapter_grouping, mock_match):
+        """No boost when chapter_index is None (not assigned)."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        # Previous match has no chapter info (chapter_index=-1 means None/unassigned)
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=-1)]
+
+        # current_chapter_index=-1 means None/unassigned
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=-1,
+            segment_chapter_map={1: -1, 2: -1},
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_coexists_with_consecutive_source_penalty(self, config_with_chapter_grouping, mock_match):
+        """Chapter source consistency boost coexists with consecutive_source_penalty.
+
+        Within chapter boundaries, both adjustments apply independently:
+        - consecutive_source_penalty: -0.10 (penalty for same source)
+        - chapter_source_consistency: +0.03 (boost for same source in same chapter)
+        Net effect is negative (-0.07), showing they coexist rather than one replacing the other.
+        """
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        # Apply consecutive_source_penalty (without suppress_in_chapter)
+        base = 0.8
+        after_penalty, penalty_reason = apply_consecutive_source_penalty(
+            base, video_seg, recent,
+            config=config_with_chapter_grouping,
+            suppress_in_chapter=False,  # penalty still applies within chapter
+        )
+        assert after_penalty < base, "consecutive_source_penalty should reduce confidence"
+        assert "consecutive_source_penalty" in penalty_reason
+
+        # Apply chapter_source_consistency boost
+        after_boost, boost_reason = scoring.apply_chapter_source_consistency(
+            after_penalty, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+        assert after_boost > after_penalty, "chapter_source_consistency should add boost"
+        assert "chapter_source_consistency" in boost_reason
+
+        # Net effect: both applied, net is negative (penalty > boost)
+        net_effect = after_boost - base
+        assert net_effect < 0, "Net effect should be negative (penalty -0.10 > boost +0.03)"
+        assert after_boost == pytest.approx(base - 0.10 + 0.03, abs=0.001)
+
 
 class TestTagKeywordBoost:
     """Tests for apply_tag_keyword_boost (US-71-003)."""
