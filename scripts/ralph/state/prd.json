@@ -168,9 +168,9 @@
                                                        "The boost is applied as a score adjustment after FAISS similarity retrieval, not as a filter",
                                                        "Unit test verifies candidates from relevant video chapters rank higher than equal-similarity candidates from irrelevant chapters"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier 3 (Matching Enhancement). Depends on US-71-005 (relevance matrix). From Area 5 of the design doc: \u0027When voiceover has chapter structure, boost candidates from video chapters with high relevance score. Not a hard filter, but a soft boost.\u0027 The embedding_search.py currently does basic FAISS similarity search and returns (segment, score) tuples. This adds a post-retrieval re-scoring step using the relevance matrix. Config via matching.chapter_grouping.relevance_boost_weight."
+                            "notes":  "Added _apply_chapter_boost() to EmbeddingSearch with relevance_matrix, voiceover_chapter_index, relevance_boost_weight params on search(). 6 unit tests verify boost proportionality, neutral treatment for no-chapter segments, and post-retrieval (not filter) behavior."
                         },
                         {
                             "id":  "US-71-012",

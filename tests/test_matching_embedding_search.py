@@ -201,6 +201,174 @@ class TestEmbeddingSearchEmptyIndex:
         assert results[1][0].id == "seg1"
 
 
+class TestChapterConstrainedBoost:
+    """Tests for chapter-constrained candidate boost (US-71-011)."""
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_relevant_chapter_candidates_rank_higher(self, mock_find_similar):
+        """Candidates from relevant video chapters rank higher than equal-similarity irrelevant ones."""
+        # Two candidates with identical FAISS similarity scores
+        mock_find_similar.return_value = (
+            np.array([0.80, 0.80]),  # Same similarity
+            np.array([0, 1])
+        )
+
+        seg0 = MockSRTSegment("relevant_ch")
+        seg0.chapter_index = 0  # In relevant video chapter
+        seg1 = MockSRTSegment("irrelevant_ch")
+        seg1.chapter_index = 1  # In irrelevant video chapter
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1, 0.2], [0.3, 0.4]], [seg0, seg1])
+
+        # Relevance matrix: vo chapter 0 has high relevance to vid chapter 0, low to vid chapter 1
+        relevance_matrix = [[0.8, 0.0]]
+        results = searcher.search(
+            [0.1, 0.2],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.1,
+        )
+
+        assert len(results) == 2
+        # seg0 (relevant chapter) should rank first due to boost
+        assert results[0][0].id == "relevant_ch"
+        assert results[1][0].id == "irrelevant_ch"
+        # seg0 boosted: 0.80 + 0.8*0.1 = 0.88, seg1 unchanged: 0.80
+        assert results[0][1] == pytest.approx(0.88)
+        assert results[1][1] == pytest.approx(0.80)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_boost_proportional_to_relevance_and_weight(self, mock_find_similar):
+        """Boost = relevance_score * relevance_boost_weight."""
+        mock_find_similar.return_value = (
+            np.array([0.70]),
+            np.array([0])
+        )
+
+        seg = MockSRTSegment("seg0")
+        seg.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1]], [seg])
+
+        relevance_matrix = [[0.5]]
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.2,
+        )
+
+        # 0.70 + 0.5 * 0.2 = 0.80
+        assert results[0][1] == pytest.approx(0.80)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_no_chapter_info_neutral_treatment(self, mock_find_similar):
+        """Candidates without chapter_index get no boost or penalty."""
+        mock_find_similar.return_value = (
+            np.array([0.80, 0.75]),
+            np.array([0, 1])
+        )
+
+        seg0 = MockSRTSegment("no_chapter")
+        # seg0 has no chapter_index attribute
+        seg1 = MockSRTSegment("with_chapter")
+        seg1.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1], [0.2]], [seg0, seg1])
+
+        relevance_matrix = [[0.9]]
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.1,
+        )
+
+        # seg0 (no chapter) stays at 0.80 — neutral
+        # seg1 (chapter 0) gets boost: 0.75 + 0.9*0.1 = 0.84
+        assert len(results) == 2
+        # seg1 should now rank higher due to boost
+        assert results[0][0].id == "with_chapter"
+        assert results[0][1] == pytest.approx(0.84)
+        assert results[1][0].id == "no_chapter"
+        assert results[1][1] == pytest.approx(0.80)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_no_relevance_matrix_no_boost(self, mock_find_similar):
+        """When no relevance_matrix is provided, scores are unchanged."""
+        mock_find_similar.return_value = (
+            np.array([0.90]),
+            np.array([0])
+        )
+
+        seg = MockSRTSegment("seg0")
+        seg.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1]], [seg])
+
+        results = searcher.search([0.1])  # No relevance params
+        assert results[0][1] == pytest.approx(0.90)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_negative_voiceover_chapter_no_boost(self, mock_find_similar):
+        """When voiceover_chapter_index is -1, no boost applied."""
+        mock_find_similar.return_value = (
+            np.array([0.90]),
+            np.array([0])
+        )
+
+        seg = MockSRTSegment("seg0")
+        seg.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1]], [seg])
+
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=[[1.0]],
+            voiceover_chapter_index=-1,
+        )
+        assert results[0][1] == pytest.approx(0.90)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_post_retrieval_not_filter(self, mock_find_similar):
+        """Boost is applied after FAISS retrieval, not as a filter — all candidates returned."""
+        mock_find_similar.return_value = (
+            np.array([0.90, 0.60, 0.30]),
+            np.array([0, 1, 2])
+        )
+
+        segments = []
+        for i in range(3):
+            s = MockSRTSegment(f"seg{i}")
+            s.chapter_index = i
+            segments.append(s)
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1], [0.2], [0.3]], segments)
+
+        # Only vid chapter 2 is relevant
+        relevance_matrix = [[0.0, 0.0, 1.0]]
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.1,
+        )
+
+        # All 3 candidates returned (not filtered)
+        assert len(results) == 3
+        # seg2 boosted from 0.30 to 0.40, but seg0 at 0.90 still highest
+        ids = [r[0].id for r in results]
+        assert "seg0" in ids
+        assert "seg1" in ids
+        assert "seg2" in ids
+
+
 class TestEmbeddingSearchSimilarity:
     """Tests for similarity calculation with known values."""
 

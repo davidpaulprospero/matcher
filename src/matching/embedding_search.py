@@ -88,7 +88,10 @@ class EmbeddingSearch:
     def search(
         self,
         query_embedding: List[float],
-        num_candidates: Optional[int] = None
+        num_candidates: Optional[int] = None,
+        relevance_matrix: Optional[List[List[float]]] = None,
+        voiceover_chapter_index: int = -1,
+        relevance_boost_weight: float = 0.1,
     ) -> List[Tuple['SRTSegment', float]]:
         """
         Search for top-k similar video segments.
@@ -96,6 +99,11 @@ class EmbeddingSearch:
         Args:
             query_embedding: Embedding vector for query (voiceover segment)
             num_candidates: Number of candidates to retrieve (overrides config)
+            relevance_matrix: 2D list [vo_chapter][vid_chapter] of relevance scores (0-1).
+                When provided with voiceover_chapter_index, applies a soft boost to
+                candidates from relevant video chapters (US-71-011).
+            voiceover_chapter_index: Current voiceover chapter index (-1 = no chapter)
+            relevance_boost_weight: Weight for the relevance boost (default 0.1)
 
         Returns:
             List of (video_segment, similarity_score) tuples, sorted by similarity
@@ -112,7 +120,56 @@ class EmbeddingSearch:
             if 0 <= idx < len(self.video_segments)
         ]
 
+        # Apply chapter-constrained relevance boost (US-71-011)
+        candidates = self._apply_chapter_boost(
+            candidates, relevance_matrix, voiceover_chapter_index, relevance_boost_weight
+        )
+
         return candidates
+
+    def _apply_chapter_boost(
+        self,
+        candidates: List[Tuple['SRTSegment', float]],
+        relevance_matrix: Optional[List[List[float]]],
+        voiceover_chapter_index: int,
+        relevance_boost_weight: float,
+    ) -> List[Tuple['SRTSegment', float]]:
+        """
+        Apply soft boost to candidates from video chapters relevant to the voiceover chapter.
+
+        Boost = relevance_score * relevance_boost_weight, applied after FAISS retrieval.
+        Candidates without chapter info receive no boost or penalty (neutral).
+
+        Args:
+            candidates: List of (segment, score) from FAISS search
+            relevance_matrix: [vo_chapter][vid_chapter] relevance scores
+            voiceover_chapter_index: Current voiceover chapter index (-1 = none)
+            relevance_boost_weight: Weight multiplier for the boost
+
+        Returns:
+            Re-sorted candidates with boosted scores
+        """
+        if not relevance_matrix or voiceover_chapter_index < 0:
+            return candidates
+
+        if voiceover_chapter_index >= len(relevance_matrix):
+            return candidates
+
+        row = relevance_matrix[voiceover_chapter_index]
+
+        boosted = []
+        for segment, score in candidates:
+            vid_ch = getattr(segment, 'chapter_index', -1)
+            if vid_ch >= 0 and vid_ch < len(row):
+                boost = row[vid_ch] * relevance_boost_weight
+                boosted.append((segment, score + boost))
+            else:
+                # No chapter info — neutral treatment
+                boosted.append((segment, score))
+
+        # Re-sort by boosted score descending
+        boosted.sort(key=lambda x: x[1], reverse=True)
+        return boosted
 
     def _compute_similarity(
         self,
