@@ -123,6 +123,120 @@ def _record_breakdown(breakdown: list, component: str, before: float, after: flo
         })
 
 
+def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
+    """Aggregate confidence_breakdown data from all match results into an audit summary.
+
+    Collects all confidence_breakdown dicts across all segments, computes:
+    - Total segments matched and average confidence
+    - Count of each scoring adjustment that fired
+    - Average magnitude per adjustment
+    - Top-3 most impactful adjustments by average absolute magnitude
+    - Adjustments that never fired (reported as 'unused')
+
+    Args:
+        results: List of MatchResult objects from the matching loop.
+
+    Returns:
+        Dict with keys: total_segments, avg_confidence, adjustment_counts,
+        avg_magnitudes, top_3_impactful, unused_adjustments.
+    """
+    # All known adjustment components (must match _record_breakdown calls)
+    ALL_KNOWN_ADJUSTMENTS = {
+        'topic_penalty', 'broll_boost', 'caption_quality', 'timing_penalty',
+        'project_boost', 'consecutive_source_penalty', 'title_relevance',
+        'description_relevance', 'tag_keyword_boost', 'chapter_topic_match',
+        'chapter_source_consistency', 'chapter_coherence_penalty',
+        'cross_chapter_relevance', 'listicle_consistency',
+        'semantic_coherence', 'temporal_coherence', 'explanation_validation',
+        'diversity_recheck',
+    }
+
+    confidences: List[float] = []
+    # adjustment_name -> list of adjustment values
+    adjustment_values: Dict[str, List[float]] = {}
+
+    for result in results:
+        if not result or not hasattr(result, 'primary_match') or not result.primary_match:
+            continue
+        confidences.append(result.primary_match.confidence)
+
+        breakdown = getattr(result, 'confidence_breakdown', None) or []
+        for entry in breakdown:
+            comp = entry.get('component', '')
+            adj = entry.get('adjustment', 0.0)
+            if comp:
+                if comp not in adjustment_values:
+                    adjustment_values[comp] = []
+                adjustment_values[comp].append(adj)
+
+    total_segments = len(confidences)
+    avg_confidence = sum(confidences) / total_segments if total_segments else 0.0
+
+    # Count how many times each adjustment fired
+    adjustment_counts = {name: len(vals) for name, vals in adjustment_values.items()}
+
+    # Average magnitude (absolute value) per adjustment
+    avg_magnitudes = {}
+    for name, vals in adjustment_values.items():
+        avg_magnitudes[name] = sum(abs(v) for v in vals) / len(vals) if vals else 0.0
+
+    # Top-3 most impactful by average absolute magnitude
+    sorted_by_impact = sorted(avg_magnitudes.items(), key=lambda x: -x[1])
+    top_3_impactful = sorted_by_impact[:3]
+
+    # Unused adjustments: known adjustments that never appeared
+    fired_adjustments = set(adjustment_values.keys())
+    unused_adjustments = sorted(ALL_KNOWN_ADJUSTMENTS - fired_adjustments)
+
+    return {
+        'total_segments': total_segments,
+        'avg_confidence': avg_confidence,
+        'adjustment_counts': adjustment_counts,
+        'avg_magnitudes': avg_magnitudes,
+        'top_3_impactful': top_3_impactful,
+        'unused_adjustments': unused_adjustments,
+    }
+
+
+def log_scoring_audit_summary(summary: Dict[str, Any]) -> None:
+    """Log the scoring audit summary at INFO level.
+
+    Args:
+        summary: Dict returned by compute_scoring_audit_summary.
+    """
+    total = summary['total_segments']
+    avg_conf = summary['avg_confidence']
+    counts = summary['adjustment_counts']
+    magnitudes = summary['avg_magnitudes']
+    top3 = summary['top_3_impactful']
+    unused = summary['unused_adjustments']
+
+    logger.info("=" * 60)
+    logger.info("SCORING ADJUSTMENT AUDIT SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"  Total segments matched: {total}")
+    logger.info(f"  Average confidence: {avg_conf:.3f}")
+
+    if counts:
+        logger.info(f"  Active adjustments ({len(counts)}):")
+        for name in sorted(counts.keys()):
+            logger.info(
+                f"    {name}: fired {counts[name]}x, avg magnitude {magnitudes.get(name, 0):.4f}"
+            )
+
+    if top3:
+        logger.info(f"  Top-3 most impactful (by avg magnitude):")
+        for rank, (name, mag) in enumerate(top3, 1):
+            logger.info(f"    #{rank}: {name} (avg |adjustment| = {mag:.4f})")
+
+    if unused:
+        logger.info(f"  Unused adjustments ({len(unused)}): {', '.join(unused)}")
+    else:
+        logger.info(f"  All known adjustments fired at least once")
+
+    logger.info("=" * 60)
+
+
 class TieredMatcher:
     """
     Two-stage matcher with embedding search + LLM reranking.
@@ -1819,4 +1933,4 @@ class TieredMatcher:
         return matches
 
 
-__all__ = ['TieredMatcher']
+__all__ = ['TieredMatcher', 'compute_scoring_audit_summary', 'log_scoring_audit_summary']

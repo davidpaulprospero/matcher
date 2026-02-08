@@ -470,6 +470,11 @@ def match_all_segments(
     # US-77-007: Enforce minimum source diversity per chapter
     results = matcher.enforce_chapter_source_diversity(results)
 
+    # US-77-008: Log scoring adjustment audit summary
+    from .tiered_matcher import compute_scoring_audit_summary, log_scoring_audit_summary
+    scoring_audit = compute_scoring_audit_summary(results)
+    log_scoring_audit_summary(scoring_audit)
+
     # Report gaps
     gaps = [r for r in results if r.has_gap]
     if gaps:
