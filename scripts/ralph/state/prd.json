@@ -128,7 +128,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "low",
-                            "notes":  "All 5/5 criteria verified. (1) HEADER_PATTERNS detect top 10, 5 reasons, 3 ways, seven tips etc. (2) expected_count stored on ListicleGroup via detect_list_header. (3) Warning logged when detected vs expected diff >1. (4) HEADER_NUMBER_WORDS handles word-form (two-twenty). (5) 6 header pattern tests + 2 integration tests (warning/no-warning) all pass. 52 total tests pass."
+                            "notes":  "All 5/5 criteria verified. HEADER_PATTERNS detect 'top N', 'N <noun>', word-form counts. expected_count stored on ListicleGroup. Warning logged when diff>1. Both numeric and word-form recognized via HEADER_NUMBER_WORDS + _parse_header_count(). 52 tests pass including 8 header-specific tests (TestDetectListHeader: 8 tests, TestListHeaderIntegration: 7 tests)."
                         },
                         {
                             "id":  "US-71-009",
