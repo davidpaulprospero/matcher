@@ -103,7 +103,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 6 criteria verified (100%). Implementation was pre-existing from US-70-007: _enrich_candidates_with_context() in llm_reranker.py:206, _build_video_context() at line 184 with format 'Video context: {title}. {first_sentence}', truncation to 100 chars, graceful skip on empty metadata/title, video_metadata wired in match.py:669-677 from state.video_search_results. 36 tests pass including TestLLMRerankerVideoContext (11 tests) and TestVideoMetadataConstruction (5 tests)."
+                            "notes":  "All 6 criteria verified: _enrich_candidates_with_context() builds context from video_metadata dict (llm_reranker.py:206-234). Format: 'Video context: {title}. {first_sentence}' (line 204). Description truncated to first sentence or 100 chars (lines 198-200). Empty/missing metadata handled gracefully with early return (line 217) and empty-string check (line 190). video_metadata wired in match.py:668-692 from state.video_search_results, passed through main.py and tiered_matcher.py. 36 tests pass covering enrichment format, truncation, graceful fallback, metadata construction, and end-to-end flow."
                         },
                         {
                             "id":  "US-72-007",
