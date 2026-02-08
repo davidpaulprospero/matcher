@@ -8,6 +8,7 @@ import pytest
 from dataclasses import asdict
 
 from src.caption.models import CaptionResult, CaptionSegment
+from src.caption.cache_models import CachedCaption
 from src.state import VideoSearchResult, DownloadedVideo
 
 
@@ -182,3 +183,42 @@ class TestDownloadedVideoDescription:
         old_data = {"file": "test.mp4", "title": "Old Video"}
         vid = DownloadedVideo(**old_data)
         assert vid.description == ""
+
+
+@pytest.mark.fast
+class TestCachedCaptionBackwardCompat:
+    """Test that CachedCaption.to_caption_result() works without new metadata fields."""
+
+    def test_cached_caption_to_result_has_defaults(self):
+        """CachedCaption (old cache, no metadata) -> CaptionResult gets safe defaults."""
+        cached = CachedCaption(
+            video_id="old_cached_vid",
+            language="en",
+            segments=[{"index": 0, "start": 0.0, "end": 5.0, "text": "Hello"}],
+            is_auto_generated=True,
+            format_source="srv3",
+            fetch_timestamp=1000000.0,
+        )
+        result = cached.to_caption_result()
+        assert isinstance(result, CaptionResult)
+        assert result.video_id == "old_cached_vid"
+        assert result.video_description == ""
+        assert result.video_chapters == []
+        assert result.video_tags == []
+        assert len(result.segments) == 1
+
+    def test_cached_caption_from_old_dict(self):
+        """CachedCaption.from_dict with old data (no metadata) loads cleanly."""
+        old_cache_dict = {
+            "video_id": "legacy_vid",
+            "language": "en",
+            "segments": [{"index": 0, "start": 0.0, "end": 3.0, "text": "Test"}],
+            "is_auto_generated": False,
+            "format_source": "vtt",
+            "fetch_timestamp": 999999.0,
+        }
+        cached = CachedCaption.from_dict(old_cache_dict)
+        result = cached.to_caption_result()
+        assert result.video_description == ""
+        assert result.video_chapters == []
+        assert result.video_tags == []
