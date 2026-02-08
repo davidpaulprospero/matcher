@@ -71,13 +71,13 @@
                                                        "Add test: setting max_retries=0 in config disables retry (single attempt only)",
                                                        "Add test: setting max_retries=3 in config allows up to 3 retry attempts after initial failure"
                                                    ],
-                            "notes":  "Added max_retries field to TranscriptionConfig (0-5 range validation), config.yaml entry, wired into transcribe_videos_parallel, 11 tests pass"
+                            "notes":  "Evidence gate: 3/5 criteria verified (60%). Minimum: 90%."
                         },
                         {
                             "id":  "US-79-005",
                             "title":  "Make cache max_age_days configurable in TranscriptionConfig",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Add `cache_max_age_days: int = 30` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 1",
                                                        "Add `cache_max_age_days` to config.yaml under transcription section",
