@@ -258,6 +258,9 @@ class MatchingConfig:
     llm_rerank_candidates: int = 5  # Send to LLM
     top_k_candidates: int = 10  # Legacy alias
 
+    # Source diversity in embedding search (US-77-009)
+    max_candidates_per_source: int = 3  # Max candidates from same video_id (0 = disabled)
+
     # Context window
     context_window: int = 2  # Consider N segments before/after
 

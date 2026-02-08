@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 class EmbeddingSearchConfig:
     """Configuration for embedding search."""
     embedding_candidates: int = 20  # Number of candidates to retrieve
+    max_candidates_per_source: int = 3  # Max results from same video_id (0 = disabled)
 
 
 class EmbeddingSearch:
@@ -82,7 +83,12 @@ class EmbeddingSearch:
             Configured EmbeddingSearch instance
         """
         embedding_candidates = getattr(matching_config, 'embedding_candidates', 20)
-        config = EmbeddingSearchConfig(embedding_candidates=embedding_candidates)
+        max_per_source_raw = getattr(matching_config, 'max_candidates_per_source', 3)
+        max_per_source = max_per_source_raw if isinstance(max_per_source_raw, int) else 3
+        config = EmbeddingSearchConfig(
+            embedding_candidates=embedding_candidates,
+            max_candidates_per_source=max_per_source,
+        )
         return cls(config, video_embeddings, video_segments, embedding_index)
 
     def search(
@@ -111,7 +117,12 @@ class EmbeddingSearch:
         k = num_candidates or self.config.embedding_candidates
         k = max(k, 20)  # Ensure minimum candidates for variety
 
-        distances, indices = self._compute_similarity(query_embedding, k)
+        max_per_source = self.config.max_candidates_per_source
+
+        # Request extra candidates when dedup is active so we can backfill
+        fetch_k = k * 3 if max_per_source > 0 else k
+
+        distances, indices = self._compute_similarity(query_embedding, fetch_k)
 
         # Build candidate list from indices
         candidates = [
@@ -124,6 +135,10 @@ class EmbeddingSearch:
         candidates = self._apply_chapter_boost(
             candidates, relevance_matrix, voiceover_chapter_index, relevance_boost_weight
         )
+
+        # Apply source diversity deduplication (US-77-009)
+        if max_per_source > 0:
+            candidates = self._deduplicate_by_source(candidates, max_per_source, k)
 
         return candidates
 
@@ -170,6 +185,41 @@ class EmbeddingSearch:
         # Re-sort by boosted score descending
         boosted.sort(key=lambda x: x[1], reverse=True)
         return boosted
+
+    def _deduplicate_by_source(
+        self,
+        candidates: List[Tuple['SRTSegment', float]],
+        max_per_source: int,
+        target_count: int,
+    ) -> List[Tuple['SRTSegment', float]]:
+        """
+        Cap candidates per video source to ensure source diversity.
+
+        Iterates through candidates (sorted by score descending) and keeps at most
+        max_per_source from each video_id. Remaining slots are filled by the next
+        best candidates from other sources.
+
+        Args:
+            candidates: Sorted list of (segment, score) tuples
+            max_per_source: Max candidates from same source video
+            target_count: Desired total candidate count
+
+        Returns:
+            Deduplicated candidate list, up to target_count items
+        """
+        source_counts: dict = {}
+        result = []
+
+        for segment, score in candidates:
+            source = getattr(segment, 'source_file', '') or getattr(segment, 'video_id', '') or ''
+            count = source_counts.get(source, 0)
+            if count < max_per_source:
+                result.append((segment, score))
+                source_counts[source] = count + 1
+                if len(result) >= target_count:
+                    break
+
+        return result
 
     def _compute_similarity(
         self,
