@@ -440,6 +440,101 @@ def deduplicate_caption_segments(
 
 
 @dataclass
+class CoverageAnalysis:
+    """Result of caption coverage analysis (US-73-010).
+
+    Identifies timing gaps and coverage holes in captions to help
+    downstream matching understand uncaptioned periods.
+    """
+    total_video_duration: float
+    total_captioned_duration: float
+    coverage_ratio: float
+    gap_count: int
+    largest_gap_seconds: float
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'total_video_duration': self.total_video_duration,
+            'total_captioned_duration': self.total_captioned_duration,
+            'coverage_ratio': self.coverage_ratio,
+            'gap_count': self.gap_count,
+            'largest_gap_seconds': self.largest_gap_seconds,
+        }
+
+
+def analyze_caption_coverage(
+    segments: List['CaptionSegment'],
+    video_duration: Optional[float],
+) -> Optional['CoverageAnalysis']:
+    """Compute caption coverage analysis including gap detection (US-73-010).
+
+    Analyzes gaps between consecutive caption segments to identify uncaptioned
+    periods (music, silence, non-speech audio). Gaps are periods >2 seconds
+    between consecutive segment end_time and next start_time.
+
+    Args:
+        segments: List of CaptionSegment sorted by start_time.
+        video_duration: Total video duration in seconds. Required for analysis.
+
+    Returns:
+        CoverageAnalysis with coverage metrics, or None if video_duration unavailable.
+    """
+    if not video_duration or video_duration <= 0:
+        return None
+
+    if not segments:
+        return CoverageAnalysis(
+            total_video_duration=video_duration,
+            total_captioned_duration=0.0,
+            coverage_ratio=0.0,
+            gap_count=1,  # Entire video is one gap
+            largest_gap_seconds=video_duration,
+        )
+
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+
+    # Sum actual captioned duration
+    total_captioned = sum(
+        max(0.0, seg.end_time - seg.start_time)
+        for seg in sorted_segs
+    )
+
+    # Detect gaps >2 seconds between consecutive segments
+    gap_threshold = 2.0
+    gap_count = 0
+    largest_gap = 0.0
+
+    # Gap before first segment
+    if sorted_segs[0].start_time > gap_threshold:
+        gap_count += 1
+        largest_gap = max(largest_gap, sorted_segs[0].start_time)
+
+    # Gaps between consecutive segments
+    for i in range(len(sorted_segs) - 1):
+        gap = sorted_segs[i + 1].start_time - sorted_segs[i].end_time
+        if gap > gap_threshold:
+            gap_count += 1
+            largest_gap = max(largest_gap, gap)
+
+    # Gap after last segment
+    trailing_gap = video_duration - sorted_segs[-1].end_time
+    if trailing_gap > gap_threshold:
+        gap_count += 1
+        largest_gap = max(largest_gap, trailing_gap)
+
+    coverage_ratio = min(1.0, total_captioned / video_duration)
+
+    return CoverageAnalysis(
+        total_video_duration=video_duration,
+        total_captioned_duration=total_captioned,
+        coverage_ratio=coverage_ratio,
+        gap_count=gap_count,
+        largest_gap_seconds=largest_gap,
+    )
+
+
+@dataclass
 class CaptionResult:
     """Result of a caption fetch operation.
 
@@ -489,6 +584,26 @@ class CaptionResult:
         # US-73-007: Deduplicate overlapping caption segments
         if self.segments and len(self.segments) > 1:
             self.segments = deduplicate_caption_segments(self.segments)
+
+    @property
+    def coverage_analysis(self) -> Optional['CoverageAnalysis']:
+        """Lazily compute and cache caption coverage analysis (US-73-010).
+
+        Returns CoverageAnalysis with gap detection, or None if video_duration unknown.
+        Emits WARNING when coverage_ratio < 0.7.
+        """
+        if not hasattr(self, '_coverage_analysis_cache'):
+            analysis = analyze_caption_coverage(self.segments, self.video_duration)
+            if analysis and analysis.coverage_ratio < 0.7:
+                logger.warning(
+                    "Low caption coverage for %s: %.1f%% covered, %d gaps, largest gap %.1fs",
+                    self.video_id,
+                    analysis.coverage_ratio * 100,
+                    analysis.gap_count,
+                    analysis.largest_gap_seconds,
+                )
+            object.__setattr__(self, '_coverage_analysis_cache', analysis)
+        return self._coverage_analysis_cache
 
     @property
     def skipped_segments_count(self) -> int:
