@@ -59,7 +59,7 @@ from .scoring import (
     validate_multimodal_weights,
 )
 from .location_matching import LocationMatcher
-from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher
+from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher, validate_explanation_confidence
 from .llm_reranker import LLMReranker, LLMRerankerConfig
 from .alternative_selection import AlternativeSelector, AlternativeSelectionConfig
 from .candidate_filter import CandidateFilter  # US-33-006: Extracted filtering
@@ -1515,6 +1515,25 @@ class TieredMatcher:
             adjusted_confidence, best_seg, confidence_breakdown
         )
 
+        # US-77-004: Apply explanation validation (verify LLM reasoning keywords)
+        explanation_validation_reason = ""
+        explanation_validation_enabled = getattr(mc, 'explanation_validation_enabled', True)
+        if explanation_validation_enabled:
+            prev = adjusted_confidence
+            video_text = getattr(best_seg, 'text', None) or None
+            explanation_result = validate_explanation_confidence(
+                explanation=reasoning,
+                voiceover_text=vo_segment.text,
+                video_text=video_text,
+            )
+            if not explanation_result.is_valid:
+                adjusted_confidence = max(0.0, adjusted_confidence - explanation_result.confidence_penalty)
+                explanation_validation_reason = (
+                    f"Explanation validation failed: {explanation_result.verification_ratio:.0%} "
+                    f"keywords verified, -{explanation_result.confidence_penalty} penalty"
+                )
+            _record_breakdown(confidence_breakdown, 'explanation_validation', prev, adjusted_confidence, explanation_validation_reason)
+
         # US-75-006: Update chapter source tracking
         self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -1545,6 +1564,8 @@ class TieredMatcher:
             final_reasoning += f" [{chapter_source_reason}]"
         if listicle_reason:
             final_reasoning += f" [{listicle_reason}]"
+        if explanation_validation_reason:
+            final_reasoning += f" [{explanation_validation_reason}]"
 
         # US-63-007: Store confidence breakdown on Match object
         match = Match(
