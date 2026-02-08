@@ -165,7 +165,7 @@
       "id": "US-79-011",
       "title": "Add delta index staleness detection with automatic rebuild",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add a check_staleness() method to DeltaIndex in src/transcription/delta_index.py that compares indexed video count against actual cache entries and returns (is_stale: bool, indexed_count: int, cache_count: int)",
         "When staleness is detected (cache has >10% more entries than index), trigger automatic rebuild with a WARNING log",
@@ -173,7 +173,7 @@
         "Add test: stale index (fewer entries than cache) triggers rebuild",
         "Add test: fresh index (matching or close to cache count) does not trigger rebuild"
       ],
-      "notes": "Tier: LOW (reliability). Files: src/transcription/delta_index.py, src/transcription/parallel_processor.py (~line 54-100). DeltaIndex tracks which videos have been transcribed for incremental processing. If the index file gets corrupted or out of sync with the actual cache (e.g., manual cache edits, interrupted writes), videos may be unnecessarily re-transcribed or skipped."
+      "notes": "Added check_staleness() and rebuild_from_cache() methods to DeltaAwareIndex. Staleness detection checks if cache has >10% more entries than index. Wired check into transcribe_videos_parallel() before processing begins. 9 new tests added (6 staleness, 3 rebuild). All 50 delta index tests pass."
     },
     {
       "id": "US-79-012",

@@ -9,7 +9,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Tuple
 
 from src.utils import normalize_path
 from .utils import extract_video_id
@@ -139,6 +139,48 @@ class DeltaAwareIndex:
             List of video paths that need indexing
         """
         return [vp for vp in video_paths if not self.is_indexed(vp)]
+
+    def check_staleness(self, cache_entry_count: int) -> Tuple[bool, int, int]:
+        """
+        Check if the delta index is stale compared to actual cache entries.
+
+        The index is considered stale if the cache has >10% more entries
+        than the index tracks, suggesting videos were cached outside
+        normal indexing (manual edits, interrupted writes, etc.).
+
+        Args:
+            cache_entry_count: Number of actual entries in the transcription cache
+
+        Returns:
+            Tuple of (is_stale, indexed_count, cache_count)
+        """
+        indexed_count = len(self.indexed_videos)
+        is_stale = (
+            cache_entry_count > 0
+            and cache_entry_count > indexed_count * 1.1
+        )
+        return is_stale, indexed_count, cache_entry_count
+
+    def rebuild_from_cache(self, cache_video_paths: List[str]) -> None:
+        """
+        Rebuild the delta index from actual cache entries.
+
+        Args:
+            cache_video_paths: List of video paths found in the cache
+        """
+        self.indexed_videos = set()
+        self.indexed_video_ids = set()
+        for vp in cache_video_paths:
+            normalized = normalize_path(vp)
+            self.indexed_videos.add(normalized)
+            vid_id = extract_video_id(vp)
+            if vid_id:
+                self.indexed_video_ids.add(vid_id)
+        self._save()
+        logger.info(
+            f"Delta index rebuilt: {len(self.indexed_videos)} videos, "
+            f"{len(self.indexed_video_ids)} video IDs"
+        )
 
     def clear(self):
         """Clear the index (force full reprocess)."""

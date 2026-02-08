@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .whisper_client import WhisperClient
 from .cache import TranscriptCache
+from .delta_index import DeltaAwareIndex
 from .utils import extract_audio, write_srt, get_audio_duration
 from .exceptions import is_transient_error
 from .metrics import TranscriptionMetrics
@@ -173,6 +174,17 @@ def transcribe_videos_parallel(
     )
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
+
+    # Delta index staleness check (US-79-011)
+    delta_index = DeltaAwareIndex(cache_dir)
+    cache_entry_count = len(transcript_cache._source_map)
+    is_stale, indexed_count, actual_count = delta_index.check_staleness(cache_entry_count)
+    if is_stale:
+        logger.warning(
+            f"Delta index is stale: index has {indexed_count} entries but cache has "
+            f"{actual_count} entries. Rebuilding index from cache."
+        )
+        delta_index.rebuild_from_cache(list(transcript_cache._source_map.keys()))
 
     try:
         # Initialize metrics (US-60-009)
