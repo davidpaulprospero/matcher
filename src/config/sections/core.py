@@ -108,6 +108,12 @@ class TranscriptionConfig:
     # FFmpeg subprocess killed if extraction exceeds this limit
     audio_extraction_timeout: int = 60
 
+    # GPU transcription timeout (seconds) (US-79-002)
+    # Maximum time allowed for a single model.transcribe() call
+    # Prevents hung GPU calls from blocking the entire pipeline
+    # Must be >= 30 seconds to allow for large audio files
+    gpu_transcription_timeout: int = 300
+
     # Known Whisper model names
     KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
     # Known compute types for faster-whisper
@@ -152,6 +158,13 @@ class TranscriptionConfig:
             raise ValueError(
                 f"TranscriptionConfig.batch_size={self.batch_size} must be >= 1. "
                 f"Check transcription.batch_size in config.yaml"
+            )
+
+        # Validate gpu_transcription_timeout >= 30 (US-79-002)
+        if self.gpu_transcription_timeout < 30:
+            raise ValueError(
+                f"TranscriptionConfig.gpu_transcription_timeout={self.gpu_transcription_timeout} "
+                f"must be >= 30. Check transcription.gpu_transcription_timeout in config.yaml"
             )
 
         # Validate and set audio_extraction_workers (US-60-010)

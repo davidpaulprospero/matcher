@@ -124,8 +124,16 @@ def transcribe_videos_parallel(
     if config:
         auto_cleanup_after_batch = getattr(config.transcription, 'auto_cleanup_after_batch', True)
 
+    # Get GPU transcription timeout (US-79-002)
+    gpu_transcription_timeout = 300  # Default 5 minutes
+    if config:
+        gpu_transcription_timeout = getattr(config.transcription, 'gpu_transcription_timeout', 300)
+
     # Initialize WhisperClient and TranscriptCache
-    whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
+    whisper_client = WhisperClient(
+        model_name=model_name, compute_type=compute_type,
+        gpu_transcription_timeout=gpu_transcription_timeout
+    )
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
 
@@ -339,7 +347,8 @@ def transcribe_video(
     min_silence_duration_ms: int = 200,
     speech_pad_ms: int = 10,
     max_retries: int = 2,
-    base_delay: float = 1.0
+    base_delay: float = 1.0,
+    gpu_transcription_timeout: int = 300
 ) -> List[TranscriptSegment]:
     """
     Transcribe a single video file with retry logic for transient errors.
@@ -360,6 +369,7 @@ def transcribe_video(
         speech_pad_ms: Padding around detected speech
         max_retries: Maximum retry attempts for transient errors (default 2)
         base_delay: Base delay for exponential backoff in seconds (default 1.0)
+        gpu_transcription_timeout: Max seconds for a single transcribe() call (US-79-002)
     """
     video_path = str(video_path)
     video_name = Path(video_path).name
@@ -386,7 +396,10 @@ def transcribe_video(
         return []
 
     # Transcribe with WhisperClient (GPU-locked) - with retry for transient errors
-    whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
+    whisper_client = WhisperClient(
+        model_name=model_name, compute_type=compute_type,
+        gpu_transcription_timeout=gpu_transcription_timeout
+    )
     raw_segments = None
     last_error = None
 
@@ -467,7 +480,8 @@ def transcribe_voiceover_audio(
     model_name: str = "base",
     compute_type: str = "auto",
     language: str = None,
-    vad_filter: bool = True  # Enable VAD by default for voiceover - better gap detection
+    vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
+    gpu_transcription_timeout: int = 300
 ) -> List[dict]:
     """
     Transcribe a voiceover audio file.
@@ -476,8 +490,12 @@ def transcribe_voiceover_audio(
     Args:
         vad_filter: Whether to apply Voice Activity Detection. Default True for voiceover
                    as it produces cleaner segment boundaries with accurate gap timing.
+        gpu_transcription_timeout: Max seconds for a single transcribe() call (US-79-002)
     """
-    whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
+    whisper_client = WhisperClient(
+        model_name=model_name, compute_type=compute_type,
+        gpu_transcription_timeout=gpu_transcription_timeout
+    )
     logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
     return whisper_client.transcribe(
         audio_path,
@@ -494,7 +512,8 @@ def transcribe_voiceover_media(
     compute_type: str = "auto",
     cache_dir: str = None,
     word_timestamps: bool = True,
-    vad_filter: bool = True  # Enable VAD by default for voiceover - better gap detection
+    vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
+    gpu_transcription_timeout: int = 300
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
@@ -526,7 +545,10 @@ def transcribe_voiceover_media(
     audio_extensions = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'}
 
     segments = []
-    whisper_client = WhisperClient(model_name=model_name, compute_type=compute_type)
+    whisper_client = WhisperClient(
+        model_name=model_name, compute_type=compute_type,
+        gpu_transcription_timeout=gpu_transcription_timeout
+    )
 
     if media_path.suffix.lower() in video_extensions:
         # Extract audio first

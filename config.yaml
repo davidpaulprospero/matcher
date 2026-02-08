@@ -185,6 +185,12 @@ transcription:
   # Increase for very long videos or slow storage
   audio_extraction_timeout: 60
 
+  # GPU transcription timeout (seconds) (US-79-002)
+  # Maximum time for a single model.transcribe() call before it's killed
+  # Prevents hung GPU calls from blocking the pipeline indefinitely
+  # Must be >= 30; increase for very large audio files or slow GPUs
+  gpu_transcription_timeout: 300
+
 # -----------------------------------------------------------------------------
 # EMBEDDINGS
 # -----------------------------------------------------------------------------

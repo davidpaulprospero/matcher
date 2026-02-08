@@ -377,7 +377,11 @@ class TestGPULocking:
     @patch('src.transcription.whisper_client.logger')
     @pytest.mark.fast
     def test_gpu_lock_acquired(self, mock_logger):
-        """Test that GPU lock is acquired during transcription"""
+        """Test that GPU lock is held during transcription.
+
+        Note: model.transcribe() runs inside a ThreadPoolExecutor (US-79-002 timeout guard),
+        so we verify the lock is held by checking it's NOT freely acquirable from a separate thread.
+        """
         import src.transcription.whisper_client as wc
 
         mock_model = Mock()
@@ -386,21 +390,29 @@ class TestGPULocking:
         with patch('faster_whisper.WhisperModel', return_value=mock_model):
             client = WhisperClient()
 
-            # Track lock state
-            lock_was_acquired = False
+            # Track lock state - check from a separate thread that lock is NOT free
+            lock_was_held = False
 
             def check_lock(*args, **kwargs):
-                nonlocal lock_was_acquired
-                # Check if lock is owned by current thread
-                lock_was_acquired = wc._gpu_lock._is_owned()
+                nonlocal lock_was_held
+                # Try to acquire lock from this thread (non-blocking)
+                # If the outer thread holds it, acquire() returns False
+                acquired = wc._gpu_lock.acquire(blocking=False)
+                if acquired:
+                    # Lock was free — release and mark as not held
+                    wc._gpu_lock.release()
+                    lock_was_held = False
+                else:
+                    # Lock held by another thread (the caller) — expected
+                    lock_was_held = True
                 return ([], Mock())
 
             mock_model.transcribe.side_effect = check_lock
 
             client.transcribe("/path/to/audio.mp3")
 
-            # Lock should have been acquired during transcription
-            assert lock_was_acquired
+            # Lock should have been held during transcription
+            assert lock_was_held
 
 
 class TestCleanup:
@@ -1112,3 +1124,93 @@ class TestGPUMemoryPreCheck:
             # Should have logged warning about low memory
             warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
             assert any('below threshold' in c for c in warning_calls)
+
+
+class TestGPUTranscriptionTimeout:
+    """Tests for GPU transcription timeout guard (US-79-002)"""
+
+    @pytest.mark.fast
+    def test_init_default_timeout(self):
+        """Test WhisperClient default gpu_transcription_timeout is 300s"""
+        client = WhisperClient()
+        assert client.gpu_transcription_timeout == 300
+
+    @pytest.mark.fast
+    def test_init_custom_timeout(self):
+        """Test WhisperClient accepts custom gpu_transcription_timeout"""
+        client = WhisperClient(gpu_transcription_timeout=60)
+        assert client.gpu_transcription_timeout == 60
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_timeout_raises_transient_error(self, mock_logger):
+        """Test that transcription exceeding timeout raises TransientTranscriptionError"""
+        import time as time_module
+        from src.transcription.exceptions import TransientTranscriptionError
+
+        mock_model = Mock()
+
+        # Simulate a hung transcription that blocks for longer than timeout
+        def slow_transcribe(*args, **kwargs):
+            time_module.sleep(5)  # Sleep longer than timeout
+            return ([], Mock())
+
+        mock_model.transcribe.side_effect = slow_transcribe
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            # Use very short timeout (1s) so test runs fast
+            client = WhisperClient(gpu_transcription_timeout=1)
+
+            with pytest.raises(TransientTranscriptionError, match="timed out"):
+                client.transcribe("/path/to/audio.mp3")
+
+        # Verify warning was logged with video_id, elapsed time, and timeout
+        warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+        assert any("timeout" in c.lower() for c in warning_calls)
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_within_timeout_returns_normally(self, mock_logger):
+        """Test that transcription completing within timeout returns segments normally"""
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = " Test segment "
+        mock_seg.words = None
+
+        mock_model = Mock()
+        mock_info = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient(gpu_transcription_timeout=60)
+            result = client.transcribe("/path/to/audio.mp3")
+
+            assert len(result) == 1
+            assert result[0]['start'] == 0.0
+            assert result[0]['end'] == 3.0
+            assert result[0]['text'] == "Test segment"
+
+    @pytest.mark.fast
+    def test_config_validation_rejects_below_30(self):
+        """Test TranscriptionConfig rejects gpu_transcription_timeout < 30"""
+        from src.config.sections.core import TranscriptionConfig
+
+        with pytest.raises(ValueError, match="gpu_transcription_timeout"):
+            TranscriptionConfig(gpu_transcription_timeout=10)
+
+    @pytest.mark.fast
+    def test_config_validation_accepts_30(self):
+        """Test TranscriptionConfig accepts gpu_transcription_timeout = 30"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(gpu_transcription_timeout=30)
+        assert config.gpu_transcription_timeout == 30
+
+    @pytest.mark.fast
+    def test_config_default_timeout(self):
+        """Test TranscriptionConfig default gpu_transcription_timeout is 300"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig()
+        assert config.gpu_transcription_timeout == 300

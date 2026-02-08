@@ -18,6 +18,8 @@ SOLUTION:
 import logging
 import sys
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -148,7 +150,8 @@ class WhisperClient:
         model_name: str = "base",
         compute_type: str = "auto",
         minimum_gpu_memory_mb: int = 2000,
-        auto_downgrade_model: bool = True
+        auto_downgrade_model: bool = True,
+        gpu_transcription_timeout: int = 300
     ):
         """
         Initialize Whisper client with model configuration.
@@ -158,11 +161,13 @@ class WhisperClient:
             compute_type: Compute type (auto, float16, int8)
             minimum_gpu_memory_mb: Minimum GPU memory required (US-60-007)
             auto_downgrade_model: Automatically downgrade model if insufficient memory
+            gpu_transcription_timeout: Max seconds for a single transcribe() call (US-79-002)
         """
         self.model_name = model_name
         self.compute_type = compute_type
         self.minimum_gpu_memory_mb = minimum_gpu_memory_mb
         self.auto_downgrade_model = auto_downgrade_model
+        self.gpu_transcription_timeout = gpu_transcription_timeout
 
     def get_model(self):
         """
@@ -312,16 +317,38 @@ class WhisperClient:
             logger.debug(f"Starting transcription of {audio_name}...")
 
             try:
-                segments, info = model.transcribe(
-                    audio_path,
-                    language=language,
-                    vad_filter=vad_filter,
-                    vad_parameters=dict(
-                        min_silence_duration_ms=min_silence_duration_ms,
-                        speech_pad_ms=speech_pad_ms
-                    ),
-                    word_timestamps=word_timestamps
-                )
+                # Run model.transcribe() with timeout guard (US-79-002)
+                # GPU calls can hang indefinitely; this prevents blocking the pipeline
+                start_time = time.monotonic()
+
+                def _do_transcribe():
+                    return model.transcribe(
+                        audio_path,
+                        language=language,
+                        vad_filter=vad_filter,
+                        vad_parameters=dict(
+                            min_silence_duration_ms=min_silence_duration_ms,
+                            speech_pad_ms=speech_pad_ms
+                        ),
+                        word_timestamps=word_timestamps
+                    )
+
+                timeout = self.gpu_transcription_timeout
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_do_transcribe)
+                    try:
+                        segments, info = future.result(timeout=timeout)
+                    except FuturesTimeoutError:
+                        elapsed = time.monotonic() - start_time
+                        logger.warning(
+                            f"GPU transcription timeout for {audio_name}: "
+                            f"elapsed={elapsed:.1f}s, timeout={timeout}s"
+                        )
+                        from src.transcription.exceptions import TransientTranscriptionError
+                        raise TransientTranscriptionError(
+                            f"GPU transcription timed out after {elapsed:.1f}s "
+                            f"(limit: {timeout}s) for {audio_name}"
+                        )
 
                 logger.debug("Transcription done, processing segments...")
                 result = []
@@ -351,6 +378,10 @@ class WhisperClient:
                 return result
 
             except Exception as e:
+                # Re-raise TransientTranscriptionError without catching it
+                from src.transcription.exceptions import TransientTranscriptionError
+                if isinstance(e, TransientTranscriptionError):
+                    raise
                 logger.error(f"Transcription error: {e}")
                 import traceback
                 traceback.print_exc()
