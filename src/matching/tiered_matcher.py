@@ -40,6 +40,7 @@ from .scoring import (
     apply_consecutive_source_penalty,  # US-63-009
     apply_title_relevance_adjustment,  # US-75-002
     apply_description_relevance_adjustment,  # US-75-003
+    apply_tag_keyword_boost,  # US-75-004
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -615,6 +616,15 @@ class TieredMatcher:
             return meta.get('description')
         return None
 
+    def _get_video_tags(self, segment: SRTSegment) -> Optional[List[str]]:
+        """Resolve video tags from video_metadata using segment's source_file."""
+        if not self.video_metadata:
+            return None
+        meta = self.video_metadata.get(segment.source_file)
+        if isinstance(meta, dict):
+            return meta.get('tags')
+        return None
+
     def _get_scene_for_segment(
         self,
         segment: SRTSegment,
@@ -807,6 +817,14 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'description_relevance', prev, adjusted_confidence, desc_relevance_reason)
 
+            # US-75-004: Apply tag keyword boost
+            prev = adjusted_confidence
+            video_tags = self._get_video_tags(best_seg)
+            adjusted_confidence, tag_boost_reason = apply_tag_keyword_boost(
+                adjusted_confidence, vo_segment, video_tags
+            )
+            _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
             # Ensure we don't drop below minimum confidence after adjustments
             min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
             adjusted_confidence = max(adjusted_confidence, min_confidence)
@@ -828,6 +846,8 @@ class TieredMatcher:
                 final_reasoning += f" [{title_relevance_reason}]"
             if desc_relevance_reason:
                 final_reasoning += f" [{desc_relevance_reason}]"
+            if tag_boost_reason:
+                final_reasoning += f" [{tag_boost_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -942,6 +962,14 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'description_relevance', prev, adjusted_confidence, desc_relevance_reason)
 
+            # US-75-004: Apply tag keyword boost
+            prev = adjusted_confidence
+            video_tags = self._get_video_tags(best_seg)
+            adjusted_confidence, tag_boost_reason = apply_tag_keyword_boost(
+                adjusted_confidence, vo_segment, video_tags
+            )
+            _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
@@ -959,6 +987,8 @@ class TieredMatcher:
                 reasoning += f" [{title_relevance_reason}]"
             if desc_relevance_reason:
                 reasoning += f" [{desc_relevance_reason}]"
+            if tag_boost_reason:
+                reasoning += f" [{tag_boost_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1130,6 +1160,14 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'description_relevance', prev, adjusted_confidence, desc_relevance_reason)
 
+        # US-75-004: Apply tag keyword boost
+        prev = adjusted_confidence
+        video_tags = self._get_video_tags(best_seg)
+        adjusted_confidence, tag_boost_reason = apply_tag_keyword_boost(
+            adjusted_confidence, vo_segment, video_tags
+        )
+        _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
         final_reasoning = reasoning
         if multimodal_enabled:
             final_reasoning += f" [{multimodal_reason}]"
@@ -1149,6 +1187,8 @@ class TieredMatcher:
             final_reasoning += f" [{title_relevance_reason}]"
         if desc_relevance_reason:
             final_reasoning += f" [{desc_relevance_reason}]"
+        if tag_boost_reason:
+            final_reasoning += f" [{tag_boost_reason}]"
 
         # US-63-007: Store confidence breakdown on Match object
         match = Match(

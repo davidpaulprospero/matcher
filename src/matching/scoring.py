@@ -1033,6 +1033,55 @@ def apply_title_relevance_adjustment(
     return min(1.0, confidence + boost), reason
 
 
+# Tag keyword boost constants (mirror MatchScoring class constants)
+_TAG_KEYWORD_BOOST_PER_TAG = 0.02
+_TAG_KEYWORD_BOOST_CAP = 0.08
+
+
+def apply_tag_keyword_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_tags: Optional[List[str]] = None,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply tag-based keyword boost to confidence score (US-75-004).
+
+    Compares voiceover segment keywords against video tags extracted
+    during caption fetching. Applies graduated boost based on overlap.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with text
+        video_tags: List of video tags/keywords from CaptionResult
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not video_tags:
+        return confidence, ""
+
+    vo_keywords = _extract_keywords(vo_segment.text)
+    if not vo_keywords:
+        return confidence, ""
+
+    # Normalize tags to lowercase keyword set
+    tag_keywords = {t.lower().strip() for t in video_tags if t and len(t.strip()) >= 3}
+    if not tag_keywords:
+        return confidence, ""
+
+    overlap = vo_keywords & tag_keywords
+    match_count = len(overlap)
+
+    if match_count == 0:
+        return confidence, ""
+
+    boost = min(match_count * _TAG_KEYWORD_BOOST_PER_TAG, _TAG_KEYWORD_BOOST_CAP)
+
+    matched_words = ', '.join(sorted(overlap)[:5])
+    reason = f"tag keyword boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
+    return min(1.0, confidence + boost), reason
+
+
 def _extract_entity_texts(segment: SRTSegment) -> List[str]:
     """
     Extract entity text values from a segment.
