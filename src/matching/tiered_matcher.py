@@ -41,6 +41,8 @@ from .scoring import (
     apply_title_relevance_adjustment,  # US-75-002
     apply_description_relevance_adjustment,  # US-75-003
     apply_tag_keyword_boost,  # US-75-004
+    apply_chapter_topic_match,  # US-75-005
+    apply_chapter_source_consistency,  # US-75-005
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -625,6 +627,10 @@ class TieredMatcher:
             return meta.get('tags')
         return None
 
+    def _get_chapter_title(self, segment: SRTSegment) -> Optional[str]:
+        """Resolve chapter title from the video segment's chapter_title attribute."""
+        return getattr(segment, 'chapter_title', None) or None
+
     def _get_scene_for_segment(
         self,
         segment: SRTSegment,
@@ -825,6 +831,23 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
 
+            # US-75-005: Apply chapter topic match
+            prev = adjusted_confidence
+            chapter_title = self._get_chapter_title(best_seg)
+            adjusted_confidence, chapter_topic_reason = apply_chapter_topic_match(
+                adjusted_confidence, vo_segment, chapter_title,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_topic_match', prev, adjusted_confidence, chapter_topic_reason)
+
+            # US-75-005: Apply chapter source consistency
+            prev = adjusted_confidence
+            adjusted_confidence, chapter_source_reason = apply_chapter_source_consistency(
+                adjusted_confidence, best_seg, vo_segment, self._recent_matches,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
+
             # Ensure we don't drop below minimum confidence after adjustments
             min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
             adjusted_confidence = max(adjusted_confidence, min_confidence)
@@ -848,6 +871,10 @@ class TieredMatcher:
                 final_reasoning += f" [{desc_relevance_reason}]"
             if tag_boost_reason:
                 final_reasoning += f" [{tag_boost_reason}]"
+            if chapter_topic_reason:
+                final_reasoning += f" [{chapter_topic_reason}]"
+            if chapter_source_reason:
+                final_reasoning += f" [{chapter_source_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -970,6 +997,23 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
 
+            # US-75-005: Apply chapter topic match
+            prev = adjusted_confidence
+            chapter_title = self._get_chapter_title(best_seg)
+            adjusted_confidence, chapter_topic_reason = apply_chapter_topic_match(
+                adjusted_confidence, vo_segment, chapter_title,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_topic_match', prev, adjusted_confidence, chapter_topic_reason)
+
+            # US-75-005: Apply chapter source consistency
+            prev = adjusted_confidence
+            adjusted_confidence, chapter_source_reason = apply_chapter_source_consistency(
+                adjusted_confidence, best_seg, vo_segment, self._recent_matches,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
+
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
                 reasoning += f" [{topic_penalty_reason}]"
@@ -989,6 +1033,10 @@ class TieredMatcher:
                 reasoning += f" [{desc_relevance_reason}]"
             if tag_boost_reason:
                 reasoning += f" [{tag_boost_reason}]"
+            if chapter_topic_reason:
+                reasoning += f" [{chapter_topic_reason}]"
+            if chapter_source_reason:
+                reasoning += f" [{chapter_source_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1168,6 +1216,23 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
 
+        # US-75-005: Apply chapter topic match
+        prev = adjusted_confidence
+        chapter_title = self._get_chapter_title(best_seg)
+        adjusted_confidence, chapter_topic_reason = apply_chapter_topic_match(
+            adjusted_confidence, vo_segment, chapter_title,
+            chapter_matching_enabled=self.chapter_matching_enabled
+        )
+        _record_breakdown(confidence_breakdown, 'chapter_topic_match', prev, adjusted_confidence, chapter_topic_reason)
+
+        # US-75-005: Apply chapter source consistency
+        prev = adjusted_confidence
+        adjusted_confidence, chapter_source_reason = apply_chapter_source_consistency(
+            adjusted_confidence, best_seg, vo_segment, self._recent_matches,
+            chapter_matching_enabled=self.chapter_matching_enabled
+        )
+        _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
+
         final_reasoning = reasoning
         if multimodal_enabled:
             final_reasoning += f" [{multimodal_reason}]"
@@ -1189,6 +1254,10 @@ class TieredMatcher:
             final_reasoning += f" [{desc_relevance_reason}]"
         if tag_boost_reason:
             final_reasoning += f" [{tag_boost_reason}]"
+        if chapter_topic_reason:
+            final_reasoning += f" [{chapter_topic_reason}]"
+        if chapter_source_reason:
+            final_reasoning += f" [{chapter_source_reason}]"
 
         # US-63-007: Store confidence breakdown on Match object
         match = Match(

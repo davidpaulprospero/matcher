@@ -1082,6 +1082,132 @@ def apply_tag_keyword_boost(
     return min(1.0, confidence + boost), reason
 
 
+# Chapter topic match constants (mirror MatchScoring class constants)
+_CHAPTER_TOPIC_BOOST_STRONG = 0.10
+_CHAPTER_TOPIC_BOOST_PARTIAL = 0.05
+_CHAPTER_TOPIC_MISMATCH_PENALTY = -0.05
+
+
+def apply_chapter_topic_match(
+    confidence: float,
+    vo_segment: SRTSegment,
+    chapter_title: Optional[str] = None,
+    chapter_matching_enabled: bool = False,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply chapter topic match adjustment (US-75-005).
+
+    Compares voiceover segment keywords against the matched video's chapter title.
+    Boosts confidence when topics match, applies small penalty on mismatch.
+
+    Graduated values:
+    - 3+ shared keywords: +0.10 (strong match)
+    - 1-2 shared keywords: +0.05 (partial match)
+    - 0 shared keywords:   -0.05 (mismatch penalty)
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with text
+        chapter_title: Chapter title for the matched video segment
+        chapter_matching_enabled: Whether chapter matching is active
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not chapter_matching_enabled:
+        return confidence, ""
+
+    vo_chapter_index = getattr(vo_segment, 'chapter_index', None)
+    if vo_chapter_index is None:
+        return confidence, ""
+
+    if not chapter_title:
+        return confidence, ""
+
+    vo_keywords = _extract_keywords(vo_segment.text)
+    chapter_keywords = _extract_keywords(chapter_title)
+
+    if not vo_keywords or not chapter_keywords:
+        return confidence, ""
+
+    overlap = vo_keywords & chapter_keywords
+    match_count = len(overlap)
+
+    if match_count >= 3:
+        adjustment = _CHAPTER_TOPIC_BOOST_STRONG
+        matched_words = ', '.join(sorted(overlap)[:5])
+        reason = f"chapter topic strong match +{adjustment} ({match_count} keywords: {matched_words})"
+    elif match_count >= 1:
+        adjustment = _CHAPTER_TOPIC_BOOST_PARTIAL
+        matched_words = ', '.join(sorted(overlap)[:5])
+        reason = f"chapter topic partial match +{adjustment} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
+    else:
+        adjustment = _CHAPTER_TOPIC_MISMATCH_PENALTY
+        reason = f"chapter topic mismatch {adjustment}"
+
+    return min(1.0, confidence + adjustment), reason
+
+
+# Chapter source consistency constants
+_DEFAULT_SOURCE_CONSISTENCY_BOOST = 0.03
+
+
+def apply_chapter_source_consistency(
+    confidence: float,
+    video_segment: SRTSegment,
+    vo_segment: SRTSegment,
+    recent_matches: List['Match'],
+    chapter_matching_enabled: bool = False,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply source consistency boost within same chapter (US-75-005).
+
+    When a candidate video source matches the previous segment's source AND
+    both voiceover segments are in the same chapter, apply a small boost.
+    Within a coherent chapter, reusing the same source provides visual continuity.
+
+    Args:
+        confidence: Current confidence score
+        video_segment: Video segment being considered
+        vo_segment: Current voiceover segment
+        recent_matches: List of recent Match objects (most recent first)
+        chapter_matching_enabled: Whether chapter matching is active
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not chapter_matching_enabled:
+        return confidence, ""
+
+    current_chapter_index = getattr(vo_segment, 'chapter_index', None)
+    if current_chapter_index is None or current_chapter_index < 0:
+        return confidence, ""
+
+    if not recent_matches:
+        return confidence, ""
+
+    current_source = getattr(video_segment, 'source_file', None)
+    if not current_source:
+        return confidence, ""
+
+    prev_match = recent_matches[0]
+    if prev_match is None:
+        return confidence, ""
+
+    prev_source = getattr(prev_match.video_segment, 'source_file', None) if prev_match.video_segment else None
+    if prev_source != current_source:
+        return confidence, ""
+
+    # Check previous voiceover segment's chapter
+    prev_chapter_index = getattr(prev_match.voiceover_segment, 'chapter_index', None) if prev_match.voiceover_segment else None
+    if prev_chapter_index is None or prev_chapter_index != current_chapter_index:
+        return confidence, ""
+
+    boost = _DEFAULT_SOURCE_CONSISTENCY_BOOST
+    reason = f"chapter_source_consistency: +{boost:.2f} (same source in chapter {current_chapter_index})"
+    return min(1.0, confidence + boost), reason
+
+
 def _extract_entity_texts(segment: SRTSegment) -> List[str]:
     """
     Extract entity text values from a segment.
