@@ -42,8 +42,8 @@
                                                        "When info_dict fields are missing or None, fields default to empty string/list without errors",
                                                        "Unit tests verify extraction from mock info_dict with all fields present, partially present, and fully absent"
                                                    ],
-                            "passes":  true,
-                            "notes":  "All 6 criteria verified. Implementation in caption_fetcher.py lines 5032 (--write-info-json flag), 5135-5142 (info.json reading + enrich_with_metadata), 2284-2336 (extract_video_metadata_from_info_dict). 13 tests pass in test_caption_metadata_enrichment_us74_002.py covering all/partial/absent fields, truncation, corrupted JSON, and command flag verification."
+                            "passes":  false,
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-74-003",
@@ -56,8 +56,8 @@
                                                        "Adjustment appears in confidence_breakdown dict under key \u0027title_relevance\u0027",
                                                        "When video title is empty or unavailable, adjustment is 0.0 (no error)"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier: Core quality improvement (Area 2). File: src/matching/scoring.py - add new adjustment in apply_all_adjustments() (~line 1772+). Follow existing adjustment pattern (e.g., visual_keyword_match). The video title is available through VideoSearchResult.title. Tests: tests/test_scoring*.py, tests/test_match*.py"
+                            "passes":  true,
+                            "notes":  "Pre-implemented in US-70-006. All 5 criteria verified: title_relevance in apply_all_adjustments (line 2903), keyword extraction+overlap (2291-2298), graduated boosts 0.03/0.05/0.08 (2214-2216), breakdown key title_relevance (2911), empty title returns 0.0 (2288-2289). Fixed mock_config missing language_confidence_penalty causing test failure. 10/10 tests pass."
                         },
                         {
                             "id":  "US-74-004",

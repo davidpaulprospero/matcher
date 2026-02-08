@@ -42,6 +42,7 @@ def mock_config():
     matching.caption_quality_low_penalty = 0.1
     matching.apply_timing_penalty = True
     matching.skip_llm_threshold = 0.85
+    matching.language_confidence_penalty = 0.0
 
     config.matching = matching
 
