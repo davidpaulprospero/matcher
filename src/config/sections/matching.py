@@ -16,6 +16,7 @@ __all__ = [
     'MatchingScoringConfig',
     'ContextEnrichmentConfig',
     'ChapterGroupingConfig',
+    'TieredCaptionPenalties',
     'MatchingConfig',
 ]
 
@@ -208,6 +209,20 @@ class ChapterGroupingConfig:
 
 
 @dataclass
+class TieredCaptionPenalties:
+    """Configurable thresholds for tiered caption quality penalties (US-78-008).
+
+    Graduated penalties for specific quality issues detected on captions.
+    Penalties stack but are capped at max_caption_penalty.
+    Different projects may need different weights (e.g., music channels vs documentaries).
+    """
+    auto_generated_penalty: float = -0.05   # Penalty for auto-generated captions
+    low_quality_penalty: float = -0.08      # Penalty for low quality captions
+    missing_timing_penalty: float = -0.03   # Penalty for missing/poor timing data
+    max_caption_penalty: float = -0.12      # Maximum combined caption penalty (cap)
+
+
+@dataclass
 class MatchingConfig:
     """Matching engine settings
 
@@ -346,12 +361,16 @@ class MatchingConfig:
     # adjusted = raw_confidence * weight
     caption_quality_weights: Optional[Dict[str, float]] = None  # None = use additive mode
 
-    # Tiered caption quality penalties (US-73-006)
+    # Tiered caption quality penalties (US-73-006, US-78-008)
     # Graduated penalties for specific quality issues - stack up to max_caption_penalty
+    # Legacy flat fields (backward compat) - prefer tiered_caption_penalties nested config
     caption_penalty_auto_generated: float = -0.05  # Penalty for auto-generated captions
     caption_penalty_low_quality: float = -0.08     # Penalty for low quality captions
     caption_penalty_missing_timing: float = -0.03  # Penalty for missing/poor timing data
     max_caption_penalty: float = -0.12             # Maximum combined caption penalty (cap)
+
+    # Nested config (US-78-008) - when set, overrides flat fields above
+    tiered_caption_penalties: TieredCaptionPenalties = None
 
     # Language confidence penalty (US-73-012)
     # Penalty multiplier for low language_confidence captions (auto-translated)
@@ -518,3 +537,22 @@ class MatchingConfig:
             self.chapter_grouping = ChapterGroupingConfig()
         elif isinstance(self.chapter_grouping, dict):
             self.chapter_grouping = ChapterGroupingConfig(**self.chapter_grouping)
+
+        # Tiered caption penalties (US-78-008)
+        # When nested config provided (from YAML), it takes precedence and syncs to flat fields.
+        # When only flat fields are set (backward compat), build nested config from them.
+        if isinstance(self.tiered_caption_penalties, dict):
+            self.tiered_caption_penalties = TieredCaptionPenalties(**self.tiered_caption_penalties)
+            # Sync nested -> flat for backward compat with scoring.py getattr
+            self.caption_penalty_auto_generated = self.tiered_caption_penalties.auto_generated_penalty
+            self.caption_penalty_low_quality = self.tiered_caption_penalties.low_quality_penalty
+            self.caption_penalty_missing_timing = self.tiered_caption_penalties.missing_timing_penalty
+            self.max_caption_penalty = self.tiered_caption_penalties.max_caption_penalty
+        elif self.tiered_caption_penalties is None:
+            # Build nested config from flat fields (backward compat or constructor override)
+            self.tiered_caption_penalties = TieredCaptionPenalties(
+                auto_generated_penalty=self.caption_penalty_auto_generated,
+                low_quality_penalty=self.caption_penalty_low_quality,
+                missing_timing_penalty=self.caption_penalty_missing_timing,
+                max_caption_penalty=self.max_caption_penalty,
+            )

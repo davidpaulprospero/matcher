@@ -405,7 +405,8 @@ def apply_tiered_caption_penalties(
     if not caption_quality_issues:
         return confidence, []
 
-    # Penalty values from config
+    # Penalty values from config (US-78-008: TieredCaptionPenalties syncs to flat fields)
+    # Read from flat fields on mc — MatchingConfig.__post_init__ syncs nested config here
     penalty_map = {
         'auto_generated': (
             getattr(mc, 'caption_penalty_auto_generated', -0.05),

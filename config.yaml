@@ -439,12 +439,14 @@ matching:
   #   medium: 0.9  # Auto captions - reduce by 10%
   #   low: 0.75    # Fallback/poor - reduce by 25%
 
-  # Tiered caption quality penalties (US-73-006)
+  # Tiered caption quality penalties (US-73-006, US-78-008)
   # Graduated penalties for specific quality issues - stack up to max_caption_penalty
-  caption_penalty_auto_generated: -0.05  # Penalty for auto-generated captions
-  caption_penalty_low_quality: -0.08     # Penalty for low quality captions
-  caption_penalty_missing_timing: -0.03  # Penalty for missing/poor timing data
-  max_caption_penalty: -0.12             # Maximum combined caption penalty (cap)
+  # Different projects may need different weights (e.g., music channels vs documentaries)
+  tiered_caption_penalties:
+    auto_generated_penalty: -0.05   # Penalty for auto-generated captions (e.g., YouTube auto-captions)
+    low_quality_penalty: -0.08      # Penalty for low quality captions (garbled, partial)
+    missing_timing_penalty: -0.03   # Penalty for missing or poor timing data
+    max_caption_penalty: -0.12      # Maximum combined penalty cap (prevents over-penalizing)
 
   # Language confidence penalty (US-73-012)
   # Penalty for low language_confidence captions (auto-translated)

@@ -3072,5 +3072,117 @@ class TestTieredPenaltyConfigDefaults:
         assert mc.max_caption_penalty == -0.20
 
 
+class TestTieredCaptionPenaltiesNestedConfig:
+    """Verify TieredCaptionPenalties nested config (US-78-008)."""
+
+    @pytest.mark.fast
+    def test_nested_config_defaults(self):
+        """TieredCaptionPenalties has correct default values."""
+        from src.config.sections.matching import TieredCaptionPenalties
+        tcp = TieredCaptionPenalties()
+
+        assert tcp.auto_generated_penalty == -0.05
+        assert tcp.low_quality_penalty == -0.08
+        assert tcp.missing_timing_penalty == -0.03
+        assert tcp.max_caption_penalty == -0.12
+
+    @pytest.mark.fast
+    def test_nested_config_on_matching_config(self):
+        """MatchingConfig creates TieredCaptionPenalties nested config."""
+        from src.config.sections.matching import MatchingConfig, TieredCaptionPenalties
+        mc = MatchingConfig()
+
+        assert isinstance(mc.tiered_caption_penalties, TieredCaptionPenalties)
+        assert mc.tiered_caption_penalties.auto_generated_penalty == -0.05
+
+    @pytest.mark.fast
+    def test_nested_config_from_dict(self):
+        """TieredCaptionPenalties can be created from dict (YAML loading)."""
+        from src.config.sections.matching import MatchingConfig, TieredCaptionPenalties
+        mc = MatchingConfig(tiered_caption_penalties={
+            'auto_generated_penalty': -0.10,
+            'low_quality_penalty': -0.15,
+            'missing_timing_penalty': -0.06,
+            'max_caption_penalty': -0.20,
+        })
+
+        assert isinstance(mc.tiered_caption_penalties, TieredCaptionPenalties)
+        assert mc.tiered_caption_penalties.auto_generated_penalty == -0.10
+        assert mc.tiered_caption_penalties.low_quality_penalty == -0.15
+        assert mc.tiered_caption_penalties.missing_timing_penalty == -0.06
+        assert mc.tiered_caption_penalties.max_caption_penalty == -0.20
+        # Flat fields synced from nested
+        assert mc.caption_penalty_auto_generated == -0.10
+        assert mc.caption_penalty_low_quality == -0.15
+        assert mc.caption_penalty_missing_timing == -0.06
+        assert mc.max_caption_penalty == -0.20
+
+    @pytest.mark.fast
+    def test_flat_fields_build_nested_config(self):
+        """Flat field overrides build nested config (backward compat)."""
+        from src.config.sections.matching import MatchingConfig
+        mc = MatchingConfig(
+            caption_penalty_auto_generated=-0.10,
+            caption_penalty_low_quality=-0.15,
+            caption_penalty_missing_timing=-0.06,
+            max_caption_penalty=-0.20,
+        )
+
+        assert mc.tiered_caption_penalties.auto_generated_penalty == -0.10
+        assert mc.tiered_caption_penalties.low_quality_penalty == -0.15
+
+    @pytest.mark.fast
+    def test_custom_penalties_applied_in_scoring(self):
+        """Custom penalty values from nested config flow through to scoring (US-78-008).
+
+        End-to-end: MatchingConfig with nested TieredCaptionPenalties ->
+        flat fields synced via __post_init__ -> scoring.py reads flat fields.
+        """
+        from src.matching.scoring import apply_tiered_caption_penalties
+        from src.config.sections.matching import MatchingConfig
+
+        mc = MatchingConfig(tiered_caption_penalties={
+            'auto_generated_penalty': -0.10,
+            'low_quality_penalty': -0.20,
+            'missing_timing_penalty': -0.05,
+            'max_caption_penalty': -0.25,
+        })
+        config = Mock()
+        config.matching = mc
+
+        video_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="v.mp4")
+        video_seg.caption_quality_issues = ['auto_generated']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, config)
+
+        # Should use custom -0.10 penalty, not default -0.05
+        assert abs(adjusted - 0.70) < 0.001
+        assert len(entries) == 1
+        assert abs(entries[0]['adjustment'] - (-0.10)) < 0.001
+
+    @pytest.mark.fast
+    def test_custom_max_penalty_cap_from_nested_config(self):
+        """Custom max_caption_penalty from nested config caps stacked penalties."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        from src.config.sections.matching import MatchingConfig
+
+        mc = MatchingConfig(tiered_caption_penalties={
+            'auto_generated_penalty': -0.10,
+            'low_quality_penalty': -0.20,
+            'missing_timing_penalty': -0.05,
+            'max_caption_penalty': -0.15,  # Tight cap
+        })
+        config = Mock()
+        config.matching = mc
+
+        video_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="v.mp4")
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality']  # Would be -0.30 uncapped
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, config)
+
+        # Capped at -0.15: 0.80 - 0.15 = 0.65
+        assert abs(adjusted - 0.65) < 0.001
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
