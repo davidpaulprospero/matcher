@@ -185,6 +185,9 @@ class MatchStage(Stage):
                 except Exception as e:
                     logger.warning(f"Failed to serialize match {i}: {e}")
 
+            # US-71-009: Serialize chapter/listicle data for checkpoint persistence
+            chapter_data = self._serialize_chapter_data(state)
+
             checkpoint_data = {
                 'match_count': len(matches),
                 'avg_confidence': avg_conf,
@@ -192,6 +195,7 @@ class MatchStage(Stage):
                 'quality_metrics': quality_metrics.to_dict(),  # Quality metrics for analysis
                 'diversity_metrics': diversity_report.to_dict(),  # US-53-005: Source diversity per track
                 'trend_data': confidence_trend.to_dict(),  # US-63-010: Confidence trend for post-run analysis
+                'chapter_data': chapter_data,  # US-71-009: Chapter/listicle detection results
             }
 
             return StageResult.ok(checkpoint_data, warnings)
@@ -255,6 +259,9 @@ class MatchStage(Stage):
                 logger.info(f"Restored MATCH: {len(restored_matches)} matches from checkpoint")
             else:
                 logger.info(f"Restored MATCH metadata from checkpoint (no matches data)")
+
+            # US-71-009: Restore chapter/listicle data from checkpoint
+            self._restore_chapter_data(state, data)
 
             return True
 
@@ -386,6 +393,73 @@ class MatchStage(Stage):
         except Exception as e:
             logger.warning(f"Listicle detection failed (non-fatal): {e}")
             state.listicle_groups = []
+
+    def _serialize_chapter_data(self, state: 'PipelineState') -> Dict[str, Any]:
+        """US-71-009: Serialize chapter/listicle data for checkpoint persistence.
+
+        Returns a dict with 'chapters' and 'listicle_groups' lists of dicts.
+        """
+        chapters = []
+        for ch in getattr(state, 'location_chapters', []) or []:
+            if isinstance(ch, dict):
+                chapters.append(ch)
+            elif hasattr(ch, 'to_dict'):
+                chapters.append(ch.to_dict())
+
+        listicle_groups = []
+        for lg in getattr(state, 'listicle_groups', []) or []:
+            if isinstance(lg, dict):
+                listicle_groups.append(lg)
+            elif hasattr(lg, 'to_dict'):
+                listicle_groups.append(lg.to_dict())
+
+        return {
+            'chapters': chapters,
+            'listicle_groups': listicle_groups,
+        }
+
+    def _restore_chapter_data(self, state: 'PipelineState', data: Dict[str, Any]) -> None:
+        """US-71-009: Restore chapter/listicle data from checkpoint.
+
+        Loads serialized chapter/listicle dicts from checkpoint and restores
+        them as dataclass instances on state. Falls back to empty lists if
+        the checkpoint has no chapter_data (backward compatibility).
+        """
+        chapter_data = data.get('chapter_data', {})
+        if not isinstance(chapter_data, dict):
+            chapter_data = {}
+
+        # Restore chapters (as ChapterCandidate objects)
+        raw_chapters = chapter_data.get('chapters', [])
+        if raw_chapters:
+            try:
+                from ..chapter_detection.models import ChapterCandidate
+                state.location_chapters = [
+                    ChapterCandidate.from_dict(ch) if isinstance(ch, dict) else ch
+                    for ch in raw_chapters
+                ]
+                logger.info(f"Restored {len(state.location_chapters)} chapters from checkpoint")
+            except Exception as e:
+                logger.warning(f"Failed to restore chapters from checkpoint: {e}")
+                state.location_chapters = []
+        else:
+            state.location_chapters = getattr(state, 'location_chapters', []) or []
+
+        # Restore listicle groups (as ListicleGroup objects)
+        raw_groups = chapter_data.get('listicle_groups', [])
+        if raw_groups:
+            try:
+                from ..chapter_detection.models import ListicleGroup
+                state.listicle_groups = [
+                    ListicleGroup.from_dict(lg) if isinstance(lg, dict) else lg
+                    for lg in raw_groups
+                ]
+                logger.info(f"Restored {len(state.listicle_groups)} listicle groups from checkpoint")
+            except Exception as e:
+                logger.warning(f"Failed to restore listicle groups from checkpoint: {e}")
+                state.listicle_groups = []
+        else:
+            state.listicle_groups = getattr(state, 'listicle_groups', []) or []
 
     def _print_settings(self, config: 'Config'):
         """Print matching settings"""

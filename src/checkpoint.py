@@ -84,6 +84,12 @@ class CheckpointData:
     iterative_match: Dict[str, Any] = field(default_factory=dict)
     download_segments: Dict[str, Any] = field(default_factory=dict)
 
+    # US-71-009: Chapter detection results persisted after match stage.
+    # Contains 'chapters' (list of ChapterCandidate dicts) and
+    # 'listicle_groups' (list of ListicleGroup dicts).
+    # Also stored inside match stage data for co-locality.
+    chapter_data: Dict[str, Any] = field(default_factory=dict)
+
     # Stage metrics for pipeline observability (US-49-012)
     # Maps stage name -> serialized StageMetrics dict
     stage_metrics: Dict[str, Any] = field(default_factory=dict)
@@ -662,6 +668,12 @@ class CheckpointManager:
             elif hasattr(self.data, stage_key):
                 setattr(self.data, stage_key, stage_data)
 
+        # US-71-009: Promote chapter_data from match stage to top-level field
+        if stage_data and stage == 'MATCH':
+            ch_data = stage_data.get('chapter_data')
+            if isinstance(ch_data, dict):
+                self.data.chapter_data = ch_data
+
         # US-49-012: Persist stage metrics for pipeline observability
         if stage_metrics:
             self.data.stage_metrics[stage] = stage_metrics
@@ -952,6 +964,16 @@ class CheckpointManager:
             return {}
         stage_key = stage.lower()
         return getattr(self.data, stage_key, {})
+
+    def get_chapter_data(self) -> Dict[str, Any]:
+        """US-71-009: Get chapter/listicle detection data from checkpoint.
+
+        Returns dict with 'chapters' and 'listicle_groups' lists.
+        Returns empty dict if no chapter data is available (backward compat).
+        """
+        if not self.data:
+            return {}
+        return self.data.chapter_data or {}
 
     def get_stage_metrics(self, stage: str) -> Dict[str, Any]:
         """Get persisted stage metrics for a specific stage (US-49-012).
