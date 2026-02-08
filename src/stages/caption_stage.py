@@ -1805,6 +1805,8 @@ class CaptionStage(Stage):
             timing_penalty = result.get('timing_penalty', 1.0)  # US-008 Sprint 7
             # US-70-008: Get video title for this video
             video_title = title_lookup.get(video_id, '')
+            # US-75-003: Get video description from caption result
+            video_description = result.get('video_description', '')
 
             # US-73-002: Map caption segments to video chapters
             chapter_map = self._map_segments_to_video_chapters(segments, chapters)
@@ -1827,6 +1829,8 @@ class CaptionStage(Stage):
                     # US-73-002: Chapter mapping
                     'chapter_index': ch_idx,
                     'chapter_title': ch_title,
+                    # US-75-003: Video description from caption result
+                    'video_description': video_description,
                 }
                 # US-70-008 / US-73-004: Add embedding_text with title (+ chapter) prefix
                 if title_enriched and video_title:
