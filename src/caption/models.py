@@ -476,8 +476,11 @@ def deduplicate_caption_segments(
 ) -> List['CaptionSegment']:
     """Remove overlapping near-duplicate caption segments.
 
-    Segments with >80% temporal overlap AND >70% text similarity are merged,
-    keeping the one with higher text quality (longer text, fewer repeated chars).
+    Segments with >80% temporal overlap AND >70% text similarity from the same
+    source_file are merged. The kept segment retains the longer text and gets
+    the union of the timestamp range (min start, max end).
+
+    Segments from different source_files are never merged.
 
     Args:
         segments: List of CaptionSegment to deduplicate.
@@ -504,6 +507,10 @@ def deduplicate_caption_segments(
             if sorted_segs[j].start_time >= sorted_segs[i].end_time + 1.0:
                 break
 
+            # US-78-012: Never merge segments from different source_files
+            if sorted_segs[i].source_file != sorted_segs[j].source_file:
+                continue
+
             temporal = _temporal_overlap_ratio(sorted_segs[i], sorted_segs[j])
             if temporal < temporal_threshold:
                 continue
@@ -517,7 +524,7 @@ def deduplicate_caption_segments(
             quality_j = _text_quality_score(sorted_segs[j].text)
 
             if quality_j > quality_i:
-                # j is better, remove i
+                # j is better, remove i; expand j's range to union
                 logger.debug(
                     "Dedup: removing segment %d (%.1fs-%.1fs) in favor of %d (%.1fs-%.1fs) "
                     "[temporal=%.2f, text=%.2f]",
@@ -525,10 +532,13 @@ def deduplicate_caption_segments(
                     sorted_segs[j].index, sorted_segs[j].start_time, sorted_segs[j].end_time,
                     temporal, text_sim,
                 )
+                # US-78-012: Union of timestamp range
+                sorted_segs[j].start_time = min(sorted_segs[i].start_time, sorted_segs[j].start_time)
+                sorted_segs[j].end_time = max(sorted_segs[i].end_time, sorted_segs[j].end_time)
                 keep[i] = False
                 break  # i is removed, no need to compare further
             else:
-                # i is better or equal, remove j
+                # i is better or equal, remove j; expand i's range to union
                 logger.debug(
                     "Dedup: removing segment %d (%.1fs-%.1fs) in favor of %d (%.1fs-%.1fs) "
                     "[temporal=%.2f, text=%.2f]",
@@ -536,6 +546,9 @@ def deduplicate_caption_segments(
                     sorted_segs[i].index, sorted_segs[i].start_time, sorted_segs[i].end_time,
                     temporal, text_sim,
                 )
+                # US-78-012: Union of timestamp range
+                sorted_segs[i].start_time = min(sorted_segs[i].start_time, sorted_segs[j].start_time)
+                sorted_segs[i].end_time = max(sorted_segs[i].end_time, sorted_segs[j].end_time)
                 keep[j] = False
 
     result = [seg for seg, k in zip(sorted_segs, keep) if k]
@@ -548,6 +561,10 @@ def deduplicate_caption_segments(
             seg.index = idx
 
     return result
+
+
+# US-78-012: Alias for story-specified name
+deduplicate_segments = deduplicate_caption_segments
 
 
 @dataclass
