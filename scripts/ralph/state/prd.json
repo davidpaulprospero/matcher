@@ -94,8 +94,8 @@
       "id": "US-75-006",
       "title": "Wire chapter_coherence_penalty and cross_chapter_relevance into TieredMatcher",
       "priority": "medium",
-      "passes": false,
-      "notes": "Tier: WIRE-UP. apply_chapter_coherence_penalty (~line 2608) penalizes using >5 different video chapters in a single voiceover section. apply_cross_chapter_relevance_boost (~line 2664) uses the relevance_matrix to boost candidates from relevant chapters. Both exist in MatchScoring.apply_all_adjustments but are unreachable from TieredMatcher. The relevance_matrix is already computed in main.py (~line 256) but only passed to embedding_search, not to TieredMatcher for scoring. Files: src/matching/tiered_matcher.py, src/matching/main.py (~line 256-262, ~288), src/matching/scoring.py (~lines 2608, 2664).",
+      "passes": true,
+      "notes": "Tier: WIRE-UP. Created standalone apply_chapter_coherence_penalty and apply_cross_chapter_relevance_boost in scoring.py. TieredMatcher now accepts relevance_matrix param and tracks _chapter_source_counts internally. Both adjustments wired into all 3 scoring paths (obvious, high-similarity, LLM). main.py passes relevance_matrix to matcher after computation. 20 unit tests in test_chapter_scoring_us75006.py all pass.",
       "acceptanceCriteria": [
         "TieredMatcher receives relevance_matrix (passed from match_all_segments)",
         "chapter_coherence_penalty fires when >5 unique video chapters used in a voiceover chapter",

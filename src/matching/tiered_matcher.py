@@ -43,6 +43,8 @@ from .scoring import (
     apply_tag_keyword_boost,  # US-75-004
     apply_chapter_topic_match,  # US-75-005
     apply_chapter_source_consistency,  # US-75-005
+    apply_chapter_coherence_penalty,  # US-75-006
+    apply_cross_chapter_relevance_boost,  # US-75-006
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -129,7 +131,8 @@ class TieredMatcher:
     """
 
     def __init__(self, config: Optional['Config'] = None, cache: Optional[CacheManager] = None, video_topics: Optional[Dict[str, VideoTopics]] = None,
-                 video_metadata: Optional[Dict[str, Dict[str, str]]] = None):
+                 video_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+                 relevance_matrix: Optional[List[List[float]]] = None):
         """
         Initialize TieredMatcher.
 
@@ -139,11 +142,17 @@ class TieredMatcher:
             video_topics: Dict mapping video paths to VideoTopics for chapter matching
             video_metadata: Optional dict mapping source_file (video ID) to
                 {"title": str, "description": str} for LLM reranker context
+            relevance_matrix: 2D list [vo_chapter][vid_chapter] of relevance scores
+                for cross-chapter relevance boost (US-75-006)
         """
         self.config = config or get_config()
         self.cache = cache
         self.video_topics = video_topics or {}
         self.video_metadata = video_metadata or {}
+        self.relevance_matrix = relevance_matrix
+
+        # US-75-006: Track unique video sources per voiceover chapter for coherence penalty
+        self._chapter_source_counts: Dict[int, set] = {}
         mc = self.config.matching
 
         # Matching thresholds
@@ -592,6 +601,22 @@ class TieredMatcher:
         if len(self._recent_matches) > self._max_recent_matches:
             self._recent_matches = self._recent_matches[:self._max_recent_matches]
 
+    def _update_chapter_source_counts(self, vo_segment: SRTSegment, video_segment: SRTSegment) -> None:
+        """
+        Track unique video sources per voiceover chapter (US-75-006).
+
+        Used by chapter_coherence_penalty to detect excessive source diversity.
+        """
+        chapter_idx = getattr(vo_segment, 'chapter_index', None)
+        if chapter_idx is None or chapter_idx < 0:
+            return
+        source = getattr(video_segment, 'source_file', None)
+        if not source:
+            return
+        if chapter_idx not in self._chapter_source_counts:
+            self._chapter_source_counts[chapter_idx] = set()
+        self._chapter_source_counts[chapter_idx].add(source)
+
     def reset_recent_matches(self) -> None:
         """
         Reset recent matches list (US-63-009).
@@ -848,6 +873,27 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
 
+            # US-75-006: Apply chapter coherence penalty
+            prev = adjusted_confidence
+            adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
+                adjusted_confidence, vo_segment,
+                chapter_source_counts=self._chapter_source_counts,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_coherence_penalty', prev, adjusted_confidence, coherence_reason)
+
+            # US-75-006: Apply cross-chapter relevance boost
+            prev = adjusted_confidence
+            adjusted_confidence, cross_chapter_reason = apply_cross_chapter_relevance_boost(
+                adjusted_confidence, vo_segment, best_seg,
+                relevance_matrix=self.relevance_matrix,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
+
+            # US-75-006: Update chapter source tracking
+            self._update_chapter_source_counts(vo_segment, best_seg)
+
             # Ensure we don't drop below minimum confidence after adjustments
             min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
             adjusted_confidence = max(adjusted_confidence, min_confidence)
@@ -1013,6 +1059,27 @@ class TieredMatcher:
                 chapter_matching_enabled=self.chapter_matching_enabled
             )
             _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
+
+            # US-75-006: Apply chapter coherence penalty
+            prev = adjusted_confidence
+            adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
+                adjusted_confidence, vo_segment,
+                chapter_source_counts=self._chapter_source_counts,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_coherence_penalty', prev, adjusted_confidence, coherence_reason)
+
+            # US-75-006: Apply cross-chapter relevance boost
+            prev = adjusted_confidence
+            adjusted_confidence, cross_chapter_reason = apply_cross_chapter_relevance_boost(
+                adjusted_confidence, vo_segment, best_seg,
+                relevance_matrix=self.relevance_matrix,
+                chapter_matching_enabled=self.chapter_matching_enabled
+            )
+            _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
+
+            # US-75-006: Update chapter source tracking
+            self._update_chapter_source_counts(vo_segment, best_seg)
 
             reasoning = f"High embedding similarity ({top_similarity:.2f})"
             if topic_penalty_reason:
@@ -1232,6 +1299,27 @@ class TieredMatcher:
             chapter_matching_enabled=self.chapter_matching_enabled
         )
         _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
+
+        # US-75-006: Apply chapter coherence penalty
+        prev = adjusted_confidence
+        adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
+            adjusted_confidence, vo_segment,
+            chapter_source_counts=self._chapter_source_counts,
+            chapter_matching_enabled=self.chapter_matching_enabled
+        )
+        _record_breakdown(confidence_breakdown, 'chapter_coherence_penalty', prev, adjusted_confidence, coherence_reason)
+
+        # US-75-006: Apply cross-chapter relevance boost
+        prev = adjusted_confidence
+        adjusted_confidence, cross_chapter_reason = apply_cross_chapter_relevance_boost(
+            adjusted_confidence, vo_segment, best_seg,
+            relevance_matrix=self.relevance_matrix,
+            chapter_matching_enabled=self.chapter_matching_enabled
+        )
+        _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
+
+        # US-75-006: Update chapter source tracking
+        self._update_chapter_source_counts(vo_segment, best_seg)
 
         final_reasoning = reasoning
         if multimodal_enabled:

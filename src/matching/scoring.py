@@ -1208,6 +1208,137 @@ def apply_chapter_source_consistency(
     return min(1.0, confidence + boost), reason
 
 
+# Chapter coherence penalty constants (mirror MatchScoring class constants)
+_CHAPTER_COHERENCE_PENALTY_PER_SOURCE = -0.03
+_CHAPTER_COHERENCE_PENALTY_CAP = -0.10
+_DEFAULT_COHERENCE_THRESHOLD = 5
+
+
+def apply_chapter_coherence_penalty(
+    confidence: float,
+    vo_segment: SRTSegment,
+    chapter_source_counts: Optional[dict] = None,
+    chapter_matching_enabled: bool = False,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply coherence penalty when a voiceover chapter uses
+    too many different video sources (US-75-006).
+
+    When segments in the same chapter are sourced from many different videos,
+    it creates a scattered viewing experience. This penalty discourages
+    excessive source diversity within a single chapter.
+
+    Fires when >5 unique video chapters used in a voiceover chapter.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with chapter_index attribute
+        chapter_source_counts: Dict mapping chapter_index -> set of unique source video IDs
+        chapter_matching_enabled: Whether chapter matching is active
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not chapter_matching_enabled:
+        return confidence, ""
+
+    current_chapter_index = getattr(vo_segment, 'chapter_index', None)
+    if current_chapter_index is None or current_chapter_index < 0:
+        return confidence, ""
+
+    if not chapter_source_counts:
+        return confidence, ""
+
+    sources = chapter_source_counts.get(current_chapter_index)
+    if not sources:
+        return confidence, ""
+
+    threshold = _DEFAULT_COHERENCE_THRESHOLD
+    source_count = len(sources)
+    excess = source_count - threshold
+
+    if excess <= 0:
+        return confidence, ""
+
+    penalty = max(
+        _CHAPTER_COHERENCE_PENALTY_CAP,
+        excess * _CHAPTER_COHERENCE_PENALTY_PER_SOURCE,
+    )
+
+    reason = (
+        f"chapter_coherence_penalty: {penalty:.2f} "
+        f"({source_count} sources in chapter {current_chapter_index}, threshold {threshold})"
+    )
+
+    return confidence + penalty, reason
+
+
+# Cross-chapter relevance boost constants
+_DEFAULT_RELEVANCE_BOOST_WEIGHT = 0.1
+
+
+def apply_cross_chapter_relevance_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    relevance_matrix: Optional[List[List[float]]] = None,
+    chapter_matching_enabled: bool = False,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply boost for candidates from high-relevance video chapters (US-75-006).
+
+    When a relevance matrix is available (computed from voiceover x video chapter
+    keyword overlap), candidates from video chapters with high topic relevance
+    to the current voiceover chapter get a proportional boost.
+
+    Boost = relevance_score * relevance_boost_weight
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with chapter_index attribute
+        video_segment: Video segment with chapter_index attribute
+        relevance_matrix: 2D list [vo_chapter][vid_chapter] of relevance scores (0-1)
+        chapter_matching_enabled: Whether chapter matching is active
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not chapter_matching_enabled:
+        return confidence, ""
+
+    current_chapter_index = getattr(vo_segment, 'chapter_index', None)
+    if current_chapter_index is None or current_chapter_index < 0:
+        return confidence, ""
+
+    video_chapter_index = getattr(video_segment, 'chapter_index', None)
+    if video_chapter_index is None or video_chapter_index < 0:
+        return confidence, ""
+
+    if not relevance_matrix:
+        return confidence, ""
+
+    # Bounds check
+    if current_chapter_index >= len(relevance_matrix):
+        return confidence, ""
+    row = relevance_matrix[current_chapter_index]
+    if video_chapter_index >= len(row):
+        return confidence, ""
+
+    relevance_score = row[video_chapter_index]
+    if relevance_score <= 0.0:
+        return confidence, ""
+
+    boost = relevance_score * _DEFAULT_RELEVANCE_BOOST_WEIGHT
+
+    reason = (
+        f"cross_chapter_relevance: +{boost:.3f} "
+        f"(vo_ch={current_chapter_index}, vid_ch={video_chapter_index}, "
+        f"relevance={relevance_score:.2f})"
+    )
+
+    return min(1.0, confidence + boost), reason
+
+
 def _extract_entity_texts(segment: SRTSegment) -> List[str]:
     """
     Extract entity text values from a segment.

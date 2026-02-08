@@ -261,6 +261,10 @@ def match_all_segments(
                     f"(boost_weight={relevance_boost_weight})"
                 )
 
+    # US-75-006: Pass relevance matrix to TieredMatcher for cross-chapter relevance boost
+    if relevance_matrix:
+        matcher.relevance_matrix = relevance_matrix
+
     # Build voiceover segment -> chapter index mapping for embedding boost
     vo_segment_chapter_map: Dict[int, int] = {}
     if location_chapters:
