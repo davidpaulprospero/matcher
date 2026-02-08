@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import os
 import sys
+import difflib
 import hashlib
 import time
 import logging
@@ -518,7 +519,20 @@ class Config:
                 else:
                     filtered_data[key] = value
             else:
-                logger.debug(f"Ignoring unknown config field in {dataclass_type.__name__}: {key}")
+                is_critical = section_name is not None and section_name in CRITICAL_SECTIONS
+                valid_names = list(valid_fields.keys())
+                close = difflib.get_close_matches(key, valid_names, n=1, cutoff=0.6)
+                suggestion = f" (did you mean '{close[0]}'?)" if close else ""
+                if is_critical:
+                    logger.warning(
+                        f"Unknown config key '{key}' in critical section "
+                        f"'{section_name}'{suggestion}"
+                    )
+                else:
+                    logger.debug(
+                        f"Ignoring unknown config field in "
+                        f"{dataclass_type.__name__}: {key}{suggestion}"
+                    )
 
         try:
             return dataclass_type(**filtered_data)

@@ -274,3 +274,82 @@ class TestDurationTiersErrorHandling:
         # long keeps its default (600, 1500, 5, 0)
         assert config.duration_tiers.long.min_seconds == 600
         assert config.duration_tiers.long.max_seconds == 1500
+
+
+# ---------------------------------------------------------------------------
+# US-80-004: Warn on unknown YAML keys in critical config sections
+# ---------------------------------------------------------------------------
+
+class TestUnknownKeyWarnings:
+    """Unknown keys in critical sections produce WARNING; optional sections stay DEBUG."""
+
+    def test_unknown_key_in_critical_section_logs_warning(self, caplog):
+        """AC1/AC3: Unknown key 'foo_bar' in matching → WARNING-level log."""
+        data = {"name": "default", "foo_bar": "stray"}
+        with caplog.at_level(logging.DEBUG, logger="src.config.base"):
+            Config._build_dataclass(
+                _OptionalFieldConfig, data, section_name="matching"
+            )
+        warning_records = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "foo_bar" in r.message
+        ]
+        assert len(warning_records) == 1
+        assert "matching" in warning_records[0].message
+        assert "Unknown config key" in warning_records[0].message
+
+    def test_unknown_key_in_optional_section_logs_debug_only(self, caplog):
+        """AC2/AC4: Unknown key 'foo_bar' in broll → DEBUG only, no WARNING."""
+        data = {"name": "default", "foo_bar": "stray"}
+        with caplog.at_level(logging.DEBUG, logger="src.config.base"):
+            Config._build_dataclass(
+                _OptionalFieldConfig, data, section_name="broll"
+            )
+        warning_records = [
+            r for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert len(warning_records) == 0
+        debug_records = [
+            r for r in caplog.records
+            if r.levelno == logging.DEBUG and "foo_bar" in r.message
+        ]
+        assert len(debug_records) == 1
+
+    def test_warning_includes_typo_suggestion(self, caplog):
+        """AC5: Typo suggestion shown when a close match exists (edit distance ≤2)."""
+        # 'coutn' is close to 'count' in _OptionalFieldConfig
+        data = {"coutn": 99}
+        with caplog.at_level(logging.DEBUG, logger="src.config.base"):
+            Config._build_dataclass(
+                _OptionalFieldConfig, data, section_name="download"
+            )
+        warning_records = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "coutn" in r.message
+        ]
+        assert len(warning_records) == 1
+        assert "did you mean 'count'" in warning_records[0].message
+
+    def test_no_suggestion_for_distant_key(self, caplog):
+        """AC5: No suggestion when no field is close enough."""
+        data = {"zzzzz_totally_unknown": "val"}
+        with caplog.at_level(logging.DEBUG, logger="src.config.base"):
+            Config._build_dataclass(
+                _OptionalFieldConfig, data, section_name="matching"
+            )
+        warning_records = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "zzzzz_totally_unknown" in r.message
+        ]
+        assert len(warning_records) == 1
+        assert "did you mean" not in warning_records[0].message
+
+    def test_none_section_name_uses_debug(self, caplog):
+        """Recursive builds (section_name=None) stay at DEBUG."""
+        data = {"name": "ok", "stray_field": "val"}
+        with caplog.at_level(logging.DEBUG, logger="src.config.base"):
+            Config._build_dataclass(_OptionalFieldConfig, data)
+        warning_records = [
+            r for r in caplog.records if r.levelno >= logging.WARNING
+        ]
+        assert len(warning_records) == 0
