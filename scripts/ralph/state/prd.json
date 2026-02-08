@@ -124,9 +124,9 @@
                                                        "Existing CaptionRetryBudget logging is preserved; new logging supplements (does not replace) it",
                                                        "Unit test verifies structured log entries are produced for success and failure cases"
                                                    ],
-                            "passes":  true,
+                            "passes":  false,
                             "priority":  "medium",
-                            "notes":  "All 5 criteria verified. Per-attempt logging in caption_fetcher.py (4 code paths: success, unavailable, fetch error, unexpected error). Summary log + checkpoint metrics in caption_stage.py. Existing retry budget logging preserved. 6/6 tests pass."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-73-009",
@@ -138,9 +138,9 @@
                                                        "Tags containing generic terms (\u0027video\u0027, \u0027youtube\u0027, \u0027official\u0027) are filtered out via a stop-tag list",
                                                        "Unit test verifies tag extraction from nearby matches and stop-tag filtering"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier: Quality improvement. Files: src/iterative_match/gap_analyzer.py (search query generation ~line 909+), src/config/sections/iterative_matching.py. Video tags from matched videos provide domain-specific vocabulary that can improve gap-filling queries. E.g., if matched videos have tags [\u0027marine biology\u0027, \u0027coral reef\u0027], gap queries should include those terms."
+                            "notes":  "Done. Added extract_tags_from_nearby_matches() in gap_analyzer.py with _STOP_TAGS filter. Strategy 5 in _generate_multi_strategy_queries appends tag-derived queries. Config field use_tag_queries (default true) added. 4 unit tests pass."
                         },
                         {
                             "id":  "US-73-010",
