@@ -15,6 +15,7 @@ from typing import List
 
 from src.chapter_detection.listicle_detector import (
     detect_listicle_groups,
+    detect_list_header,
     _detect_ordinal,
     _detect_numbered,
     _detect_transition,
@@ -359,3 +360,115 @@ class TestDetectListicleGroups:
         assert len(groups) == 2
         assert groups[-1].start_segment_idx == 1
         assert groups[-1].end_segment_idx == 3
+
+
+# ── List header detection ───────────────────────────────
+
+class TestDetectListHeader:
+    def test_top_10_numeric(self):
+        """Detect 'top 10 reasons'."""
+        assert detect_list_header("Here are the top 10 reasons to visit") == 10
+
+    def test_numeric_at_start(self):
+        """Detect '5 ways' at start of text."""
+        assert detect_list_header("5 ways to improve your health") == 5
+
+    def test_word_form_tips(self):
+        """Detect 'seven tips' with word-form number."""
+        assert detect_list_header("seven tips for better sleep") == 7
+
+    def test_word_form_three_ways(self):
+        """Detect 'three ways' with word-form number."""
+        assert detect_list_header("three ways to save money") == 3
+
+    def test_the_best_pattern(self):
+        """Detect 'the 3 best places'."""
+        assert detect_list_header("the 3 best places to eat") == 3
+
+    def test_top_word_form(self):
+        """Detect 'top five things'."""
+        assert detect_list_header("top five things you need to know") == 5
+
+    def test_no_header(self):
+        """Text without header returns None."""
+        assert detect_list_header("The city is beautiful at night") is None
+
+    def test_no_header_unrecognized_noun(self):
+        """Numbers followed by non-list nouns are not headers."""
+        assert detect_list_header("5 cats sat on the mat") is None
+
+
+class TestListHeaderIntegration:
+    def test_expected_count_stored_on_groups(self):
+        """When a header is in the segments, expected_count is set on all groups."""
+        segments = _make_segments([
+            "Here are the top 5 reasons to visit Paris",
+            "First, the Eiffel Tower",
+            "Second, the Louvre Museum",
+            "Third, the food scene",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) >= 3
+        for g in groups:
+            assert g.expected_count == 5
+
+    def test_no_header_expected_count_is_none(self):
+        """Without a header, expected_count remains None."""
+        segments = _make_segments([
+            "First, the old town",
+            "Second, the beach",
+            "Third, the mountains",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        for g in groups:
+            assert g.expected_count is None
+
+    def test_mismatch_logs_warning(self, caplog):
+        """Warning logged when detected count differs from expected by >1."""
+        import logging
+        segments = _make_segments([
+            "Here are the top 10 tips for travel",
+            "First, pack light",
+            "Second, learn the language",
+            "Third, try local food",
+        ])
+        with caplog.at_level(logging.WARNING, logger="src.chapter_detection.listicle_detector"):
+            groups = detect_listicle_groups(segments)
+        # 3 detected vs 10 expected → diff=7 > 1 → warning
+        assert any("expected 10 items but detected 3" in r.message for r in caplog.records)
+
+    def test_close_match_no_warning(self, caplog):
+        """No warning when detected count is within 1 of expected."""
+        import logging
+        segments = _make_segments([
+            "3 ways to enjoy summer",
+            "First, go swimming",
+            "Second, have a barbecue",
+            "Third, visit the park",
+        ])
+        with caplog.at_level(logging.WARNING, logger="src.chapter_detection.listicle_detector"):
+            groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        assert not any("expected" in r.message and "detected" in r.message for r in caplog.records)
+
+    def test_expected_count_serialization(self):
+        """expected_count round-trips through to_dict/from_dict."""
+        group = ListicleGroup(
+            group_id=0, item_label='first',
+            start_segment_idx=0, end_segment_idx=2,
+            topic_keywords=['paris'], expected_count=5,
+        )
+        d = group.to_dict()
+        assert d['expected_count'] == 5
+        restored = ListicleGroup.from_dict(d)
+        assert restored.expected_count == 5
+
+    def test_expected_count_none_serialization(self):
+        """expected_count=None round-trips correctly."""
+        group = ListicleGroup(group_id=0, item_label='first',
+                              start_segment_idx=0, end_segment_idx=0)
+        d = group.to_dict()
+        assert d['expected_count'] is None
+        restored = ListicleGroup.from_dict(d)
+        assert restored.expected_count is None

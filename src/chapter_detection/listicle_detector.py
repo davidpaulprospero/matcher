@@ -9,10 +9,13 @@ Detects list-style structure in voiceover segments by identifying:
 Returns ListicleGroup objects representing each detected list item.
 """
 
+import logging
 import re
 from typing import List, Optional, Tuple, Any
 
 from .models import ListicleGroup
+
+logger = logging.getLogger(__name__)
 
 
 # Ordinal words mapped to their sequence position (for ordering)
@@ -57,6 +60,46 @@ TRANSITION_PATTERNS = [
     re.compile(r'^\s*now\s+(?:for|let\'?s\s+look\s+at)\b', re.IGNORECASE),
     re.compile(r'^\s*another\s+(?:thing|reason|way|tip|point)\b', re.IGNORECASE),
     re.compile(r'^\s*on\s+to\s+(?:the\s+)?(?:next|our\s+next)\b', re.IGNORECASE),
+]
+
+# Word-form numbers for header detection (e.g., "five reasons", "seven tips")
+HEADER_NUMBER_WORDS = {
+    'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12, 'fifteen': 15, 'twenty': 20,
+}
+
+# List header nouns that follow the count
+_HEADER_NOUNS = (
+    r'(?:reasons?|ways?|tips?|things?|steps?|points?|facts?|'
+    r'places?|ideas?|mistakes?|secrets?|signs?|tricks?|methods?|'
+    r'rules?|lessons?|examples?|benefits?|attractions?|destinations?)'
+)
+
+# Header patterns: "top 10 reasons", "5 ways", "seven tips", "the 3 best things"
+HEADER_PATTERNS = [
+    # "top N <noun>" — numeric
+    re.compile(r'\btop\s+(\d+)\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    # "top N <noun>" — word-form
+    re.compile(
+        r'\btop\s+(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+' + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
+    # "N <noun>" at start — numeric (e.g., "5 reasons", "10 tips")
+    re.compile(r'^\s*(\d+)\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    # "N <noun>" at start — word-form (e.g., "five reasons", "seven tips")
+    re.compile(
+        r'^\s*(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+' + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
+    # "the N best/worst/most <noun>" — numeric
+    re.compile(r'\bthe\s+(\d+)\s+(?:best|worst|most\s+\w+)\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    # "the N best/worst/most <noun>" — word-form
+    re.compile(
+        r'\bthe\s+(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+(?:best|worst|most\s+\w+)\s+'
+        + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -150,6 +193,33 @@ def _get_segment_index(segment: Any, position: int) -> int:
     return getattr(segment, 'index', position)
 
 
+def _parse_header_count(value: str) -> Optional[int]:
+    """Parse a count from a header match — handles both digits and word-form."""
+    value_lower = value.lower().strip()
+    if value_lower.isdigit():
+        return int(value_lower)
+    return HEADER_NUMBER_WORDS.get(value_lower)
+
+
+def detect_list_header(text: str) -> Optional[int]:
+    """
+    Detect a list header pattern in text and return the expected count.
+
+    Recognizes patterns like:
+    - "top 10 reasons" → 10
+    - "5 ways to improve" → 5
+    - "seven tips for success" → 7
+    - "the 3 best places" → 3
+
+    Returns the expected count or None if no header detected.
+    """
+    for pattern in HEADER_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return _parse_header_count(match.group(1))
+    return None
+
+
 def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
     """
     Detect listicle (list-style) structure in voiceover segments.
@@ -192,6 +262,16 @@ def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
     if len(markers) < 2:
         return []
 
+    # Scan all segments for a list header to get expected_count
+    expected_count: Optional[int] = None
+    for segment in segments:
+        text = _get_segment_text(segment)
+        if text:
+            count = detect_list_header(text)
+            if count is not None:
+                expected_count = count
+                break  # Use the first header found
+
     # Second pass: build groups from markers
     groups: List[ListicleGroup] = []
 
@@ -215,7 +295,15 @@ def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
             start_segment_idx=_get_segment_index(segments[pos], pos),
             end_segment_idx=_get_segment_index(segments[end_pos], end_pos),
             topic_keywords=topic_keywords,
+            expected_count=expected_count,
         )
         groups.append(group)
+
+    # Log warning if detected count differs from expected by more than 1
+    if expected_count is not None and abs(len(groups) - expected_count) > 1:
+        logger.warning(
+            "Listicle header expected %d items but detected %d markers (diff=%d)",
+            expected_count, len(groups), abs(len(groups) - expected_count),
+        )
 
     return groups

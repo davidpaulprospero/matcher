@@ -194,6 +194,7 @@ class ListicleGroup:
     start_segment_idx: int = 0
     end_segment_idx: int = 0
     topic_keywords: List[str] = field(default_factory=list)  # Key topics in this item
+    expected_count: Optional[int] = None   # From list header (e.g., "top 10" → 10)
 
     @property
     def segment_count(self) -> int:
@@ -210,6 +211,7 @@ class ListicleGroup:
             start_segment_idx=data.get('start_segment_idx', 0),
             end_segment_idx=data.get('end_segment_idx', 0),
             topic_keywords=data.get('topic_keywords', []),
+            expected_count=data.get('expected_count'),
         )
 
 
