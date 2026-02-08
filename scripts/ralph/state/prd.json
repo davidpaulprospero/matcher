@@ -40,9 +40,9 @@
                                                        "Segments outside all chapter boundaries get chapter_index=-1 and chapter_title=\u0027\u0027",
                                                        "Unit test verifies chapter mapping with 3+ chapters and segments at boundaries, midpoints, and outside ranges"
                                                    ],
-                            "passes":  true,
+                            "passes":  false,
                             "priority":  "high",
-                            "notes":  "All 5 criteria verified: (1) _populate_text_metadata calls _map_segments_to_video_chapters after propagating video_chapters to VSR, (2) chapter_index/chapter_title populated in text_metadata entries at lines 1811-1812, (3) greatest overlap logic in mapping.py, (4) outside segments get -1/'', (5) test_three_plus_chapters_comprehensive covers 4 chapters with midpoints/boundaries/outside. 33 tests pass."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-73-003",
@@ -54,9 +54,9 @@
                                                        "Description is truncated to first 200 chars before keyword extraction to avoid noise from long descriptions",
                                                        "Unit test verifies graduated boost values and confidence_breakdown entry for 0, 1, 2, and 3+ keyword matches"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "high",
-                            "notes":  "Tier: Quality improvement. Files: src/matching/scoring.py (apply_all_adjustments at ~line 2592). Currently description is used in LLM reranker context but NOT in numeric scoring adjustments. This adds a lightweight keyword-overlap signal without LLM cost. Uses same keyword extraction pattern as existing apply_title_relevance()."
+                            "notes":  "Implemented apply_description_relevance() with graduated boosts (+0.02/+0.04/+0.06), 200-char truncation, wired into apply_all_adjustments. 9 unit tests pass."
                         },
                         {
                             "id":  "US-73-004",

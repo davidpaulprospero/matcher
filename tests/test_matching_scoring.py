@@ -1746,6 +1746,127 @@ class TestTitleRelevanceAdjustment:
         assert "tokyo" in reason.lower() or "skyline" in reason.lower()
 
 
+class TestDescriptionRelevance:
+    """Test apply_description_relevance graduated boost (US-73-003)."""
+
+    @pytest.mark.fast
+    def test_zero_keyword_match_no_boost(self, mock_config):
+        """No keyword overlap produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="underwater coral reef marine biology")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="mountain hiking trails adventure"
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_one_keyword_match_boost(self, mock_config):
+        """One keyword overlap gives +0.02 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="The history of ancient Rome and its empire")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="Rome travel guide for beginners"
+        )
+        assert adjusted == pytest.approx(0.72, abs=0.001)
+        assert "description relevance boost" in reason
+        assert "+0.02" in reason
+
+    @pytest.mark.fast
+    def test_two_keyword_match_boost(self, mock_config):
+        """Two keyword overlaps give +0.04 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo skyline and Japanese culture travel")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="Tokyo culture documentary film"
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+        assert "+0.04" in reason
+
+    @pytest.mark.fast
+    def test_three_plus_keyword_match_boost(self, mock_config):
+        """Three or more keyword overlaps give +0.06 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="ancient Roman architecture ruins temples heritage")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="ancient Roman architecture temples overview"
+        )
+        assert adjusted == pytest.approx(0.76, abs=0.001)
+        assert "+0.06" in reason
+
+    @pytest.mark.fast
+    def test_empty_description_no_boost(self, mock_config):
+        """Empty description produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description=""
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_none_description_no_boost(self, mock_config):
+        """None description produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description=None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_description_truncated_to_200_chars(self, mock_config):
+        """Description is truncated to first 200 chars before keyword extraction."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="unique keyword matchword")
+        # Place matching keyword beyond 200 chars
+        padding = "a " * 110  # 220 chars of non-matching text
+        desc = padding + "matchword unique keyword"
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description=desc
+        )
+        # Keywords beyond 200 chars should not be found
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+
+    @pytest.mark.fast
+    def test_breakdown_entry_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records description_relevance in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        # sample_vo_segment text: "Sample voiceover text about Tokyo"
+        adjusted, reason, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            video_description="Tokyo travel guide sample"
+        )
+        desc_entries = [b for b in breakdown if b['component'] == 'description_relevance']
+        assert len(desc_entries) == 1
+        entry = desc_entries[0]
+        assert entry['adjustment'] > 0
+        assert 'description relevance boost' in entry['reason']
+
+    @pytest.mark.fast
+    def test_apply_all_no_description_no_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no video_description produces no description_relevance entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        desc_entries = [b for b in breakdown if b['component'] == 'description_relevance']
+        assert len(desc_entries) == 0
+
+
 class TestChapterSourceConsistency:
     """Tests for chapter-level source consistency boost (US-70-011)."""
 

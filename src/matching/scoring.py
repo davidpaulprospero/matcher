@@ -2082,6 +2082,12 @@ class MatchScoring:
     TITLE_BOOST_2_KEYWORDS = 0.05  # 2 keyword matches
     TITLE_BOOST_3_PLUS_KEYWORDS = 0.08  # 3+ keyword matches
 
+    # Description relevance boost thresholds (US-73-003)
+    DESC_BOOST_1_KEYWORD = 0.02   # 1 keyword match
+    DESC_BOOST_2_KEYWORDS = 0.04  # 2 keyword matches
+    DESC_BOOST_3_PLUS_KEYWORDS = 0.06  # 3+ keyword matches
+    DESC_MAX_CHARS = 200  # Truncate description before keyword extraction
+
     # Chapter topic match thresholds (US-70-009, updated US-72-007)
     CHAPTER_TOPIC_BOOST_PARTIAL = 0.05      # Partial match: 1-2 shared keywords
     CHAPTER_TOPIC_BOOST_STRONG = 0.10       # Strong match: 3+ shared keywords
@@ -2170,6 +2176,53 @@ class MatchScoring:
 
         matched_words = ', '.join(sorted(overlap)[:5])
         reason = f"title relevance boost +{boost} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
+        return confidence + boost, reason
+
+    def apply_description_relevance(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_description: Optional[str] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply description keyword overlap boost to confidence score (US-73-003).
+
+        Extracts keywords from the voiceover segment text and the first 200 chars
+        of the video description, then applies a graduated boost based on overlap.
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Voiceover segment with text
+            video_description: Video description string
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if not video_description:
+            return confidence, ""
+
+        truncated = video_description[:self.DESC_MAX_CHARS]
+        vo_keywords = self._extract_keywords(vo_segment.text)
+        desc_keywords = self._extract_keywords(truncated)
+
+        if not vo_keywords or not desc_keywords:
+            return confidence, ""
+
+        overlap = vo_keywords & desc_keywords
+        match_count = len(overlap)
+
+        if match_count == 0:
+            return confidence, ""
+
+        if match_count >= 3:
+            boost = self.DESC_BOOST_3_PLUS_KEYWORDS
+        elif match_count == 2:
+            boost = self.DESC_BOOST_2_KEYWORDS
+        else:
+            boost = self.DESC_BOOST_1_KEYWORD
+
+        matched_words = ', '.join(sorted(overlap)[:5])
+        reason = f"description relevance boost +{boost} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
         return confidence + boost, reason
 
     def apply_chapter_topic_match(
@@ -2607,12 +2660,14 @@ class MatchScoring:
         relevance_matrix: Optional[List[List[float]]] = None,
         video_chapter_index: int = -1,
         listicle_groups: Optional[List[Any]] = None,
+        video_description: Optional[str] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
 
         Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty
-               -> project_boost -> title_relevance -> chapter_topic_match
+               -> project_boost -> title_relevance -> description_relevance
+               -> chapter_topic_match
                -> chapter_source_consistency -> tag_keyword_boost
                -> chapter_coherence_penalty -> cross_chapter_relevance
                -> listicle_consistency
@@ -2702,6 +2757,16 @@ class MatchScoring:
             if title_reason:
                 reasons.append(title_reason)
                 breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
+
+        # 6b. Description relevance boost (US-73-003)
+        if video_description:
+            prev = confidence
+            confidence, desc_reason = self.apply_description_relevance(
+                confidence, vo_segment, video_description
+            )
+            if desc_reason:
+                reasons.append(desc_reason)
+                breakdown.append({'component': 'description_relevance', 'adjustment': round(confidence - prev, 4), 'reason': desc_reason})
 
         # 7. Chapter topic match (US-70-009, US-72-007)
         if chapter_title:
