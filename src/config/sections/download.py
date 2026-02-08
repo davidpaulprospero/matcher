@@ -375,6 +375,14 @@ class CaptionFirstConfig:
     # Empty list = use default behavior (preferred_language -> en -> any)
     fallback_languages: List[str] = field(default_factory=list)
 
+    # Language priority chain for caption track selection (US-78-009)
+    # Ordered list of language codes to try before falling back to auto-generated captions.
+    # YouTube videos often have regional variants (en-US, en-GB) but not plain 'en'.
+    # The fetcher tries each code in order; when a non-primary (index > 0) language is
+    # used, language_confidence is reduced (0.8 for 2nd choice, 0.6 for 3rd+).
+    # Empty list = use preferred_language only (existing behavior).
+    language_priority: List[str] = field(default_factory=lambda: ['en', 'en-US', 'en-GB'])
+
     # Timeout for caption fetch requests (seconds)
     timeout: int = 30
 

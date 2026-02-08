@@ -4596,7 +4596,7 @@ class CaptionFetcher:
                 f"Language '{language}' not available. Available: {available_codes}"
             )
 
-        selected_lang, selected_auto = selected_track
+        selected_lang, selected_auto, priority_index = selected_track
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
         # US-60-005: Single targeted --write-sub download
@@ -4615,14 +4615,32 @@ class CaptionFetcher:
                     if self._rate_limiter:
                         self._rate_limiter.record_success()
 
-                    # US-73-012: Set language confidence based on caption source type
+                    # US-73-012 + US-78-009: Set language confidence based on
+                    # caption source type and position in language priority chain.
+                    # priority_index: 0 = primary, 1 = 2nd choice (0.8), 2+ = 3rd+ (0.6)
                     lang_matches = selected_lang.lower() == language.lower()
-                    if not selected_auto:
-                        # Manual captions in target language
+                    if not selected_auto and (priority_index <= 0):
+                        # Manual captions in primary language
                         result.language_confidence = 1.0
-                    elif lang_matches:
-                        # Auto-generated in target language
+                    elif not selected_auto and priority_index == 1:
+                        # US-78-009: Manual captions in 2nd-choice language
                         result.language_confidence = 0.8
+                        result.fallback_language = selected_lang
+                    elif not selected_auto and priority_index >= 2:
+                        # US-78-009: Manual captions in 3rd+ choice language
+                        result.language_confidence = 0.6
+                        result.fallback_language = selected_lang
+                    elif lang_matches and priority_index <= 0:
+                        # Auto-generated in primary language
+                        result.language_confidence = 0.8
+                    elif priority_index == 1:
+                        # US-78-009: Auto-generated in 2nd-choice language
+                        result.language_confidence = 0.8
+                        result.fallback_language = selected_lang
+                    elif priority_index >= 2:
+                        # US-78-009: Auto-generated in 3rd+ choice language
+                        result.language_confidence = 0.6
+                        result.fallback_language = selected_lang
                     else:
                         # Auto-generated in different language (translated)
                         result.language_confidence = 0.5
@@ -4657,19 +4675,39 @@ class CaptionFetcher:
             f"No captions available in {language} or en"
         )
 
+    def _get_language_priority_from_config(self) -> List[str]:
+        """Get language priority chain from config (US-78-009).
+
+        Returns:
+            List of language codes in priority order, or empty list if not configured.
+        """
+        if not self.config:
+            return []
+        caption_first = getattr(self.config.download, 'caption_first', None)
+        if not caption_first:
+            return []
+        return getattr(caption_first, 'language_priority', [])
+
     def _select_best_track(
         self,
         available_languages: List[AvailableLanguage],
         preferred_language: str,
         prefer_manual: bool
     ) -> Optional[tuple]:
-        """Select the best caption track from available languages (US-60-005).
+        """Select the best caption track from available languages (US-60-005, US-78-009).
+
+        US-78-009: Uses language_priority chain from config to try multiple language
+        codes in order before falling back to auto-generated captions. This handles
+        YouTube videos that have regional variants (en-US, en-GB) but not plain 'en'.
 
         Priority order:
-        1. Manual captions in preferred language (if prefer_manual)
-        2. Auto captions in preferred language (or swap with #1 if not prefer_manual)
-        3. Manual captions in English fallback
+        1. Manual captions in each language_priority code (if prefer_manual)
+        2. Auto captions in each language_priority code
+        3. Manual captions in English fallback (if not in priority list)
         4. Auto captions in English fallback
+
+        The return tuple includes a third element: the priority_index (0-based position
+        in the language_priority chain) for confidence scoring. -1 means not from priority chain.
 
         Args:
             available_languages: List of AvailableLanguage from list_available_languages().
@@ -4677,7 +4715,7 @@ class CaptionFetcher:
             prefer_manual: If True, prefer manual over auto-generated.
 
         Returns:
-            Tuple of (language_code, is_auto_generated) for the best track,
+            Tuple of (language_code, is_auto_generated, priority_index) for the best track,
             or None if no suitable track found.
         """
         # Build lookup structures
@@ -4690,32 +4728,72 @@ class CaptionFetcher:
             if lang.is_auto_generated
         }
 
+        # US-78-009: Build language priority chain
+        language_priority = self._get_language_priority_from_config()
+
+        # If language_priority is configured, use it as the primary selection method
+        if language_priority:
+            tried = set()
+            for idx, lang_code in enumerate(language_priority):
+                lc = lang_code.lower()
+                if lc in tried:
+                    continue
+                tried.add(lc)
+
+                if prefer_manual:
+                    if lc in manual_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (manual) at position {idx}"
+                        )
+                        return (lang_code, False, idx)
+                    if lc in auto_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (auto) at position {idx}"
+                        )
+                        return (lang_code, True, idx)
+                else:
+                    if lc in auto_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (auto) at position {idx}"
+                        )
+                        return (lang_code, True, idx)
+                    if lc in manual_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (manual) at position {idx}"
+                        )
+                        return (lang_code, False, idx)
+
+            logger.debug(
+                f"Language priority chain exhausted ({language_priority}), "
+                f"falling back to English/any"
+            )
+
+        # Original behavior: try preferred language
         pref_lower = preferred_language.lower()
 
-        # Try preferred language first
         if prefer_manual:
             if pref_lower in manual_langs:
-                return (preferred_language, False)
+                return (preferred_language, False, 0)
             if pref_lower in auto_langs:
-                return (preferred_language, True)
+                return (preferred_language, True, 0)
         else:
             if pref_lower in auto_langs:
-                return (preferred_language, True)
+                return (preferred_language, True, 0)
             if pref_lower in manual_langs:
-                return (preferred_language, False)
+                return (preferred_language, False, 0)
 
         # Fallback to English if not the preferred language
         if preferred_language.lower() != "en":
             if prefer_manual:
                 if "en" in manual_langs:
-                    return ("en", False)
+                    return ("en", False, -1)
                 if "en" in auto_langs:
-                    return ("en", True)
+                    return ("en", True, -1)
             else:
                 if "en" in auto_langs:
-                    return ("en", True)
+                    return ("en", True, -1)
                 if "en" in manual_langs:
-                    return ("en", False)
+                    return ("en", False, -1)
 
         # No suitable track found
         return None

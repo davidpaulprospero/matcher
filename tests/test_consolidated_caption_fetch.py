@@ -194,7 +194,7 @@ class TestBestTrackSelection:
         ]
 
         result = fetcher._select_best_track(available, 'en', prefer_manual=True)
-        assert result == ('en', False)  # False = not auto-generated
+        assert result[:2] == ('en', False)  # False = not auto-generated
 
     def test_prefers_auto_over_manual_when_prefer_manual_false(self):
         """When prefer_manual=False, auto captions are selected over manual."""
@@ -206,7 +206,7 @@ class TestBestTrackSelection:
         ]
 
         result = fetcher._select_best_track(available, 'en', prefer_manual=False)
-        assert result == ('en', True)  # True = auto-generated
+        assert result[:2] == ('en', True)  # True = auto-generated
 
     def test_falls_back_to_auto_when_manual_unavailable(self):
         """Falls back to auto when manual is unavailable (prefer_manual=True)."""
@@ -217,7 +217,7 @@ class TestBestTrackSelection:
         ]
 
         result = fetcher._select_best_track(available, 'en', prefer_manual=True)
-        assert result == ('en', True)  # Falls back to auto
+        assert result[:2] == ('en', True)  # Falls back to auto
 
     def test_falls_back_to_english_when_preferred_lang_unavailable(self):
         """Falls back to English when preferred language is unavailable."""
@@ -229,7 +229,7 @@ class TestBestTrackSelection:
         ]
 
         result = fetcher._select_best_track(available, 'es', prefer_manual=True)
-        assert result == ('en', False)  # Falls back to English manual
+        assert result[:2] == ('en', False)  # Falls back to English manual
 
     def test_returns_none_when_no_suitable_track(self):
         """Returns None when no suitable track is available."""

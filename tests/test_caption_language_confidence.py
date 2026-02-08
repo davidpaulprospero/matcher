@@ -85,12 +85,13 @@ class TestFetchCaptionsLanguageConfidence:
         from src.caption_fetcher import CaptionFetcher
 
         fetcher = CaptionFetcher.__new__(CaptionFetcher)
+        fetcher.config = None  # No config -> no language_priority
         # Simulate _select_best_track returning manual captions in preferred lang
         result = fetcher._select_best_track(
             [MagicMock(code='en', is_auto_generated=False)],
             'en', True
         )
-        assert result == ('en', False)
+        assert result == ('en', False, 0)
         # Manual + matching language -> 1.0
 
     def test_auto_captions_in_preferred_language(self):
@@ -98,11 +99,12 @@ class TestFetchCaptionsLanguageConfidence:
         from src.caption_fetcher import CaptionFetcher
 
         fetcher = CaptionFetcher.__new__(CaptionFetcher)
+        fetcher.config = None
         result = fetcher._select_best_track(
             [MagicMock(code='en', is_auto_generated=True)],
             'en', True
         )
-        assert result == ('en', True)
+        assert result == ('en', True, 0)
         # Auto + matching language -> 0.8
 
     def test_fallback_to_different_language(self):
@@ -110,11 +112,12 @@ class TestFetchCaptionsLanguageConfidence:
         from src.caption_fetcher import CaptionFetcher
 
         fetcher = CaptionFetcher.__new__(CaptionFetcher)
+        fetcher.config = None
         result = fetcher._select_best_track(
             [MagicMock(code='en', is_auto_generated=True)],
             'fr', True
         )
-        assert result == ('en', True)
+        assert result == ('en', True, -1)
         # Auto + different language -> 0.5
 
 

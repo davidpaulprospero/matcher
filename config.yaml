@@ -1103,6 +1103,10 @@ download:
     # Example for multilingual projects: ["es", "pt", "fr"]
     # Empty list = default behavior (preferred_language -> en -> any)
     fallback_languages: []            # Language fallback chain (empty = default)
+    # Language priority chain for caption track selection (US-78-009)
+    # Tries each code in order before falling back to auto-generated captions.
+    # Non-primary matches get reduced language_confidence (0.8 for 2nd, 0.6 for 3rd+).
+    language_priority: ["en", "en-US", "en-GB"]
     timeout: 30                       # Timeout for caption fetch requests (seconds)
     prefer_human_captions: true       # Prefer human-uploaded over auto-generated
     allow_auto_generated: true        # Allow auto-generated caption fallback (US-59-007)
