@@ -147,7 +147,7 @@
                             "id":  "US-78-010",
                             "title":  "Add per-video progress tracking to caption stage batch processing",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Caption stage emits progress callbacks with video_index/total_videos ratio during batch processing",
                                                        "Progress includes current video_id and elapsed time for the current video",
@@ -155,7 +155,7 @@
                                                        "Progress is compatible with the existing TTY-aware streaming output (lines 600-800 of caption_stage.py)",
                                                        "Unit test verifies progress callback is invoked with correct video_index for a 3-video batch"
                                                    ],
-                            "notes":  "Tier: UX/Diagnostics. Caption stage processes videos in batches but progress output (caption_stage.py lines 600-800) only shows aggregate progress. For large batches (100+ videos), users can\u0027t tell which video is being processed or if one is stuck. Files: src/stages/caption_stage.py (batch processing loop), tests/test_stage_caption*.py"
+                            "notes":  "Implemented. Added start_time to fetching progress callback and slow_video (>30s threshold) progress event in batch_processor.py. Added slow_video TTY-aware handler in caption_stage.py on_progress. 6 new tests in test_caption_per_video_progress.py covering: 3-video batch index verification, video_id/elapsed inclusion, slow_video >30s warning, ratio correctness, threshold boundary, and TTY field compatibility. All 77 related tests pass (71 existing + 6 new)."
                         },
                         {
                             "id":  "US-78-011",

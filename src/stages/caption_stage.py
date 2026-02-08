@@ -725,6 +725,17 @@ class CaptionStage(Stage):
                             else:
                                 print(line)
 
+                        elif status == 'slow_video':
+                            # US-78-010: Warn when a video takes >30s to process
+                            elapsed_s = details.get('elapsed_seconds', 0)
+                            line = f"  [{idx}/{total}] {video_id}: SLOW ({elapsed_s:.1f}s)"
+                            if is_tty:
+                                padding = max(0, last_line_length - len(line))
+                                print(f"\r{line}{' ' * padding}")
+                                last_line_length = 0
+                            else:
+                                print(line)
+
                 # US-005 Sprint 8: Create or reuse batch checkpoint for partial recovery
                 checkpoint_save_interval = getattr(caption_config, 'checkpoint_save_interval', 10)
                 if batch_checkpoint is None and batch_checkpoint_path:

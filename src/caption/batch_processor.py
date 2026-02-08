@@ -336,10 +336,12 @@ class BatchProcessor:
             worker_tracker.worker_start(worker_id, video_id)
 
             # Notify progress: fetching
+            # US-78-010: Include start_time so callers can compute elapsed time
             _notify_progress(video_id, 'fetching', {
                 'index': index + 1,
                 'total': total_videos,
                 'worker_id': worker_id,
+                'start_time': start_time,
             })
 
             # Record fetch attempt in metrics
@@ -376,6 +378,15 @@ class BatchProcessor:
                         f"Slow caption fetch for {video_id}: {elapsed:.1f}s "
                         f"(>{slow_threshold:.1f}s threshold)"
                     )
+
+                # US-78-010: Emit slow_video progress when >30s processing time
+                if elapsed > 30.0:
+                    _notify_progress(video_id, 'slow_video', {
+                        'index': index + 1,
+                        'total': total_videos,
+                        'elapsed_seconds': elapsed,
+                        'worker_id': worker_id,
+                    })
 
                 # Record success in metrics
                 if metrics:
