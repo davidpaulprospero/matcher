@@ -133,7 +133,7 @@
                                                        "Unit test: chapters outside the overlap zone are preserved from both chunks",
                                                        "Unit test: higher-confidence chapter wins when deduplicating"
                                                    ],
-                            "notes":  "Implementation in chunking.py: _deduplicate_overlap_zone, _segment_overlap_ratio, _score_chapter helpers. merge_chunk_results calls dedup before merge. 12 tests in test_chapter_chunking.py all pass: TestOverlapDeduplication (8 tests covering AC #1-6 plus threshold/multi-chunk) and TestSegmentOverlapRatio (4 tests)."
+                            "notes":  "Implementation complete. _deduplicate_overlap_zone in chunking.py handles >50% overlap dedup with confidence-based winner selection, scoped to overlap zone only. 12 tests in test_chapter_chunking.py all pass: TestOverlapDeduplication (8 tests covering AC #1-#6) + TestSegmentOverlapRatio (4 tests)."
                         },
                         {
                             "id":  "US-76-009",
