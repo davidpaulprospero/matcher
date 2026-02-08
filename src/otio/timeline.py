@@ -1046,6 +1046,11 @@ def create_timeline(
             'target_duration': target_duration
         }
 
+        # Propagate chapter title from video segment if available
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            metadata['chapter'] = chapter_title
+
         # Create primary video clip (V1) - prefix with segment ID for tracing
         clip_folder = Path(source_file_for_clip).parent.name
         clip_stem = Path(source_file_for_clip).stem
@@ -1121,6 +1126,11 @@ def create_timeline(
                     'original_duration': alt_source_duration,
                     'target_duration': target_duration
                 }
+
+                # Propagate chapter title from video segment if available
+                alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                if alt_chapter_title:
+                    alt_metadata['chapter'] = alt_chapter_title
 
                 # Alternative video clip - include segment ID for tracing
                 alt_folder = Path(alt_source_file).parent.name
@@ -1222,6 +1232,11 @@ def create_timeline(
                     'target_duration': target_duration,
                     'is_secondary': True
                 }
+
+                # Propagate chapter title from video segment if available
+                sec_chapter_title = getattr(sec_seg, 'chapter_title', '')
+                if sec_chapter_title:
+                    sec_metadata['chapter'] = sec_chapter_title
 
                 # Secondary video clip - include segment ID for tracing
                 sec_label = secondary_names[sec_idx] if sec_idx < len(secondary_names) else f"Secondary {sec_idx}"
@@ -1332,6 +1347,11 @@ def create_timeline(
                     'original_duration': strat_source_duration,
                     'target_duration': target_duration
                 }
+
+                # Propagate chapter title from video segment if available
+                strat_chapter_title = getattr(strat_seg, 'chapter_title', '')
+                if strat_chapter_title:
+                    strat_metadata['chapter'] = strat_chapter_title
 
                 # Strategy video clip - include segment ID for tracing
                 strat_folder = Path(strat_source_file).parent.name

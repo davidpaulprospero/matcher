@@ -534,6 +534,11 @@ def generate_resolve_xml_with_bins(
             f'                                <file id="{file_id}"/>',
         ])
 
+        # Add chapter title as comment if available on the video segment
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            xml_lines.append(f'                                <comment>{escape_xml(chapter_title)}</comment>')
+
         # Add speed adjustment if needed
         if source_frames != target_frames and target_frames > 0:
             speed = (source_frames / target_frames) * 100
@@ -1263,8 +1268,14 @@ def generate_davinci_sequence_xml(
             '                            </media>',
             '                        </file>',
             '                        <compositemode>normal</compositemode>',
-            '                    </clipitem>',
         ])
+
+        # Add chapter title as comment if available on the video segment
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            xml_lines.append(f'                        <comment>{escape_xml(chapter_title)}</comment>')
+
+        xml_lines.append('                    </clipitem>')
 
         timeline_pos += target_frames
 
