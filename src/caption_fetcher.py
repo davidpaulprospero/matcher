@@ -2342,7 +2342,10 @@ def parse_description_chapters(description: str) -> List[dict]:
     Many YouTube videos have chapters only in the description, not in the
     structured chapters field. This extracts timestamp-title pairs from
     common formats like '0:00 Introduction', '01:23 Topic Name',
-    '1:02:30 Long Topic'.
+    '1:02:30 Long Topic', '[0:00] Title'.
+
+    Delegates to src.caption.models.parse_description_chapters for core parsing,
+    then converts None end_time to 0.0 for backward compatibility with yt-dlp format.
 
     Args:
         description: Video description text.
@@ -2350,48 +2353,18 @@ def parse_description_chapters(description: str) -> List[dict]:
     Returns:
         List of {title: str, start_time: float, end_time: float} dicts.
         end_time is computed from the next chapter's start_time.
+        Last chapter end_time defaults to 0.0 (consistent with yt-dlp).
         Returns empty list if no chapter pattern is detected or description
         is empty/None.
     """
-    if not description:
-        return []
+    from src.caption.models import parse_description_chapters as _parse_chapters
 
-    # Match timestamps like 0:00, 01:23, 1:02:30 followed by a title
-    pattern = r'(?:^|\n)\s*(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+?)(?=\n|$)'
-    matches = re.findall(pattern, description)
-
-    if len(matches) < 2:
-        # Need at least 2 chapters to form a meaningful chapter list
-        return []
-
-    # Parse timestamps and titles
-    parsed = []
-    for timestamp_str, title in matches:
-        title = title.strip()
-        if not title:
-            continue
-        parts = timestamp_str.split(':')
-        if len(parts) == 3:
-            # HH:MM:SS
-            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-        elif len(parts) == 2:
-            # MM:SS
-            seconds = int(parts[0]) * 60 + int(parts[1])
-        else:
-            continue
-        parsed.append({
-            'title': title,
-            'start_time': float(seconds),
-            'end_time': 0.0,  # Will be filled below
-        })
-
-    # Compute end_time from next chapter's start_time
-    for i in range(len(parsed) - 1):
-        parsed[i]['end_time'] = parsed[i + 1]['start_time']
-
-    # Last chapter gets end_time = 0.0 (unknown duration, consistent with yt-dlp)
-
-    return parsed
+    chapters = _parse_chapters(description)
+    # Convert None end_time to 0.0 for yt-dlp compatibility
+    for ch in chapters:
+        if ch.get('end_time') is None:
+            ch['end_time'] = 0.0
+    return chapters
 
 
 @dataclass

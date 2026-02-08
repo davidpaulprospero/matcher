@@ -7977,12 +7977,14 @@ class TestParseDescriptionChapters:
         assert parse_description_chapters("") == []
         assert parse_description_chapters(None) == []
 
-    def test_single_timestamp_returns_empty(self):
-        """Returns empty list for only one timestamp (not a chapter list)."""
+    def test_single_timestamp_returns_single_chapter(self):
+        """Single timestamp returns a single chapter (US-78-004 updated behavior)."""
         from src.caption_fetcher import parse_description_chapters
 
         description = "0:00 Only one chapter"
-        assert parse_description_chapters(description) == []
+        chapters = parse_description_chapters(description)
+        assert len(chapters) == 1
+        assert chapters[0] == {'title': 'Only one chapter', 'start_time': 0.0, 'end_time': 0.0}
 
     def test_malformed_timestamps_skipped(self):
         """Handles lines with no timestamp gracefully."""

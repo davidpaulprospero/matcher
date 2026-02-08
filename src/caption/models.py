@@ -8,6 +8,7 @@ and related data structures.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
@@ -93,6 +94,64 @@ def map_segments_to_chapters(
         seg.chapter_title = best_title
 
     return segments
+
+
+def parse_description_chapters(description_text: str) -> List[Dict[str, Any]]:
+    """Parse YouTube chapter timestamps from video description text.
+
+    Handles common YouTube timestamp formats:
+    - '0:00 Title'
+    - '00:00 Title'
+    - '0:00:00 Title'
+    - '[0:00] Title'
+
+    Args:
+        description_text: Video description text.
+
+    Returns:
+        List of {'title': str, 'start_time': float, 'end_time': float|None} dicts.
+        end_time is inferred from the next chapter's start_time.
+        Last chapter's end_time defaults to None.
+        Returns empty list if no timestamps found or description is empty.
+    """
+    if not description_text:
+        return []
+
+    # Match timestamps: 0:00, 00:00, 0:00:00, [0:00], [00:00], [0:00:00]
+    pattern = r'(?:^|\n)\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+(.+?)(?=\n|$)'
+    matches = re.findall(pattern, description_text)
+
+    if not matches:
+        return []
+
+    parsed: List[Dict[str, Any]] = []
+    for timestamp_str, title in matches:
+        title = title.strip()
+        if not title:
+            continue
+        parts = timestamp_str.split(':')
+        if len(parts) == 3:
+            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            seconds = int(parts[0]) * 60 + int(parts[1])
+        else:
+            continue
+        parsed.append({
+            'title': title,
+            'start_time': float(seconds),
+            'end_time': None,
+        })
+
+    if not parsed:
+        return []
+
+    # Infer end_time from next chapter's start_time
+    for i in range(len(parsed) - 1):
+        parsed[i]['end_time'] = parsed[i + 1]['start_time']
+
+    # Last chapter end_time stays None
+
+    return parsed
 
 
 @dataclass
