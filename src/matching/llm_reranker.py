@@ -7,10 +7,11 @@ Selects the best video segment from candidates using LLM semantic understanding.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import hashlib
 import logging
-from typing import TYPE_CHECKING, List, Tuple, Optional, Any
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional, Any
 
 if TYPE_CHECKING:
     from ..utils import SRTSegment
@@ -83,7 +84,8 @@ class LLMReranker:
         primary_provider: Optional['LLMProvider'] = None,
         secondary_provider: Optional['LLMProvider'] = None,
         context: Optional[str] = None,
-        negative_rules: Optional[List[str]] = None
+        negative_rules: Optional[List[str]] = None,
+        video_metadata: Optional[Dict[str, Dict[str, str]]] = None
     ) -> RerankResult:
         """
         Rerank candidates using LLM semantic understanding.
@@ -93,6 +95,8 @@ class LLMReranker:
             candidates: List of (video_segment, similarity) tuples
             context: Optional context string
             negative_rules: Optional list of things to avoid
+            video_metadata: Optional dict mapping source_file (video ID) to
+                {"title": str, "description": str} for context enrichment
 
         Returns:
             RerankResult with selected index, confidence, and reasoning
@@ -100,8 +104,13 @@ class LLMReranker:
         if not candidates:
             return RerankResult(selected_idx=0, confidence=0.0, reasoning="No candidates provided")
 
-        # Check cache first
-        cache_key = self._get_cache_key(voiceover_text, candidates)
+        # Enrich candidates with video context for LLM prompt (US-70-007)
+        enriched_candidates = self._enrich_candidates_with_context(
+            candidates[:5], video_metadata
+        )
+
+        # Check cache first (uses enriched text for cache key)
+        cache_key = self._get_cache_key(voiceover_text, enriched_candidates)
         cached = self._get_cached_response(cache_key)
         if cached:
             return RerankResult(
@@ -119,10 +128,10 @@ class LLMReranker:
                 reasoning=f"Embedding similarity only (sim={embedding_sim:.2f})"
             )
 
-        # Call primary provider
+        # Call primary provider with enriched candidates
         try:
             results = primary_provider.match_batch(
-                [(voiceover_text, candidates[:5])],
+                [(voiceover_text, enriched_candidates)],
                 context=context,
                 negative_rules=negative_rules
             )
@@ -133,7 +142,7 @@ class LLMReranker:
             if confidence < self.config.ambiguous_threshold and secondary_provider:
                 logger.debug(f"Ambiguous match ({confidence:.2f}), using secondary LLM")
                 secondary_results = secondary_provider.match_batch(
-                    [(voiceover_text, candidates[:5])],
+                    [(voiceover_text, enriched_candidates)],
                     context=context,
                     negative_rules=negative_rules
                 )
@@ -170,6 +179,59 @@ class LLMReranker:
                 confidence=0.60,
                 reasoning=f"LLM fallback (emb_sim={embedding_sim:.2f})"
             )
+
+    @staticmethod
+    def _build_video_context(title: str, description: str) -> str:
+        """Build video context string from title and description.
+
+        Format: 'Video context: {title}. {first_sentence}'
+        Returns empty string if no title/description available.
+        """
+        if not title and not description:
+            return ""
+
+        parts = []
+        if title:
+            parts.append(title)
+        if description:
+            # Extract first sentence (up to 100 chars)
+            first_sentence = description.split('.')[0].strip()
+            if len(first_sentence) > 100:
+                first_sentence = first_sentence[:97] + "..."
+            if first_sentence:
+                parts.append(first_sentence)
+
+        return "Video context: " + ". ".join(parts)
+
+    def _enrich_candidates_with_context(
+        self,
+        candidates: List[Tuple['SRTSegment', float]],
+        video_metadata: Optional[Dict[str, Dict[str, str]]] = None
+    ) -> List[Tuple['SRTSegment', float]]:
+        """Enrich candidate segments with video title/description context (US-70-007).
+
+        Creates shallow copies of SRTSegments with enriched text that includes
+        video context prefix when metadata is available. Falls back to original
+        text when no metadata exists for a candidate.
+        """
+        if not video_metadata:
+            return candidates
+
+        enriched = []
+        for seg, sim in candidates:
+            meta = video_metadata.get(seg.source_file, {})
+            title = meta.get('title', '')
+            description = meta.get('description', '')
+            video_context = self._build_video_context(title, description)
+
+            if video_context:
+                enriched_seg = copy.copy(seg)
+                enriched_seg.text = f"[{video_context}] {seg.text}"
+                enriched.append((enriched_seg, sim))
+            else:
+                enriched.append((seg, sim))
+
+        return enriched
 
     def _get_cache_key(self, voiceover_text: str, candidates: List[Tuple['SRTSegment', float]]) -> str:
         """Generate cache key for LLM response."""

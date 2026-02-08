@@ -13,6 +13,7 @@ class MockSRTSegment:
     text: str
     start: float = 0.0
     end: float = 1.0
+    source_file: str = ""
 
 
 class MockLLMProvider:
@@ -441,3 +442,164 @@ class TestLLMRerankerSpreadCalibration:
         assert config.clear_winner_threshold == 0.20
         assert config.close_spread_factor == 0.9
         assert config.clear_winner_factor == 1.1
+
+
+class TestLLMRerankerVideoContext:
+    """Tests for US-70-007: video title/description context enrichment."""
+
+    def test_build_video_context_with_title_and_description(self):
+        """Verify context string includes title and first sentence of description."""
+        result = LLMReranker._build_video_context(
+            "Solar Energy Explained",
+            "This video covers the basics of solar power. It also discusses costs."
+        )
+        assert result == "Video context: Solar Energy Explained. This video covers the basics of solar power"
+
+    def test_build_video_context_title_only(self):
+        """Verify context string works with title only."""
+        result = LLMReranker._build_video_context("Solar Energy Explained", "")
+        assert result == "Video context: Solar Energy Explained"
+
+    def test_build_video_context_description_only(self):
+        """Verify context string works with description only."""
+        result = LLMReranker._build_video_context(
+            "", "This video covers the basics of solar power."
+        )
+        assert result == "Video context: This video covers the basics of solar power"
+
+    def test_build_video_context_empty(self):
+        """Verify empty string returned when no title or description."""
+        result = LLMReranker._build_video_context("", "")
+        assert result == ""
+
+    def test_build_video_context_long_description_truncated(self):
+        """Verify first sentence longer than 100 chars is truncated."""
+        long_sentence = "A" * 150 + ". Second sentence."
+        result = LLMReranker._build_video_context("Title", long_sentence)
+        # First sentence is 150 chars, gets truncated to 97 + "..."
+        assert "..." in result
+        assert len(result) < 200  # Reasonable total length
+
+    def test_enrich_candidates_with_metadata(self):
+        """Verify candidates are enriched with video context prefix."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment("caption text about panels", source_file="vid123"), 0.9),
+            (MockSRTSegment("another caption", source_file="vid456"), 0.8),
+        ]
+
+        video_metadata = {
+            "vid123": {"title": "Solar Energy", "description": "How solar panels work."},
+            "vid456": {"title": "Wind Power", "description": ""},
+        }
+
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        assert len(enriched) == 2
+        assert enriched[0][0].text.startswith("[Video context: Solar Energy. How solar panels work]")
+        assert "caption text about panels" in enriched[0][0].text
+        assert enriched[1][0].text.startswith("[Video context: Wind Power]")
+        assert "another caption" in enriched[1][0].text
+
+    def test_enrich_candidates_no_metadata_fallback(self):
+        """Verify candidates unchanged when no metadata provided."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment("caption text", source_file="vid123"), 0.9),
+        ]
+
+        enriched = reranker._enrich_candidates_with_context(candidates, None)
+
+        assert enriched[0][0].text == "caption text"
+
+    def test_enrich_candidates_partial_metadata(self):
+        """Verify only matching candidates get enriched."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment("caption 1", source_file="vid123"), 0.9),
+            (MockSRTSegment("caption 2", source_file="vid999"), 0.8),
+        ]
+
+        video_metadata = {
+            "vid123": {"title": "Known Video", "description": ""},
+        }
+
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        assert "[Video context:" in enriched[0][0].text
+        assert enriched[1][0].text == "caption 2"  # No metadata, unchanged
+
+    def test_rerank_passes_enriched_candidates_to_provider(self):
+        """Verify enriched candidates are passed to LLM provider."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+        provider = MockLLMProvider()
+
+        candidates = [
+            (MockSRTSegment("solar panel footage", source_file="vid123"), 0.9),
+            (MockSRTSegment("wind turbine footage", source_file="vid456"), 0.8),
+        ]
+
+        video_metadata = {
+            "vid123": {"title": "Solar Energy Guide", "description": "Complete guide to solar."},
+        }
+
+        reranker.rerank(
+            voiceover_text="renewable energy sources",
+            candidates=candidates,
+            primary_provider=provider,
+            video_metadata=video_metadata
+        )
+
+        batch = provider.last_call_args['batch']
+        enriched_candidates = batch[0][1]
+        # First candidate should be enriched
+        assert "[Video context:" in enriched_candidates[0][0].text
+        assert "Solar Energy Guide" in enriched_candidates[0][0].text
+        # Second candidate has no metadata, unchanged
+        assert enriched_candidates[1][0].text == "wind turbine footage"
+
+    def test_rerank_without_metadata_falls_back(self):
+        """Verify rerank works normally when no video_metadata provided."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+        provider = MockLLMProvider()
+
+        candidates = [
+            (MockSRTSegment("caption text", source_file="vid123"), 0.9),
+        ]
+
+        reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        batch = provider.last_call_args['batch']
+        # Candidate text should be unchanged
+        assert batch[0][1][0][0].text == "caption text"
+
+    def test_cache_key_differs_with_video_context(self):
+        """Verify cache key changes when video context is added."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment("caption text", source_file="vid123"), 0.9),
+        ]
+
+        key_without = reranker._get_cache_key("voiceover", candidates)
+
+        # Enrich candidates
+        video_metadata = {"vid123": {"title": "Solar Energy", "description": ""}}
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        key_with = reranker._get_cache_key("voiceover", enriched)
+
+        assert key_without != key_with

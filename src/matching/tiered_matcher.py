@@ -123,7 +123,8 @@ class TieredMatcher:
     - llm_providers.py for LLM interactions
     """
 
-    def __init__(self, config: Optional['Config'] = None, cache: Optional[CacheManager] = None, video_topics: Optional[Dict[str, VideoTopics]] = None):
+    def __init__(self, config: Optional['Config'] = None, cache: Optional[CacheManager] = None, video_topics: Optional[Dict[str, VideoTopics]] = None,
+                 video_metadata: Optional[Dict[str, Dict[str, str]]] = None):
         """
         Initialize TieredMatcher.
 
@@ -131,10 +132,13 @@ class TieredMatcher:
             config: Configuration object (uses get_config() if None)
             cache: Cache manager for LLM responses
             video_topics: Dict mapping video paths to VideoTopics for chapter matching
+            video_metadata: Optional dict mapping source_file (video ID) to
+                {"title": str, "description": str} for LLM reranker context
         """
         self.config = config or get_config()
         self.cache = cache
         self.video_topics = video_topics or {}
+        self.video_metadata = video_metadata or {}
         mc = self.config.matching
 
         # Matching thresholds
@@ -960,7 +964,8 @@ class TieredMatcher:
             primary_provider=self.primary_provider,
             secondary_provider=self.secondary_provider,
             context=context,
-            negative_rules=negative_rules
+            negative_rules=negative_rules,
+            video_metadata=self.video_metadata
         )
         selected_idx = rerank_result.selected_idx
         confidence = rerank_result.confidence

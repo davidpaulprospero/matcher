@@ -40,7 +40,8 @@ def match_all_segments(
     face_preference: str = "neutral",
     video_topics: Optional[Dict[str, 'VideoTopics']] = None,
     location_chapters: Optional[List['LocationChapter']] = None,
-    video_locations: Optional[Dict[str, 'GeoLocation']] = None
+    video_locations: Optional[Dict[str, 'GeoLocation']] = None,
+    video_metadata: Optional[Dict[str, Dict[str, str]]] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -86,7 +87,8 @@ def match_all_segments(
     # Import TieredMatcher here to avoid circular import
     from .tiered_matcher import TieredMatcher
 
-    matcher = TieredMatcher(config, cache, video_topics=video_topics)
+    matcher = TieredMatcher(config, cache, video_topics=video_topics,
+                            video_metadata=video_metadata)
 
     # Set up location-aware matching if provided
     if location_chapters:
