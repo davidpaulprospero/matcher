@@ -156,7 +156,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Created src/chapter_detection/bridge.py with listicle_groups_to_chapters, merge_chapters, build_unified_chapters, build_segment_chapter_map. Integrated _build_unified_chapters into match stage after listicle detection. YouTube chapters take precedence for overlapping ranges. 27 unit tests in test_chapter_bridge.py all pass."
+                            "notes":  "All 5 criteria verified. 32 unit tests pass covering conversion, topic_keywords population, merge with overlap precedence, unified interface, and segment chapter map."
                         },
                         {
                             "id":  "US-71-011",
