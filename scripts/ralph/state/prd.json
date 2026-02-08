@@ -43,7 +43,7 @@
                                                        "Unit tests verify extraction from mock info_dict with all fields present, partially present, and fully absent"
                                                    ],
                             "passes":  true,
-                            "notes":  "All 6/6 criteria verified. 13 tests passing: truncation (500 chars default), chapter extraction (list of dicts), tag extraction (list of strings), None/missing field defaults, partial info_dict, corrupted JSON, --write-info-json flag in command."
+                            "notes":  "All 6 criteria verified. Implementation in caption_fetcher.py lines 5032 (--write-info-json flag), 5135-5142 (info.json reading + enrich_with_metadata), 2284-2336 (extract_video_metadata_from_info_dict). 13 tests pass in test_caption_metadata_enrichment_us74_002.py covering all/partial/absent fields, truncation, corrupted JSON, and command flag verification."
                         },
                         {
                             "id":  "US-74-003",
