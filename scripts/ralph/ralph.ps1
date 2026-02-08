@@ -550,6 +550,16 @@ function Invoke-ClaudeForStory {
             Write-Host "    Pre-flight: $StoryId already auto-completed this session - skipping" -ForegroundColor Yellow
             return $true
         }
+
+        # Fast path: notes say "Pre-implemented" — skip git/LLM check entirely
+        $storyNotes = if ($storyObj.notes) { $storyObj.notes } else { "" }
+        if ($storyNotes -match '[Pp]re-implemented') {
+            Write-Host "    Pre-flight: $StoryId notes indicate pre-implemented - auto-completing" -ForegroundColor Green
+            Complete-StoryAutomatically -StoryId $StoryId -Story $storyObj -Reason "pre-implemented-in-notes"
+            $script:AutoCompletedStories[$StoryId] = $true
+            return $true
+        }
+
         $alreadyDone = Test-StoryAlreadyCommitted -StoryId $StoryId -Story $storyObj
         if ($alreadyDone) {
             Write-Host "    Pre-flight: $StoryId already committed in git - auto-completing" -ForegroundColor Green
