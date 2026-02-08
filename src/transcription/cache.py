@@ -170,6 +170,40 @@ class TranscriptCache:
         key = f"{path.name}:{size}"
         return hashlib.md5(key.encode()).hexdigest()
 
+    def validate_entry(self, segments: List[dict], video_id: str = "") -> Optional[str]:
+        """
+        Validate a cache entry's segments for integrity.
+
+        Args:
+            segments: List of segment dicts with 'start', 'end', 'text'
+            video_id: Optional identifier for logging
+
+        Returns:
+            None if valid, or a string describing the validation failure
+        """
+        if not segments:
+            return "empty segments list"
+
+        for i, seg in enumerate(segments):
+            if not isinstance(seg, dict):
+                return f"segment {i} is not a dict"
+            text = seg.get('text', '')
+            if not text or not str(text).strip():
+                return f"segment {i} has empty text"
+            start = seg.get('start', seg.get('start_time'))
+            end = seg.get('end', seg.get('end_time'))
+            if start is None or end is None:
+                return f"segment {i} missing start_time or end_time"
+            try:
+                start_f = float(start)
+                end_f = float(end)
+            except (TypeError, ValueError):
+                return f"segment {i} has non-numeric start/end times"
+            if end_f < start_f:
+                return f"segment {i} has end_time ({end_f}) < start_time ({start_f})"
+
+        return None
+
     def get(self, video_path: str) -> Optional[List[dict]]:
         """
         Get cached transcript for a video.
@@ -238,7 +272,16 @@ class TranscriptCache:
                         'text': seg.get('text', '')
                     })
 
-            return normalized if normalized else None
+            if not normalized:
+                return None
+
+            # Validate entry integrity
+            reason = self.validate_entry(normalized, video_id=Path(video_path).name)
+            if reason:
+                logger.warning(f"Discarding invalid cache entry for {Path(video_path).name}: {reason}")
+                return None
+
+            return normalized
 
         except json.JSONDecodeError as e:
             logger.warning(f"Corrupt cache file {cache_file}: {e}")
@@ -423,6 +466,7 @@ class TranscriptCache:
 
         imported_count = 0
         skipped_duplicates = 0
+        skipped_invalid = 0
 
         # Collect existing source files to avoid duplicates
         existing_sources = set(self._source_map.keys())
@@ -438,6 +482,20 @@ class TranscriptCache:
                 try:
                     with open(cache_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
+
+                    # Extract segments for validation
+                    if isinstance(data, list):
+                        raw_segments = data
+                    elif isinstance(data, dict):
+                        raw_segments = data.get('segments', data.get('transcripts', []))
+                    else:
+                        raw_segments = []
+
+                    # Validate entry integrity before importing
+                    reason = self.validate_entry(raw_segments, video_id=cache_file.stem)
+                    if reason:
+                        skipped_invalid += 1
+                        continue
 
                     # Extract source_file from the data
                     source_file = None
@@ -491,6 +549,9 @@ class TranscriptCache:
                 except Exception as e:
                     logger.warning(f"Unexpected {type(e).__name__} importing {cache_file}: {e}")
                     continue
+
+        if skipped_invalid > 0:
+            logger.warning(f"Transcript cache warmup: skipped {skipped_invalid} invalid entries from {project_dir}")
 
         if imported_count > 0 or skipped_duplicates > 0:
             logger.info(f"Transcript cache warmup: imported {imported_count} entries, "

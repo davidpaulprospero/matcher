@@ -115,13 +115,13 @@
         "Add test: custom whisper_num_workers value is passed to WhisperModel constructor",
         "Add test: custom whisper_cpu_threads value is passed to WhisperModel constructor"
       ],
-      "notes": "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/whisper_client.py (get_model() ~line 258-259), config.yaml. Currently num_workers=1 and cpu_threads=4 are hardcoded in WhisperModel init. Systems with more CPU cores could benefit from higher cpu_threads; num_workers=1 is correct for GPU serialization but should be documented."
+      "notes": "All 6 criteria verified. Config fields in core.py (lines 130-134), validation in __post_init__ (lines 203-215), WhisperClient wired at lines 269-270 of whisper_client.py, config.yaml updated, 12 tests passing in TestWhisperThreadingConfig."
     },
     {
       "id": "US-79-008",
       "title": "Replace print-based progress with structured logging in parallel processor",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Replace all print() calls in src/transcription/parallel_processor.py with logger.info() or logger.debug() calls using the module logger",
         "Ensure Phase 1 (audio extraction) progress uses logger.info at configurable intervals instead of every-10th-item hardcoded check",
@@ -129,13 +129,13 @@
         "Add a `progress_log_interval: int = 10` field to TranscriptionConfig controlling how often progress is logged (every N items)",
         "Add test: progress logging uses logger, not print, verified via caplog fixture"
       ],
-      "notes": "Tier: LOW (code quality). Files: src/transcription/parallel_processor.py (~lines 201-296). Currently Phase 2 progress uses print() with \\r for carriage return overwrite, which doesn't work in log files and mixes with structured logging output. The hardcoded `completed % 10 == 0` check should be configurable."
+      "notes": "Replaced all print() with logger.info/debug. Added progress_log_interval config field (default 10). Fixed pre-existing US-79-007 test assertions. 36/36 tests pass."
     },
     {
       "id": "US-79-009",
       "title": "Add cache warmup validation with integrity check",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add a validate_entry() method to TranscriptCache that checks a cached entry has non-empty segments list, valid start_time/end_time on each segment, and non-empty text",
         "Call validate_entry() during cache get() and discard invalid entries (log WARNING with video_id and reason)",
@@ -144,7 +144,7 @@
         "Add test: cache entry with segments missing text field is discarded on get()",
         "Add test: warmup_from_project skips invalid entries and logs count"
       ],
-      "notes": "Tier: LOW (reliability). Files: src/transcription/cache.py (get() ~lines 168-240, warmup_from_project() ~lines 387-477). Currently cache entries are returned without validation. Corrupt or partial cache entries (e.g., from interrupted writes) can propagate empty or malformed segments downstream, causing subtle matching failures."
+      "notes": "Done. Added validate_entry() method checking non-empty segments, valid start/end times, non-empty text. Wired into get() (discards with WARNING log) and warmup_from_project() (skips with count summary). 12 tests in test_transcript_cache_validation.py all pass."
     },
     {
       "id": "US-79-010",
