@@ -19,6 +19,8 @@ from src.chapter_detection.listicle_detector import (
     _detect_ordinal,
     _detect_numbered,
     _detect_transition,
+    _normalize_marker_sequence,
+    _extract_marker_position,
 )
 from src.chapter_detection.models import ListicleGroup
 
@@ -589,3 +591,82 @@ class TestMidSegmentDetection:
         assert len(groups) == 2
         assert '#1' in groups[0].item_label or '1' in groups[0].item_label
         assert '#2' in groups[1].item_label or '2' in groups[1].item_label
+
+
+# ── Mixed numbering normalization ─────────────────────────
+
+class TestMixedNumberingNormalization:
+    def test_mixed_ordinal_numbered_hash_normalized(self):
+        """'first', '#2', 'third' produces groups with group_ids 0, 1, 2 in correct order."""
+        segments = _make_segments([
+            "First, the beach is stunning",
+            "Crystal clear waters",
+            "#2 The mountain village",
+            "Traditional architecture",
+            "Third, the ancient temple",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        # After normalization: first(1) → 0, #2(2) → 1, third(3) → 2
+        assert groups[0].group_id == 0
+        assert groups[0].item_label == 'first'
+        assert groups[1].group_id == 1
+        assert '#2' in groups[1].item_label or '2' in groups[1].item_label
+        assert groups[2].group_id == 2
+        assert groups[2].item_label == 'third'
+
+    def test_transition_markers_preserve_original_order(self):
+        """Purely transition-based markers preserve original detection order."""
+        segments = _make_segments([
+            "Next up is the harbor",
+            "Beautiful boats everywhere",
+            "Moving on to the old town",
+            "Cobblestone streets abound",
+            "Let's talk about the food scene",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        # All transitions — no position inferable, order preserved
+        assert groups[0].group_id == 0
+        assert groups[1].group_id == 1
+        assert groups[2].group_id == 2
+        assert 'next up' in groups[0].item_label.lower()
+        assert 'moving on to' in groups[1].item_label.lower()
+        assert "let's talk about" in groups[2].item_label.lower()
+
+    def test_gap_numbering_preserves_relative_order(self):
+        """Gap in numbering (e.g., '#1', '#3', '#5') preserves relative order without phantoms."""
+        segments = _make_segments([
+            "#1 The first attraction",
+            "Details about it",
+            "#3 The third attraction",
+            "More details",
+            "#5 The fifth attraction",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3  # No phantom groups inserted for #2 and #4
+        # Relative order preserved: #1 < #3 < #5
+        assert groups[0].group_id == 0
+        assert groups[1].group_id == 1
+        assert groups[2].group_id == 2
+        assert '1' in groups[0].item_label
+        assert '3' in groups[1].item_label
+        assert '5' in groups[2].item_label
+
+    def test_extract_marker_position_ordinals(self):
+        """_extract_marker_position correctly maps ordinal words."""
+        assert _extract_marker_position('ordinal', 'first') == 1
+        assert _extract_marker_position('ordinal', 'second') == 2
+        assert _extract_marker_position('ordinal', 'third') == 3
+        assert _extract_marker_position('ordinal', 'finally') == -1
+
+    def test_extract_marker_position_numbered(self):
+        """_extract_marker_position correctly parses numbered labels."""
+        assert _extract_marker_position('numbered', '#2') == 2
+        assert _extract_marker_position('numbered', 'Step 3') == 3
+        assert _extract_marker_position('numbered', 'Number one') == 1
+
+    def test_extract_marker_position_transition(self):
+        """_extract_marker_position returns None for transitions."""
+        assert _extract_marker_position('transition', 'Next up') is None
+        assert _extract_marker_position('transition', 'Moving on to') is None

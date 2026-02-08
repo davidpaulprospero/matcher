@@ -273,6 +273,119 @@ def detect_list_header(text: str) -> Optional[int]:
     return None
 
 
+def _extract_marker_position(marker_type: str, label: str) -> Optional[int]:
+    """
+    Extract a numeric position from a marker label.
+
+    For ordinal markers, uses ORDINAL_WORDS mapping (e.g., 'first' → 1).
+    For numbered markers, parses digits or number words from the label.
+    Terminal markers (finally, lastly, last) return -1.
+    Transition markers return None (no position inferable).
+
+    Returns:
+        Positive int for positioned markers, -1 for terminal markers,
+        None if no position can be inferred.
+    """
+    if marker_type == 'ordinal':
+        return ORDINAL_WORDS.get(label.lower())
+
+    if marker_type == 'numbered':
+        # Try to find a digit in the label (e.g., '#2', 'Step 3')
+        digit_match = re.search(r'(\d+)', label)
+        if digit_match:
+            return int(digit_match.group(1))
+        # Try number words (e.g., 'Step two', 'Number one')
+        for word, num in NUMBER_WORDS.items():
+            if word in label.lower():
+                return num
+
+    # Transition markers have no inherent position
+    return None
+
+
+def _normalize_marker_sequence(groups: List['ListicleGroup']) -> List['ListicleGroup']:
+    """
+    Normalize mixed marker numbering to a consistent 0-based sequence.
+
+    When markers come from mixed types (ordinals, numbered, transitions),
+    their group_ids may not reflect logical order. This function:
+    1. Extracts numeric positions from labels where possible
+    2. Sorts groups by inferred position (positioned markers first)
+    3. Appends unpositioned markers (transitions) in original order
+    4. Reassigns group_id to a clean 0-based sequence
+
+    Terminal markers (finally, lastly) are always placed last.
+    Groups where no position can be inferred keep their relative order.
+    """
+    if not groups:
+        return groups
+
+    positioned: List[Tuple[int, int, ListicleGroup]] = []  # (position, original_idx, group)
+    terminal: List[Tuple[int, ListicleGroup]] = []          # (original_idx, group)
+    unpositioned: List[Tuple[int, ListicleGroup]] = []      # (original_idx, group)
+
+    for idx, group in enumerate(groups):
+        pos = _extract_marker_position(group.marker_type, group.item_label)
+        if pos is None:
+            unpositioned.append((idx, group))
+        elif pos == -1:
+            terminal.append((idx, group))
+        else:
+            positioned.append((pos, idx, group))
+
+    # If no positioned markers exist, nothing to normalize
+    if not positioned:
+        return groups
+
+    # Sort positioned markers by their inferred numeric position,
+    # breaking ties by original detection order
+    positioned.sort(key=lambda x: (x[0], x[1]))
+
+    # Build final ordered list:
+    # 1. Positioned markers in sorted order
+    # 2. Unpositioned markers in original order (interleaved by original position)
+    # 3. Terminal markers at the end
+    result: List[ListicleGroup] = []
+
+    # Merge positioned and unpositioned by original index to maintain
+    # relative ordering when both types are present
+    pos_iter = iter(positioned)
+    unpos_iter = iter(unpositioned)
+
+    current_pos = next(pos_iter, None)
+    current_unpos = next(unpos_iter, None)
+
+    while current_pos is not None or current_unpos is not None:
+        if current_pos is not None and current_unpos is not None:
+            # Positioned markers go in their sorted position;
+            # unpositioned markers fill gaps based on original order
+            # Strategy: place all positioned first, then unpositioned
+            result.append(current_pos[2])
+            current_pos = next(pos_iter, None)
+        elif current_pos is not None:
+            result.append(current_pos[2])
+            current_pos = next(pos_iter, None)
+        else:
+            result.append(current_unpos[1])
+            current_unpos = next(unpos_iter, None)
+
+    # Append remaining unpositioned
+    while current_unpos is not None:
+        result.append(current_unpos[1])
+        current_unpos = next(unpos_iter, None)
+
+    # Terminal markers always go last, in original order
+    terminal.sort(key=lambda x: x[0])
+    for _, group in terminal:
+        result.append(group)
+
+    # Reassign group_id to clean 0-based sequence
+    for new_id, group in enumerate(result):
+        group.group_id = new_id
+
+    return result
+
+
 def detect_listicle_groups(
     segments: List[Any],
     max_chars_offset: int = 50,
@@ -390,6 +503,9 @@ def detect_listicle_groups(
             expected_count=expected_count,
         )
         groups.append(group)
+
+    # Normalize mixed marker numbering to consistent sequence
+    groups = _normalize_marker_sequence(groups)
 
     # Log warning if detected count differs from expected by more than 1
     if expected_count is not None and abs(len(groups) - expected_count) > 1:

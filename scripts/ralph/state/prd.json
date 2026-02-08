@@ -109,7 +109,7 @@
       "id": "US-76-007",
       "title": "Normalize mixed listicle numbering to consistent sequence",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "When detect_listicle_groups finds mixed marker types (e.g., 'first', '#2', 'third'), it normalizes group_id to a consistent 0-based sequence regardless of detected label",
         "A new _normalize_marker_sequence function resolves ordinal words to numeric positions and sorts groups by detected position when possible",
@@ -118,7 +118,7 @@
         "Unit test: purely transition-based markers preserve original detection order",
         "Unit test: gap in numbering (e.g., '#1', '#3', '#5') preserves relative order without inserting phantom groups"
       ],
-      "notes": "Tier: robustness. Source files: src/chapter_detection/listicle_detector.py (lines 276-300 where groups are built -- add normalization pass after group creation, lines 22-29 ORDINAL_WORDS mapping already exists for position lookup). The current code assigns group_id=idx (enumeration index) which works for single-type markers but fails for mixed sequences where a transition marker at position 2 should logically be item #2 based on surrounding ordinals. Test file: tests/test_listicle_detector.py (test_mixed_numbering_styles at line 219 exists but doesn't test normalization)."
+      "notes": "Added _extract_marker_position and _normalize_marker_sequence functions. Normalization resolves ordinals to numeric positions, sorts by position, preserves transition order, places terminal markers last. 6 new tests all passing (67 total)."
     },
     {
       "id": "US-76-008",
