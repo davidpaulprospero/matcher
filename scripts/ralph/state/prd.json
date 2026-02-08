@@ -175,9 +175,9 @@
                                                        "Add config field to IterativeMatchingConfig in src/config/sections/matching.py",
                                                        "Unit test: verify query extraction from sample descriptions, empty description handling, and config toggle"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier 5 (Enhanced Iterative Matching). Source files: src/iterative_match/gap_analyzer.py, src/config/sections/matching.py (IterativeMatchingConfig), config.yaml. Depends on US-72-002 for description data being available. Simple regex-based phrase extraction is sufficient — no need for NLP libraries."
+                            "notes":  "Added derive_queries_from_descriptions() method to gap_analyzer.py - extracts noun phrases via regex (capitalized sequences + quoted phrases) from matched video descriptions, scores by relevance to gap text. Config toggle use_description_queries already existed. 10 unit tests added, all 116 tests pass."
                         },
                         {
                             "id":  "US-72-012",
