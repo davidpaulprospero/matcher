@@ -93,8 +93,10 @@ class TranscriptCache:
                 try:
                     shutil.copy2(cache_file, dest)
                     migrated += 1
-                except Exception as e:
+                except (OSError, PermissionError) as e:
                     logger.debug(f"Could not migrate {cache_file.name}: {e}")
+                except Exception as e:
+                    logger.warning(f"Unexpected {type(e).__name__} migrating {cache_file.name}: {e}")
 
         if migrated > 0:
             logger.info(f"Migrated {migrated} transcript cache file(s) from transcripts/ to transcriptions/")
@@ -145,7 +147,10 @@ class TranscriptCache:
                         if video_id and video_id not in self._video_id_map:
                             self._video_id_map[video_id] = cache_file
 
+                except (json.JSONDecodeError, OSError, PermissionError, KeyError, TypeError):
+                    continue
                 except Exception as e:
+                    logger.warning(f"Unexpected {type(e).__name__} reading cache file {cache_file.name}: {e}")
                     continue
 
         logger.debug(f"Built source map with {len(self._source_map)} entries, {len(self._video_id_map)} video IDs")
@@ -235,8 +240,14 @@ class TranscriptCache:
 
             return normalized if normalized else None
 
-        except Exception as e:
+        except json.JSONDecodeError as e:
+            logger.warning(f"Corrupt cache file {cache_file}: {e}")
+            return None
+        except (FileNotFoundError, PermissionError, OSError) as e:
             logger.debug(f"Cache read error: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected {type(e).__name__} reading cache {cache_file}: {e}")
             return None
 
     def set(self, video_path: str, segments: List[dict]):
@@ -270,8 +281,10 @@ class TranscriptCache:
             self._source_map[video_path_resolved] = cache_file
             self._source_map[Path(video_path).name] = cache_file
 
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.debug(f"Could not cache transcript: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected {type(e).__name__} caching transcript: {e}")
 
     def cleanup_orphaned(self) -> int:
         """
@@ -307,7 +320,10 @@ class TranscriptCache:
                         cache_file.unlink()
                         removed += 1
 
-                except Exception:
+                except (json.JSONDecodeError, OSError, PermissionError, FileNotFoundError):
+                    continue
+                except Exception as e:
+                    logger.warning(f"Unexpected {type(e).__name__} during orphan cleanup of {cache_file.name}: {e}")
                     continue
 
         if removed > 0:
@@ -343,7 +359,10 @@ class TranscriptCache:
                     if mtime < cutoff_time:
                         cache_file.unlink()
                         removed += 1
-                except Exception:
+                except (OSError, FileNotFoundError):
+                    continue
+                except Exception as e:
+                    logger.warning(f"Unexpected {type(e).__name__} during stale cleanup of {cache_file.name}: {e}")
                     continue
 
         if removed > 0:
@@ -466,8 +485,11 @@ class TranscriptCache:
 
                     imported_count += 1
 
-                except Exception as e:
+                except (json.JSONDecodeError, OSError, PermissionError) as e:
                     logger.debug(f"Could not import {cache_file}: {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Unexpected {type(e).__name__} importing {cache_file}: {e}")
                     continue
 
         if imported_count > 0 or skipped_duplicates > 0:

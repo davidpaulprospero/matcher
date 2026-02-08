@@ -1,193 +1,193 @@
-﻿{
-    "sprintNumber":  79,
-    "focusArea":  "transcription",
-    "branchName":  "ralph/sprint-79",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-79-001",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027transcription\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027transcription\u0027",
-                                                       "Add stories US-79-002 through US-79-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-79-NNN to be unique across sprints",
-                                                       "Mark this story (US-79-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Generate sprint stories for transcription focus area",
-                            "notes":  "Seed story - generated 11 transcription improvement stories covering GPU timeout safety, config wiring, retry budget, cache age management, error specificity, Whisper worker config, parallel processor progress logging, cache warmup validation, audio extraction async optimization, transcription metrics dashboard, and delta index staleness detection."
-                        },
-                        {
-                            "id":  "US-79-002",
-                            "title":  "Add configurable timeout guard to Whisper GPU transcription",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add `gpu_transcription_timeout: int = 300` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 30",
-                                                       "Add `gpu_transcription_timeout` to config.yaml under transcription section with comment explaining default",
-                                                       "Wrap `model.transcribe()` call in src/transcription/whisper_client.py `transcribe()` method with a threading.Timer-based timeout that raises TransientTranscriptionError on expiry",
-                                                       "When timeout fires, log a WARNING with video_id, elapsed time, and configured timeout value",
-                                                       "Add test: transcription that exceeds timeout raises TransientTranscriptionError",
-                                                       "Add test: transcription that completes within timeout returns segments normally"
-                                                   ],
-                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: a083b87 chore: [US-79-002] Mark as complete in prd.json"
-                        },
-                        {
-                            "id":  "US-79-003",
-                            "title":  "Wire audio_extraction_timeout config to utils.extract_audio function",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "In src/transcription/parallel_processor.py, pass config.transcription.audio_extraction_timeout to extract_audio() calls instead of relying on the default parameter value",
-                                                       "In src/transcription/parallel_processor.py transcribe_video() function, pass config timeout to extract_audio() call",
-                                                       "Verify that changing audio_extraction_timeout in config.yaml actually changes the FFmpeg subprocess timeout",
-                                                       "Add test: extract_audio uses config timeout value instead of hardcoded default",
-                                                       "Add test: parallel_processor passes config timeout to extract_audio calls"
-                                                   ],
-                            "notes":  "Wired audio_extraction_timeout from TranscriptionConfig to all 3 extract_audio() call sites in parallel_processor.py (transcribe_videos_parallel, transcribe_video, transcribe_voiceover_media). Added 5 new tests in TestConfigTimeoutPropagation. Fixed 18 pre-existing test failures from US-79-002."
-                        },
-                        {
-                            "id":  "US-79-004",
-                            "title":  "Add configurable max_retries to TranscriptionConfig",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add `max_retries: int = 2` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 0 and \u003c= 5",
-                                                       "Add `max_retries` to config.yaml under transcription section",
-                                                       "Update transcribe_video() in src/transcription/parallel_processor.py to read max_retries from config instead of hardcoded parameter default",
-                                                       "Add test: setting max_retries=0 in config disables retry (single attempt only)",
-                                                       "Add test: setting max_retries=3 in config allows up to 3 retry attempts after initial failure"
-                                                   ],
-                            "notes":  "Evidence gate: 3/5 criteria verified (60%). Minimum: 90%."
-                        },
-                        {
-                            "id":  "US-79-005",
-                            "title":  "Make cache max_age_days configurable in TranscriptionConfig",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add `cache_max_age_days: int = 30` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 1",
-                                                       "Add `cache_max_age_days` to config.yaml under transcription section",
-                                                       "Update cleanup_stale_entries() in src/transcription/cache.py to accept and use config value instead of hardcoded max_age_days=30 parameter default",
-                                                       "Add test: cache entries older than configured max_age_days are removed by cleanup",
-                                                       "Add test: cache entries newer than configured max_age_days are preserved by cleanup"
-                                                   ],
-                            "notes":  "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/cache.py (cleanup_stale_entries max_age_days param ~line 322), config.yaml. Currently cache expiry is hardcoded to 30 days. Different projects may need different retention (short test projects vs long-running production)."
-                        },
-                        {
-                            "id":  "US-79-006",
-                            "title":  "Replace broad exception handlers with specific exception types in transcription cache",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Replace `except Exception` in cache.py get() method (~lines 214-240) with specific exceptions: json.JSONDecodeError, FileNotFoundError, PermissionError, OSError",
-                                                       "Replace `except Exception` in cache.py set() method (~lines 264-274) with specific exceptions: OSError, PermissionError, json.JSONDecodeError",
-                                                       "Replace `except Exception` in cache.py cleanup methods (~lines 310-311, 346-347) with specific exceptions: OSError, FileNotFoundError",
-                                                       "Log at WARNING level (not DEBUG) for unexpected exception types that fall through, preserving the exception class name",
-                                                       "Add test: JSONDecodeError in cache get() returns None and logs at appropriate level",
-                                                       "Add test: PermissionError in cache set() is caught and logged without crashing"
-                                                   ],
-                            "notes":  "Tier: MEDIUM (error handling quality). Files: src/transcription/cache.py (~lines 96, 148, 214-240, 264-274, 310-311, 346-347, 469-471). Currently 7+ instances of bare `except Exception` with silent debug logs make it very hard to diagnose production issues. Specific exception types enable better debugging and prevent masking genuine bugs."
-                        },
-                        {
-                            "id":  "US-79-007",
-                            "title":  "Make Whisper num_workers and cpu_threads configurable",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add `whisper_num_workers: int = 1` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 1",
-                                                       "Add `whisper_cpu_threads: int = 4` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 1",
-                                                       "Add both fields to config.yaml under transcription section with comments explaining GPU serialization tradeoff",
-                                                       "Update WhisperModel initialization in src/transcription/whisper_client.py get_model() to use config values instead of hardcoded num_workers=1, cpu_threads=4",
-                                                       "Add test: custom whisper_num_workers value is passed to WhisperModel constructor",
-                                                       "Add test: custom whisper_cpu_threads value is passed to WhisperModel constructor"
-                                                   ],
-                            "notes":  "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/whisper_client.py (get_model() ~line 258-259), config.yaml. Currently num_workers=1 and cpu_threads=4 are hardcoded in WhisperModel init. Systems with more CPU cores could benefit from higher cpu_threads; num_workers=1 is correct for GPU serialization but should be documented."
-                        },
-                        {
-                            "id":  "US-79-008",
-                            "title":  "Replace print-based progress with structured logging in parallel processor",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Replace all print() calls in src/transcription/parallel_processor.py with logger.info() or logger.debug() calls using the module logger",
-                                                       "Ensure Phase 1 (audio extraction) progress uses logger.info at configurable intervals instead of every-10th-item hardcoded check",
-                                                       "Ensure Phase 2 (GPU transcription) progress uses logger.info instead of print with carriage return",
-                                                       "Add a `progress_log_interval: int = 10` field to TranscriptionConfig controlling how often progress is logged (every N items)",
-                                                       "Add test: progress logging uses logger, not print, verified via caplog fixture"
-                                                   ],
-                            "notes":  "Tier: LOW (code quality). Files: src/transcription/parallel_processor.py (~lines 201-296). Currently Phase 2 progress uses print() with \\r for carriage return overwrite, which doesn\u0027t work in log files and mixes with structured logging output. The hardcoded `completed % 10 == 0` check should be configurable."
-                        },
-                        {
-                            "id":  "US-79-009",
-                            "title":  "Add cache warmup validation with integrity check",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add a validate_entry() method to TranscriptCache that checks a cached entry has non-empty segments list, valid start_time/end_time on each segment, and non-empty text",
-                                                       "Call validate_entry() during cache get() and discard invalid entries (log WARNING with video_id and reason)",
-                                                       "Call validate_entry() during warmup_from_project() and skip invalid entries with a count summary log",
-                                                       "Add test: cache entry with empty segments list is discarded on get()",
-                                                       "Add test: cache entry with segments missing text field is discarded on get()",
-                                                       "Add test: warmup_from_project skips invalid entries and logs count"
-                                                   ],
-                            "notes":  "Tier: LOW (reliability). Files: src/transcription/cache.py (get() ~lines 168-240, warmup_from_project() ~lines 387-477). Currently cache entries are returned without validation. Corrupt or partial cache entries (e.g., from interrupted writes) can propagate empty or malformed segments downstream, causing subtle matching failures."
-                        },
-                        {
-                            "id":  "US-79-010",
-                            "title":  "Add transcription batch retry budget tracking",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Create a TranscriptionRetryBudget class (similar to CaptionRetryBudget) in src/transcription/retry_budget.py that tracks total attempts, failures, and cumulative backoff time across a batch",
-                                                       "Add `retry_budget_max_attempts: int = 50` and `retry_budget_max_backoff_seconds: float = 180.0` to TranscriptionConfig",
-                                                       "Integrate TranscriptionRetryBudget into transcribe_videos_parallel() to stop retrying when budget is exhausted, logging which videos were skipped",
-                                                       "Add budget summary to TranscriptionMetrics (total_attempts, failed_attempts, budget_exhausted_count)",
-                                                       "Add test: batch processing stops retrying individual videos when budget is exhausted",
-                                                       "Add test: budget summary is included in returned metrics"
-                                                   ],
-                            "notes":  "Tier: MEDIUM (reliability). Files: new src/transcription/retry_budget.py, src/transcription/parallel_processor.py (transcribe_videos_parallel ~lines 54-329), src/transcription/metrics.py, src/config/sections/core.py. Caption system has CaptionRetryBudget (src/caption/retry_budget.py) which prevents infinite retry loops. Transcription has no equivalent - a batch with many failing videos wastes time retrying endlessly within the hardcoded 2-retry limit per video, with no global budget."
-                        },
-                        {
-                            "id":  "US-79-011",
-                            "title":  "Add delta index staleness detection with automatic rebuild",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Add a check_staleness() method to DeltaIndex in src/transcription/delta_index.py that compares indexed video count against actual cache entries and returns (is_stale: bool, indexed_count: int, cache_count: int)",
-                                                       "When staleness is detected (cache has \u003e10% more entries than index), trigger automatic rebuild with a WARNING log",
-                                                       "Add staleness check to the start of transcribe_videos_parallel() before processing begins",
-                                                       "Add test: stale index (fewer entries than cache) triggers rebuild",
-                                                       "Add test: fresh index (matching or close to cache count) does not trigger rebuild"
-                                                   ],
-                            "notes":  "Tier: LOW (reliability). Files: src/transcription/delta_index.py, src/transcription/parallel_processor.py (~line 54-100). DeltaIndex tracks which videos have been transcribed for incremental processing. If the index file gets corrupted or out of sync with the actual cache (e.g., manual cache edits, interrupted writes), videos may be unnecessarily re-transcribed or skipped."
-                        },
-                        {
-                            "id":  "US-79-012",
-                            "title":  "Add transcription metrics summary to pipeline checkpoint",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "After transcribe_videos_parallel() completes, store TranscriptionMetrics summary dict in checkpoint.json under a \u0027transcription_metrics\u0027 key",
-                                                       "Summary must include: total_videos, cached_videos, transcribed_videos, failed_videos, total_duration_seconds, average_speed_ratio",
-                                                       "When resuming from checkpoint, log the previous transcription metrics at INFO level for comparison",
-                                                       "Add test: transcription metrics are persisted in checkpoint after batch processing",
-                                                       "Add test: resumed pipeline logs previous transcription metrics from checkpoint"
-                                                   ],
-                            "notes":  "Tier: LOW (observability). Files: src/transcription/metrics.py (TranscriptionMetrics class), src/transcription/parallel_processor.py (return_metrics=True path ~lines 300-329), src/checkpoint.py. Currently TranscriptionMetrics are computed and optionally returned but never persisted. After a pipeline run, there\u0027s no record of transcription performance. Persisting to checkpoint enables cross-run comparison and debugging slow transcription batches."
-                        }
-                    ]
+{
+  "sprintNumber": 79,
+  "focusArea": "transcription",
+  "branchName": "ralph/sprint-79",
+  "projectContext": {
+    "sourceDir": "src/",
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short"
+  },
+  "userStories": [
+    {
+      "id": "US-79-001",
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'transcription' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'transcription'",
+        "Add stories US-79-002 through US-79-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-79-NNN to be unique across sprints",
+        "Mark this story (US-79-001) as passes: true when done"
+      ],
+      "passes": true,
+      "priority": "high",
+      "title": "Generate sprint stories for transcription focus area",
+      "notes": "Seed story - generated 11 transcription improvement stories covering GPU timeout safety, config wiring, retry budget, cache age management, error specificity, Whisper worker config, parallel processor progress logging, cache warmup validation, audio extraction async optimization, transcription metrics dashboard, and delta index staleness detection."
+    },
+    {
+      "id": "US-79-002",
+      "title": "Add configurable timeout guard to Whisper GPU transcription",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add `gpu_transcription_timeout: int = 300` field to TranscriptionConfig in src/config/sections/core.py with validation >= 30",
+        "Add `gpu_transcription_timeout` to config.yaml under transcription section with comment explaining default",
+        "Wrap `model.transcribe()` call in src/transcription/whisper_client.py `transcribe()` method with a threading.Timer-based timeout that raises TransientTranscriptionError on expiry",
+        "When timeout fires, log a WARNING with video_id, elapsed time, and configured timeout value",
+        "Add test: transcription that exceeds timeout raises TransientTranscriptionError",
+        "Add test: transcription that completes within timeout returns segments normally"
+      ],
+      "notes": "Auto-completed by pre-flight check (git-commit-detected). Commit: a083b87 chore: [US-79-002] Mark as complete in prd.json"
+    },
+    {
+      "id": "US-79-003",
+      "title": "Wire audio_extraction_timeout config to utils.extract_audio function",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "In src/transcription/parallel_processor.py, pass config.transcription.audio_extraction_timeout to extract_audio() calls instead of relying on the default parameter value",
+        "In src/transcription/parallel_processor.py transcribe_video() function, pass config timeout to extract_audio() call",
+        "Verify that changing audio_extraction_timeout in config.yaml actually changes the FFmpeg subprocess timeout",
+        "Add test: extract_audio uses config timeout value instead of hardcoded default",
+        "Add test: parallel_processor passes config timeout to extract_audio calls"
+      ],
+      "notes": "Wired audio_extraction_timeout from TranscriptionConfig to all 3 extract_audio() call sites in parallel_processor.py (transcribe_videos_parallel, transcribe_video, transcribe_voiceover_media). Added 5 new tests in TestConfigTimeoutPropagation. Fixed 18 pre-existing test failures from US-79-002."
+    },
+    {
+      "id": "US-79-004",
+      "title": "Add configurable max_retries to TranscriptionConfig",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add `max_retries: int = 2` field to TranscriptionConfig in src/config/sections/core.py with validation >= 0 and <= 5",
+        "Add `max_retries` to config.yaml under transcription section",
+        "Update transcribe_video() in src/transcription/parallel_processor.py to read max_retries from config instead of hardcoded parameter default",
+        "Add test: setting max_retries=0 in config disables retry (single attempt only)",
+        "Add test: setting max_retries=3 in config allows up to 3 retry attempts after initial failure"
+      ],
+      "notes": "Evidence gate: 3/5 criteria verified (60%). Minimum: 90%."
+    },
+    {
+      "id": "US-79-005",
+      "title": "Make cache max_age_days configurable in TranscriptionConfig",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Add `cache_max_age_days: int = 30` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
+        "Add `cache_max_age_days` to config.yaml under transcription section",
+        "Update cleanup_stale_entries() in src/transcription/cache.py to accept and use config value instead of hardcoded max_age_days=30 parameter default",
+        "Add test: cache entries older than configured max_age_days are removed by cleanup",
+        "Add test: cache entries newer than configured max_age_days are preserved by cleanup"
+      ],
+      "notes": "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/cache.py (cleanup_stale_entries max_age_days param ~line 322), config.yaml. Currently cache expiry is hardcoded to 30 days. Different projects may need different retention (short test projects vs long-running production)."
+    },
+    {
+      "id": "US-79-006",
+      "title": "Replace broad exception handlers with specific exception types in transcription cache",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Replace `except Exception` in cache.py get() method (~lines 214-240) with specific exceptions: json.JSONDecodeError, FileNotFoundError, PermissionError, OSError",
+        "Replace `except Exception` in cache.py set() method (~lines 264-274) with specific exceptions: OSError, PermissionError, json.JSONDecodeError",
+        "Replace `except Exception` in cache.py cleanup methods (~lines 310-311, 346-347) with specific exceptions: OSError, FileNotFoundError",
+        "Log at WARNING level (not DEBUG) for unexpected exception types that fall through, preserving the exception class name",
+        "Add test: JSONDecodeError in cache get() returns None and logs at appropriate level",
+        "Add test: PermissionError in cache set() is caught and logged without crashing"
+      ],
+      "notes": "Replaced 7 bare except Exception handlers in cache.py with specific types (json.JSONDecodeError, OSError, PermissionError, FileNotFoundError, KeyError, TypeError). Added WARNING-level fallback for unexpected exceptions. Added 5 new tests in TestSpecificExceptionHandling class."
+    },
+    {
+      "id": "US-79-007",
+      "title": "Make Whisper num_workers and cpu_threads configurable",
+      "priority": "medium",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Add `whisper_num_workers: int = 1` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
+        "Add `whisper_cpu_threads: int = 4` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
+        "Add both fields to config.yaml under transcription section with comments explaining GPU serialization tradeoff",
+        "Update WhisperModel initialization in src/transcription/whisper_client.py get_model() to use config values instead of hardcoded num_workers=1, cpu_threads=4",
+        "Add test: custom whisper_num_workers value is passed to WhisperModel constructor",
+        "Add test: custom whisper_cpu_threads value is passed to WhisperModel constructor"
+      ],
+      "notes": "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/whisper_client.py (get_model() ~line 258-259), config.yaml. Currently num_workers=1 and cpu_threads=4 are hardcoded in WhisperModel init. Systems with more CPU cores could benefit from higher cpu_threads; num_workers=1 is correct for GPU serialization but should be documented."
+    },
+    {
+      "id": "US-79-008",
+      "title": "Replace print-based progress with structured logging in parallel processor",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Replace all print() calls in src/transcription/parallel_processor.py with logger.info() or logger.debug() calls using the module logger",
+        "Ensure Phase 1 (audio extraction) progress uses logger.info at configurable intervals instead of every-10th-item hardcoded check",
+        "Ensure Phase 2 (GPU transcription) progress uses logger.info instead of print with carriage return",
+        "Add a `progress_log_interval: int = 10` field to TranscriptionConfig controlling how often progress is logged (every N items)",
+        "Add test: progress logging uses logger, not print, verified via caplog fixture"
+      ],
+      "notes": "Tier: LOW (code quality). Files: src/transcription/parallel_processor.py (~lines 201-296). Currently Phase 2 progress uses print() with \\r for carriage return overwrite, which doesn't work in log files and mixes with structured logging output. The hardcoded `completed % 10 == 0` check should be configurable."
+    },
+    {
+      "id": "US-79-009",
+      "title": "Add cache warmup validation with integrity check",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Add a validate_entry() method to TranscriptCache that checks a cached entry has non-empty segments list, valid start_time/end_time on each segment, and non-empty text",
+        "Call validate_entry() during cache get() and discard invalid entries (log WARNING with video_id and reason)",
+        "Call validate_entry() during warmup_from_project() and skip invalid entries with a count summary log",
+        "Add test: cache entry with empty segments list is discarded on get()",
+        "Add test: cache entry with segments missing text field is discarded on get()",
+        "Add test: warmup_from_project skips invalid entries and logs count"
+      ],
+      "notes": "Tier: LOW (reliability). Files: src/transcription/cache.py (get() ~lines 168-240, warmup_from_project() ~lines 387-477). Currently cache entries are returned without validation. Corrupt or partial cache entries (e.g., from interrupted writes) can propagate empty or malformed segments downstream, causing subtle matching failures."
+    },
+    {
+      "id": "US-79-010",
+      "title": "Add transcription batch retry budget tracking",
+      "priority": "medium",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Create a TranscriptionRetryBudget class (similar to CaptionRetryBudget) in src/transcription/retry_budget.py that tracks total attempts, failures, and cumulative backoff time across a batch",
+        "Add `retry_budget_max_attempts: int = 50` and `retry_budget_max_backoff_seconds: float = 180.0` to TranscriptionConfig",
+        "Integrate TranscriptionRetryBudget into transcribe_videos_parallel() to stop retrying when budget is exhausted, logging which videos were skipped",
+        "Add budget summary to TranscriptionMetrics (total_attempts, failed_attempts, budget_exhausted_count)",
+        "Add test: batch processing stops retrying individual videos when budget is exhausted",
+        "Add test: budget summary is included in returned metrics"
+      ],
+      "notes": "Tier: MEDIUM (reliability). Files: new src/transcription/retry_budget.py, src/transcription/parallel_processor.py (transcribe_videos_parallel ~lines 54-329), src/transcription/metrics.py, src/config/sections/core.py. Caption system has CaptionRetryBudget (src/caption/retry_budget.py) which prevents infinite retry loops. Transcription has no equivalent - a batch with many failing videos wastes time retrying endlessly within the hardcoded 2-retry limit per video, with no global budget."
+    },
+    {
+      "id": "US-79-011",
+      "title": "Add delta index staleness detection with automatic rebuild",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "Add a check_staleness() method to DeltaIndex in src/transcription/delta_index.py that compares indexed video count against actual cache entries and returns (is_stale: bool, indexed_count: int, cache_count: int)",
+        "When staleness is detected (cache has >10% more entries than index), trigger automatic rebuild with a WARNING log",
+        "Add staleness check to the start of transcribe_videos_parallel() before processing begins",
+        "Add test: stale index (fewer entries than cache) triggers rebuild",
+        "Add test: fresh index (matching or close to cache count) does not trigger rebuild"
+      ],
+      "notes": "Tier: LOW (reliability). Files: src/transcription/delta_index.py, src/transcription/parallel_processor.py (~line 54-100). DeltaIndex tracks which videos have been transcribed for incremental processing. If the index file gets corrupted or out of sync with the actual cache (e.g., manual cache edits, interrupted writes), videos may be unnecessarily re-transcribed or skipped."
+    },
+    {
+      "id": "US-79-012",
+      "title": "Add transcription metrics summary to pipeline checkpoint",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "After transcribe_videos_parallel() completes, store TranscriptionMetrics summary dict in checkpoint.json under a 'transcription_metrics' key",
+        "Summary must include: total_videos, cached_videos, transcribed_videos, failed_videos, total_duration_seconds, average_speed_ratio",
+        "When resuming from checkpoint, log the previous transcription metrics at INFO level for comparison",
+        "Add test: transcription metrics are persisted in checkpoint after batch processing",
+        "Add test: resumed pipeline logs previous transcription metrics from checkpoint"
+      ],
+      "notes": "Tier: LOW (observability). Files: src/transcription/metrics.py (TranscriptionMetrics class), src/transcription/parallel_processor.py (return_metrics=True path ~lines 300-329), src/checkpoint.py. Currently TranscriptionMetrics are computed and optionally returned but never persisted. After a pipeline run, there's no record of transcription performance. Persisting to checkpoint enables cross-run comparison and debugging slow transcription batches."
+    }
+  ]
 }

@@ -975,6 +975,123 @@ class TestCleanupStaleEntriesConfigurable:
         assert config.cache_max_age_days == 1
 
 
+class TestSpecificExceptionHandling:
+    """Tests for specific exception handling in cache.py (US-79-006)"""
+
+    @pytest.mark.fast
+    def test_json_decode_error_in_get_returns_none_and_logs_warning(self, tmp_cache_dir, caplog):
+        """Test that JSONDecodeError in get() returns None and logs at WARNING level"""
+        import logging
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a valid entry first so source map has an entry
+        video_path = "/path/to/video.mp4"
+        cache = TranscriptCache(str(tmp_cache_dir))
+        cache.set(video_path, [{"start": 0.0, "end": 1.0, "text": "test"}])
+
+        # Now corrupt the cache file with invalid JSON
+        cache_files = list(transcriptions_dir.glob("*.json"))
+        assert len(cache_files) == 1
+        with open(cache_files[0], 'w') as f:
+            f.write("{corrupted json content here!!!")
+
+        # Clear maps to force file read path
+        cache._source_map = {}
+        cache._video_id_map = {}
+
+        with caplog.at_level(logging.WARNING, logger="src.transcription.cache"):
+            result = cache.get(video_path)
+
+        assert result is None
+        assert any("Corrupt cache file" in record.message for record in caplog.records)
+        assert any(record.levelno == logging.WARNING for record in caplog.records
+                   if "Corrupt cache file" in record.message)
+
+    @pytest.mark.fast
+    def test_permission_error_in_set_caught_and_logged(self, tmp_cache_dir, caplog):
+        """Test that PermissionError in set() is caught and logged without crashing"""
+        import logging
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        video_path = "/path/to/video.mp4"
+        segments = [{"start": 0.0, "end": 3.0, "text": "Test"}]
+
+        # Mock open to raise PermissionError on the write path
+        with patch('builtins.open', side_effect=PermissionError("Access denied")):
+            with caplog.at_level(logging.DEBUG, logger="src.transcription.cache"):
+                cache.set(video_path, segments)  # Should NOT raise
+
+        # Should have logged the error (at DEBUG level for expected OS errors)
+        assert any("Could not cache transcript" in record.message for record in caplog.records)
+
+    @pytest.mark.fast
+    def test_file_not_found_in_get_returns_none(self, tmp_cache_dir):
+        """Test that FileNotFoundError in get() returns None gracefully"""
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        video_path = "/path/to/video.mp4"
+        cache = TranscriptCache(str(tmp_cache_dir))
+        cache.set(video_path, [{"start": 0.0, "end": 1.0, "text": "test"}])
+
+        # Delete the cache file after set() so source map points to missing file
+        cache_files = list(transcriptions_dir.glob("*.json"))
+        for f in cache_files:
+            f.unlink()
+
+        result = cache.get(video_path)
+        assert result is None
+
+    @pytest.mark.fast
+    def test_os_error_in_cleanup_stale_does_not_crash(self, tmp_cache_dir):
+        """Test that OSError (FileNotFoundError subclass) in cleanup_stale_entries does not crash"""
+        import os
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a cache file
+        cache_file = transcriptions_dir / "test_entry.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Test", "source_file": "/test.mp4"}]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # Delete the file between glob listing and stat() call
+        # by removing it now — cleanup_stale_entries uses list(glob) first,
+        # then iterates. We delete the file so stat() raises FileNotFoundError (subclass of OSError).
+        os.remove(cache_file)
+
+        # Should not crash — (OSError, FileNotFoundError) caught
+        removed = cache.cleanup_stale_entries(max_age_days=30)
+        assert removed == 0
+
+    @pytest.mark.fast
+    def test_json_decode_error_in_build_source_map_skipped(self, tmp_cache_dir):
+        """Test that corrupt JSON in _build_source_map is silently skipped"""
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a corrupt JSON file
+        corrupt_file = transcriptions_dir / "corrupt.json"
+        with open(corrupt_file, 'w') as f:
+            f.write("not valid json {{{")
+
+        # Create a valid file too
+        valid_file = transcriptions_dir / "valid.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Valid", "source_file": "/valid.mp4"}]
+        with open(valid_file, 'w') as f:
+            json.dump(data, f)
+
+        # Should not crash, should still build map from valid file
+        cache = TranscriptCache(str(tmp_cache_dir))
+        assert len(cache._source_map) > 0
+
+
 class TestWarmupFromProject:
     """Tests for warmup_from_project method (US-60-008)"""
 
