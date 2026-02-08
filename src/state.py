@@ -56,6 +56,9 @@ class TranscriptSegment:
     # B-roll/silent video attributes
     is_broll: bool = False  # True if this is a silent/B-roll video segment
     description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+    # US-72-003: Chapter mapping fields
+    chapter_index: Optional[int] = None  # Index of containing chapter (None = outside all chapters)
+    chapter_title: str = ''  # Title of containing chapter
 
     def to_dict(self) -> dict:
         return asdict(self)

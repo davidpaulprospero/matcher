@@ -6,11 +6,11 @@ downstream scoring adjustments (chapter_topic_match, chapter_source_consistency,
 chapter_coherence_penalty, cross_chapter_relevance) work uniformly regardless
 of whether structure came from YouTube chapters or listicle detection.
 
-US-71-010
+US-71-010, US-72-003
 """
 
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from .models import ChapterCandidate, ListicleGroup
 
@@ -164,3 +164,56 @@ def build_segment_chapter_map(chapters: List[ChapterCandidate]) -> Dict[int, int
         for seg_idx in range(chapter.start_segment_idx, chapter.end_segment_idx + 1):
             mapping[seg_idx] = chapter.chapter_id
     return mapping
+
+
+def _compute_overlap(seg_start: float, seg_end: float, ch_start: float, ch_end: float) -> float:
+    """Compute the overlap duration between a segment and a chapter time range."""
+    overlap_start = max(seg_start, ch_start)
+    overlap_end = min(seg_end, ch_end)
+    return max(0.0, overlap_end - overlap_start)
+
+
+def assign_chapter_indices(
+    segments: List,
+    chapters: List[Dict],
+) -> None:
+    """
+    Assign chapter_index and chapter_title to each TranscriptSegment by timestamp overlap.
+
+    Each segment is assigned to the chapter with the greatest overlap duration.
+    Segments spanning two chapters are assigned to the one with >50% overlap.
+    Segments outside all chapter ranges get chapter_index=None, chapter_title=''.
+
+    Mutates segments in-place.
+
+    Args:
+        segments: List of TranscriptSegment objects (must have start_time, end_time)
+        chapters: List of chapter dicts with keys: title, start_time, end_time.
+                  Chapters are assumed to be sorted by start_time.
+
+    US-72-003
+    """
+    if not chapters:
+        return
+
+    for seg in segments:
+        best_idx: Optional[int] = None
+        best_overlap: float = 0.0
+        seg_duration = seg.end_time - seg.start_time
+
+        for i, ch in enumerate(chapters):
+            ch_start = ch.get('start_time', 0.0)
+            ch_end = ch.get('end_time', 0.0)
+            overlap = _compute_overlap(seg.start_time, seg.end_time, ch_start, ch_end)
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_idx = i
+
+        # Only assign if there's meaningful overlap (>0)
+        if best_idx is not None and best_overlap > 0.0:
+            seg.chapter_index = best_idx
+            seg.chapter_title = chapters[best_idx].get('title', '')
+        else:
+            seg.chapter_index = None
+            seg.chapter_title = ''

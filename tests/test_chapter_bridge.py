@@ -16,8 +16,10 @@ from src.chapter_detection.bridge import (
     merge_chapters,
     build_unified_chapters,
     build_segment_chapter_map,
+    assign_chapter_indices,
     _ranges_overlap,
 )
+from src.state import TranscriptSegment
 
 
 # --- Helpers ---
@@ -276,3 +278,115 @@ class TestBuildSegmentChapterMap:
         assert result[5] == 1
         assert result[7] == 1
         assert 3 not in result  # Gap not mapped
+
+
+# --- assign_chapter_indices (US-72-003) ---
+
+def _make_segment(index, start_time, end_time, text="test"):
+    return TranscriptSegment(index=index, start_time=start_time, end_time=end_time, text=text)
+
+
+class TestAssignChapterIndices:
+    """Tests for timestamp-based segment-to-chapter mapping (US-72-003)."""
+
+    def test_segment_fully_inside_chapter(self):
+        """Segments fully inside a chapter are assigned to it."""
+        segments = [_make_segment(0, 5.0, 10.0)]
+        chapters = [{'title': 'Intro', 'start_time': 0.0, 'end_time': 30.0}]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Intro'
+
+    def test_segment_spanning_two_chapters_majority_overlap(self):
+        """Segment spanning two chapters assigned to chapter with >50% overlap."""
+        # Segment: 8.0-12.0 (4s total)
+        # Chapter 0: 0-10 -> overlap = 2s (50%)
+        # Chapter 1: 10-20 -> overlap = 2s (50%)
+        # Tie goes to first found (chapter 0) since overlap is equal
+        # Make asymmetric: segment 7.0-12.0 (5s total)
+        # Chapter 0: 0-10 -> overlap = 3s (60%)
+        # Chapter 1: 10-20 -> overlap = 2s (40%)
+        segments = [_make_segment(0, 7.0, 12.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Chapter A'
+
+    def test_segment_spanning_two_chapters_second_wins(self):
+        """Segment with more overlap in second chapter assigned there."""
+        # Segment: 9.0-15.0 (6s total)
+        # Chapter 0: 0-10 -> overlap = 1s
+        # Chapter 1: 10-20 -> overlap = 5s
+        segments = [_make_segment(0, 9.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_segment_outside_all_chapters(self):
+        """Segments outside all chapter ranges get None."""
+        segments = [_make_segment(0, 50.0, 55.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index is None
+        assert segments[0].chapter_title == ''
+
+    def test_empty_chapters_list(self):
+        """No chapters -> segments unchanged."""
+        segments = [_make_segment(0, 5.0, 10.0)]
+        assign_chapter_indices(segments, [])
+        assert segments[0].chapter_index is None
+        assert segments[0].chapter_title == ''
+
+    def test_empty_segments_list(self):
+        """Empty segments list doesn't raise."""
+        chapters = [{'title': 'Ch', 'start_time': 0.0, 'end_time': 10.0}]
+        assign_chapter_indices([], chapters)  # Should not raise
+
+    def test_multiple_segments_different_chapters(self):
+        """Multiple segments map to their respective chapters."""
+        segments = [
+            _make_segment(0, 1.0, 5.0),   # In chapter 0
+            _make_segment(1, 12.0, 18.0),  # In chapter 1
+            _make_segment(2, 25.0, 28.0),  # In chapter 2
+        ]
+        chapters = [
+            {'title': 'Intro', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Main', 'start_time': 10.0, 'end_time': 20.0},
+            {'title': 'Outro', 'start_time': 20.0, 'end_time': 30.0},
+        ]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Intro'
+        assert segments[1].chapter_index == 1
+        assert segments[1].chapter_title == 'Main'
+        assert segments[2].chapter_index == 2
+        assert segments[2].chapter_title == 'Outro'
+
+    def test_segment_in_gap_between_chapters(self):
+        """Segment in gap between non-contiguous chapters gets None."""
+        segments = [_make_segment(0, 15.0, 18.0)]
+        chapters = [
+            {'title': 'Ch A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Ch B', 'start_time': 20.0, 'end_time': 30.0},
+        ]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index is None
+        assert segments[0].chapter_title == ''
+
+    def test_chapter_missing_title_defaults_empty(self):
+        """Chapter dict without title key gives empty chapter_title."""
+        segments = [_make_segment(0, 5.0, 8.0)]
+        chapters = [{'start_time': 0.0, 'end_time': 10.0}]
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == ''
