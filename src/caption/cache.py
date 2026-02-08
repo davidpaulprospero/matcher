@@ -541,6 +541,12 @@ class CaptionCache(BaseCache):
             caption_quality=result.caption_quality,
             coverage_ratio=result.coverage_ratio,
             unavailable=False,
+            # US-78-007: Preserve metadata fields in cache
+            video_description=result.video_description,
+            video_chapters=result.video_chapters,
+            video_tags=result.video_tags,
+            language_confidence=result.language_confidence,
+            fallback_language=result.fallback_language,
         )
 
         self.set(key, cached.to_dict())

@@ -33,10 +33,17 @@ class CachedCaption:
     caption_quality: str = "medium"  # 'high', 'medium', or 'low' (US-007)
     coverage_ratio: Optional[float] = None  # Caption coverage vs video duration (US-004)
     unavailable: bool = False  # True if captions are known to be unavailable (US-008 enhancement)
+    # US-78-007: Video metadata for backward-compatible cache deserialization
+    video_description: str = ""  # Full video description text
+    video_chapters: List[Dict[str, Any]] = field(default_factory=list)  # Parsed chapter markers
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-78-007: Language confidence and fallback tracking
+    language_confidence: float = 1.0  # 0.0-1.0: manual=1.0, auto target=0.8, auto translated=0.5
+    fallback_language: str = ""  # Language actually used when different from requested
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        d = {
             'video_id': self.video_id,
             'language': self.language,
             'segments': self.segments,
@@ -48,6 +55,18 @@ class CachedCaption:
             'coverage_ratio': self.coverage_ratio,
             'unavailable': self.unavailable,
         }
+        # US-78-007: Serialize metadata (only when non-empty to save space)
+        if self.video_description:
+            d['video_description'] = self.video_description
+        if self.video_chapters:
+            d['video_chapters'] = self.video_chapters
+        if self.video_tags:
+            d['video_tags'] = self.video_tags
+        if self.language_confidence != 1.0:
+            d['language_confidence'] = self.language_confidence
+        if self.fallback_language:
+            d['fallback_language'] = self.fallback_language
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> 'CachedCaption':
@@ -84,6 +103,12 @@ class CachedCaption:
             language=self.language,
             is_auto_generated=self.is_auto_generated,
             format_source=self.format_source,
+            # US-78-007: Preserve metadata through cache round-trip
+            video_description=self.video_description,
+            video_chapters=self.video_chapters,
+            video_tags=self.video_tags,
+            language_confidence=self.language_confidence,
+            fallback_language=self.fallback_language,
         )
 
     @classmethod
@@ -109,6 +134,12 @@ class CachedCaption:
             fetch_timestamp=time.time(),
             duration=duration,
             caption_quality=result.caption_quality,
+            # US-78-007: Preserve metadata fields
+            video_description=result.video_description,
+            video_chapters=result.video_chapters,
+            video_tags=result.video_tags,
+            language_confidence=result.language_confidence,
+            fallback_language=result.fallback_language,
         )
 
 
