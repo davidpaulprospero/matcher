@@ -1,4 +1,4 @@
-{
+﻿{
   "sprintNumber": 75,
   "focusArea": "context-matching",
   "branchName": "ralph/sprint-75",
@@ -140,7 +140,7 @@
       "title": "Build video_id-to-metadata lookup for efficient context access during matching",
       "priority": "high",
       "passes": true,
-      "notes": "DONE: Extracted _build_video_metadata() method in MatchStage that merges video_search_results (title, desc, tags) with caption_results (video_tags, video_chapters) into a unified dict keyed by video_id. Each entry has 'title' (str), 'description' (str), 'tags' (List[str]), 'chapters' (List[dict]) — all defaulting to empty, never None. Added _get_video_chapters() accessor to TieredMatcher. Updated type hints in main.py and tiered_matcher.py from Dict[str, str] to Dict[str, Any]. 10 unit tests pass covering merged metadata, empty defaults, None handling, dict VSRs, and TieredMatcher chapters accessor.",
+      "notes": "DONE: Extracted _build_video_metadata() method in MatchStage that merges video_search_results (title, desc, tags) with caption_results (video_tags, video_chapters) into a unified dict keyed by video_id. Each entry has 'title' (str), 'description' (str), 'tags' (List[str]), 'chapters' (List[dict]) \u2014 all defaulting to empty, never None. Added _get_video_chapters() accessor to TieredMatcher. Updated type hints in main.py and tiered_matcher.py from Dict[str, str] to Dict[str, Any]. 10 unit tests pass covering merged metadata, empty defaults, None handling, dict VSRs, and TieredMatcher chapters accessor.",
       "acceptanceCriteria": [
         "video_metadata dict includes 'tags' key (List[str]) for each video_id",
         "video_metadata dict includes 'chapters' key (List[dict]) for each video_id",
@@ -169,8 +169,8 @@
       "id": "US-75-011",
       "title": "Add description keywords to embedding text for enriched semantic search",
       "priority": "low",
-      "passes": true,
-      "notes": "Implemented: Added description_enriched_embeddings config flag (default: false) to ContextEnrichmentConfig. Added _extract_description_keywords() method using word frequency with stop word + YouTube word filtering. When enabled, top 5 keywords appended as '[kw1 kw2 ...]' suffix to embedding_text. 10 unit tests pass.",
+      "passes": false,
+      "notes": "Evidence gate: 2/6 criteria verified (33%). Minimum: 90%.",
       "acceptanceCriteria": [
         "New config flag matching.context_enrichment.description_enriched_embeddings (default: false)",
         "When enabled, top 3-5 content keywords from video description are appended to embedding_text",
