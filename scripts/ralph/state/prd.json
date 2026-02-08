@@ -63,7 +63,7 @@
                             "id":  "US-79-004",
                             "title":  "Add configurable max_retries to TranscriptionConfig",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Add `max_retries: int = 2` field to TranscriptionConfig in src/config/sections/core.py with validation \u003e= 0 and \u003c= 5",
                                                        "Add `max_retries` to config.yaml under transcription section",
@@ -71,7 +71,7 @@
                                                        "Add test: setting max_retries=0 in config disables retry (single attempt only)",
                                                        "Add test: setting max_retries=3 in config allows up to 3 retry attempts after initial failure"
                                                    ],
-                            "notes":  "Tier: MEDIUM (configurability). Files: src/config/sections/core.py (TranscriptionConfig ~line 50-167), src/transcription/parallel_processor.py (transcribe_video max_retries param ~line 341), config.yaml. Currently max_retries=2 is hardcoded as a function parameter default. Users cannot tune retry behavior without code changes."
+                            "notes":  "Added max_retries field to TranscriptionConfig (0-5 range validation), config.yaml entry, wired into transcribe_videos_parallel, 11 tests pass"
                         },
                         {
                             "id":  "US-79-005",

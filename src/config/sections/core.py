@@ -114,6 +114,11 @@ class TranscriptionConfig:
     # Must be >= 30 seconds to allow for large audio files
     gpu_transcription_timeout: int = 300
 
+    # Transcription retry attempts (US-79-004)
+    # Maximum retry attempts for transient errors (e.g., GPU OOM)
+    # 0 = no retries (single attempt only), max 5
+    max_retries: int = 2
+
     # Known Whisper model names
     KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
     # Known compute types for faster-whisper
@@ -165,6 +170,13 @@ class TranscriptionConfig:
             raise ValueError(
                 f"TranscriptionConfig.gpu_transcription_timeout={self.gpu_transcription_timeout} "
                 f"must be >= 30. Check transcription.gpu_transcription_timeout in config.yaml"
+            )
+
+        # Validate max_retries (US-79-004)
+        if self.max_retries < 0 or self.max_retries > 5:
+            raise ValueError(
+                f"TranscriptionConfig.max_retries={self.max_retries} "
+                f"must be >= 0 and <= 5. Check transcription.max_retries in config.yaml"
             )
 
         # Validate and set audio_extraction_workers (US-60-010)

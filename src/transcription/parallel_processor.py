@@ -134,6 +134,11 @@ def transcribe_videos_parallel(
     if config:
         audio_extraction_timeout = getattr(config.transcription, 'audio_extraction_timeout', 60)
 
+    # Get max retries for transient errors (US-79-004)
+    max_retries = 2  # Default 2 retries
+    if config:
+        max_retries = getattr(config.transcription, 'max_retries', 2)
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,

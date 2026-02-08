@@ -191,6 +191,12 @@ transcription:
   # Must be >= 30; increase for very large audio files or slow GPUs
   gpu_transcription_timeout: 300
 
+  # Transcription retry attempts (US-79-004)
+  # Maximum retry attempts for transient GPU errors (e.g., CUDA OOM)
+  # 0 = no retries (single attempt only), max 5
+  # Each retry uses exponential backoff (1s, 2s, 4s...)
+  max_retries: 2
+
 # -----------------------------------------------------------------------------
 # EMBEDDINGS
 # -----------------------------------------------------------------------------
