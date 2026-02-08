@@ -112,7 +112,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 5 criteria verified. deduplicate_caption_segments() in models.py uses token overlap (Jaccard >0.7) and temporal overlap (>0.8) to merge duplicates, keeping higher quality text. DEBUG logging on each merge. CaptionResult.__post_init__ calls dedup automatically. 25 unit tests pass covering: helper functions, merge behavior, non-overlapping passthrough, quality selection, reindexing, chained duplicates, logging, and CaptionResult integration."
+                            "notes":  "All 5/5 criteria verified. deduplicate_caption_segments() in src/caption/models.py with >80% temporal + >70% text similarity thresholds, keeps higher quality text. DEBUG logging with segment indices. CaptionResult.__post_init__ calls dedup. 25 tests pass covering: token overlap, temporal overlap, text quality, merge behavior, pass-through, reindexing, chained duplicates, debug logging, and CaptionResult post_init integration."
                         },
                         {
                             "id":  "US-73-008",
