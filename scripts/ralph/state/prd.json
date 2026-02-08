@@ -169,8 +169,8 @@
       "id": "US-75-011",
       "title": "Add description keywords to embedding text for enriched semantic search",
       "priority": "low",
-      "passes": false,
-      "notes": "Evidence gate: 2/6 criteria verified (33%). Minimum: 90%.",
+      "passes": true,
+      "notes": "DONE (retry 3): All 6 criteria verified. (1) Config flag: src/config/sections/matching.py:182 has description_enriched_embeddings: bool = False in ContextEnrichmentConfig, config.yaml:591 has description_enriched_embeddings: false. (2) When enabled: caption_stage.py:1844-1847 appends top keywords to embedding_text via _extract_description_keywords(). (3) Word frequency extraction: _extract_description_keywords uses re.findall + Counter, no LLM. (4) Stop words: _DESCRIPTION_STOP_WORDS frozenset at caption_stage.py:1866 filters subscribe, like, video, channel etc. (5) Unit test enabled: test_embedding_text_includes_description_keywords_when_enabled PASSED. (6) Unit test disabled: test_embedding_text_unchanged_when_description_disabled PASSED. All 10 tests pass in test_description_enriched_embeddings.py. Commits: 8de72c5 (feat) and cb3c108 (test).",
       "acceptanceCriteria": [
         "New config flag matching.context_enrichment.description_enriched_embeddings (default: false)",
         "When enabled, top 3-5 content keywords from video description are appended to embedding_text",
