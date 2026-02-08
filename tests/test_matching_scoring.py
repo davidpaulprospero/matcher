@@ -1746,5 +1746,275 @@ class TestTitleRelevanceAdjustment:
         assert "tokyo" in reason.lower() or "skyline" in reason.lower()
 
 
+class TestChapterSourceConsistency:
+    """Tests for chapter-level source consistency boost (US-70-011)."""
+
+    @pytest.fixture
+    def mock_match(self):
+        """Create a mock Match object with both video and voiceover segments."""
+        def _make_match(source_file: str, vo_index: int = 0, chapter_index: int = -1):
+            match = Mock()
+            match.video_segment = Mock()
+            match.video_segment.source_file = source_file
+            match.voiceover_segment = Mock()
+            match.voiceover_segment.index = vo_index
+            match.voiceover_segment.chapter_index = chapter_index
+            return match
+        return _make_match
+
+    @pytest.fixture
+    def config_with_chapter_grouping(self):
+        """Mock config with chapter grouping enabled."""
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        matching.broll_boost = 0.1
+        matching.caption_quality_adjustment_enabled = False
+        matching.apply_timing_penalty = False
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        # Chapter grouping config
+        cg = Mock()
+        cg.enabled = True
+        cg.source_consistency_boost = 0.03
+        matching.chapter_grouping = cg
+        # Scoring config (for MatchScoring init)
+        sc = Mock()
+        sc.confidence_floor = 0.05
+        sc.low_confidence_warning_threshold = 0.15
+        matching.scoring = sc
+        config.matching = matching
+        config.global_cache = Mock()
+        config.global_cache.current_project_boost = 0.1
+        return config
+
+    @pytest.fixture
+    def config_without_chapter_grouping(self):
+        """Mock config with chapter grouping disabled."""
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        cg = Mock()
+        cg.enabled = False
+        cg.source_consistency_boost = 0.03
+        matching.chapter_grouping = cg
+        sc = Mock()
+        sc.confidence_floor = 0.05
+        matching.scoring = sc
+        config.matching = matching
+        config.global_cache = Mock()
+        config.global_cache.current_project_boost = 0.1
+        return config
+
+    @pytest.mark.fast
+    def test_boost_applied_same_source_same_chapter(self, config_with_chapter_grouping, mock_match):
+        """Boost applies when same source used within same chapter."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="More footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+        segment_chapter_map = {1: 0, 2: 0}
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map=segment_chapter_map,
+        )
+
+        assert adjusted == pytest.approx(0.73, abs=0.001)
+        assert "chapter_source_consistency" in reason
+        assert "+0.03" in reason
+
+    @pytest.mark.fast
+    def test_no_boost_different_chapters(self, config_with_chapter_grouping, mock_match):
+        """No boost when segments are in different chapters."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Different chapter", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+        segment_chapter_map = {1: 0, 2: 1}
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=1,
+            segment_chapter_map=segment_chapter_map,
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_different_source(self, config_with_chapter_grouping, mock_match):
+        """No boost when sources differ even within same chapter."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Different video", source_file="/videos/other.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+        segment_chapter_map = {1: 0, 2: 0}
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map=segment_chapter_map,
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_when_disabled(self, config_without_chapter_grouping, mock_match):
+        """No boost when chapter grouping is disabled."""
+        scoring = MatchScoring(config_without_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_no_chapter_info(self, config_with_chapter_grouping, mock_match):
+        """No boost when no chapter info available (chapter_index=-1)."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=-1)]
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=-1,
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_consecutive_penalty_suppressed_in_chapter(self, config_with_chapter_grouping, mock_match):
+        """Consecutive source penalty is suppressed within same chapter."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        # Without suppression - penalty applies
+        adjusted_no_suppress, reason_no_suppress = apply_consecutive_source_penalty(
+            0.8, video_seg, recent,
+            config=config_with_chapter_grouping,
+            suppress_in_chapter=False,
+        )
+        assert adjusted_no_suppress < 0.8
+
+        # With suppression - penalty suppressed
+        adjusted_suppress, reason_suppress = apply_consecutive_source_penalty(
+            0.8, video_seg, recent,
+            config=config_with_chapter_grouping,
+            suppress_in_chapter=True,
+        )
+        assert adjusted_suppress == 0.8
+        assert reason_suppress == ""
+
+    @pytest.mark.fast
+    def test_consecutive_penalty_unchanged_without_chapters(self, mock_match):
+        """When chapter structure not available, consecutive penalty unchanged."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        matching.chapter_grouping = None
+        config.matching = matching
+
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1)]
+
+        adjusted, reason = apply_consecutive_source_penalty(
+            0.8, video_seg, recent,
+            config=config,
+            suppress_in_chapter=False,
+        )
+
+        # Penalty still applies normally
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert "consecutive_source_penalty" in reason
+
+    @pytest.mark.fast
+    def test_is_within_chapter(self, config_with_chapter_grouping, mock_match):
+        """is_within_chapter returns True for same chapter, False otherwise."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        # Same chapter
+        assert scoring.is_within_chapter(0, recent, {1: 0}) is True
+
+        # Different chapter
+        assert scoring.is_within_chapter(1, recent, {1: 0}) is False
+
+        # No chapter info
+        assert scoring.is_within_chapter(-1, recent) is False
+
+    @pytest.mark.fast
+    def test_custom_boost_amount(self, mock_match):
+        """Custom source_consistency_boost value is respected."""
+        config = Mock()
+        matching = Mock()
+        cg = Mock()
+        cg.enabled = True
+        cg.source_consistency_boost = 0.07  # Custom boost
+        matching.chapter_grouping = cg
+        sc = Mock()
+        sc.confidence_floor = 0.05
+        matching.scoring = sc
+        config.matching = matching
+
+        scoring = MatchScoring(config)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+
+        assert adjusted == pytest.approx(0.77, abs=0.001)
+        assert "+0.07" in reason
+
+    @pytest.mark.fast
+    def test_breakdown_recorded_in_apply_all_adjustments(self, config_with_chapter_grouping, mock_match):
+        """Chapter source consistency appears in confidence_breakdown."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        vo_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                            text="Tokyo travel guide")
+        video_seg = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                               text="Tokyo footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=vo_seg,
+            video_segment=video_seg,
+            recent_matches=recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+
+        components = [b['component'] for b in breakdown]
+        assert 'chapter_source_consistency' in components
+        consistency_entry = next(b for b in breakdown if b['component'] == 'chapter_source_consistency')
+        assert consistency_entry['adjustment'] == pytest.approx(0.03, abs=0.001)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

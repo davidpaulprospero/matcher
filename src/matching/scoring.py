@@ -2051,6 +2051,9 @@ class MatchScoring:
     CHAPTER_TOPIC_BOOST_STRONG = 0.10  # Strong boost for 2+ keyword matches
     CHAPTER_TOPIC_MISMATCH_PENALTY = -0.05  # Penalty when chapter topic doesn't match
 
+    # Chapter source consistency default (US-70-011)
+    DEFAULT_SOURCE_CONSISTENCY_BOOST = 0.03
+
     # Stopwords for title keyword extraction
     _TITLE_STOPWORDS = frozenset({
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
@@ -2165,6 +2168,116 @@ class MatchScoring:
 
         return confidence + adjustment, reason
 
+    def apply_chapter_source_consistency(
+        self,
+        confidence: float,
+        video_segment: SRTSegment,
+        recent_matches: List['Match'],
+        current_chapter_index: int = -1,
+        segment_chapter_map: Optional[dict] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply source consistency boost within the same voiceover chapter (US-70-011).
+
+        When a candidate video source matches the previous segment's source AND
+        both segments are in the same voiceover chapter, apply a small boost.
+        Within a coherent chapter about one topic, reusing the same source is
+        desirable for visual continuity.
+
+        Args:
+            confidence: Current confidence score
+            video_segment: Video segment being considered
+            recent_matches: List of recent Match objects (most recent first)
+            current_chapter_index: Chapter index for current voiceover segment (-1 = none)
+            segment_chapter_map: Optional dict mapping segment index to chapter index
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        # Only applies when chapter grouping is enabled and we have chapter info
+        cg = getattr(self._mc, 'chapter_grouping', None) if self._mc else None
+        if cg is None or not getattr(cg, 'enabled', True):
+            return confidence, ""
+
+        if current_chapter_index < 0 or not recent_matches:
+            return confidence, ""
+
+        current_source = getattr(video_segment, 'source_file', None)
+        if not current_source:
+            return confidence, ""
+
+        # Check the most recent match
+        prev_match = recent_matches[0]
+        if prev_match is None:
+            return confidence, ""
+
+        prev_source = getattr(prev_match.video_segment, 'source_file', None) if prev_match.video_segment else None
+        if prev_source != current_source:
+            return confidence, ""
+
+        # Check if previous segment is in the same chapter
+        prev_chapter_index = -1
+        if segment_chapter_map is not None:
+            prev_seg_idx = getattr(prev_match.voiceover_segment, 'index', None) if prev_match.voiceover_segment else None
+            if prev_seg_idx is not None:
+                prev_chapter_index = segment_chapter_map.get(prev_seg_idx, -1)
+        # Also support chapter_index attribute on the voiceover segment itself
+        if prev_chapter_index < 0 and prev_match.voiceover_segment:
+            prev_chapter_index = getattr(prev_match.voiceover_segment, 'chapter_index', -1)
+
+        if prev_chapter_index != current_chapter_index or prev_chapter_index < 0:
+            return confidence, ""
+
+        boost = getattr(cg, 'source_consistency_boost', self.DEFAULT_SOURCE_CONSISTENCY_BOOST)
+        reason = f"chapter_source_consistency: +{boost:.2f} (same source in chapter {current_chapter_index})"
+
+        logger.debug(
+            f"US-70-011 chapter source consistency: source={current_source}, "
+            f"chapter={current_chapter_index}, boost={boost:.2f}"
+        )
+
+        return confidence + boost, reason
+
+    def is_within_chapter(
+        self,
+        current_chapter_index: int,
+        recent_matches: List['Match'],
+        segment_chapter_map: Optional[dict] = None,
+    ) -> bool:
+        """
+        Check if the current segment and previous segment are in the same chapter.
+
+        Used to suppress consecutive_source_penalty within chapter boundaries.
+
+        Args:
+            current_chapter_index: Chapter index for current segment (-1 = none)
+            recent_matches: Recent matches (most recent first)
+            segment_chapter_map: Optional dict mapping segment index to chapter index
+
+        Returns:
+            True if both are in the same chapter (and chapter grouping is enabled)
+        """
+        cg = getattr(self._mc, 'chapter_grouping', None) if self._mc else None
+        if cg is None or not getattr(cg, 'enabled', True):
+            return False
+
+        if current_chapter_index < 0 or not recent_matches:
+            return False
+
+        prev_match = recent_matches[0]
+        if prev_match is None:
+            return False
+
+        prev_chapter_index = -1
+        if segment_chapter_map is not None:
+            prev_seg_idx = getattr(prev_match.voiceover_segment, 'index', None) if prev_match.voiceover_segment else None
+            if prev_seg_idx is not None:
+                prev_chapter_index = segment_chapter_map.get(prev_seg_idx, -1)
+        if prev_chapter_index < 0 and prev_match.voiceover_segment:
+            prev_chapter_index = getattr(prev_match.voiceover_segment, 'chapter_index', -1)
+
+        return prev_chapter_index == current_chapter_index and prev_chapter_index >= 0
+
     def apply_all_adjustments(
         self,
         confidence: float,
@@ -2175,12 +2288,16 @@ class MatchScoring:
         topic_mismatch_penalty: float = 0.15,
         video_title: Optional[str] = None,
         chapter_title: Optional[str] = None,
+        recent_matches: Optional[List['Match']] = None,
+        current_chapter_index: int = -1,
+        segment_chapter_map: Optional[dict] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
 
         Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty
                -> project_boost -> title_relevance -> chapter_topic_match
+               -> chapter_source_consistency
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2193,6 +2310,9 @@ class MatchScoring:
             topic_mismatch_penalty: Maximum topic mismatch penalty
             video_title: Optional video title for title relevance scoring
             chapter_title: Optional chapter title for chapter topic matching
+            recent_matches: Optional list of recent Match objects for source consistency
+            current_chapter_index: Chapter index for current voiceover segment (-1 = none)
+            segment_chapter_map: Optional dict mapping segment index to chapter index
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -2270,7 +2390,18 @@ class MatchScoring:
                 reasons.append(chapter_reason)
                 breakdown.append({'component': 'chapter_topic_match', 'adjustment': round(confidence - prev, 4), 'reason': chapter_reason})
 
-        # 8. Enforce minimum confidence floor (US-46-004)
+        # 8. Chapter source consistency boost (US-70-011)
+        if recent_matches is not None:
+            prev = confidence
+            confidence, consistency_reason = self.apply_chapter_source_consistency(
+                confidence, video_segment, recent_matches,
+                current_chapter_index, segment_chapter_map
+            )
+            if consistency_reason:
+                reasons.append(consistency_reason)
+                breakdown.append({'component': 'chapter_source_consistency', 'adjustment': round(confidence - prev, 4), 'reason': consistency_reason})
+
+        # 9. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2278,7 +2409,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 9. Log warning for over-penalized matches (US-46-004)
+        # 10. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2289,7 +2420,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 10. Log confidence breakdown at DEBUG level (US-53-003)
+        # 11. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(
@@ -2497,7 +2628,8 @@ def apply_consecutive_source_penalty(
     confidence: float,
     video_segment: SRTSegment,
     recent_matches: List['Match'],
-    config=None
+    config=None,
+    suppress_in_chapter: bool = False,
 ) -> Tuple[float, str]:
     """
     Apply penalty for using the same video source in consecutive segments (US-63-009).
@@ -2506,17 +2638,25 @@ def apply_consecutive_source_penalty(
     repeatedly in adjacent segments creates a monotonous viewing experience.
     This function applies a stacking penalty for consecutive same-source matches.
 
+    When suppress_in_chapter is True (US-70-011), the penalty is suppressed because
+    within a coherent chapter, source consistency is desirable.
+
     Args:
         confidence: Current confidence score
         video_segment: Video segment being considered
         recent_matches: List of recent Match objects (most recent first), used to check
                        if previous N matches used the same source
         config: Optional config object with matching settings
+        suppress_in_chapter: If True, skip penalty (segments in same chapter)
 
     Returns:
         Tuple of (adjusted_confidence, reason_string)
     """
     if not recent_matches:
+        return confidence, ""
+
+    # US-70-011: Suppress penalty within chapter boundaries
+    if suppress_in_chapter:
         return confidence, ""
 
     # Get config values

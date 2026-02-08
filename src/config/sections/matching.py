@@ -15,6 +15,7 @@ __all__ = [
     'ChapterDetectionConfig',
     'MatchingScoringConfig',
     'ContextEnrichmentConfig',
+    'ChapterGroupingConfig',
     'MatchingConfig',
 ]
 
@@ -177,6 +178,18 @@ class ContextEnrichmentConfig:
     max_description_length: int = 500        # Truncate descriptions longer than this
     parse_description_chapters: bool = True  # Parse chapter timestamps from description text
     title_enriched_embeddings: bool = True   # Include title+description in embedding generation
+
+
+@dataclass
+class ChapterGroupingConfig:
+    """Chapter-level source consistency settings (US-70-011).
+
+    When segments fall within the same voiceover chapter, using clips from the
+    same video source is desirable (topical coherence) rather than penalizable.
+    This config controls the consistency boost and penalty suppression.
+    """
+    enabled: bool = True  # Enable chapter-level source grouping
+    source_consistency_boost: float = 0.03  # Boost when same source within chapter
 
 
 @dataclass
@@ -405,6 +418,9 @@ class MatchingConfig:
     # Context enrichment (US-70-004)
     context_enrichment: ContextEnrichmentConfig = None
 
+    # Chapter-level source grouping (US-70-011)
+    chapter_grouping: ChapterGroupingConfig = None
+
     def __post_init__(self):
         import logging
         logger = logging.getLogger(__name__)
@@ -466,3 +482,8 @@ class MatchingConfig:
             self.context_enrichment = ContextEnrichmentConfig()
         elif isinstance(self.context_enrichment, dict):
             self.context_enrichment = ContextEnrichmentConfig(**self.context_enrichment)
+
+        if self.chapter_grouping is None:
+            self.chapter_grouping = ChapterGroupingConfig()
+        elif isinstance(self.chapter_grouping, dict):
+            self.chapter_grouping = ChapterGroupingConfig(**self.chapter_grouping)
