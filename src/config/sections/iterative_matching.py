@@ -52,6 +52,7 @@ class IterativeMatchingConfig:
     # Iteration limits
     max_iterations: int = 5  # Maximum passes to attempt
     min_gap_percentage: float = 0.05  # Stop if fewer than 5% gaps remaining
+    no_progress_min_pass: int = 3  # Minimum pass number before stopping on zero progress
 
     # Search settings
     search_results_per_gap: int = 10  # YouTube results to fetch per gap query
@@ -61,6 +62,7 @@ class IterativeMatchingConfig:
     use_voiceover_text_queries: bool = True  # Extract keywords from voiceover text
     use_similar_to_locked: bool = True  # Find videos similar to successful matches
     use_entity_topic_queries: bool = True  # Query with entities and topics
+    use_description_queries: bool = True  # US-70-012: Generate queries from matched video descriptions
     parallel_strategy_search: bool = True  # Run strategies in parallel
 
     # Progressive refinement (for subsequent passes)
@@ -100,6 +102,7 @@ class IterativeMatchingConfig:
         # Ensure positive values
         self.source_spacing_seconds = max(0.0, self.source_spacing_seconds)
         self.max_iterations = max(1, self.max_iterations)
+        self.no_progress_min_pass = max(1, self.no_progress_min_pass)
         self.min_gap_percentage = max(0.0, min(1.0, self.min_gap_percentage))
         self.search_results_per_gap = max(1, self.search_results_per_gap)
         self.max_new_videos_per_pass = max(1, self.max_new_videos_per_pass)

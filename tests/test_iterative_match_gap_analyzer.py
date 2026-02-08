@@ -24,9 +24,12 @@ from src.iterative_match.gap_analyzer import (
     analyze_gap_patterns_for_logging,
     log_gap_pattern_analysis,
     extract_keywords_for_gap,
+    extract_description_queries,
     _classify_gap_pattern,
     _has_location_pattern,
     _has_proper_noun,
+    _extract_content_words,
+    _extract_key_phrases,
     _cluster_gaps_by_topic,
     _cluster_gaps_by_position,
     _extract_recurring_keywords,
@@ -760,3 +763,134 @@ class TestLogGapPatternAnalysis:
         """Logging empty log runs without error."""
         log = GapPatternLog(pass_number=1, total_gaps=0)
         log_gap_pattern_analysis(log)  # Uses default logger
+
+
+# ============================================================================
+# US-70-012: Description-derived search queries
+# ============================================================================
+
+class TestExtractDescriptionQueries:
+    """Tests for extract_description_queries function."""
+
+    def test_empty_descriptions(self):
+        """No descriptions returns empty list."""
+        result = extract_description_queries([])
+        assert result == []
+
+    def test_none_descriptions_filtered(self):
+        """None and empty descriptions are handled gracefully."""
+        result = extract_description_queries(["", None, ""])
+        assert result == []
+
+    def test_single_description_extracts_queries(self):
+        """A single description with content produces queries."""
+        descriptions = [
+            "This documentary explores renewable energy solutions "
+            "including solar panels and wind turbines across Europe."
+        ]
+        result = extract_description_queries(descriptions, max_queries=5)
+        assert len(result) > 0
+        # Should contain meaningful phrases, not stop words
+        for q in result:
+            assert len(q) > 3
+
+    def test_multiple_descriptions_shared_themes(self):
+        """Multiple descriptions with shared themes produce relevant queries."""
+        descriptions = [
+            "Climate change affects coral reefs worldwide",
+            "Scientists study coral reef degradation from climate change",
+            "Protecting coral ecosystems from rising ocean temperatures",
+        ]
+        result = extract_description_queries(descriptions, max_queries=10)
+        assert len(result) > 0
+        # "coral" should appear somewhere in the queries since it's a shared theme
+        all_queries_lower = ' '.join(result).lower()
+        assert 'coral' in all_queries_lower
+
+    def test_max_queries_respected(self):
+        """Output is capped at max_queries."""
+        descriptions = [
+            "A very long description about many different topics including "
+            "technology, science, medicine, agriculture, economics, politics, "
+            "culture, arts, sports, entertainment, education, and philosophy."
+        ] * 5
+        result = extract_description_queries(descriptions, max_queries=3)
+        assert len(result) <= 3
+
+    def test_url_noise_filtered(self):
+        """URLs and YouTube boilerplate are filtered from descriptions."""
+        descriptions = [
+            "Subscribe to my channel https://youtube.com/example "
+            "Follow me on Twitter. The space exploration mission launched."
+        ]
+        result = extract_description_queries(descriptions, max_queries=5)
+        # Should not contain URL fragments or boilerplate
+        for q in result:
+            assert 'http' not in q.lower()
+            assert 'subscribe' not in q.lower()
+
+    def test_graceful_with_short_descriptions(self):
+        """Very short descriptions don't crash."""
+        descriptions = ["OK", "Hi", ""]
+        result = extract_description_queries(descriptions)
+        # May return empty or minimal results, but should not crash
+        assert isinstance(result, list)
+
+    def test_bigram_phrases_preferred(self):
+        """Multi-word phrases are preferred over single words when available."""
+        descriptions = [
+            "artificial intelligence research advances rapidly in modern laboratories",
+            "artificial intelligence models transform healthcare diagnostics",
+        ]
+        result = extract_description_queries(descriptions, max_queries=5)
+        # Should have at least one multi-word phrase
+        multi_word = [q for q in result if ' ' in q]
+        assert len(multi_word) > 0
+
+
+class TestExtractContentWords:
+    """Tests for _extract_content_words helper."""
+
+    def test_removes_urls(self):
+        result = _extract_content_words("visit https://example.com for more info about technology")
+        assert not any('example' in w for w in result)
+        assert 'technology' in result
+
+    def test_removes_stop_words(self):
+        result = _extract_content_words("the quick brown fox jumps over")
+        assert 'quick' in result
+        assert 'brown' in result
+        # 'the' and 'over' are stop words / too short
+        assert 'the' not in result
+
+    def test_removes_short_words(self):
+        result = _extract_content_words("a be do it go")
+        assert result == []
+
+
+class TestExtractKeyPhrases:
+    """Tests for _extract_key_phrases helper."""
+
+    def test_basic_bigram_extraction(self):
+        top_words = {'climate', 'change', 'global'}
+        result = _extract_key_phrases(
+            "Understanding global climate change effects on agriculture",
+            top_words, max_phrases=3
+        )
+        assert len(result) > 0
+        # Should contain bigrams with at least one top word
+        for phrase in result:
+            words = phrase.split()
+            assert any(w in top_words for w in words)
+
+    def test_max_phrases_limit(self):
+        top_words = {'every', 'word', 'here'}
+        result = _extract_key_phrases(
+            "every word here matters greatly indeed today certainly",
+            top_words, max_phrases=2
+        )
+        assert len(result) <= 2
+
+    def test_empty_text(self):
+        result = _extract_key_phrases("", {'word'}, max_phrases=3)
+        assert result == []

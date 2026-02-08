@@ -19,7 +19,7 @@ import re
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from ..state import PipelineState, VoiceoverSegment
@@ -810,3 +810,158 @@ def log_gap_pattern_analysis(
         log_fn.debug("Query hints:")
         for hint in log.query_hints:
             log_fn.debug(f"  → {hint}")
+
+
+# ============================================================================
+# US-70-012: Description-derived search queries
+# ============================================================================
+
+# Stop words for description key phrase extraction
+_DESCRIPTION_STOP_WORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+    'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+    'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
+    'these', 'those', 'it', 'its', 'they', 'them', 'their', 'we', 'us',
+    'our', 'you', 'your', 'he', 'she', 'him', 'her', 'his', 'i', 'me', 'my',
+    'not', 'no', 'so', 'if', 'then', 'than', 'very', 'just', 'about',
+    'also', 'more', 'some', 'any', 'all', 'each', 'every', 'how', 'what',
+    'when', 'where', 'which', 'who', 'why', 'here', 'there', 'only',
+    'http', 'https', 'www', 'com', 'subscribe', 'like', 'video', 'channel',
+}
+
+
+def extract_description_queries(
+    descriptions: List[str],
+    max_queries: int = 10,
+    max_phrases_per_description: int = 3,
+) -> List[str]:
+    """
+    Extract key phrases from video descriptions to generate search queries.
+
+    Uses simple TF-IDF-like keyword extraction: finds words that appear frequently
+    across descriptions and forms short phrases from them.
+
+    Args:
+        descriptions: List of video description strings from matched videos.
+        max_queries: Maximum number of queries to return.
+        max_phrases_per_description: Maximum phrases to extract per description.
+
+    Returns:
+        List of search query strings derived from descriptions.
+    """
+    if not descriptions:
+        return []
+
+    # Count word frequency across all descriptions (TF-IDF-like)
+    word_freq: Dict[str, int] = defaultdict(int)
+    word_in_docs: Dict[str, int] = defaultdict(int)  # Document frequency
+
+    for desc in descriptions:
+        if not desc:
+            continue
+        words = _extract_content_words(desc)
+        unique_words = set(words)
+        for word in words:
+            word_freq[word] += 1
+        for word in unique_words:
+            word_in_docs[word] += 1
+
+    if not word_freq:
+        return []
+
+    num_docs = len([d for d in descriptions if d])
+    if num_docs == 0:
+        return []
+
+    # Score words: prefer frequent but not ubiquitous words
+    word_scores: Dict[str, float] = {}
+    for word, freq in word_freq.items():
+        doc_freq = word_in_docs.get(word, 1)
+        # Simple TF-IDF-like scoring: higher freq is good, but penalize
+        # words that appear in every single description (too generic)
+        if doc_freq >= num_docs and num_docs > 1:
+            # Appears in all docs — likely too generic
+            word_scores[word] = freq * 0.3
+        else:
+            word_scores[word] = freq * (1.0 + 1.0 / max(doc_freq, 1))
+
+    # Get top-scoring words
+    top_words = sorted(word_scores.items(), key=lambda x: -x[1])
+
+    # Extract bigram phrases from descriptions using top words
+    queries: List[str] = []
+    seen_queries: Set[str] = set()
+    top_word_set = {w for w, _ in top_words[:30]}
+
+    for desc in descriptions:
+        if not desc:
+            continue
+        phrases = _extract_key_phrases(desc, top_word_set, max_phrases_per_description)
+        for phrase in phrases:
+            phrase_lower = phrase.lower()
+            if phrase_lower not in seen_queries and len(phrase.split()) >= 2:
+                seen_queries.add(phrase_lower)
+                queries.append(phrase)
+
+    # If not enough bigram phrases, fall back to top individual words
+    if len(queries) < max_queries:
+        for word, _ in top_words:
+            if word not in seen_queries and len(word) > 4:
+                seen_queries.add(word)
+                queries.append(word)
+            if len(queries) >= max_queries:
+                break
+
+    return queries[:max_queries]
+
+
+def _extract_content_words(text: str) -> List[str]:
+    """Extract meaningful content words from text, filtering noise."""
+    # Remove URLs
+    text = re.sub(r'https?://\S+', '', text)
+    # Remove common YouTube boilerplate patterns
+    text = re.sub(r'(?i)subscribe\s+(to\s+)?my\s+channel', '', text)
+    text = re.sub(r'(?i)follow\s+(me\s+)?on\s+\w+', '', text)
+    # Split and clean
+    words = text.lower().split()
+    words = [re.sub(r'[^a-z0-9]', '', w) for w in words]
+    return [w for w in words if len(w) > 3 and w not in _DESCRIPTION_STOP_WORDS]
+
+
+def _extract_key_phrases(
+    text: str,
+    top_words: Set[str],
+    max_phrases: int = 3,
+) -> List[str]:
+    """
+    Extract short key phrases (bigrams/trigrams) from text using top-scored words.
+
+    Args:
+        text: Source text to extract phrases from.
+        top_words: Set of high-scoring words to anchor phrases on.
+        max_phrases: Maximum phrases to return.
+
+    Returns:
+        List of key phrase strings.
+    """
+    # Clean text
+    text = re.sub(r'https?://\S+', '', text)
+    words = text.split()
+    cleaned = []
+    for w in words:
+        clean = re.sub(r'[^a-zA-Z0-9]', '', w).lower()
+        if clean and len(clean) > 2 and clean not in _DESCRIPTION_STOP_WORDS:
+            cleaned.append(clean)
+
+    phrases: List[str] = []
+    # Extract bigrams that contain at least one top word
+    for i in range(len(cleaned) - 1):
+        if cleaned[i] in top_words or cleaned[i + 1] in top_words:
+            phrase = f"{cleaned[i]} {cleaned[i + 1]}"
+            if phrase not in phrases:
+                phrases.append(phrase)
+        if len(phrases) >= max_phrases:
+            break
+
+    return phrases

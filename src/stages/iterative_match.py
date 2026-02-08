@@ -850,6 +850,30 @@ class IterativeMatchStage(Stage):
                         'priority': 2
                     })
 
+        # Strategy 4: Description-derived queries (US-70-012)
+        if getattr(config, 'use_description_queries', True) and locked:
+            from ..iterative_match.gap_analyzer import extract_description_queries
+            # Collect descriptions from locked matches via video_search_results
+            descriptions = []
+            vid_id_to_desc = {}
+            for vsr in (state.video_search_results or []):
+                desc = getattr(vsr, 'description', '') or ''
+                if desc and hasattr(vsr, 'video_id'):
+                    vid_id_to_desc[vsr.video_id] = desc
+            for lm in locked:
+                desc = vid_id_to_desc.get(lm.video_id, '')
+                if desc:
+                    descriptions.append(desc)
+            if descriptions:
+                desc_queries = extract_description_queries(descriptions, max_queries=10)
+                for dq in desc_queries:
+                    queries.append({
+                        'query': dq,
+                        'strategy': 'description',
+                        'gap_indices': [],  # Broad queries, not gap-specific
+                        'priority': 1  # Lower priority than targeted strategies
+                    })
+
         # Deduplicate by query string AND exclude already-used queries
         seen_queries = set()
         unique_queries = []

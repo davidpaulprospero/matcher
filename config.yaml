@@ -1979,6 +1979,7 @@ iterative_matching:
   use_voiceover_text_queries: true # Extract keywords from gap text
   use_similar_to_locked: true      # Find videos like successful matches
   use_entity_topic_queries: true   # Use entities and topics in queries
+  use_description_queries: true    # Generate queries from matched video descriptions
   parallel_strategy_search: true   # Run strategies concurrently
 
   # === Progressive refinement (passes 2+) ===
