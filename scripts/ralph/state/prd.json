@@ -124,7 +124,7 @@
       "id": "US-76-008",
       "title": "Deduplicate chapters at chunk overlap boundaries",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "merge_chunk_results in chunking.py deduplicates chapters whose segment ranges overlap by more than 50% between adjacent chunks",
         "When two overlapping chapters from adjacent chunks are detected, the one with higher confidence is kept",
@@ -133,7 +133,7 @@
         "Unit test: chapters outside the overlap zone are preserved from both chunks",
         "Unit test: higher-confidence chapter wins when deduplicating"
       ],
-      "notes": "Tier: robustness. Source files: src/chapter_detection/chunking.py (lines 142-234 merge_chunk_results -- currently merges by segment index but doesn't explicitly deduplicate overlapping chapters from the overlap zone). The overlap_segments parameter in create_chunks (line 44) defines how many segments overlap between chunks, but merge_chunk_results may produce near-duplicate chapters at boundaries. Test file: new tests/test_chapter_chunking.py or extend existing tests."
+      "notes": "Added _deduplicate_overlap_zone as Phase 1 of merge_chunk_results. Uses _segment_overlap_ratio (>50% threshold) and _score_chapter helpers. Only deduplicates in overlap zone defined by chunk.overlap_end. 12 tests in tests/test_chapter_chunking.py (8 dedup + 4 ratio helper). All 199 chapter tests pass."
     },
     {
       "id": "US-76-009",

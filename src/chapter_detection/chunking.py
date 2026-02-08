@@ -139,6 +139,121 @@ def create_chunks(
     return chunks
 
 
+def _compute_overlap_range(ch: Dict[str, Any]) -> set:
+    """Return the set of segment indices covered by a chapter."""
+    start = ch.get('start_segment_idx', 0)
+    end = ch.get('end_segment_idx', start)
+    return set(range(start, end + 1))
+
+
+def _segment_overlap_ratio(ch_a: Dict[str, Any], ch_b: Dict[str, Any]) -> float:
+    """Return the fraction of overlap between two chapters' segment ranges.
+
+    Overlap ratio = intersection / min(len_a, len_b).
+    Returns 0.0 if either chapter has zero range.
+    """
+    range_a = _compute_overlap_range(ch_a)
+    range_b = _compute_overlap_range(ch_b)
+    if not range_a or not range_b:
+        return 0.0
+    intersection = len(range_a & range_b)
+    return intersection / min(len(range_a), len(range_b))
+
+
+def _score_chapter(ch: Dict[str, Any]) -> int:
+    """Score a chapter by confidence level (higher is better)."""
+    conf_str = ch.get('confidence', 'medium')
+    conf_scores = {'high': 3, 'medium': 2, 'low': 1}
+    return conf_scores.get(conf_str, 2)
+
+
+def _deduplicate_overlap_zone(
+    chunk_results: List[List[Dict[str, Any]]],
+    chunks: List[TextChunk],
+) -> List[List[Dict[str, Any]]]:
+    """Deduplicate chapters that fall in the overlap zone between adjacent chunks.
+
+    For each pair of adjacent chunks, identifies the overlap region (defined by
+    overlap_segments on the chunk boundaries). Chapters from *different* chunks
+    whose segment ranges overlap by more than 50% within that zone are
+    considered duplicates — the one with higher confidence wins.
+
+    Returns a new list of chapter lists with duplicates removed.
+    """
+    if len(chunk_results) < 2:
+        return [list(chs) for chs in chunk_results]
+
+    # Track which chapters to drop (by chunk_idx, chapter list index)
+    to_drop: set = set()
+
+    for ci in range(len(chunks) - 1):
+        chunk_a = chunks[ci]
+        chunk_b = chunks[ci + 1]
+
+        # The overlap zone is the range of segment indices shared between
+        # the end of chunk_a and the start of chunk_b.
+        overlap_size = chunk_a.overlap_end
+        if overlap_size <= 0:
+            continue
+
+        # Overlap zone segment range
+        overlap_zone_start = chunk_b.start_segment_idx
+        overlap_zone_end = overlap_zone_start + overlap_size - 1
+
+        def _in_overlap_zone(ch: Dict[str, Any]) -> bool:
+            """Check if a chapter's segment range intersects the overlap zone."""
+            ch_start = ch.get('start_segment_idx', 0)
+            ch_end = ch.get('end_segment_idx', ch_start)
+            return ch_start <= overlap_zone_end and ch_end >= overlap_zone_start
+
+        # Gather chapters from each adjacent chunk that touch the overlap zone
+        chapters_a = [
+            (idx, ch) for idx, ch in enumerate(chunk_results[ci])
+            if _in_overlap_zone(ch)
+        ]
+        chapters_b = [
+            (idx, ch) for idx, ch in enumerate(chunk_results[ci + 1])
+            if _in_overlap_zone(ch)
+        ]
+
+        # Compare each pair across the two chunks
+        for idx_a, ch_a in chapters_a:
+            for idx_b, ch_b in chapters_b:
+                if (ci, idx_a) in to_drop or (ci + 1, idx_b) in to_drop:
+                    continue
+                ratio = _segment_overlap_ratio(ch_a, ch_b)
+                if ratio > 0.5:
+                    # Keep higher confidence, drop the other
+                    if _score_chapter(ch_a) >= _score_chapter(ch_b):
+                        to_drop.add((ci + 1, idx_b))
+                        logger.debug(
+                            f"Dedup overlap: drop chunk {ci+1} ch {idx_b} "
+                            f"(conf={ch_b.get('confidence')}) in favour of "
+                            f"chunk {ci} ch {idx_a} (conf={ch_a.get('confidence')})"
+                        )
+                    else:
+                        to_drop.add((ci, idx_a))
+                        logger.debug(
+                            f"Dedup overlap: drop chunk {ci} ch {idx_a} "
+                            f"(conf={ch_a.get('confidence')}) in favour of "
+                            f"chunk {ci+1} ch {idx_b} (conf={ch_b.get('confidence')})"
+                        )
+
+    # Rebuild chapter lists without dropped entries
+    deduped = []
+    for ci, chapters in enumerate(chunk_results):
+        deduped.append([
+            ch for idx, ch in enumerate(chapters)
+            if (ci, idx) not in to_drop
+        ])
+
+    dropped_count = len(to_drop)
+    if dropped_count:
+        logger.info(f"Deduplicated {dropped_count} chapters in overlap zones")
+
+    return deduped
+
+
 def merge_chunk_results(
     chunk_results: List[List[Dict[str, Any]]],
     chunks: List[TextChunk],
@@ -147,9 +262,9 @@ def merge_chunk_results(
     """
     Merge chapter detection results from multiple chunks.
 
-    Handles conflicts in overlap regions by preferring:
-    1. Higher confidence chapters
-    2. Chapters that appear in multiple chunks
+    First deduplicates near-duplicate chapters in chunk overlap zones
+    (>50% segment overlap, keeping higher confidence), then merges
+    remaining chapters across all chunks.
 
     Args:
         chunk_results: List of chapter lists, one per chunk
@@ -165,9 +280,12 @@ def merge_chunk_results(
     if len(chunk_results) == 1:
         return chunk_results[0]
 
-    # Collect all chapters with their source chunk
+    # Phase 1: Deduplicate chapters in overlap zones between adjacent chunks
+    deduped_results = _deduplicate_overlap_zone(chunk_results, chunks)
+
+    # Phase 2: Collect all remaining chapters with their source chunk
     all_chapters = []
-    for chunk_idx, chapters in enumerate(chunk_results):
+    for chunk_idx, chapters in enumerate(deduped_results):
         for ch in chapters:
             ch_copy = dict(ch)
             ch_copy['_source_chunk'] = chunk_idx
@@ -204,13 +322,7 @@ def merge_chunk_results(
         if len(overlapping) == 1:
             best = overlapping[0]
         else:
-            # Score by confidence
-            def score_chapter(ch):
-                conf_str = ch.get('confidence', 'medium')
-                conf_scores = {'high': 3, 'medium': 2, 'low': 1}
-                return conf_scores.get(conf_str, 2)
-
-            overlapping.sort(key=score_chapter, reverse=True)
+            overlapping.sort(key=_score_chapter, reverse=True)
             best = overlapping[0]
 
             # Merge boundaries from all overlapping
@@ -230,7 +342,7 @@ def merge_chunk_results(
     for idx, ch in enumerate(merged):
         ch['chapter_id'] = idx
 
-    logger.info(f"Merged {sum(len(r) for r in chunk_results)} chapters into {len(merged)}")
+    logger.info(f"Merged {sum(len(r) for r in deduped_results)} chapters into {len(merged)}")
     return merged
 
 
