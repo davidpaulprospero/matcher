@@ -62,7 +62,7 @@
             "id": "US-78-004",
             "title": "Parse chapter timestamps from video description text",
             "priority": "medium",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "New function parse_description_chapters(description_text) in src/caption/models.py returns List[dict] with {title, start_time, end_time} entries",
                 "Regex handles common YouTube timestamp formats: '0:00 Title', '00:00 Title', '0:00:00 Title', '[0:00] Title'",
@@ -71,7 +71,7 @@
                 "Config flag matching.context_enrichment.parse_description_chapters gates this behavior (already exists, default true)",
                 "Unit test covers all 4 timestamp formats plus edge cases (single chapter, no timestamps, malformed input)"
             ],
-            "notes": "Tier: Feature. CaptionResult.video_chapters (line 571) is populated from info_dict['chapters'] but many YouTube videos use description-embedded timestamps instead. Config parse_description_chapters exists (src/config/sections/matching.py line 186) but no implementation backs it. This fills the gap. Files: src/caption/models.py, src/caption_fetcher.py (where info_dict is processed), tests/test_caption*.py"
+            "notes": "Added parse_description_chapters() to src/caption/models.py with all 4 timestamp formats (M:SS, MM:SS, H:MM:SS, [M:SS]). Bracket format and None end_time for last chapter. caption_fetcher.py delegates to models version. 15 new tests + 9 existing tests pass."
         },
         {
             "id": "US-78-005",
