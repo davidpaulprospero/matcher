@@ -83,6 +83,24 @@ class TestQueryResult:
             gaps_filled=0, avg_confidence_improvement=0.0,
         )
         assert result.successful is False
+        assert result.chapter_type == ''
+
+    def test_chapter_type_field(self):
+        result = QueryResult(
+            query="q", strategy="s", gap_indices=[0], videos_found=3,
+            gaps_filled=1, avg_confidence_improvement=0.2,
+            chapter_type="intro",
+        )
+        assert result.chapter_type == "intro"
+
+    def test_chapter_type_in_to_dict(self):
+        result = QueryResult(
+            query="q", strategy="s", gap_indices=[], videos_found=0,
+            gaps_filled=0, avg_confidence_improvement=0.0,
+            chapter_type="conclusion",
+        )
+        d = result.to_dict()
+        assert d["chapter_type"] == "conclusion"
 
 
 # ============================================================================
@@ -695,3 +713,80 @@ class TestChapterTypeClassification:
         listicle_groups = [{'group_id': 'group_1', 'start_segment': 0, 'end_segment': 10}]
         result = annotate_gaps_with_chapters(gaps, total_segments=100, listicle_groups=listicle_groups)
         assert result[0].chapter_type == "listicle_item"
+
+
+# ============================================================================
+# get_preferred_strategies (US-72-012)
+# ============================================================================
+
+class TestGetPreferredStrategies:
+    """AC: get_preferred_strategies(chapter_type, top_n=3) returns best strategies for a chapter type."""
+
+    def test_returns_default_when_no_data(self, tmp_path):
+        """With no chapter data, returns default strategy order truncated to top_n."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        result = db.get_preferred_strategies("intro")
+        assert result == ["voiceover", "similar_locked", "entity"]
+
+    def test_returns_top_n_strategies(self, tmp_path):
+        """Returns strategies sorted by chapter-type success rate, limited to top_n."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["intro"]["entity"] = 0.9
+        db.chapter_strategy_success["intro"]["voiceover"] = 0.5
+        db.chapter_strategy_success["intro"]["topic"] = 0.7
+        db.chapter_strategy_success["intro"]["similar_locked"] = 0.3
+
+        result = db.get_preferred_strategies("intro", top_n=3)
+        assert len(result) == 3
+        assert result[0] == "entity"
+        assert result[1] == "topic"
+        assert result[2] == "voiceover"
+
+    def test_top_n_limits_output(self, tmp_path):
+        """top_n=1 returns only the single best strategy."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["body"]["entity"] = 0.9
+        db.chapter_strategy_success["body"]["voiceover"] = 0.5
+        result = db.get_preferred_strategies("body", top_n=1)
+        assert result == ["entity"]
+
+    def test_fewer_strategies_than_top_n(self, tmp_path):
+        """When fewer strategies exist than top_n, returns all available."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["conclusion"]["entity"] = 0.8
+        result = db.get_preferred_strategies("conclusion", top_n=3)
+        assert result == ["entity"]
+
+    def test_different_chapter_types_independent(self, tmp_path):
+        """Preferred strategies for different chapter types are independent."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["intro"]["entity"] = 0.9
+        db.chapter_strategy_success["intro"]["voiceover"] = 0.2
+        db.chapter_strategy_success["conclusion"]["voiceover"] = 0.9
+        db.chapter_strategy_success["conclusion"]["entity"] = 0.2
+
+        intro_prefs = db.get_preferred_strategies("intro", top_n=2)
+        conclusion_prefs = db.get_preferred_strategies("conclusion", top_n=2)
+        assert intro_prefs[0] == "entity"
+        assert conclusion_prefs[0] == "voiceover"
+
+    def test_strategy_preference_reflects_recorded_results(self, tmp_path):
+        """Preferences update correctly after recording results."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Record multiple successful entity queries for listicle_item
+        for _ in range(5):
+            r = QueryResult(query="list item footage", strategy="entity", gap_indices=[0],
+                            videos_found=10, gaps_filled=1, avg_confidence_improvement=0.4,
+                            chapter_type="listicle_item")
+            db.record_result(r, "other", chapter_type="listicle_item")
+
+        # Record failed voiceover queries for listicle_item
+        for _ in range(5):
+            r = QueryResult(query="list voiceover", strategy="voiceover", gap_indices=[1],
+                            videos_found=2, gaps_filled=0, avg_confidence_improvement=0.0,
+                            chapter_type="listicle_item")
+            db.record_result(r, "other", chapter_type="listicle_item")
+
+        prefs = db.get_preferred_strategies("listicle_item", top_n=3)
+        assert prefs[0] == "entity"

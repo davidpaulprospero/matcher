@@ -47,6 +47,7 @@ class QueryResult:
     gaps_filled: int  # How many gaps improved confidence
     avg_confidence_improvement: float
     successful: bool = False
+    chapter_type: str = ''  # intro, body, conclusion, listicle_item, unknown
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -284,6 +285,31 @@ class QueryLearningDB:
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return [s[0] for s in scored]
+
+    def get_preferred_strategies(self, chapter_type: str, top_n: int = 3) -> List[str]:
+        """
+        Return the best strategies for a chapter type, ranked by success rate.
+
+        Uses chapter-type-level success data only (no pattern blending).
+        Falls back to default strategy order if no data exists.
+
+        Args:
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+            top_n: Maximum number of strategies to return
+
+        Returns:
+            List of up to top_n strategy names ordered by success rate (best first)
+        """
+        default_order = ['voiceover', 'similar_locked', 'entity', 'topic']
+        chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
+
+        if not chapter_strategies:
+            return default_order[:top_n]
+
+        sorted_strategies = sorted(
+            chapter_strategies.items(), key=lambda x: x[1], reverse=True
+        )
+        return [s[0] for s in sorted_strategies[:top_n]]
 
     def get_strategy_ranking(self, gap_pattern: str) -> List[str]:
         """

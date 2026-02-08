@@ -190,9 +190,9 @@
                                                        "Add method `get_preferred_strategies(chapter_type, top_n=3)` that returns best strategies for a chapter type",
                                                        "Unit test: verify chapter_type tracking, per-type success rates, and strategy preference ordering"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier 5 (Enhanced Iterative Matching). Source files: src/iterative_match/query_learning.py (QueryResult, QueryLearningDB). Depends on US-72-003 for chapter indices. Chapter type classification: first chapter = \u0027intro\u0027, last chapter = \u0027conclusion\u0027, chapters with listicle markers = \u0027listicle_item\u0027, others = \u0027body\u0027. This was already partially implemented in sprint-71 (US-71-012) — check existing code before implementing."
+                            "notes":  "Most was pre-implemented in US-71-012. Added: (1) chapter_type: str = '' field to QueryResult dataclass, (2) get_preferred_strategies(chapter_type, top_n=3) method that returns best strategies by chapter-type success rate, (3) 9 new unit tests covering field, to_dict, default/top_n/independence/recorded-results scenarios. All 72 tests pass."
                         }
                     ]
 }
