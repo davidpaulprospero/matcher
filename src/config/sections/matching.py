@@ -179,6 +179,7 @@ class ContextEnrichmentConfig:
     parse_description_chapters: bool = True  # Parse chapter timestamps from description text
     title_enriched_embeddings: bool = True   # Include title+description in embedding generation
     chapter_enriched_embeddings: bool = True  # Include chapter title in embedding text when available
+    description_enriched_embeddings: bool = False  # Append top description keywords to embedding text
 
 
 @dataclass

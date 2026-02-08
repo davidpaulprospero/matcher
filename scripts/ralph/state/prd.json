@@ -169,8 +169,8 @@
       "id": "US-75-011",
       "title": "Add description keywords to embedding text for enriched semantic search",
       "priority": "low",
-      "passes": false,
-      "notes": "Tier: ENHANCEMENT. Currently embedding_text includes [title] and optionally [title | chapter] prefix, but video description keywords are not included. For videos with rich descriptions (common for educational/documentary content), adding top 3-5 description keywords to embedding text could improve semantic matching. This should be gated behind a config flag since it changes embedding dimensions/cache. Files: src/stages/caption_stage.py (_populate_text_metadata ~line where embedding_text is built), src/config/sections/matching.py (ContextEnrichmentConfig - add description_enriched_embeddings flag).",
+      "passes": true,
+      "notes": "Implemented: Added description_enriched_embeddings config flag (default: false) to ContextEnrichmentConfig. Added _extract_description_keywords() method using word frequency with stop word + YouTube word filtering. When enabled, top 5 keywords appended as '[kw1 kw2 ...]' suffix to embedding_text. 10 unit tests pass.",
       "acceptanceCriteria": [
         "New config flag matching.context_enrichment.description_enriched_embeddings (default: false)",
         "When enabled, top 3-5 content keywords from video description are appended to embedding_text",

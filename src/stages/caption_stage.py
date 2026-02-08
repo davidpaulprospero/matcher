@@ -1760,11 +1760,13 @@ class CaptionStage(Stage):
         # US-70-008: Build title lookup and check config for title-enriched embeddings
         title_enriched = False
         chapter_enriched = False  # US-73-004: Chapter-enriched embedding text
+        description_enriched = False  # US-75-011: Description keywords in embedding text
         title_lookup = {}
         if config is not None:
             ce = getattr(getattr(config, 'matching', None), 'context_enrichment', None)
             title_enriched = getattr(ce, 'title_enriched_embeddings', False)
             chapter_enriched = getattr(ce, 'chapter_enriched_embeddings', True)
+            description_enriched = getattr(ce, 'description_enriched_embeddings', False)
 
         if title_enriched and hasattr(state, 'video_search_results'):
             for vsr in state.video_search_results:
@@ -1832,12 +1834,18 @@ class CaptionStage(Stage):
                     # US-75-003: Video description from caption result
                     'video_description': video_description,
                 }
-                # US-70-008 / US-73-004: Add embedding_text with title (+ chapter) prefix
+                # US-70-008 / US-73-004 / US-75-011: Build embedding_text with enrichments
                 if title_enriched and video_title:
                     if chapter_enriched and ch_title:
-                        entry['embedding_text'] = f'[{video_title} | {ch_title}] {seg_text}'
+                        embed_text = f'[{video_title} | {ch_title}] {seg_text}'
                     else:
-                        entry['embedding_text'] = f'[{video_title}] {seg_text}'
+                        embed_text = f'[{video_title}] {seg_text}'
+                    # US-75-011: Append description keywords when enabled
+                    if description_enriched and video_description:
+                        desc_kw = self._extract_description_keywords(video_description)
+                        if desc_kw:
+                            embed_text = f'{embed_text} [{" ".join(desc_kw)}]'
+                    entry['embedding_text'] = embed_text
                 text_metadata.append(entry)
 
         # US-37-010/US-41-002/US-41-007: Final safety check before extending
@@ -1853,6 +1861,66 @@ class CaptionStage(Stage):
         state.text_metadata.extend(text_metadata)
 
         logger.info(f"Populated text_metadata with {len(text_metadata)} caption segments")
+
+    # US-75-011: YouTube/generic stop words to filter from description keywords
+    _DESCRIPTION_STOP_WORDS = frozenset({
+        # English stop words
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
+        'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+        'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over',
+        'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when',
+        'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
+        'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+        'same', 'so', 'than', 'too', 'very', 'just', 'because', 'but', 'and',
+        'or', 'if', 'while', 'about', 'up', 'its', 'it', 'this', 'that',
+        'these', 'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he',
+        'him', 'his', 'she', 'her', 'they', 'them', 'their', 'what', 'which',
+        'who', 'whom',
+        # YouTube-specific words
+        'subscribe', 'like', 'video', 'channel', 'watch', 'click', 'link',
+        'description', 'comment', 'share', 'follow', 'instagram', 'twitter',
+        'facebook', 'tiktok', 'patreon', 'merch', 'discount', 'code', 'http',
+        'https', 'www', 'com',
+    })
+
+    @staticmethod
+    def _extract_description_keywords(description: str, max_keywords: int = 5) -> List[str]:
+        """Extract top content keywords from video description by word frequency.
+
+        US-75-011: Simple frequency-based extraction — no LLM needed.
+        Filters stop words and YouTube-specific words, returns top N keywords.
+
+        Args:
+            description: Video description text.
+            max_keywords: Maximum keywords to return (default 5).
+
+        Returns:
+            List of top keywords, lowercased and deduplicated.
+        """
+        import re
+        if not description:
+            return []
+
+        # Tokenize: split on non-alphanumeric, keep words 3+ chars
+        words = re.findall(r'[a-zA-Z]{3,}', description.lower())
+
+        # Filter stop words and YouTube-specific words
+        stop_words = CaptionStage._DESCRIPTION_STOP_WORDS
+        filtered = [w for w in words if w not in stop_words]
+
+        if not filtered:
+            return []
+
+        # Count frequencies
+        freq: Dict[str, int] = {}
+        for w in filtered:
+            freq[w] = freq.get(w, 0) + 1
+
+        # Sort by frequency (desc), then alphabetically for stability
+        sorted_words = sorted(freq.keys(), key=lambda w: (-freq[w], w))
+        return sorted_words[:max_keywords]
 
     @staticmethod
     def _map_segments_to_video_chapters(
