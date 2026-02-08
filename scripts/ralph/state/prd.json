@@ -150,7 +150,7 @@
                             "id":  "US-70-010",
                             "title":  "Detect listicle structure in voiceover narration",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "New module src/chapter_detection/listicle_detector.py with detect_listicle_groups(segments) function",
                                                        "Detects ordinal markers (\u0027first\u0027, \u0027second\u0027, \u0027third\u0027, \u0027finally\u0027, \u0027lastly\u0027) at segment boundaries",
@@ -159,7 +159,7 @@
                                                        "Returns List[ListicleGroup] where ListicleGroup has: group_id, item_label, start_segment_idx, end_segment_idx, topic_keywords",
                                                        "Unit tests verify detection of each marker type and edge case of mixed numbering styles"
                                                    ],
-                            "notes":  "Tier: enhancement (Area 4). Files: new src/chapter_detection/listicle_detector.py. The chapter_detection/ directory already exists with detector.py, models.py, chunking.py, and passes/. ListicleGroup dataclass can go in src/chapter_detection/models.py. Integration with existing chapter detection (detector.py) is a separate story. This story focuses on the detection logic only."
+                            "notes":  "ListicleGroup dataclass in models.py + listicle_detector.py with detect_listicle_groups(). Detects ordinal/numbered/transition markers, requires 2+ markers for confirmation. 38 unit tests all passing."
                         },
                         {
                             "id":  "US-70-011",
