@@ -160,6 +160,8 @@ class TieredMatcher:
         self._chapter_source_counts: Dict[int, set] = {}
         # US-75-010: Per-segment chapter index mapping (set by match_all_segments)
         self.segment_chapter_map: Dict[int, int] = {}
+        # US-76-012: Chapter confidence map (chapter_index -> confidence score)
+        self._chapter_confidence_map: Dict[int, float] = {}
         mc = self.config.matching
 
         # Matching thresholds
@@ -624,6 +626,33 @@ class TieredMatcher:
             self._chapter_source_counts[chapter_idx] = set()
         self._chapter_source_counts[chapter_idx].add(source)
 
+    def set_chapter_confidence_map(self, chapters) -> None:
+        """
+        Build chapter confidence map from chapter candidates (US-76-012).
+
+        Args:
+            chapters: List of ChapterCandidate objects or dicts with chapter_id and confidence
+        """
+        self._chapter_confidence_map = {}
+        if not chapters:
+            return
+        for ch in chapters:
+            if isinstance(ch, dict):
+                ch_id = ch.get('chapter_id', ch.get('chapter_index'))
+                conf = ch.get('confidence', 0.8)
+            else:
+                ch_id = getattr(ch, 'chapter_id', None)
+                conf = getattr(ch, 'confidence', 0.8)
+            if ch_id is not None:
+                self._chapter_confidence_map[ch_id] = conf
+
+    def _get_vo_chapter_confidence(self, vo_segment) -> float:
+        """Look up chapter detection confidence for a voiceover segment (US-76-012)."""
+        chapter_idx = getattr(vo_segment, 'chapter_index', None)
+        if chapter_idx is None:
+            return 1.0
+        return self._chapter_confidence_map.get(chapter_idx, 1.0)
+
     def reset_recent_matches(self) -> None:
         """
         Reset recent matches list (US-63-009).
@@ -878,9 +907,11 @@ class TieredMatcher:
             # US-75-005: Apply chapter topic match
             prev = adjusted_confidence
             chapter_title = self._get_chapter_title(best_seg)
+            _ch_conf = self._get_vo_chapter_confidence(vo_segment)
             adjusted_confidence, chapter_topic_reason = apply_chapter_topic_match(
                 adjusted_confidence, vo_segment, chapter_title,
-                chapter_matching_enabled=self.chapter_matching_enabled
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                chapter_confidence=_ch_conf,
             )
             _record_breakdown(confidence_breakdown, 'chapter_topic_match', prev, adjusted_confidence, chapter_topic_reason)
 
@@ -888,7 +919,8 @@ class TieredMatcher:
             prev = adjusted_confidence
             adjusted_confidence, chapter_source_reason = apply_chapter_source_consistency(
                 adjusted_confidence, best_seg, vo_segment, self._recent_matches,
-                chapter_matching_enabled=self.chapter_matching_enabled
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                chapter_confidence=_ch_conf,
             )
             _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
 
@@ -897,7 +929,8 @@ class TieredMatcher:
             adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
                 adjusted_confidence, vo_segment,
                 chapter_source_counts=self._chapter_source_counts,
-                chapter_matching_enabled=self.chapter_matching_enabled
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                chapter_confidence=_ch_conf,
             )
             _record_breakdown(confidence_breakdown, 'chapter_coherence_penalty', prev, adjusted_confidence, coherence_reason)
 
@@ -1076,9 +1109,11 @@ class TieredMatcher:
             # US-75-005: Apply chapter topic match
             prev = adjusted_confidence
             chapter_title = self._get_chapter_title(best_seg)
+            _ch_conf = self._get_vo_chapter_confidence(vo_segment)
             adjusted_confidence, chapter_topic_reason = apply_chapter_topic_match(
                 adjusted_confidence, vo_segment, chapter_title,
-                chapter_matching_enabled=self.chapter_matching_enabled
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                chapter_confidence=_ch_conf,
             )
             _record_breakdown(confidence_breakdown, 'chapter_topic_match', prev, adjusted_confidence, chapter_topic_reason)
 
@@ -1086,7 +1121,8 @@ class TieredMatcher:
             prev = adjusted_confidence
             adjusted_confidence, chapter_source_reason = apply_chapter_source_consistency(
                 adjusted_confidence, best_seg, vo_segment, self._recent_matches,
-                chapter_matching_enabled=self.chapter_matching_enabled
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                chapter_confidence=_ch_conf,
             )
             _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
 
@@ -1095,7 +1131,8 @@ class TieredMatcher:
             adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
                 adjusted_confidence, vo_segment,
                 chapter_source_counts=self._chapter_source_counts,
-                chapter_matching_enabled=self.chapter_matching_enabled
+                chapter_matching_enabled=self.chapter_matching_enabled,
+                chapter_confidence=_ch_conf,
             )
             _record_breakdown(confidence_breakdown, 'chapter_coherence_penalty', prev, adjusted_confidence, coherence_reason)
 
@@ -1327,9 +1364,11 @@ class TieredMatcher:
         # US-75-005: Apply chapter topic match
         prev = adjusted_confidence
         chapter_title = self._get_chapter_title(best_seg)
+        _ch_conf = self._get_vo_chapter_confidence(vo_segment)
         adjusted_confidence, chapter_topic_reason = apply_chapter_topic_match(
             adjusted_confidence, vo_segment, chapter_title,
-            chapter_matching_enabled=self.chapter_matching_enabled
+            chapter_matching_enabled=self.chapter_matching_enabled,
+            chapter_confidence=_ch_conf,
         )
         _record_breakdown(confidence_breakdown, 'chapter_topic_match', prev, adjusted_confidence, chapter_topic_reason)
 
@@ -1337,7 +1376,8 @@ class TieredMatcher:
         prev = adjusted_confidence
         adjusted_confidence, chapter_source_reason = apply_chapter_source_consistency(
             adjusted_confidence, best_seg, vo_segment, self._recent_matches,
-            chapter_matching_enabled=self.chapter_matching_enabled
+            chapter_matching_enabled=self.chapter_matching_enabled,
+            chapter_confidence=_ch_conf,
         )
         _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
 
@@ -1346,7 +1386,8 @@ class TieredMatcher:
         adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
             adjusted_confidence, vo_segment,
             chapter_source_counts=self._chapter_source_counts,
-            chapter_matching_enabled=self.chapter_matching_enabled
+            chapter_matching_enabled=self.chapter_matching_enabled,
+            chapter_confidence=_ch_conf,
         )
         _record_breakdown(confidence_breakdown, 'chapter_coherence_penalty', prev, adjusted_confidence, coherence_reason)
 

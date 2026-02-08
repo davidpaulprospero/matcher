@@ -16,7 +16,12 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.matching.scoring import apply_chapter_topic_match, apply_chapter_source_consistency
+from src.matching.scoring import (
+    apply_chapter_topic_match,
+    apply_chapter_source_consistency,
+    apply_chapter_coherence_penalty,
+    _compute_chapter_confidence_weight,
+)
 from src.utils import SRTSegment
 
 
@@ -202,3 +207,118 @@ class TestApplyChapterSourceConsistency:
         )
         assert conf > 0.80
         assert "chapter_source_consistency" in reason
+
+
+class TestChapterConfidenceWeight:
+    """Tests for chapter boundary confidence weighting in scoring (US-76-012)."""
+
+    def test_weight_high_confidence(self):
+        """Confidence >= 0.8 produces weight 1.0."""
+        assert _compute_chapter_confidence_weight(0.8) == pytest.approx(1.0)
+        assert _compute_chapter_confidence_weight(0.9) == pytest.approx(1.0)
+        assert _compute_chapter_confidence_weight(1.0) == pytest.approx(1.0)
+
+    def test_weight_low_confidence(self):
+        """Confidence <= 0.5 produces weight 0.5."""
+        assert _compute_chapter_confidence_weight(0.5) == pytest.approx(0.5)
+        assert _compute_chapter_confidence_weight(0.4) == pytest.approx(0.5)
+        assert _compute_chapter_confidence_weight(0.0) == pytest.approx(0.5)
+
+    def test_weight_mid_confidence_interpolation(self):
+        """Confidence 0.65 (midpoint) produces ~0.75 weight via linear interpolation."""
+        weight = _compute_chapter_confidence_weight(0.65)
+        assert weight == pytest.approx(0.75, abs=0.01)
+
+    def test_topic_match_high_confidence_full_boost(self):
+        """Chapter with confidence 0.9 applies full chapter_topic_match boost."""
+        seg = _make_segment("Roman architecture ancient history exploration", chapter_index=0)
+        chapter_title = "Roman Architecture and Ancient History"
+        conf, reason = apply_chapter_topic_match(
+            0.70, seg, chapter_title,
+            chapter_matching_enabled=True,
+            chapter_confidence=0.9,
+        )
+        # High confidence => weight 1.0 => full +0.10 boost
+        assert conf == pytest.approx(0.80, abs=0.01)
+        assert "strong match" in reason
+
+    def test_topic_match_low_confidence_half_boost(self):
+        """Chapter with confidence 0.4 applies 50% of chapter_topic_match boost."""
+        seg = _make_segment("Roman architecture ancient history exploration", chapter_index=0)
+        chapter_title = "Roman Architecture and Ancient History"
+        conf, reason = apply_chapter_topic_match(
+            0.70, seg, chapter_title,
+            chapter_matching_enabled=True,
+            chapter_confidence=0.4,
+        )
+        # Low confidence => weight 0.5 => +0.05 boost (50% of 0.10)
+        assert conf == pytest.approx(0.75, abs=0.01)
+        assert "strong match" in reason
+
+    def test_topic_match_mid_confidence_interpolated_boost(self):
+        """Chapter with confidence 0.65 applies ~75% of chapter_topic_match boost."""
+        seg = _make_segment("Roman architecture ancient history exploration", chapter_index=0)
+        chapter_title = "Roman Architecture and Ancient History"
+        conf, reason = apply_chapter_topic_match(
+            0.70, seg, chapter_title,
+            chapter_matching_enabled=True,
+            chapter_confidence=0.65,
+        )
+        # Mid confidence 0.65 => weight ~0.75 => +0.075 boost (75% of 0.10)
+        assert conf == pytest.approx(0.775, abs=0.01)
+        assert "strong match" in reason
+
+    def test_source_consistency_weighted_by_confidence(self):
+        """Source consistency boost is scaled by chapter confidence."""
+        video_seg = _make_segment("some content", source_file="vid_A")
+        vo_seg = _make_segment("voiceover text", chapter_index=2)
+        prev_match = _make_match("vid_A", vo_chapter_index=2)
+
+        # High confidence: full 0.03 boost
+        conf_high, _ = apply_chapter_source_consistency(
+            0.70, video_seg, vo_seg, [prev_match],
+            chapter_matching_enabled=True, chapter_confidence=0.9,
+        )
+        assert conf_high == pytest.approx(0.73, abs=0.01)
+
+        # Low confidence: 50% of 0.03 = 0.015
+        conf_low, _ = apply_chapter_source_consistency(
+            0.70, video_seg, vo_seg, [prev_match],
+            chapter_matching_enabled=True, chapter_confidence=0.4,
+        )
+        assert conf_low == pytest.approx(0.715, abs=0.01)
+
+    def test_coherence_penalty_weighted_by_confidence(self):
+        """Coherence penalty is scaled by chapter confidence."""
+        vo_seg = _make_segment("voiceover text", chapter_index=0)
+        # 7 sources = 2 excess over threshold(5) => raw penalty = 2 * -0.03 = -0.06
+        sources = {0: {f"vid_{i}" for i in range(7)}}
+
+        # High confidence: full -0.06 penalty
+        conf_high, _ = apply_chapter_coherence_penalty(
+            0.70, vo_seg, chapter_source_counts=sources,
+            chapter_matching_enabled=True, chapter_confidence=0.9,
+        )
+        assert conf_high == pytest.approx(0.64, abs=0.01)
+
+        # Low confidence: 50% of -0.06 = -0.03
+        conf_low, _ = apply_chapter_coherence_penalty(
+            0.70, vo_seg, chapter_source_counts=sources,
+            chapter_matching_enabled=True, chapter_confidence=0.4,
+        )
+        assert conf_low == pytest.approx(0.67, abs=0.01)
+
+    def test_default_confidence_preserves_original_behavior(self):
+        """Default chapter_confidence=1.0 preserves original unweighted behavior."""
+        seg = _make_segment("Roman architecture ancient history exploration", chapter_index=0)
+        chapter_title = "Roman Architecture and Ancient History"
+
+        # No chapter_confidence arg (default 1.0)
+        conf_default, _ = apply_chapter_topic_match(
+            0.70, seg, chapter_title, chapter_matching_enabled=True,
+        )
+        # Explicit 1.0
+        conf_explicit, _ = apply_chapter_topic_match(
+            0.70, seg, chapter_title, chapter_matching_enabled=True, chapter_confidence=1.0,
+        )
+        assert conf_default == conf_explicit

@@ -1088,11 +1088,28 @@ _CHAPTER_TOPIC_BOOST_PARTIAL = 0.05
 _CHAPTER_TOPIC_MISMATCH_PENALTY = -0.05
 
 
+def _compute_chapter_confidence_weight(chapter_confidence: float) -> float:
+    """
+    Compute a weight multiplier based on chapter detection confidence (US-76-012).
+
+    - High confidence (>0.8): full weight (1.0)
+    - Low confidence (<0.5): half weight (0.5)
+    - Between 0.5 and 0.8: linear interpolation from 0.5 to 1.0
+    """
+    if chapter_confidence >= 0.8:
+        return 1.0
+    if chapter_confidence <= 0.5:
+        return 0.5
+    # Linear interpolation: 0.5 -> 0.5 weight, 0.8 -> 1.0 weight
+    return 0.5 + (chapter_confidence - 0.5) / 0.3 * 0.5
+
+
 def apply_chapter_topic_match(
     confidence: float,
     vo_segment: SRTSegment,
     chapter_title: Optional[str] = None,
     chapter_matching_enabled: bool = False,
+    chapter_confidence: float = 1.0,
 ) -> Tuple[float, str]:
     """
     Standalone function: apply chapter topic match adjustment (US-75-005).
@@ -1110,6 +1127,7 @@ def apply_chapter_topic_match(
         vo_segment: Voiceover segment with text
         chapter_title: Chapter title for the matched video segment
         chapter_matching_enabled: Whether chapter matching is active
+        chapter_confidence: Chapter detection confidence (0.0-1.0), scales adjustment
 
     Returns:
         Tuple of (adjusted_confidence, reason)
@@ -1133,17 +1151,19 @@ def apply_chapter_topic_match(
     overlap = vo_keywords & chapter_keywords
     match_count = len(overlap)
 
+    weight = _compute_chapter_confidence_weight(chapter_confidence)
+
     if match_count >= 3:
-        adjustment = _CHAPTER_TOPIC_BOOST_STRONG
+        adjustment = _CHAPTER_TOPIC_BOOST_STRONG * weight
         matched_words = ', '.join(sorted(overlap)[:5])
-        reason = f"chapter topic strong match +{adjustment} ({match_count} keywords: {matched_words})"
+        reason = f"chapter topic strong match +{adjustment:.2f} ({match_count} keywords: {matched_words})"
     elif match_count >= 1:
-        adjustment = _CHAPTER_TOPIC_BOOST_PARTIAL
+        adjustment = _CHAPTER_TOPIC_BOOST_PARTIAL * weight
         matched_words = ', '.join(sorted(overlap)[:5])
-        reason = f"chapter topic partial match +{adjustment} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
+        reason = f"chapter topic partial match +{adjustment:.2f} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
     else:
-        adjustment = _CHAPTER_TOPIC_MISMATCH_PENALTY
-        reason = f"chapter topic mismatch {adjustment}"
+        adjustment = _CHAPTER_TOPIC_MISMATCH_PENALTY * weight
+        reason = f"chapter topic mismatch {adjustment:.2f}"
 
     return min(1.0, confidence + adjustment), reason
 
@@ -1158,6 +1178,7 @@ def apply_chapter_source_consistency(
     vo_segment: SRTSegment,
     recent_matches: List['Match'],
     chapter_matching_enabled: bool = False,
+    chapter_confidence: float = 1.0,
 ) -> Tuple[float, str]:
     """
     Standalone function: apply source consistency boost within same chapter (US-75-005).
@@ -1203,7 +1224,8 @@ def apply_chapter_source_consistency(
     if prev_chapter_index is None or prev_chapter_index != current_chapter_index:
         return confidence, ""
 
-    boost = _DEFAULT_SOURCE_CONSISTENCY_BOOST
+    weight = _compute_chapter_confidence_weight(chapter_confidence)
+    boost = _DEFAULT_SOURCE_CONSISTENCY_BOOST * weight
     reason = f"chapter_source_consistency: +{boost:.2f} (same source in chapter {current_chapter_index})"
     return min(1.0, confidence + boost), reason
 
@@ -1219,6 +1241,7 @@ def apply_chapter_coherence_penalty(
     vo_segment: SRTSegment,
     chapter_source_counts: Optional[dict] = None,
     chapter_matching_enabled: bool = False,
+    chapter_confidence: float = 1.0,
 ) -> Tuple[float, str]:
     """
     Standalone function: apply coherence penalty when a voiceover chapter uses
@@ -1260,10 +1283,12 @@ def apply_chapter_coherence_penalty(
     if excess <= 0:
         return confidence, ""
 
-    penalty = max(
+    weight = _compute_chapter_confidence_weight(chapter_confidence)
+    raw_penalty = max(
         _CHAPTER_COHERENCE_PENALTY_CAP,
         excess * _CHAPTER_COHERENCE_PENALTY_PER_SOURCE,
     )
+    penalty = raw_penalty * weight
 
     reason = (
         f"chapter_coherence_penalty: {penalty:.2f} "
