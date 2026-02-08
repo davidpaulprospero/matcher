@@ -1141,3 +1141,77 @@ def _extract_key_phrases(
             break
 
     return phrases
+
+
+# ============================================================================
+# US-73-009: Video tag-derived search queries
+# ============================================================================
+
+# Generic tags that don't improve search specificity
+_STOP_TAGS = {
+    'video', 'youtube', 'official', 'channel', 'subscribe', 'like',
+    'comment', 'share', 'watch', 'new', 'best', 'top', 'free',
+    'live', 'full', 'hd', '4k', '1080p', '720p', 'shorts', 'vlog',
+    'tutorial', 'how to', 'reaction', 'review', 'compilation',
+    'highlights', 'episode', 'part', 'clip', 'trailer',
+}
+
+
+def extract_tags_from_nearby_matches(
+    gap: 'GapSegment',
+    locked: List['LockedMatch'],
+    state: Any,
+    max_tags: int = 3,
+    max_distance: float = 120.0,
+) -> List[str]:
+    """
+    Extract the most frequent video tags from locked matches near a gap.
+
+    Finds locked matches within max_distance seconds of the gap, collects
+    their video_tags from state.video_search_results, filters out generic
+    stop-tags, and returns the top tags by frequency.
+
+    Args:
+        gap: The gap segment to find nearby tags for.
+        locked: All locked matches in this pass.
+        state: PipelineState with video_search_results.
+        max_tags: Maximum tags to return (default 3).
+        max_distance: Maximum timeline distance in seconds to consider
+            a locked match as "nearby" (default 120s).
+
+    Returns:
+        List of tag strings, most frequent first, up to max_tags.
+    """
+    # Build video_id -> tags lookup from state
+    vid_tags: Dict[str, List[str]] = {}
+    for vsr in (state.video_search_results or []):
+        vid_id = getattr(vsr, 'video_id', None) or (
+            vsr.get('video_id') if isinstance(vsr, dict) else None
+        )
+        tags = getattr(vsr, 'video_tags', None) or (
+            vsr.get('video_tags', []) if isinstance(vsr, dict) else []
+        )
+        if vid_id and tags:
+            vid_tags[vid_id] = tags
+
+    if not vid_tags:
+        return []
+
+    # Collect tags from nearby locked matches
+    tag_freq: Dict[str, int] = defaultdict(int)
+    for lock in locked:
+        distance = abs(gap.position - lock.position)
+        if distance > max_distance:
+            continue
+        tags = vid_tags.get(lock.video_id, [])
+        for tag in tags:
+            tag_lower = tag.lower().strip()
+            if tag_lower and tag_lower not in _STOP_TAGS and len(tag_lower) >= 3:
+                tag_freq[tag_lower] += 1
+
+    if not tag_freq:
+        return []
+
+    # Sort by frequency descending, return top N
+    sorted_tags = sorted(tag_freq.items(), key=lambda x: -x[1])
+    return [tag for tag, _ in sorted_tags[:max_tags]]

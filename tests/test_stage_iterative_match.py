@@ -1222,3 +1222,105 @@ class TestMatchSerializationVideoFile:
         assert restored.confidence == 0.88
         assert restored.strategy == 'visual'
         assert restored.face_score == 0.6
+
+
+# ============================================================================
+# US-73-009: Video tag-derived search queries
+# ============================================================================
+
+class TestVideoTagQueryExtraction:
+    """Test tag extraction from nearby matches and stop-tag filtering."""
+
+    @pytest.mark.fast
+    def test_extracts_tags_from_nearby_locked_matches(self):
+        """Tags from locked matches near the gap are extracted by frequency."""
+        from src.iterative_match.gap_analyzer import (
+            GapSegment, LockedMatch, extract_tags_from_nearby_matches,
+        )
+
+        gap = GapSegment(
+            segment_index=5, confidence=0.3,
+            voiceover_text="coral reef ecosystem", position=100.0,
+        )
+        locked = [
+            LockedMatch(segment_index=4, video_id='vid_A', confidence=0.95, position=90.0),
+            LockedMatch(segment_index=6, video_id='vid_B', confidence=0.92, position=110.0),
+            LockedMatch(segment_index=10, video_id='vid_C', confidence=0.91, position=500.0),  # far away
+        ]
+
+        # Mock state with video_search_results carrying tags
+        state = MagicMock()
+        vsr_a = MagicMock(video_id='vid_A', video_tags=['marine biology', 'coral reef', 'ocean'])
+        vsr_b = MagicMock(video_id='vid_B', video_tags=['coral reef', 'diving', 'ocean'])
+        vsr_c = MagicMock(video_id='vid_C', video_tags=['space exploration', 'nasa'])
+        state.video_search_results = [vsr_a, vsr_b, vsr_c]
+
+        tags = extract_tags_from_nearby_matches(gap, locked, state, max_tags=3)
+
+        # 'coral reef' appears in both nearby matches (freq=2), should be first
+        assert 'coral reef' in tags
+        # 'ocean' also freq=2
+        assert 'ocean' in tags
+        # 'space exploration' should NOT appear (vid_C is too far away)
+        assert 'space exploration' not in tags
+        assert len(tags) <= 3
+
+    @pytest.mark.fast
+    def test_filters_out_stop_tags(self):
+        """Generic tags like 'video', 'youtube', 'official' are filtered out."""
+        from src.iterative_match.gap_analyzer import (
+            GapSegment, LockedMatch, extract_tags_from_nearby_matches,
+        )
+
+        gap = GapSegment(
+            segment_index=2, confidence=0.4,
+            voiceover_text="test content", position=50.0,
+        )
+        locked = [
+            LockedMatch(segment_index=1, video_id='vid_X', confidence=0.95, position=45.0),
+        ]
+
+        state = MagicMock()
+        vsr = MagicMock(
+            video_id='vid_X',
+            video_tags=['video', 'youtube', 'official', 'marine biology', 'HD'],
+        )
+        state.video_search_results = [vsr]
+
+        tags = extract_tags_from_nearby_matches(gap, locked, state, max_tags=5)
+
+        # Only 'marine biology' should survive stop-tag filtering
+        assert 'marine biology' in tags
+        assert 'video' not in tags
+        assert 'youtube' not in tags
+        assert 'official' not in tags
+
+    @pytest.mark.fast
+    def test_returns_empty_when_no_nearby_matches(self):
+        """Returns empty list when no locked matches are within range."""
+        from src.iterative_match.gap_analyzer import (
+            GapSegment, LockedMatch, extract_tags_from_nearby_matches,
+        )
+
+        gap = GapSegment(
+            segment_index=5, confidence=0.3,
+            voiceover_text="isolated gap", position=1000.0,
+        )
+        locked = [
+            LockedMatch(segment_index=0, video_id='vid_A', confidence=0.95, position=10.0),
+        ]
+
+        state = MagicMock()
+        vsr = MagicMock(video_id='vid_A', video_tags=['nature', 'wildlife'])
+        state.video_search_results = [vsr]
+
+        tags = extract_tags_from_nearby_matches(gap, locked, state, max_tags=3)
+        assert tags == []
+
+    @pytest.mark.fast
+    def test_config_use_tag_queries_field_exists(self):
+        """IterativeMatchingConfig has use_tag_queries field defaulting to True."""
+        from src.config.sections.iterative_matching import IterativeMatchingConfig
+
+        config = IterativeMatchingConfig()
+        assert config.use_tag_queries is True

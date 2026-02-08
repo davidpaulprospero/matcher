@@ -63,6 +63,7 @@ class IterativeMatchingConfig:
     use_similar_to_locked: bool = True  # Find videos similar to successful matches
     use_entity_topic_queries: bool = True  # Query with entities and topics
     use_description_queries: bool = True  # US-70-012: Generate queries from matched video descriptions
+    use_tag_queries: bool = True  # US-73-009: Inject video tags into gap-filling queries
     parallel_strategy_search: bool = True  # Run strategies in parallel
 
     # Progressive refinement (for subsequent passes)

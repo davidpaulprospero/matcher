@@ -888,6 +888,23 @@ class IterativeMatchStage(Stage):
                         'priority': 1  # Lower priority than targeted strategies
                     })
 
+        # Strategy 5: Video tag-derived queries (US-73-009)
+        if getattr(config, 'use_tag_queries', True) and locked:
+            from ..iterative_match.gap_analyzer import extract_tags_from_nearby_matches
+
+            for gap in gaps[:20]:
+                tags = extract_tags_from_nearby_matches(
+                    gap, locked, state, max_tags=3
+                )
+                if tags:
+                    tag_query = ' '.join(tags) + ' footage'
+                    queries.append({
+                        'query': tag_query,
+                        'strategy': 'video_tags',
+                        'gap_indices': [gap.segment_index],
+                        'priority': 2
+                    })
+
         # Deduplicate by query string AND exclude already-used queries
         seen_queries = set()
         unique_queries = []
