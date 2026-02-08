@@ -88,7 +88,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Pre-implemented in US-71-003. All 6 criteria verified: apply_tag_keyword_boost() at scoring.py:2221 with +0.02/tag capped at +0.08, confidence_breakdown entry with component 'tag_keyword_boost', lowercased tags and keywords, called from apply_all_adjustments() at line 2718. 11 tests pass covering 0/1/2/3/5 tags plus case-insensitive, short-tag filtering, and breakdown integration."
+                            "notes":  "Pre-implemented in US-71-003. All 6 criteria verified: apply_tag_keyword_boost() at scoring.py:2221 with +0.02/tag capped at +0.08, confidence_breakdown entry with component \u0027tag_keyword_boost\u0027, lowercased tags and keywords, called from apply_all_adjustments() at line 2718. 11 tests pass covering 0/1/2/3/5 tags plus case-insensitive, short-tag filtering, and breakdown integration."
                         },
                         {
                             "id":  "US-72-006",
@@ -103,7 +103,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Verified and completed. _enrich_candidates_with_context() and _build_video_context() already implemented in llm_reranker.py (US-70-007). Context format 'Video context: {title}. {first_sentence}' already correct at llm_reranker.py. Truncation to first sentence or 100 chars already implemented. Graceful skip on empty metadata already implemented. NEW: Wired video_metadata dict construction in MatchStage._run_matching() using state.video_search_results. NEW: Added 5 unit tests for metadata construction and end-to-end enrichment flow (format validation, truncation edge cases, missing metadata handling, empty context, full pipeline integration). All tests passing."
+                            "notes":  "All 6 criteria verified (100%). Implementation was pre-existing from US-70-007: _enrich_candidates_with_context() in llm_reranker.py:206, _build_video_context() at line 184 with format 'Video context: {title}. {first_sentence}', truncation to 100 chars, graceful skip on empty metadata/title, video_metadata wired in match.py:669-677 from state.video_search_results. 36 tests pass including TestLLMRerankerVideoContext (11 tests) and TestVideoMetadataConstruction (5 tests)."
                         },
                         {
                             "id":  "US-72-007",
