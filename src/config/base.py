@@ -54,7 +54,7 @@ import time
 import logging
 import threading
 from pathlib import Path
-from dataclasses import dataclass, field, asdict, fields
+from dataclasses import dataclass, field, asdict, fields, is_dataclass, MISSING
 from typing import Optional, List, Dict, Any, Tuple, Union, TypeVar, Type
 from datetime import datetime
 
@@ -258,16 +258,25 @@ class Config:
 
         Also handles the case where a dataclass instance has nested dict
         fields that need conversion (e.g., after merge_config updates).
-        """
-        # Import here to avoid circular imports
-        from .sections.infrastructure import HealingConfig
 
-        if isinstance(self.healing, dict):
-            self.healing = HealingConfig(**self.healing)
-        elif hasattr(self.healing, '__post_init__'):
-            # Re-run __post_init__ to convert any nested dicts
-            # (e.g., watcher dict -> WatcherConfig after merge)
-            self.healing.__post_init__()
+        Iterates over ALL dataclass fields on Config, not just healing,
+        so that merge_config replacing entire sections with dicts is handled.
+        """
+        for f in fields(self):
+            # Use default_factory to get the actual type (annotations are
+            # strings due to `from __future__ import annotations`)
+            if f.default_factory is MISSING:
+                continue
+            factory = f.default_factory
+            if not is_dataclass(factory):
+                continue
+            value = getattr(self, f.name)
+            if isinstance(value, dict):
+                setattr(self, f.name, factory(**value))
+            elif hasattr(value, '__post_init__'):
+                # Re-run __post_init__ to convert any nested dicts
+                # (e.g., watcher dict -> WatcherConfig after merge)
+                value.__post_init__()
 
     def _populate_api_keys(self):
         """Populate top-level API key aliases from api_keys config"""

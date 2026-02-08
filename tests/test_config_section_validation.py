@@ -2003,5 +2003,66 @@ class TestVarietyConfigValueErrorValidation:
         assert config.max_source_repeats_in_window == 1
 
 
+# =============================================================================
+# US-80-003: _convert_nested_configs handles all section dataclasses
+# =============================================================================
+
+
+class TestConvertNestedConfigsAllSections:
+    """Test that _convert_nested_configs converts all section fields, not just healing."""
+
+    def test_matching_dict_converted_to_dataclass(self):
+        """After merge_config replaces matching with a dict, _convert_nested_configs restores it."""
+        config = Config()
+        # Simulate merge_config replacing matching section with a raw dict
+        config.matching = {"min_confidence": 0.5, "max_clip_reuse": 3}
+        config._convert_nested_configs()
+        assert isinstance(config.matching, MatchingConfig)
+        assert config.matching.min_confidence == 0.5
+        assert config.matching.max_clip_reuse == 3
+
+    def test_download_dict_converted_to_dataclass(self):
+        """After merge_config replaces download with a dict, _convert_nested_configs restores it."""
+        config = Config()
+        config.download = {"quality": "720p", "davinci_mode": False}
+        config._convert_nested_configs()
+        assert isinstance(config.download, DownloadConfig)
+        assert config.download.quality == "720p"
+        assert config.download.davinci_mode is False
+
+    def test_healing_dict_still_converted(self):
+        """Healing dict conversion still works with the generic approach."""
+        config = Config()
+        config.healing = {"enabled": False}
+        config._convert_nested_configs()
+        assert isinstance(config.healing, HealingConfig)
+        assert config.healing.enabled is False
+
+    def test_already_converted_sections_unchanged(self):
+        """Dataclass instances that are already correct type are left unchanged (idempotent)."""
+        config = Config()
+        original_matching = config.matching
+        original_download = config.download
+        original_healing = config.healing
+        # Running _convert_nested_configs on already-correct instances should not break them
+        config._convert_nested_configs()
+        assert isinstance(config.matching, MatchingConfig)
+        assert isinstance(config.download, DownloadConfig)
+        assert isinstance(config.healing, HealingConfig)
+        # Values should be preserved
+        assert config.matching.min_confidence == original_matching.min_confidence
+        assert config.download.quality == original_download.quality
+
+    def test_idempotent_double_call(self):
+        """Calling _convert_nested_configs twice produces same result."""
+        config = Config()
+        config.matching = {"min_confidence": 0.7}
+        config._convert_nested_configs()
+        first_result = config.matching.min_confidence
+        config._convert_nested_configs()
+        assert config.matching.min_confidence == first_result
+        assert isinstance(config.matching, MatchingConfig)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
