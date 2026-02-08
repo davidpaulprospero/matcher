@@ -165,7 +165,7 @@
                             "id":  "US-70-011",
                             "title":  "Add chapter-level source consistency boost to scoring",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "New method apply_chapter_source_consistency() in MatchScoring class applies +0.03 boost when candidate video source matches previous segment\u0027s source within the same voiceover chapter",
                                                        "consecutive_source_penalty is suppressed (not applied) for segments within the same voiceover chapter boundary when chapter_grouping is enabled",
@@ -174,7 +174,7 @@
                                                        "Adjustment recorded in confidence_breakdown as \u0027chapter_source_consistency\u0027 entry",
                                                        "Unit tests verify boost application within chapters and penalty suppression logic"
                                                    ],
-                            "notes":  "Tier: enhancement (Area 3/5). Files: src/matching/scoring.py (apply_consecutive_source_penalty and MatchScoring class), src/config/sections/matching.py (add chapter_grouping config section with ChapterGroupingConfig dataclass), config.yaml. Depends on chapter detection (US-70-009/010) for knowing chapter boundaries. The insight is that within a coherent section about one topic, using multiple clips from the same video is actually desirable, not penalizable."
+                            "notes":  "ChapterGroupingConfig dataclass added to matching config. apply_chapter_source_consistency() on MatchScoring applies +0.03 boost for same-source within same chapter. apply_consecutive_source_penalty gains suppress_in_chapter param. is_within_chapter() helper added. apply_all_adjustments integrates as step 8. 10 unit tests all passing. Config in config.yaml under matching.chapter_grouping."
                         },
                         {
                             "id":  "US-70-012",
