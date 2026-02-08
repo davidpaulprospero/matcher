@@ -1284,6 +1284,19 @@ class CaptionStage(Stage):
                         f"due to budget exhaustion"
                     )
 
+            # US-73-008: Structured summary log for caption stage diagnostics
+            # Compute avg_duration_ms from per-video fetch times
+            fetch_times_ms = [t * 1000 for t in metrics.video_fetch_times.values()] if metrics.video_fetch_times else []
+            avg_duration_ms = round(sum(fetch_times_ms) / len(fetch_times_ms)) if fetch_times_ms else 0
+            caption_stage_metrics = {
+                'total_attempts': metrics.fetch_attempts,
+                'success_count': metrics.successes,
+                'failure_count': metrics.failures,
+                'error_type_distribution': dict(metrics.error_category_counts),
+                'avg_duration_ms': avg_duration_ms,
+            }
+            logger.info("caption_stage_summary %s", caption_stage_metrics)
+
             # US-002 Sprint 7: Save format statistics for cross-run learning
             # This enables adaptive format ordering in future runs
             if caption_cache.enabled and metrics.format_success_counts:
@@ -1334,6 +1347,8 @@ class CaptionStage(Stage):
                 'caption_batch_low_yield': getattr(state, 'caption_batch_low_yield', False),
                 # US-60-006: Videos needing transcription fallback for resume support
                 'needs_transcription': self.needs_transcription,
+                # US-73-008: Structured metrics for post-run analysis
+                'caption_stage_metrics': caption_stage_metrics,
             }
 
             # US-37-007: Save retry budget state for resume support

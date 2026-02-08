@@ -1398,3 +1398,202 @@ class TestCaptionStatusField:
         assert '2 videos' in log_messages[0], (
             f"Log should mention 2 videos with no captions: {log_messages[0]}"
         )
+
+
+# =============================================================================
+# US-73-008: Structured Retry Logging for Caption Fetcher Budget Diagnostics
+# =============================================================================
+
+
+class TestStructuredRetryLogging:
+    """Tests for structured per-attempt and summary logging (US-73-008).
+
+    Verifies:
+    - Each fetch attempt produces a structured log dict with required keys
+    - Summary log at stage completion includes aggregated metrics
+    - Summary is written to checkpoint under caption_stage_metrics key
+    """
+
+    @pytest.mark.fast
+    def test_per_attempt_structured_log_success(self, caplog):
+        """Test structured log entry is produced for successful caption fetch.
+
+        AC1: Log dict has keys: video_id, attempt_number, success, error_type,
+             duration_ms, method.
+        """
+        import logging
+        from unittest.mock import patch
+        from src.caption_fetcher import (
+            CaptionFetcher, CaptionResult, CaptionSegment, CaptionMetrics,
+        )
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        mock_result = CaptionResult(
+            video_id='testVid001x',
+            segments=[CaptionSegment(0, 0.0, 5.0, "Hello", 'testVid001x')],
+            language='en',
+            is_auto_generated=False,
+        )
+
+        retry_budget = CaptionRetryBudget()
+        metrics = CaptionMetrics()
+
+        with patch.object(
+            CaptionFetcher, 'fetch_captions_auto_language_with_retry',
+            return_value=mock_result
+        ):
+            fetcher = CaptionFetcher()
+            with caplog.at_level(logging.INFO, logger='src.caption_fetcher'):
+                results = fetcher.fetch_captions_batch(
+                    ['testVid001x'],
+                    metrics=metrics,
+                    retry_budget=retry_budget,
+                )
+
+        # Find structured attempt log
+        attempt_logs = [
+            r for r in caplog.records
+            if r.message.startswith('caption_fetch_attempt')
+        ]
+        assert len(attempt_logs) >= 1, (
+            f"Expected at least 1 caption_fetch_attempt log. "
+            f"Got: {[r.message for r in caplog.records]}"
+        )
+
+        # Parse the structured dict from the log message
+        log_msg = attempt_logs[0].message
+        # The dict is formatted as string after "caption_fetch_attempt "
+        assert "'video_id': 'testVid001x'" in log_msg
+        assert "'success': True" in log_msg
+        assert "'error_type': None" in log_msg
+        assert "'method': 'captions'" in log_msg
+        assert "'attempt_number':" in log_msg
+        assert "'duration_ms':" in log_msg
+
+    @pytest.mark.fast
+    def test_per_attempt_structured_log_failure(self, caplog):
+        """Test structured log entry is produced for failed caption fetch.
+
+        AC1: Log dict has success=False and error_type populated.
+        """
+        import logging
+        from unittest.mock import patch
+        from src.caption_fetcher import (
+            CaptionFetcher, CaptionMetrics, CaptionFetchError,
+        )
+        from src.caption.retry_budget import CaptionRetryBudget
+
+        retry_budget = CaptionRetryBudget()
+        metrics = CaptionMetrics()
+
+        with patch.object(
+            CaptionFetcher, 'fetch_captions_auto_language_with_retry',
+            side_effect=CaptionFetchError('failVid001x', 'Network timeout')
+        ):
+            fetcher = CaptionFetcher()
+            with caplog.at_level(logging.INFO, logger='src.caption_fetcher'):
+                results = fetcher.fetch_captions_batch(
+                    ['failVid001x'],
+                    metrics=metrics,
+                    retry_budget=retry_budget,
+                )
+
+        # Find structured attempt log
+        attempt_logs = [
+            r for r in caplog.records
+            if r.message.startswith('caption_fetch_attempt')
+        ]
+        assert len(attempt_logs) >= 1, (
+            f"Expected at least 1 caption_fetch_attempt log for failure."
+        )
+
+        log_msg = attempt_logs[0].message
+        assert "'video_id': 'failVid001x'" in log_msg
+        assert "'success': False" in log_msg
+        assert "'error_type': 'Network timeout'" in log_msg
+        assert "'method': 'captions'" in log_msg
+
+    @pytest.mark.integration
+    def test_summary_log_and_checkpoint_metrics(self, caplog):
+        """Test summary log entry and caption_stage_metrics in checkpoint.
+
+        AC2: Summary log has total_attempts, success_count, failure_count,
+             error_type_distribution, avg_duration_ms.
+        AC3: Summary is written to checkpoint under 'caption_stage_metrics'.
+        """
+        import logging
+
+        video_ids = ["vidS001xxxx", "vidF001xxxx"]
+
+        state = MockPipelineState(
+            video_ids=video_ids,
+            video_search_results=[MockVideoSearchResult(vid, 120.0) for vid in video_ids],
+        )
+
+        config = make_mock_config(
+            retry_budget_config={'enabled': True, 'max_attempts': 100}
+        )
+        checkpoint = MockCheckpointManager(stage_data={})
+        stage = CaptionStage()
+
+        def mock_batch_fetch(video_ids, **kwargs):
+            return {
+                'vidS001xxxx': {
+                    'video_id': 'vidS001xxxx',
+                    'status': 'success',
+                    'segments': [{'text': 'test', 'start': 0, 'end': 1}],
+                    'segment_count': 1,
+                    'language': 'en',
+                    'is_auto_generated': False,
+                    'caption_quality': 'high',
+                },
+                'vidF001xxxx': {
+                    'video_id': 'vidF001xxxx',
+                    'error': True,
+                    'status': 'error',
+                    'reason': 'Network timeout',
+                    'caption_quality': 'low',
+                },
+            }
+
+        with patch('src.caption_fetcher.CaptionFetcher') as MockFetcher:
+            fetcher_instance = MockFetcher.return_value
+            fetcher_instance._timeout = 30
+            fetcher_instance.apply_adaptive_format_order.return_value = []
+            fetcher_instance._using_adaptive_order = False
+            fetcher_instance.fetch_captions_batch.side_effect = mock_batch_fetch
+            fetcher_instance.set_video_channel_map = MagicMock()
+
+            with caplog.at_level(logging.INFO, logger='src.stages.caption_stage'):
+                result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+
+        # AC2: Check summary log entry
+        summary_logs = [
+            r for r in caplog.records
+            if r.message.startswith('caption_stage_summary')
+        ]
+        assert len(summary_logs) >= 1, (
+            f"Expected caption_stage_summary log. "
+            f"Got logs: {[r.message for r in caplog.records if 'caption' in r.message.lower()]}"
+        )
+
+        summary_msg = summary_logs[0].message
+        assert "'total_attempts':" in summary_msg
+        assert "'success_count':" in summary_msg
+        assert "'failure_count':" in summary_msg
+        assert "'error_type_distribution':" in summary_msg
+        assert "'avg_duration_ms':" in summary_msg
+
+        # AC3: Check caption_stage_metrics in checkpoint data
+        assert 'caption_stage_metrics' in result.data, (
+            "Checkpoint data should contain 'caption_stage_metrics' key"
+        )
+        metrics = result.data['caption_stage_metrics']
+        assert 'total_attempts' in metrics
+        assert 'success_count' in metrics
+        assert 'failure_count' in metrics
+        assert 'error_type_distribution' in metrics
+        assert 'avg_duration_ms' in metrics
+        assert isinstance(metrics['error_type_distribution'], dict)

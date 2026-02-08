@@ -4062,6 +4062,20 @@ class CaptionFetcher:
                 if retry_budget:
                     retry_budget.record_success(video_id)
 
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': True,
+                        'error_type': None,
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
+
                 # Notify progress callback: success (with worker stats)
                 if progress_callback:
                     try:
@@ -4102,6 +4116,20 @@ class CaptionFetcher:
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
+
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': False,
+                        'error_type': 'unavailable',
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
@@ -4157,6 +4185,20 @@ class CaptionFetcher:
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
 
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': False,
+                        'error_type': str(e.reason),
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
+
                 # Record failure in metrics (thread-safe)
                 if metrics:
                     metrics.record_fetch_failure(
@@ -4199,6 +4241,20 @@ class CaptionFetcher:
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
+
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': False,
+                        'error_type': type(e).__name__,
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
