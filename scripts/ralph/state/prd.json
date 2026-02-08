@@ -124,8 +124,8 @@
       "id": "US-75-008",
       "title": "Add MatchScoring.apply_all_adjustments integration test with full pipeline",
       "priority": "medium",
-      "passes": false,
-      "notes": "Tier: TESTING. Once US-75-002 through US-75-007 wire up individual adjustments, we need an integration test that verifies the complete adjustment chain works end-to-end through TieredMatcher. The test should create a realistic matching scenario with chapters, video metadata, tags, and listicle groups to verify all adjustments fire correctly. This also serves as a regression guard to ensure future refactors don't disconnect adjustments again. Files: tests/test_matching_scoring.py or new tests/test_tiered_matcher_adjustments.py, src/matching/tiered_matcher.py, src/matching/scoring.py.",
+      "passes": true,
+      "notes": "Created tests/test_tiered_matcher_adjustments.py with 6 integration tests. Tests exercise TieredMatcher.match_segment with full video_metadata (titles, descriptions, tags), chapters, relevance_matrix, listicle_groups, and chapter_source_counts. All 6 acceptance criteria verified: title_relevance, description_relevance, tag_keyword_boost, chapter_topic_match, chapter_source_consistency, chapter_coherence_penalty, cross_chapter_relevance, listicle_consistency all appear in confidence_breakdown. Final confidence differs from base similarity. All adjustment values within documented ranges.",
       "acceptanceCriteria": [
         "Integration test creates a TieredMatcher with full video_metadata (titles, descriptions, tags, chapters)",
         "Test exercises match_segment and verifies confidence_breakdown contains all adjustment types",
