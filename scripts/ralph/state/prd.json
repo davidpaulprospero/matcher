@@ -162,7 +162,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "low",
-                            "notes":  "Fixed breakdown component name from 'chapter_coherence' to 'chapter_coherence_penalty' per criteria. Added None chapter_index handling. Added test_none_chapter_index_no_penalty test. All 12 tests pass including: triggers at threshold, no trigger below threshold, absent without chapter data, None chapter_index, custom config threshold, breakdown in apply_all."
+                            "notes":  "Fixed breakdown component name from \u0027chapter_coherence\u0027 to \u0027chapter_coherence_penalty\u0027 per criteria. Added None chapter_index handling. Added test_none_chapter_index_no_penalty test. All 12 tests pass including: triggers at threshold, no trigger below threshold, absent without chapter data, None chapter_index, custom config threshold, breakdown in apply_all."
                         },
                         {
                             "id":  "US-72-011",
@@ -192,7 +192,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "low",
-                            "notes":  "Most was pre-implemented in US-71-012. Added: (1) chapter_type: str = '' field to QueryResult dataclass, (2) get_preferred_strategies(chapter_type, top_n=3) method that returns best strategies by chapter-type success rate, (3) 9 new unit tests covering field, to_dict, default/top_n/independence/recorded-results scenarios. All 72 tests pass."
+                            "notes":  "All 6 acceptance criteria met. chapter_type field on QueryResult, CHAPTER_TYPES constant, chapter_strategy_success tracking with EMA, get_best_strategy_for_chapter with 60/40 blending, get_preferred_strategies method, and 72 unit tests all passing. Includes chapter type classification tests via annotate_gaps_with_chapters."
                         }
                     ]
 }
