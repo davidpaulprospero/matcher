@@ -207,7 +207,7 @@ function Start-InterviewQueueLoop {
 
             if ($status.nextStory) {
                 Write-Host "  Next story: $($status.nextStory.id) - $($status.nextStory.title)" -ForegroundColor White
-                $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+                $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
                 if (-not $success) {
                     Write-Host "  Story failed, continuing..." -ForegroundColor Yellow
@@ -383,7 +383,7 @@ function Start-TrueAutoLoop {
                 }
 
                 # Generate new PRD using Invoke-ClaudeForFocusArea (archive happens in New-SeedPRD)
-                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $focusTarget -Context "" -GeneratePRD
+                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $focusTarget -Context "" -GeneratePRD | Select-Object -Last 1)
 
                 # Pre-flight: check new PRD for already-committed stories
                 Invoke-BatchPreFlight | Out-Null
@@ -401,7 +401,7 @@ function Start-TrueAutoLoop {
         }
 
         if ($status.nextStory) {
-            $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+            $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
             if (Test-ShouldAbort) {
                 break
@@ -488,7 +488,7 @@ function Start-StandardLoop {
             # Read context inline (using already-parsed queue data)
             $context = ""
             if ($inlineQueue -and $inlineQueue.interviewContext) { $context = $inlineQueue.interviewContext }
-            $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $queuedArea -Context $context -GeneratePRD
+            $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $queuedArea -Context $context -GeneratePRD | Select-Object -Last 1)
 
             if (-not $prdGenerated) {
                 Write-Host "  Failed to generate PRD for $queuedArea" -ForegroundColor Red
@@ -570,7 +570,7 @@ function Start-StandardLoop {
                 # Read context inline for reliability
                 $context = ""
                 if ($loopQueue -and $loopQueue.interviewContext) { $context = $loopQueue.interviewContext }
-                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $nextArea -Context $context -GeneratePRD
+                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $nextArea -Context $context -GeneratePRD | Select-Object -Last 1)
 
                 if ($prdGenerated) {
                     Write-Host "  PRD generated. Continuing with $nextArea" -ForegroundColor Green
@@ -595,7 +595,7 @@ function Start-StandardLoop {
         if ($status.nextStory) {
             Write-Host "  Next story: $($status.nextStory.id) - $($status.nextStory.title)" -ForegroundColor White
 
-            $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+            $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
             if (Test-ShouldAbort) {
                 break
@@ -752,7 +752,7 @@ function Start-RalphsChoiceLoop {
             # Generate PRD for selected area
             try {
                 $context = Get-InterviewContext
-                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD
+                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD | Select-Object -Last 1)
 
                 if (-not $prdGenerated) {
                     Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
@@ -777,7 +777,7 @@ function Start-RalphsChoiceLoop {
 
         # Work on current story
         if ($status.nextStory) {
-            $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+            $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
             if (Test-ShouldAbort) {
                 break
@@ -964,7 +964,7 @@ function Start-RalphsChoiceAutoLoop {
 
                 # Generate PRD for selected area
                 $context = Get-InterviewContext
-                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD
+                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD | Select-Object -Last 1)
 
                 if (-not $prdGenerated) {
                     Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
@@ -989,7 +989,7 @@ function Start-RalphsChoiceAutoLoop {
 
         # Work on current story
         if ($status.nextStory) {
-            $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+            $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
             if (Test-ShouldAbort) {
                 break
@@ -1218,7 +1218,7 @@ function Start-AdaptiveOvernightLoop {
 
             try {
                 $context = Get-InterviewContext
-                $prdGenerated = Invoke-ClaudeForFocusArea -FocusAreaId $currentArea -Context $context -GeneratePRD
+                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $currentArea -Context $context -GeneratePRD | Select-Object -Last 1)
 
                 if (-not $prdGenerated) {
                     Write-Host "  Failed to generate PRD for $currentArea" -ForegroundColor Red
@@ -1247,7 +1247,7 @@ function Start-AdaptiveOvernightLoop {
         if ($status.nextStory) {
             Write-Host "  Story: $($status.nextStory.id) - $($status.nextStory.title)" -ForegroundColor White
 
-            $success = Invoke-ClaudeForStory -StoryId $status.nextStory.id
+            $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
             $state.TotalAttempts++
 
             if ($success) {

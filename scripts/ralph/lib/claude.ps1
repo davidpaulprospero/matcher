@@ -961,7 +961,7 @@ function Resolve-ClaudeResult {
 
             # Update baseline after successful story (skip if evidence-rejected)
             if ($success -and $Ctx.TestResults) {
-                Update-TestBaseline -TestResults $Ctx.TestResults
+                $null = Update-TestBaseline -TestResults $Ctx.TestResults
             }
 
             # Token budget check
@@ -970,7 +970,7 @@ function Resolve-ClaudeResult {
             # Save story progress (skip if evidence-rejected)
             if ($success) {
                 try {
-                    Save-StoryProgress -StoryId $Ctx.StoryId -Milestone "completed" -Data @{
+                    $null = Save-StoryProgress -StoryId $Ctx.StoryId -Milestone "completed" -Data @{
                         iteration = $script:State.IterationCount
                         retryCount = $script:State.CurrentRetryCount
                         tokensUsed = $Ctx.TokensUsed
@@ -980,7 +980,7 @@ function Resolve-ClaudeResult {
 
             # Update learning database
             try {
-                Update-LearningDb -Entry @{
+                $null = Update-LearningDb -Entry @{
                     type = "story_success"
                     storyId = $Ctx.StoryId
                     focusArea = $Ctx.FocusAreaId
@@ -998,7 +998,7 @@ function Resolve-ClaudeResult {
                 try {
                     $injectedWarnings = Get-LearningInjection -FocusArea $Ctx.FocusAreaId
                     if ($injectedWarnings) {
-                        Update-LearningDb -Entry @{
+                        $null = Update-LearningDb -Entry @{
                             type = "injection_result"
                             storyId = $Ctx.StoryId
                             focusArea = $Ctx.FocusAreaId
@@ -1038,7 +1038,7 @@ function Resolve-ClaudeResult {
         # Update learning database on failure
         if ($Ctx.StoryId) {
             try {
-                Update-LearningDb -Entry @{
+                $null = Update-LearningDb -Entry @{
                     type = "story_failure"
                     storyId = $Ctx.StoryId
                     focusArea = $Ctx.FocusAreaId
@@ -1054,7 +1054,7 @@ function Resolve-ClaudeResult {
             try {
                 $injectedWarnings = Get-LearningInjection -FocusArea $Ctx.FocusAreaId
                 if ($injectedWarnings) {
-                    Update-LearningDb -Entry @{
+                    $null = Update-LearningDb -Entry @{
                         type = "injection_result"
                         storyId = $Ctx.StoryId
                         focusArea = $Ctx.FocusAreaId
@@ -1214,7 +1214,7 @@ Start by reading the config and prompt files to get the current sprintNumber, th
 
     # Invoke the common process handler
     $useTools = $GeneratePRD -or $SkipPlanApproval
-    $result = Invoke-ClaudeProcess -Prompt $prompt -PromptType $promptType -Identifier $FocusAreaId -AllowedTools:$useTools
+    $result = [bool](Invoke-ClaudeProcess -Prompt $prompt -PromptType $promptType -Identifier $FocusAreaId -AllowedTools:$useTools | Select-Object -Last 1)
 
     # After PRD generation, update queue context from the new PRD
     if ($GeneratePRD -and $result) {

@@ -564,7 +564,7 @@ function Invoke-ClaudeForStory {
     }
 
     # Invoke the common process handler
-    $success = Invoke-ClaudeProcess -Prompt $prompt -PromptType "story_work" -Identifier $StoryId -FocusArea $focusArea -StoryObj $storyObj
+    $success = [bool](Invoke-ClaudeProcess -Prompt $prompt -PromptType "story_work" -Identifier $StoryId -FocusArea $focusArea -StoryObj $storyObj | Select-Object -Last 1)
 
     # Post-success validation: verify prd.json was actually updated
     # Prevents infinite loop when Claude exits 0 but doesn't set passes: true
