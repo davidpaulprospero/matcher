@@ -1789,8 +1789,12 @@ class CaptionStage(Stage):
             # US-70-008: Get video title for this video
             video_title = title_lookup.get(video_id, '')
 
-            for seg in segments:
+            # US-73-002: Map caption segments to video chapters
+            chapter_map = self._map_segments_to_video_chapters(segments, chapters)
+
+            for seg_idx, seg in enumerate(segments):
                 seg_text = seg.get('text', '')
+                ch_idx, ch_title = chapter_map.get(seg_idx, (-1, ''))
                 entry = {
                     'text': seg_text,
                     'video_path': video_id,  # In caption-first mode, this is video ID
@@ -1803,6 +1807,9 @@ class CaptionStage(Stage):
                     'caption_auto_generated': is_auto,
                     'caption_quality': caption_quality,  # US-007: Quality indicator
                     'timing_penalty': timing_penalty,  # US-008 Sprint 7: Timing penalty factor
+                    # US-73-002: Chapter mapping
+                    'chapter_index': ch_idx,
+                    'chapter_title': ch_title,
                 }
                 # US-70-008: Add embedding_text with title prefix when enabled
                 if title_enriched and video_title:
@@ -1822,6 +1829,51 @@ class CaptionStage(Stage):
         state.text_metadata.extend(text_metadata)
 
         logger.info(f"Populated text_metadata with {len(text_metadata)} caption segments")
+
+    @staticmethod
+    def _map_segments_to_video_chapters(
+        segments: List[Dict[str, Any]],
+        chapters_raw: List[Dict[str, Any]],
+    ) -> Dict[int, tuple]:
+        """Map caption segments to video chapters using temporal overlap.
+
+        US-73-002: Converts raw chapter dicts to VideoChapter objects and
+        delegates to map_segments_to_chapters for overlap calculation.
+
+        Args:
+            segments: List of caption segment dicts with 'start' and 'end' keys.
+            chapters_raw: List of chapter dicts with 'title', 'start_time', 'end_time'.
+
+        Returns:
+            Dict mapping segment index to (chapter_index, chapter_title).
+        """
+        if not segments or not chapters_raw:
+            return {i: (-1, '') for i in range(len(segments))}
+
+        from ..chapter_detector.detector import VideoChapter
+        from ..chapter_detector.mapping import map_segments_to_chapters
+
+        # Convert raw chapter dicts to VideoChapter objects
+        video_chapters = []
+        for ch in chapters_raw:
+            if isinstance(ch, VideoChapter):
+                video_chapters.append(ch)
+            else:
+                video_chapters.append(VideoChapter.from_dict(ch))
+
+        # Create lightweight segment wrappers with start_time/end_time attributes
+        class _SegProxy:
+            __slots__ = ('start_time', 'end_time')
+            def __init__(self, s, e):
+                self.start_time = s
+                self.end_time = e
+
+        seg_proxies = [
+            _SegProxy(seg.get('start', 0), seg.get('end', 0))
+            for seg in segments
+        ]
+
+        return map_segments_to_chapters(seg_proxies, video_chapters)
 
     def _validate_language_config(self, config: 'Config') -> None:
         """Validate language configuration at stage initialization (US-005).
