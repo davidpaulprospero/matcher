@@ -100,7 +100,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Implemented apply_listicle_consistency_boost() in scoring.py with LISTICLE_CONSISTENCY_BOOST=0.04. Wired into apply_all_adjustments as step 12. 8 unit tests covering: within-group same-source boost, boundary no-boost, cross-group no-boost, different-source no-boost, empty groups/matches, and breakdown integration."
+                            "notes":  "All 6 criteria verified. apply_listicle_consistency_boost() at scoring.py:2460, LISTICLE_CONSISTENCY_BOOST=0.04 at line 2106, boundary check at line 2507, listicle_consistency breakdown entry at line 2759, apply_all_adjustments calls it at line 2752. 8 unit tests in TestListicleConsistencyBoost all pass."
                         },
                         {
                             "id":  "US-71-007",
