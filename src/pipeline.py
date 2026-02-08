@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
+from .pipeline_progress import ProgressReporter
 from .state import PipelineState
 from .stages import Stage, StageResult, StageMetrics
 
@@ -90,6 +91,9 @@ class PipelineOrchestrator:
         self.current_stage: Optional[str] = None
         self.stage_timings: dict = {}
         self.stage_metrics: dict = {}  # stage_name -> StageMetrics
+
+        # Progress reporter for real-time progress.json updates
+        self.progress_reporter = ProgressReporter(project_dir)
 
     def add_stage(self, stage: Stage) -> 'PipelineOrchestrator':
         """Add a stage to the pipeline (fluent interface)"""
@@ -530,6 +534,11 @@ class PipelineOrchestrator:
                 except Exception as e:
                     logger.warning(f"on_stage_start callback failed for {stage_name}: {e}")
 
+            # Start progress tracking for this stage
+            self.progress_reporter.start_stage(stage_name)
+            # Make reporter accessible to stages via state (transient, not serialized)
+            self.state._progress_reporter = self.progress_reporter
+
             logger.info(f"Running stage: {stage_name}")
             result = stage.run(self.state, self.config, self.checkpoint)
 
@@ -561,6 +570,7 @@ class PipelineOrchestrator:
                 # Mark metrics as failed (metrics already stored above)
                 if stage_name in self.stage_metrics:
                     self.stage_metrics[stage_name].failed = True
+                self.progress_reporter.finish_stage()
                 state_ctx = self._get_state_summary()
                 recovery = self._get_recovery_suggestion(stage_name, result.error or "")
                 logger.error(
@@ -584,6 +594,7 @@ class PipelineOrchestrator:
                 self.checkpoint.save(stage_name, result.data,
                                      stage_metrics=metrics_dict)
 
+            self.progress_reporter.finish_stage()
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
 
         self.current_stage = None
@@ -591,6 +602,8 @@ class PipelineOrchestrator:
         # Print timing summary after successful pipeline completion
         total_duration = time.time() - pipeline_start_time
         self._print_timing_summary(total_duration, skipped_stages)
+
+        self.progress_reporter.finish_pipeline()
 
         return True
 

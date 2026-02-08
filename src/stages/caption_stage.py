@@ -633,6 +633,11 @@ class CaptionStage(Stage):
             if ids_to_fetch:
                 print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
 
+                # US-81-004: Get progress reporter from state (set by pipeline)
+                _progress_reporter = getattr(state, '_progress_reporter', None)
+                if _progress_reporter:
+                    _progress_reporter.update(total=len(ids_to_fetch))
+
                 # US-009: TTY-aware progress callback for real-time streaming output
                 # US-001 (Sprint 6): Thread-safe with lock for concurrent access
                 import sys
@@ -735,6 +740,15 @@ class CaptionStage(Stage):
                                 last_line_length = 0
                             else:
                                 print(line)
+
+                        # US-81-004: Update centralized progress reporter on terminal statuses
+                        if _progress_reporter and status in ('success', 'failed', 'skipped'):
+                            failed_delta = 1 if status == 'failed' else 0
+                            completed_delta = 1 if status != 'failed' else 0
+                            _progress_reporter.update(
+                                completed=completed_delta,
+                                failed=failed_delta,
+                            )
 
                 # US-005 Sprint 8: Create or reuse batch checkpoint for partial recovery
                 checkpoint_save_interval = getattr(caption_config, 'checkpoint_save_interval', 10)

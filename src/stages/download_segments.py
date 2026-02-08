@@ -397,6 +397,11 @@ class DownloadVideoSegmentsStage(Stage):
                 _checkpoint_every_n = 1
             _checkpoint_counter = [0]  # mutable for closure
 
+            # US-81-004: Get progress reporter from state (set by pipeline)
+            _progress_reporter = getattr(state, '_progress_reporter', None)
+            if _progress_reporter:
+                _progress_reporter.update(total=len(segments_to_download))
+
             # Download segments with progress callback for checkpointing
             def checkpoint_progress(current: int, total: int, downloaded: list):
                 """Save progress checkpoint during download.
@@ -406,6 +411,14 @@ class DownloadVideoSegmentsStage(Stage):
                 Only writes to disk every N calls to reduce I/O overhead.
                 Always writes on abort (current < total check in caller).
                 """
+                # US-81-004: Update centralized progress reporter
+                if _progress_reporter:
+                    prev_completed = getattr(checkpoint_progress, '_prev', 0)
+                    delta = current - prev_completed
+                    if delta > 0:
+                        _progress_reporter.update(completed=delta)
+                    checkpoint_progress._prev = current
+
                 _checkpoint_counter[0] += 1
                 # Write every N items, or on final item, or when aborting
                 is_final = (current >= total)
