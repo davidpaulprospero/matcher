@@ -129,7 +129,7 @@
                                                        "Config toggle matching.context_enrichment.title_enriched_embeddings controls this behavior with getattr fallback",
                                                        "Unit tests verify embedding text construction with and without title prefix"
                                                    ],
-                            "notes":  "All 5/5 criteria verified. Added optional config parameter to _populate_text_metadata() in caption_stage.py. When matching.context_enrichment.title_enriched_embeddings is True, builds title lookup from state.video_search_results and adds embedding_text field with '[{title}] {text}' format to text_metadata entries. Original text preserved - match stage uses getattr(seg, 'embedding_text', seg.text) for embedding computation. 9 unit tests verify all edge cases (disabled, no config, empty title, multiple videos, dict search results). All 78 existing caption tests pass."
+                            "notes":  "All 5/5 criteria verified. Implementation adds embedding_text field with '[Title] text' format in _populate_text_metadata(). Config accessed via getattr chain with False fallback. 9 unit tests cover: enabled/disabled, no config, empty title, no search results, multiple videos, text preservation, dict results, unavailable captions."
                         },
                         {
                             "id":  "US-70-009",
