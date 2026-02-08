@@ -70,8 +70,8 @@
                                                        "When both title and description are empty, no context line is added",
                                                        "Unit test verifies prompt construction with various title/description combinations"
                                                    ],
-                            "passes":  false,
-                            "notes":  "Tier: Core quality improvement (Area 2). File: src/matching/llm_reranker.py - modify _build_video_context() (~line 184) and _enrich_candidates_with_context() (~line 107). Currently only uses title and description but truncation/sentence logic may be missing. Tests: tests/test_match*.py"
+                            "passes":  true,
+                            "notes":  "Pre-implemented in US-70-007. All 5 criteria verified: (1) _build_video_context formats 'Video context: {title}. {first_sentence}' (line 204), (2) description split on '.' then capped at 100 chars (lines 198-200), (3) empty description yields title only without trailing period ('. '.join on single-element list), (4) both empty returns '' and no context added (lines 190-191, 227), (5) 36 tests in test_matching_llm_reranker.py cover all combinations including test_build_video_context_* and test_enrich_candidates_*. All 36 tests pass."
                         },
                         {
                             "id":  "US-74-005",
