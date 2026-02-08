@@ -6416,3 +6416,220 @@ class TestCaptionRetryBudgetErrorMetrics:
         # Should log again after reset
         second_logs = [r for r in caplog.records if "[US-62-010]" in r.message]
         assert len(second_logs) == 1, "Should log pattern again after reset"
+
+
+# =============================================================================
+# US-78-006: Exhaustion Diagnostics with Actionable Suggestions
+# =============================================================================
+
+class TestCaptionRetryBudgetExhaustionDiagnostics:
+    """Tests for US-78-006: Add retry budget exhaustion diagnostics with actionable suggestions.
+
+    Verifies:
+    - get_exhaustion_diagnostics() returns dict with limit_hit, dominant_error, suggestion
+    - Correct diagnostics for RATE_LIMIT dominant errors
+    - Correct diagnostics for NETWORK dominant errors
+    - Correct diagnostics for TIMEOUT dominant errors
+    - budget_exhausted() calls get_exhaustion_diagnostics() and logs it
+    """
+
+    @pytest.mark.fast
+    def test_diagnostics_rate_limit_dominant_attempts_exhausted(self):
+        """US-78-006 AC3/AC5: RATE_LIMIT errors suggest VPN rotation or increasing max_attempts."""
+        budget = CaptionRetryBudget(max_attempts=10, max_backoff_time=0)
+
+        # Record 8 RATE_LIMIT failures and 2 NETWORK
+        for _ in range(8):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for _ in range(2):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['limit_hit'] == 'attempts'
+        assert diag['dominant_error'] == 'RATE_LIMIT'
+        assert 'VPN rotation' in diag['suggestion']
+        assert 'max_attempts' in diag['suggestion']
+
+    @pytest.mark.fast
+    def test_diagnostics_rate_limit_dominant_backoff_exhausted(self):
+        """US-78-006 AC3: RATE_LIMIT with backoff exhaustion suggests increasing backoff time."""
+        budget = CaptionRetryBudget(max_attempts=0, max_backoff_time=10.0)
+
+        # Record rate limit failures
+        for _ in range(6):
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+        for _ in range(2):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        # Exhaust backoff
+        budget.record_backoff(10.0, "v")
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['limit_hit'] == 'backoff_time'
+        assert diag['dominant_error'] == 'RATE_LIMIT'
+        assert 'max_backoff_time_seconds' in diag['suggestion']
+        assert 'VPN rotation' in diag['suggestion']
+
+    @pytest.mark.fast
+    def test_diagnostics_network_dominant(self):
+        """US-78-006 AC3/AC5: NETWORK errors suggest checking connectivity."""
+        budget = CaptionRetryBudget(max_attempts=10, max_backoff_time=0)
+
+        # Record 7 NETWORK failures and 3 TIMEOUT
+        for _ in range(7):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+        for _ in range(3):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.TIMEOUT)
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['limit_hit'] == 'attempts'
+        assert diag['dominant_error'] == 'NETWORK'
+        assert 'connectivity' in diag['suggestion']
+        assert 'DNS' in diag['suggestion']
+
+    @pytest.mark.fast
+    def test_diagnostics_timeout_dominant(self):
+        """US-78-006 AC3/AC5: TIMEOUT errors suggest increasing timeout settings."""
+        budget = CaptionRetryBudget(max_attempts=10, max_backoff_time=0)
+
+        # Record 8 TIMEOUT failures and 2 PARSE
+        for _ in range(8):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.TIMEOUT)
+        for _ in range(2):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.PARSE)
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['limit_hit'] == 'attempts'
+        assert diag['dominant_error'] == 'TIMEOUT'
+        assert 'timeout' in diag['suggestion'].lower()
+        assert 'slowdown' in diag['suggestion'].lower() or 'concurrency' in diag['suggestion'].lower()
+
+    @pytest.mark.fast
+    def test_diagnostics_no_errors(self):
+        """US-78-006 AC3: No errors returns generic suggestion."""
+        budget = CaptionRetryBudget(max_attempts=5, max_backoff_time=0)
+
+        # Record only attempts (no failures with categories)
+        for _ in range(5):
+            budget.record_attempt("v")
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['limit_hit'] == 'attempts'
+        assert diag['dominant_error'] == 'NONE'
+        assert 'max_attempts' in diag['suggestion']
+
+    @pytest.mark.fast
+    def test_diagnostics_returns_dict_with_required_fields(self):
+        """US-78-006 AC3: get_exhaustion_diagnostics returns dict with required fields."""
+        budget = CaptionRetryBudget(max_attempts=5, max_backoff_time=0)
+        for _ in range(5):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert isinstance(diag, dict)
+        assert 'limit_hit' in diag
+        assert 'dominant_error' in diag
+        assert 'suggestion' in diag
+        assert diag['limit_hit'] in ('attempts', 'backoff_time')
+
+    @pytest.mark.fast
+    def test_budget_exhausted_logs_diagnostics(self, caplog):
+        """US-78-006 AC4: budget_exhausted() calls get_exhaustion_diagnostics() and logs it."""
+        import logging
+        budget = CaptionRetryBudget(max_attempts=5, max_backoff_time=0)
+
+        for _ in range(5):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.RATE_LIMIT)
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            result = budget.budget_exhausted()
+
+        assert result is True
+
+        # Check that diagnostic log was emitted
+        diag_logs = [
+            r for r in caplog.records
+            if "Diagnostics:" in r.message
+            and "limit_hit=" in r.message
+            and "dominant_error=" in r.message
+            and "suggestion=" in r.message
+        ]
+        assert len(diag_logs) >= 1, "budget_exhausted() should log diagnostics"
+
+        # Verify the diagnostic content in log
+        diag_msg = diag_logs[0].message
+        assert "RATE_LIMIT" in diag_msg
+        assert "VPN" in diag_msg  # suggestion should mention VPN for rate limits
+
+    @pytest.mark.fast
+    def test_budget_exhausted_backoff_logs_diagnostics(self, caplog):
+        """US-78-006 AC4: budget_exhausted() logs diagnostics on backoff exhaustion too."""
+        import logging
+        budget = CaptionRetryBudget(max_attempts=0, max_backoff_time=10.0)
+
+        # Record network failures and exhaust backoff
+        for _ in range(6):
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+        budget.record_backoff(10.0, "v")
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            result = budget.budget_exhausted()
+
+        assert result is True
+
+        diag_logs = [
+            r for r in caplog.records
+            if "Diagnostics:" in r.message
+            and "limit_hit=backoff_time" in r.message
+        ]
+        assert len(diag_logs) >= 1, "Should log diagnostics with backoff_time limit"
+
+    @pytest.mark.fast
+    def test_diagnostics_parse_errors_dominant(self):
+        """US-78-006 AC3: PARSE errors suggest checking yt-dlp version."""
+        budget = CaptionRetryBudget(max_attempts=10, max_backoff_time=0)
+
+        for _ in range(8):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.PARSE)
+        for _ in range(2):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.TIMEOUT)
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['dominant_error'] == 'PARSE'
+        assert 'yt-dlp' in diag['suggestion']
+
+    @pytest.mark.fast
+    def test_diagnostics_unavailable_errors_dominant(self):
+        """US-78-006 AC3: UNAVAILABLE errors give appropriate message."""
+        budget = CaptionRetryBudget(max_attempts=10, max_backoff_time=0)
+
+        for _ in range(8):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.UNAVAILABLE)
+        for _ in range(2):
+            budget.record_attempt("v")
+            budget.record_failure("v", error_category=CaptionErrorCategory.NETWORK)
+
+        diag = budget.get_exhaustion_diagnostics()
+
+        assert diag['dominant_error'] == 'UNAVAILABLE'
+        assert 'no captions' in diag['suggestion'].lower() or 'transcription' in diag['suggestion'].lower()

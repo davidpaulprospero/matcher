@@ -375,6 +375,110 @@ class CaptionRetryBudget:
             f"original_max={self.original_max_attempts}, {scaling_status}, {errors_str}"
         )
 
+    def get_exhaustion_diagnostics(self) -> Dict[str, str]:
+        """Get actionable diagnostics when retry budget is exhausted (US-78-006).
+
+        Determines which limit was hit, the dominant error category, and provides
+        a context-aware suggestion for remediation.
+
+        Returns:
+            Dict with keys:
+            - limit_hit: 'attempts' or 'backoff_time' indicating which limit was hit
+            - dominant_error: Name of the most common error category, or 'NONE'
+            - suggestion: Actionable remediation suggestion based on the dominant error
+
+        Example:
+            >>> budget.get_exhaustion_diagnostics()
+            {'limit_hit': 'attempts', 'dominant_error': 'RATE_LIMIT',
+             'suggestion': 'Increase max_backoff_time_seconds or enable VPN rotation ...'}
+        """
+        with self._lock:
+            # Determine which limit was hit
+            limit_hit = 'attempts'
+            if self.max_attempts > 0 and self.attempts >= self.max_attempts:
+                limit_hit = 'attempts'
+            elif self.max_backoff_time > 0 and self.backoff_time_spent >= self.max_backoff_time:
+                limit_hit = 'backoff_time'
+
+            # Find dominant error category
+            top_errors = self.get_top_errors(limit=1)
+            if top_errors:
+                dominant_cat, dominant_count = top_errors[0]
+                dominant_error = dominant_cat.name
+            else:
+                dominant_error = 'NONE'
+                dominant_cat = None
+
+            # Build context-aware suggestion
+            suggestion = self._build_suggestion(limit_hit, dominant_error, dominant_cat)
+
+            return {
+                'limit_hit': limit_hit,
+                'dominant_error': dominant_error,
+                'suggestion': suggestion,
+            }
+
+    def _build_suggestion(
+        self,
+        limit_hit: str,
+        dominant_error: str,
+        dominant_cat: Optional[CaptionErrorCategory],
+    ) -> str:
+        """Build a context-aware remediation suggestion (US-78-006).
+
+        Args:
+            limit_hit: Which limit was hit ('attempts' or 'backoff_time').
+            dominant_error: Name of the dominant error category.
+            dominant_cat: The CaptionErrorCategory enum value, or None.
+
+        Returns:
+            Actionable suggestion string.
+        """
+        if dominant_cat == CaptionErrorCategory.RATE_LIMIT:
+            if limit_hit == 'backoff_time':
+                return (
+                    "Rate limiting is the dominant error. Increase "
+                    "download.caption_first.retry_budget.max_backoff_time_seconds in config.yaml, "
+                    "or enable VPN rotation (download.caption_first.retry_budget."
+                    "vpn_rotation_on_caption_exhaustion: true) to rotate IP on exhaustion."
+                )
+            return (
+                "Rate limiting is the dominant error. Enable VPN rotation "
+                "(download.caption_first.retry_budget.vpn_rotation_on_caption_exhaustion: true) "
+                "or increase max_attempts in config.yaml. Consider waiting before re-running."
+            )
+        elif dominant_cat == CaptionErrorCategory.NETWORK:
+            return (
+                "Network errors are dominant. Check your internet connectivity and DNS settings. "
+                "If on VPN, try disconnecting. If persistent, increase max_attempts to allow more retries."
+            )
+        elif dominant_cat == CaptionErrorCategory.TIMEOUT:
+            return (
+                "Timeout errors are dominant. Increase download timeout settings in config.yaml, "
+                "or check if YouTube is experiencing slowdowns. Reducing batch concurrency may also help."
+            )
+        elif dominant_cat == CaptionErrorCategory.PARSE:
+            return (
+                "Parse errors are dominant. Captions may be in an unexpected format. "
+                "Check yt-dlp version and consider updating. Retrying is unlikely to help."
+            )
+        elif dominant_cat == CaptionErrorCategory.UNAVAILABLE:
+            return (
+                "Most videos have no captions available. This is expected for certain content. "
+                "Transcription fallback will handle these automatically."
+            )
+        else:
+            # No dominant error or unknown category
+            if limit_hit == 'backoff_time':
+                return (
+                    "Backoff time budget exhausted. Increase "
+                    "download.caption_first.retry_budget.max_backoff_time_seconds in config.yaml."
+                )
+            return (
+                "Attempt budget exhausted. Increase "
+                "download.caption_first.retry_budget.max_attempts or enable auto_scale in config.yaml."
+            )
+
     def is_format_exhausted(self, format: str) -> bool:
         """Check if a specific subtitle format is exhausted (US-59-010).
 
@@ -437,6 +541,12 @@ class CaptionRetryBudget:
                 )
                 # US-42-005: Log diagnostic info at INFO level
                 logger.info(f"CaptionRetryBudget: {self._get_diagnostic_info()}")
+                # US-78-006: Log actionable diagnostics
+                diag = self.get_exhaustion_diagnostics()
+                logger.info(
+                    f"CaptionRetryBudget: Diagnostics: limit_hit={diag['limit_hit']}, "
+                    f"dominant_error={diag['dominant_error']}, suggestion={diag['suggestion']}"
+                )
                 # US-41-006: Log circuit breaker trips if any occurred
                 if self.circuit_breaker_trips > 0:
                     logger.info(
@@ -453,6 +563,12 @@ class CaptionRetryBudget:
                 )
                 # US-42-005: Log diagnostic info at INFO level
                 logger.info(f"CaptionRetryBudget: {self._get_diagnostic_info()}")
+                # US-78-006: Log actionable diagnostics
+                diag = self.get_exhaustion_diagnostics()
+                logger.info(
+                    f"CaptionRetryBudget: Diagnostics: limit_hit={diag['limit_hit']}, "
+                    f"dominant_error={diag['dominant_error']}, suggestion={diag['suggestion']}"
+                )
                 # US-41-006: Log circuit breaker trips if any occurred
                 if self.circuit_breaker_trips > 0:
                     logger.info(
