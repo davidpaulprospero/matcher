@@ -106,6 +106,8 @@ class OutputStage(Stage):
 
     name = "OUTPUT"
     description = "Generate timeline and output files"
+    DEPENDS_ON = ['MATCH', 'DOWNLOAD_SEGMENTS']
+    PRODUCES = ['otio_files', 'output_files']
 
     def _scan_video_segments(self, config: 'Config') -> List[SegmentInfo]:
         """

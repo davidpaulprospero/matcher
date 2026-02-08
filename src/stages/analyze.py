@@ -43,6 +43,8 @@ class AnalyzeStage(Stage):
 
     name = "ANALYZE"
     description = "Analyze voiceover and extract keywords"
+    DEPENDS_ON = []  # First stage — no dependencies
+    PRODUCES = ['voiceover_segments', 'keywords', 'topic_context', 'extracted_entities']
 
     def run(
         self,

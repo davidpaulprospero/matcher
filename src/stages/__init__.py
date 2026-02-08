@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 _stages_logger = logging.getLogger(__name__)
 
 
+class DependencyError(Exception):
+    """Raised when a stage's dependencies are not satisfied."""
+    pass
+
+
 @dataclass
 class StageMetrics:
     """
@@ -123,6 +128,14 @@ class Stage(ABC):
 
     # Human-readable description
     description: str = ""
+
+    # Explicit stage dependencies: list of stage names that must complete before this stage.
+    # Defaults to empty list (no dependencies) for backward compatibility.
+    DEPENDS_ON: List[str] = []
+
+    # State attributes this stage produces (sets on PipelineState).
+    # Used for documentation and future dependency resolution.
+    PRODUCES: List[str] = []
 
     @abstractmethod
     def run(

@@ -51,6 +51,8 @@ class CaptionStage(Stage):
 
     name = "CAPTION"
     description = "Fetch YouTube captions for video candidates"
+    DEPENDS_ON = ['VIDEO_SEARCH']
+    PRODUCES = ['caption_results', 'text_metadata']
 
     def __init__(self, config: 'Config' = None):
         """Initialize CaptionStage.

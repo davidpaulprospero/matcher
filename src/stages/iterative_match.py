@@ -95,6 +95,8 @@ class IterativeMatchStage(Stage):
 
     name = "ITERATIVE_MATCH"
     description = "Fill matching gaps with iterative search passes"
+    DEPENDS_ON = ['MATCH']
+    PRODUCES = ['matches']
 
     def __init__(self):
         """Initialize the stage with cookie rotator."""

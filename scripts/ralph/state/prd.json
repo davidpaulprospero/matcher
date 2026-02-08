@@ -77,21 +77,20 @@
                             "title":  "Add data quality gate between MATCH and OUTPUT stages",
                             "priority":  "medium",
                             "passes":  true,
-                            "notes":  "Added QualityGatesConfig dataclass, config.yaml entry, _check_match_coverage_gate in pipeline.py after MATCH/ITERATIVE_MATCH, 7 tests all pass",
+                            "notes":  "All 5 criteria verified. Implementation in src/pipeline.py (_check_match_coverage_gate). Config in config.yaml (pipeline.quality_gates.min_match_coverage). 7 tests in tests/test_pipeline_quality_gate.py all pass: below-threshold warning, above-threshold no warning, exact threshold, custom threshold, zero segments, zero matches, info log.",
                             "acceptanceCriteria":  [
                                                        "After MATCH stage completes, a validation check verifies that at least 50% of voiceover segments have a match (configurable threshold)",
                                                        "If match coverage is below threshold, a warning is logged with specific guidance: \u0027Only N/M segments matched (X%). Consider running with --force-rematch or checking video search results.\u0027",
                                                        "The quality gate threshold is configurable via config.yaml under pipeline.quality_gates.min_match_coverage (default 0.5)",
                                                        "The quality gate does NOT abort the pipeline - it logs a warning and continues (non-blocking by default)",
                                                        "A test verifies that the warning is emitted when match coverage is below threshold and NOT emitted when above"
-                                                   ],
-                            "notes":  "Tier: reliability. Currently pipeline happily generates an OTIO with 10% coverage. Source files: src/pipeline.py (add quality gate check between stages), src/config/sections/ (new pipeline config section or add to existing). The gate should run after MATCH and after ITERATIVE_MATCH. Use the existing logging pattern with structured data."
+                                                   ]
                         },
                         {
                             "id":  "US-81-006",
                             "title":  "Add explicit stage dependency declarations to pipeline stages",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Each stage class defines a DEPENDS_ON class attribute listing stage names it requires (e.g., MatchStage.DEPENDS_ON = [\u0027ANALYZE\u0027, \u0027CAPTION\u0027])",
                                                        "Each stage class defines a PRODUCES class attribute listing state attributes it outputs (e.g., CaptionStage.PRODUCES = [\u0027caption_results\u0027, \u0027text_metadata\u0027])",
@@ -99,7 +98,7 @@
                                                        "A test verifies that running MATCH without CAPTION raises a clear DependencyError with message naming the missing dependency",
                                                        "A test verifies that the existing STAGE_ORDER is consistent with declared dependencies (no stage runs before its dependencies)"
                                                    ],
-                            "notes":  "Tier: architecture. Currently dependencies are implicit in STAGE_ORDER and somewhat checked by validate_inputs(). Explicit declarations enable future parallel stage resolution and better error messages. Source files: src/stages/__init__.py (Stage base class - add DEPENDS_ON, PRODUCES class attrs), src/pipeline.py (add dependency validation in _run_stage), src/checkpoint.py (check completed stages against dependencies). Keep backward-compatible - DEPENDS_ON defaults to empty list."
+                            "notes":  "Added DEPENDS_ON and PRODUCES class attrs to Stage base class (backward-compatible defaults). All 7 stages declare explicit dependencies. DependencyError class added. Pipeline.run() validates deps via _validate_stage_dependencies() tracking completed/restored stages. 21 tests in tests/test_stage_dependencies.py cover: declarations on all stages, STAGE_ORDER consistency, DependencyError on missing deps, dependency names in error messages, checkpoint restore counting."
                         },
                         {
                             "id":  "US-81-007",

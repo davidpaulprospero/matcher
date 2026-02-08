@@ -46,6 +46,8 @@ class MatchStage(Stage):
 
     name = "MATCH"
     description = "Match voiceover segments to video clips"
+    DEPENDS_ON = ['ANALYZE', 'CAPTION']
+    PRODUCES = ['matches', 'alternatives']
 
     def run(
         self,

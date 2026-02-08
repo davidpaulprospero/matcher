@@ -41,6 +41,8 @@ class VideoSearchStage(Stage):
 
     name = "VIDEO_SEARCH"
     description = "Search YouTube for videos (no download)"
+    DEPENDS_ON = ['ANALYZE']
+    PRODUCES = ['video_ids', 'video_search_results', 'search_failed_keywords']
 
     def __init__(self):
         self.ydl_opts = None

@@ -251,6 +251,8 @@ class DownloadVideoSegmentsStage(Stage):
 
     name = "DOWNLOAD_SEGMENTS"
     description = "Download matched video segments"
+    DEPENDS_ON = ['MATCH']
+    PRODUCES = ['downloaded_segments']
 
     # Browsers that yt-dlp supports for cookie extraction
     _KNOWN_BROWSERS = ('firefox', 'chrome', 'edge', 'safari', 'opera', 'brave')

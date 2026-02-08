@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .pipeline_progress import ProgressReporter
 from .state import PipelineState
-from .stages import Stage, StageResult, StageMetrics
+from .stages import Stage, StageResult, StageMetrics, DependencyError
 
 if TYPE_CHECKING:
     from .config import Config
@@ -251,6 +251,35 @@ class PipelineOrchestrator:
                 f'cookies_from_browser is set to "{browser}" but it is not '
                 f'found on PATH. Tier 3 cookie extraction will fail. '
                 f'Set download.cookies_path instead or install {browser}.'
+            )
+
+    def _validate_stage_dependencies(
+        self,
+        stage: Stage,
+        completed_stages: set,
+    ) -> None:
+        """
+        Validate that all declared dependencies for a stage are satisfied.
+
+        A dependency is satisfied if it has been completed in the current run
+        OR was completed in a loaded checkpoint (i.e., it was skipped/restored).
+
+        Args:
+            stage: The stage about to run.
+            completed_stages: Set of stage names completed or restored so far.
+
+        Raises:
+            DependencyError: If any required dependency is missing.
+        """
+        depends_on = getattr(stage, 'DEPENDS_ON', [])
+        if not depends_on:
+            return
+
+        missing = [dep for dep in depends_on if dep not in completed_stages]
+        if missing:
+            raise DependencyError(
+                f"Stage '{stage.name}' requires {missing} to be completed first. "
+                f"Completed stages: {sorted(completed_stages)}"
             )
 
     # Fields to snapshot before each stage for rollback on failure
@@ -499,6 +528,9 @@ class PipelineOrchestrator:
         # Track processed parallel groups to avoid running same group twice
         processed_parallel_groups: set = set()
 
+        # Track completed/restored stages for dependency validation
+        completed_stages: set = set()
+
         # Run each stage
         for stage in self.stages:
             stage_name = stage.name
@@ -519,6 +551,7 @@ class PipelineOrchestrator:
                     # Validate state attributes after stage restoration
                     self.state.validate_state_attributes()
                     skipped_stages.add(stage_name)
+                    completed_stages.add(stage_name)
                     continue
                 else:
                     # US-51-008: restore failed - re-run the stage instead of
@@ -547,6 +580,13 @@ class PipelineOrchestrator:
                 if not success:
                     return False
                 continue
+
+            # Validate stage dependencies (US-81-006)
+            try:
+                self._validate_stage_dependencies(stage, completed_stages)
+            except DependencyError as e:
+                logger.error(f"Stage dependency error: {e}")
+                return False
 
             # Validate inputs
             validation_error = stage.validate_inputs(self.state, self.config)
@@ -635,6 +675,7 @@ class PipelineOrchestrator:
                                      stage_metrics=metrics_dict)
 
             self.progress_reporter.finish_stage()
+            completed_stages.add(stage_name)
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
 
             # Run quality gate after matching stages (US-81-005)
