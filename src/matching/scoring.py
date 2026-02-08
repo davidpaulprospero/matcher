@@ -2082,9 +2082,9 @@ class MatchScoring:
     TITLE_BOOST_2_KEYWORDS = 0.05  # 2 keyword matches
     TITLE_BOOST_3_PLUS_KEYWORDS = 0.08  # 3+ keyword matches
 
-    # Chapter topic match thresholds (US-70-009)
-    CHAPTER_TOPIC_BOOST = 0.05      # Base boost for 1 keyword match
-    CHAPTER_TOPIC_BOOST_STRONG = 0.10  # Strong boost for 2+ keyword matches
+    # Chapter topic match thresholds (US-70-009, updated US-72-007)
+    CHAPTER_TOPIC_BOOST_PARTIAL = 0.05      # Partial match: 1-2 shared keywords
+    CHAPTER_TOPIC_BOOST_STRONG = 0.10       # Strong match: 3+ shared keywords
     CHAPTER_TOPIC_MISMATCH_PENALTY = -0.05  # Penalty when chapter topic doesn't match
 
     # Chapter source consistency default (US-70-011)
@@ -2177,21 +2177,33 @@ class MatchScoring:
         confidence: float,
         vo_segment: SRTSegment,
         chapter_title: Optional[str] = None,
+        vo_chapter_index: Optional[int] = None,
     ) -> Tuple[float, str]:
         """
-        Apply chapter topic match adjustment to confidence score.
+        Apply chapter topic match adjustment to confidence score (US-72-007).
 
-        Compares voiceover segment keywords against chapter title keywords.
+        Compares voiceover chapter keywords against video chapter title keywords.
         Boosts confidence when topics match, applies small penalty on mismatch.
+        No adjustment when either side lacks chapter data.
+
+        Thresholds:
+        - Partial match (1-2 shared keywords): +0.05
+        - Strong match (3+ shared keywords): +0.10
+        - Mismatch (0 shared keywords): -0.05
 
         Args:
             confidence: Current confidence score
             vo_segment: Voiceover segment with text
             chapter_title: Chapter title for the matched video segment
+            vo_chapter_index: Voiceover chapter index (None = no chapter data)
 
         Returns:
             Tuple of (adjusted_confidence, reason)
         """
+        # No adjustment when either side lacks chapter data
+        if vo_chapter_index is None:
+            return confidence, ""
+
         if not chapter_title:
             return confidence, ""
 
@@ -2204,14 +2216,14 @@ class MatchScoring:
         overlap = vo_keywords & chapter_keywords
         match_count = len(overlap)
 
-        if match_count >= 2:
+        if match_count >= 3:
             adjustment = self.CHAPTER_TOPIC_BOOST_STRONG
             matched_words = ', '.join(sorted(overlap)[:5])
-            reason = f"chapter topic boost +{adjustment} ({match_count} keywords: {matched_words})"
-        elif match_count == 1:
-            adjustment = self.CHAPTER_TOPIC_BOOST
-            matched_words = ', '.join(sorted(overlap))
-            reason = f"chapter topic boost +{adjustment} (1 keyword: {matched_words})"
+            reason = f"chapter topic strong match +{adjustment} ({match_count} keywords: {matched_words})"
+        elif match_count >= 1:
+            adjustment = self.CHAPTER_TOPIC_BOOST_PARTIAL
+            matched_words = ', '.join(sorted(overlap)[:5])
+            reason = f"chapter topic partial match +{adjustment} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
         else:
             adjustment = self.CHAPTER_TOPIC_MISMATCH_PENALTY
             reason = f"chapter topic mismatch {adjustment}"
@@ -2691,11 +2703,12 @@ class MatchScoring:
                 reasons.append(title_reason)
                 breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
 
-        # 7. Chapter topic match (US-70-009)
+        # 7. Chapter topic match (US-70-009, US-72-007)
         if chapter_title:
+            vo_ch_idx = current_chapter_index if current_chapter_index >= 0 else None
             prev = confidence
             confidence, chapter_reason = self.apply_chapter_topic_match(
-                confidence, vo_segment, chapter_title
+                confidence, vo_segment, chapter_title, vo_chapter_index=vo_ch_idx
             )
             if chapter_reason:
                 reasons.append(chapter_reason)

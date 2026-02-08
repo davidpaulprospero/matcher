@@ -2500,5 +2500,147 @@ class TestListicleConsistencyBoost:
         assert len(listicle_entries) == 0
 
 
+# ============================================================================
+# Test Chapter Topic Match (US-72-007)
+# ============================================================================
+
+class TestChapterTopicMatch:
+    """Test apply_chapter_topic_match scoring adjustment (US-72-007)."""
+
+    @staticmethod
+    def _make_segment(text: str, chapter_index=None) -> SRTSegment:
+        seg = SRTSegment(index=1, start_time=0.0, end_time=10.0, text=text, source_file="v.mp4")
+        if chapter_index is not None:
+            seg.chapter_index = chapter_index
+        return seg
+
+    @pytest.mark.fast
+    def test_no_chapter_data_no_adjustment(self, mock_config):
+        """No adjustment when vo_chapter_index is None (either side lacks chapter data)."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change impacts global warming")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate and Weather Patterns",
+            vo_chapter_index=None,
+        )
+        assert conf == 0.70
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_chapter_title_no_adjustment(self, mock_config):
+        """No adjustment when chapter_title is empty/None."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change impacts global warming")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title=None,
+            vo_chapter_index=0,
+        )
+        assert conf == 0.70
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_partial_match_1_keyword(self, mock_config):
+        """Partial match (+0.05) with 1 shared keyword."""
+        scoring = MatchScoring(mock_config)
+        # 'climate' will overlap
+        vo = self._make_segment("climate change impacts the world")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate and Extreme Events",
+            vo_chapter_index=0,
+        )
+        assert conf == pytest.approx(0.75, abs=0.001)
+        assert "partial match" in reason
+        assert "+0.05" in reason
+
+    @pytest.mark.fast
+    def test_partial_match_2_keywords(self, mock_config):
+        """Partial match (+0.05) with 2 shared keywords."""
+        scoring = MatchScoring(mock_config)
+        # 'climate' and 'impacts' will overlap
+        vo = self._make_segment("climate change impacts the world")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate Impacts Analysis",
+            vo_chapter_index=1,
+        )
+        assert conf == pytest.approx(0.75, abs=0.001)
+        assert "partial match" in reason
+        assert "+0.05" in reason
+
+    @pytest.mark.fast
+    def test_strong_match_3_plus_keywords(self, mock_config):
+        """Strong match (+0.10) with 3+ shared keywords."""
+        scoring = MatchScoring(mock_config)
+        # 'climate', 'change', 'global' will overlap (3 keywords)
+        vo = self._make_segment("climate change global warming effects")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate Change Global Warming",
+            vo_chapter_index=2,
+        )
+        assert conf == pytest.approx(0.80, abs=0.001)
+        assert "strong match" in reason
+        assert "+0.1" in reason
+
+    @pytest.mark.fast
+    def test_mismatch_penalty(self, mock_config):
+        """Mismatch penalty (-0.05) when voiceover chapter has keywords but zero overlap."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("renewable energy solar power wind")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Marine Biology Ocean Ecosystems",
+            vo_chapter_index=0,
+        )
+        assert conf == pytest.approx(0.65, abs=0.001)
+        assert "mismatch" in reason
+        assert "-0.05" in reason
+
+    @pytest.mark.fast
+    def test_breakdown_in_apply_all_adjustments(self, mock_config):
+        """Verify chapter_topic_match appears in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change global warming effects")
+        vid = self._make_segment("video about rising sea levels")
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.70,
+            vo_segment=vo,
+            video_segment=vid,
+            chapter_title="Climate Change Global Warming",
+            current_chapter_index=0,
+        )
+        chapter_entries = [b for b in breakdown if b['component'] == 'chapter_topic_match']
+        assert len(chapter_entries) == 1
+        entry = chapter_entries[0]
+        assert 'adjustment' in entry
+        assert 'reason' in entry
+        assert isinstance(entry['adjustment'], float)
+
+    @pytest.mark.fast
+    def test_no_breakdown_without_chapter_index(self, mock_config):
+        """No chapter_topic_match entry when current_chapter_index is -1 (None)."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change impacts the world")
+        vid = self._make_segment("video content here")
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.70,
+            vo_segment=vo,
+            video_segment=vid,
+            chapter_title="Climate Change",
+            current_chapter_index=-1,
+        )
+        chapter_entries = [b for b in breakdown if b['component'] == 'chapter_topic_match']
+        assert len(chapter_entries) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
