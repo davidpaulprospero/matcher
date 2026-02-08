@@ -115,7 +115,7 @@
                                                        "When title/description are empty, format falls back to current behavior (caption text only)",
                                                        "Unit tests verify prompt construction with and without video context"
                                                    ],
-                            "notes":  "All 5/5 criteria verified. Implementation: _build_video_context() formats 'Video context: {title}. {first_sentence}' with 100-char truncation. _enrich_candidates_with_context() prepends [context] prefix to segment text. Fallback: empty title+description returns original text unchanged. 11 unit tests pass in TestLLMRerankerVideoContext covering: title+desc, title-only, desc-only, empty, truncation, enrichment with/without metadata, partial metadata, provider integration, fallback, cache key differentiation."
+                            "notes":  "All 11 tests pass. Implementation uses _build_video_context() and _enrich_candidates_with_context() methods."
                         },
                         {
                             "id":  "US-70-008",
