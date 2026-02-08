@@ -178,6 +178,7 @@ class ContextEnrichmentConfig:
     max_description_length: int = 500        # Truncate descriptions longer than this
     parse_description_chapters: bool = True  # Parse chapter timestamps from description text
     title_enriched_embeddings: bool = True   # Include title+description in embedding generation
+    chapter_enriched_embeddings: bool = True  # Include chapter title in embedding text when available
 
 
 @dataclass

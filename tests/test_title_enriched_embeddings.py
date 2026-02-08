@@ -27,10 +27,11 @@ class FakeState:
     video_ids: List[str] = field(default_factory=list)
 
 
-def _make_config(title_enriched_embeddings: bool = True):
+def _make_config(title_enriched_embeddings: bool = True, chapter_enriched_embeddings: bool = True):
     """Build a minimal config mock with context_enrichment settings."""
     config = MagicMock()
     config.matching.context_enrichment.title_enriched_embeddings = title_enriched_embeddings
+    config.matching.context_enrichment.chapter_enriched_embeddings = chapter_enriched_embeddings
     return config
 
 
@@ -249,3 +250,113 @@ class TestTitleEnrichedEmbeddings:
         stage._populate_text_metadata(state, caption_results, config)
 
         assert len(state.text_metadata) == 0
+
+
+class TestChapterEnrichedEmbeddings:
+    """Tests for US-73-004: Chapter-enriched embedding text."""
+
+    def _make_caption_results_with_chapters(self, video_id, segments, chapters):
+        """Build caption_results with chapter data."""
+        return {
+            video_id: {
+                'segments': segments,
+                'language': 'en',
+                'is_auto_generated': False,
+                'caption_quality': 'high',
+                'video_chapters': chapters,
+            }
+        }
+
+    @pytest.mark.fast
+    def test_embedding_text_with_chapter_title(self):
+        """When chapter_enriched=True and segment has chapter, format is '[Title | Chapter] text'."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Video')
+            ]
+        )
+        caption_results = self._make_caption_results_with_chapters(
+            'abc123',
+            [{'text': 'hello world', 'start': 10, 'end': 15}],
+            [{'title': 'Introduction', 'start_time': 0, 'end_time': 60}],
+        )
+        config = _make_config(title_enriched_embeddings=True, chapter_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        assert len(state.text_metadata) == 1
+        entry = state.text_metadata[0]
+        assert entry['embedding_text'] == '[My Video | Introduction] hello world'
+
+    @pytest.mark.fast
+    def test_embedding_text_without_chapter_falls_back(self):
+        """When segment has no chapter (chapter_index=-1), falls back to '[Title] text'."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Video')
+            ]
+        )
+        # No chapters provided - all segments map to chapter_index=-1
+        caption_results = self._make_caption_results_with_chapters(
+            'abc123',
+            [{'text': 'hello world', 'start': 10, 'end': 15}],
+            [],  # No chapters
+        )
+        config = _make_config(title_enriched_embeddings=True, chapter_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        assert len(state.text_metadata) == 1
+        entry = state.text_metadata[0]
+        assert entry['embedding_text'] == '[My Video] hello world'
+
+    @pytest.mark.fast
+    def test_chapter_enrichment_disabled_uses_title_only(self):
+        """When chapter_enriched=False, even with chapter data, uses '[Title] text'."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Video')
+            ]
+        )
+        caption_results = self._make_caption_results_with_chapters(
+            'abc123',
+            [{'text': 'hello world', 'start': 10, 'end': 15}],
+            [{'title': 'Introduction', 'start_time': 0, 'end_time': 60}],
+        )
+        config = _make_config(title_enriched_embeddings=True, chapter_enriched_embeddings=False)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        assert len(state.text_metadata) == 1
+        entry = state.text_metadata[0]
+        assert entry['embedding_text'] == '[My Video] hello world'
+
+    @pytest.mark.fast
+    def test_mixed_chapter_and_no_chapter_segments(self):
+        """Segments with chapters get enriched, those without get title-only."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Video')
+            ]
+        )
+        caption_results = self._make_caption_results_with_chapters(
+            'abc123',
+            [
+                {'text': 'in chapter', 'start': 10, 'end': 15},
+                {'text': 'outside chapter', 'start': 200, 'end': 205},
+            ],
+            # Chapter only covers 0-60s, so second segment (200-205) is outside
+            [{'title': 'Intro', 'start_time': 0, 'end_time': 60}],
+        )
+        config = _make_config(title_enriched_embeddings=True, chapter_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        assert len(state.text_metadata) == 2
+        entries = {e['text']: e.get('embedding_text') for e in state.text_metadata}
+        assert entries['in chapter'] == '[My Video | Intro] in chapter'
+        assert entries['outside chapter'] == '[My Video] outside chapter'

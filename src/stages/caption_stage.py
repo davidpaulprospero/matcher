@@ -1744,10 +1744,12 @@ class CaptionStage(Stage):
 
         # US-70-008: Build title lookup and check config for title-enriched embeddings
         title_enriched = False
+        chapter_enriched = False  # US-73-004: Chapter-enriched embedding text
         title_lookup = {}
         if config is not None:
             ce = getattr(getattr(config, 'matching', None), 'context_enrichment', None)
             title_enriched = getattr(ce, 'title_enriched_embeddings', False)
+            chapter_enriched = getattr(ce, 'chapter_enriched_embeddings', True)
 
         if title_enriched and hasattr(state, 'video_search_results'):
             for vsr in state.video_search_results:
@@ -1811,9 +1813,12 @@ class CaptionStage(Stage):
                     'chapter_index': ch_idx,
                     'chapter_title': ch_title,
                 }
-                # US-70-008: Add embedding_text with title prefix when enabled
+                # US-70-008 / US-73-004: Add embedding_text with title (+ chapter) prefix
                 if title_enriched and video_title:
-                    entry['embedding_text'] = f'[{video_title}] {seg_text}'
+                    if chapter_enriched and ch_title:
+                        entry['embedding_text'] = f'[{video_title} | {ch_title}] {seg_text}'
+                    else:
+                        entry['embedding_text'] = f'[{video_title}] {seg_text}'
                 text_metadata.append(entry)
 
         # US-37-010/US-41-002/US-41-007: Final safety check before extending
