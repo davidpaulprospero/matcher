@@ -7904,3 +7904,181 @@ class TestCaptionResultEnrichWithMetadata:
         assert result.video_description == ""
         assert result.video_chapters == []
         assert result.video_tags == []
+
+
+class TestParseDescriptionChapters:
+    """Tests for parse_description_chapters (US-70-005)."""
+
+    def test_standard_mm_ss_format(self):
+        """Parses standard MM:SS chapter format from description."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "0:00 Introduction\n"
+            "1:23 Main Topic\n"
+            "5:45 Conclusion"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Introduction', 'start_time': 0.0, 'end_time': 83.0}
+        assert chapters[1] == {'title': 'Main Topic', 'start_time': 83.0, 'end_time': 345.0}
+        assert chapters[2] == {'title': 'Conclusion', 'start_time': 345.0, 'end_time': 0.0}
+
+    def test_hh_mm_ss_format(self):
+        """Parses HH:MM:SS chapter format."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "0:00:00 Start\n"
+            "1:02:30 Long Section\n"
+            "2:15:00 End"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Start', 'start_time': 0.0, 'end_time': 3750.0}
+        assert chapters[1] == {'title': 'Long Section', 'start_time': 3750.0, 'end_time': 8100.0}
+        assert chapters[2] == {'title': 'End', 'start_time': 8100.0, 'end_time': 0.0}
+
+    def test_mixed_formats(self):
+        """Parses mix of MM:SS and HH:MM:SS formats."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "0:00 Introduction\n"
+            "5:30 First Part\n"
+            "1:00:00 Second Part\n"
+            "1:30:15 Wrap Up"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 4
+        assert chapters[0]['title'] == 'Introduction'
+        assert chapters[0]['start_time'] == 0.0
+        assert chapters[1]['title'] == 'First Part'
+        assert chapters[1]['start_time'] == 330.0
+        assert chapters[2]['title'] == 'Second Part'
+        assert chapters[2]['start_time'] == 3600.0
+        assert chapters[3]['title'] == 'Wrap Up'
+        assert chapters[3]['start_time'] == 5415.0
+
+    def test_no_chapters_returns_empty(self):
+        """Returns empty list when no chapter pattern detected."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = "This is a regular description with no timestamps."
+        assert parse_description_chapters(description) == []
+
+    def test_empty_description_returns_empty(self):
+        """Returns empty list for empty description."""
+        from src.caption_fetcher import parse_description_chapters
+
+        assert parse_description_chapters("") == []
+        assert parse_description_chapters(None) == []
+
+    def test_single_timestamp_returns_empty(self):
+        """Returns empty list for only one timestamp (not a chapter list)."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = "0:00 Only one chapter"
+        assert parse_description_chapters(description) == []
+
+    def test_malformed_timestamps_skipped(self):
+        """Handles lines with no timestamp gracefully."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "Check out my channel!\n"
+            "0:00 Introduction\n"
+            "Some random text\n"
+            "3:45 Good Stuff\n"
+            "Thanks for watching!"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 2
+        assert chapters[0]['title'] == 'Introduction'
+        assert chapters[1]['title'] == 'Good Stuff'
+
+    def test_leading_whitespace_timestamps(self):
+        """Handles timestamps with leading spaces."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "  0:00 Introduction\n"
+            "  2:30 Topic\n"
+            "  5:00 End"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Introduction'
+
+    def test_end_time_chaining(self):
+        """Each chapter's end_time equals the next chapter's start_time."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = "0:00 A\n1:00 B\n2:00 C\n3:00 D"
+        chapters = parse_description_chapters(description)
+
+        assert chapters[0]['end_time'] == chapters[1]['start_time']
+        assert chapters[1]['end_time'] == chapters[2]['start_time']
+        assert chapters[2]['end_time'] == chapters[3]['start_time']
+        assert chapters[3]['end_time'] == 0.0  # Last chapter
+
+
+class TestExtractMetadataDescriptionChapterFallback:
+    """Tests for description chapter fallback in extract_video_metadata_from_info_dict (US-70-005)."""
+
+    def test_fallback_when_no_structured_chapters(self):
+        """Parses chapters from description when info_dict has no chapters field."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': "0:00 Intro\n1:30 Main\n5:00 End",
+        }
+        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Intro'
+
+    def test_no_fallback_when_structured_chapters_exist(self):
+        """Does NOT parse description when structured chapters already present."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': "0:00 Desc Intro\n1:30 Desc Main",
+            'chapters': [{'title': 'Structured', 'start_time': 0.0, 'end_time': 100.0}],
+        }
+        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+
+        assert len(chapters) == 1
+        assert chapters[0]['title'] == 'Structured'
+
+    def test_fallback_disabled_by_flag(self):
+        """Does NOT parse description when parse_chapters_from_description=False."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': "0:00 Intro\n1:30 Main\n5:00 End",
+        }
+        _, chapters, _ = extract_video_metadata_from_info_dict(
+            info_dict, parse_chapters_from_description=False
+        )
+
+        assert chapters == []
+
+    def test_fallback_uses_full_description_not_truncated(self):
+        """Chapter parsing uses full description, not the truncated version."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        # Description with chapters past the 50-char truncation point
+        desc = "X" * 100 + "\n0:00 Start\n2:00 Middle\n4:00 End"
+        info_dict = {'description': desc}
+        _, chapters, _ = extract_video_metadata_from_info_dict(
+            info_dict, max_description_length=50
+        )
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Start'

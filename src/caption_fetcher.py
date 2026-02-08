@@ -2278,7 +2278,8 @@ class CaptionResult:
 
 def extract_video_metadata_from_info_dict(
     info_dict: Dict[str, Any],
-    max_description_length: int = 500
+    max_description_length: int = 500,
+    parse_chapters_from_description: bool = True
 ) -> tuple:
     """Extract video metadata from a yt-dlp info_dict (US-70-003).
 
@@ -2288,6 +2289,8 @@ def extract_video_metadata_from_info_dict(
     Args:
         info_dict: Dict from yt-dlp --dump-json output.
         max_description_length: Maximum characters for description (default 500).
+        parse_chapters_from_description: If True and no structured chapters found,
+            parse chapter timestamps from description text (US-70-005).
 
     Returns:
         Tuple of (video_description, video_chapters, video_tags):
@@ -2320,7 +2323,70 @@ def extract_video_metadata_from_info_dict(
     if raw_tags and isinstance(raw_tags, list):
         video_tags = [str(t) for t in raw_tags if t is not None]
 
+    # US-70-005: Parse chapters from description if structured chapters are missing
+    # Use raw_description (not truncated) since chapters may appear beyond truncation point
+    if parse_chapters_from_description and not video_chapters and raw_description:
+        video_chapters = parse_description_chapters(raw_description)
+
     return video_description, video_chapters, video_tags
+
+
+def parse_description_chapters(description: str) -> List[dict]:
+    """Parse YouTube chapter timestamps from video description text (US-70-005).
+
+    Many YouTube videos have chapters only in the description, not in the
+    structured chapters field. This extracts timestamp-title pairs from
+    common formats like '0:00 Introduction', '01:23 Topic Name',
+    '1:02:30 Long Topic'.
+
+    Args:
+        description: Video description text.
+
+    Returns:
+        List of {title: str, start_time: float, end_time: float} dicts.
+        end_time is computed from the next chapter's start_time.
+        Returns empty list if no chapter pattern is detected or description
+        is empty/None.
+    """
+    if not description:
+        return []
+
+    # Match timestamps like 0:00, 01:23, 1:02:30 followed by a title
+    pattern = r'(?:^|\n)\s*(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+?)(?=\n|$)'
+    matches = re.findall(pattern, description)
+
+    if len(matches) < 2:
+        # Need at least 2 chapters to form a meaningful chapter list
+        return []
+
+    # Parse timestamps and titles
+    parsed = []
+    for timestamp_str, title in matches:
+        title = title.strip()
+        if not title:
+            continue
+        parts = timestamp_str.split(':')
+        if len(parts) == 3:
+            # HH:MM:SS
+            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            # MM:SS
+            seconds = int(parts[0]) * 60 + int(parts[1])
+        else:
+            continue
+        parsed.append({
+            'title': title,
+            'start_time': float(seconds),
+            'end_time': 0.0,  # Will be filled below
+        })
+
+    # Compute end_time from next chapter's start_time
+    for i in range(len(parsed) - 1):
+        parsed[i]['end_time'] = parsed[i + 1]['start_time']
+
+    # Last chapter gets end_time = 0.0 (unknown duration, consistent with yt-dlp)
+
+    return parsed
 
 
 @dataclass
