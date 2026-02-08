@@ -162,7 +162,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "low",
-                            "notes":  "Pre-implemented in US-71-004. apply_chapter_coherence_penalty() exists in scoring.py:2347 with -0.03 per excess source, configurable threshold (default 5) via chapter_grouping.coherence_penalty_threshold, breakdown component 'chapter_coherence', no penalty when chapter_index < 0, and 11 unit tests all passing."
+                            "notes":  "Fixed breakdown component name from 'chapter_coherence' to 'chapter_coherence_penalty' per criteria. Added None chapter_index handling. Added test_none_chapter_index_no_penalty test. All 12 tests pass including: triggers at threshold, no trigger below threshold, absent without chapter data, None chapter_index, custom config threshold, breakdown in apply_all."
                         },
                         {
                             "id":  "US-72-011",

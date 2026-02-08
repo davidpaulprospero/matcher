@@ -2365,7 +2365,7 @@ class MatchScoring:
         Returns:
             Tuple of (adjusted_confidence, reason)
         """
-        if current_chapter_index < 0 or not chapter_source_counts:
+        if current_chapter_index is None or current_chapter_index < 0 or not chapter_source_counts:
             return confidence, ""
 
         cg = getattr(self._mc, 'chapter_grouping', None) if self._mc else None
@@ -2743,7 +2743,7 @@ class MatchScoring:
             )
             if coherence_reason:
                 reasons.append(coherence_reason)
-                breakdown.append({'component': 'chapter_coherence', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
+                breakdown.append({'component': 'chapter_coherence_penalty', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
 
         # 11. Cross-chapter relevance boost (US-71-005)
         if relevance_matrix and current_chapter_index >= 0 and video_chapter_index >= 0:

@@ -2268,6 +2268,16 @@ class TestChapterCoherencePenalty:
         assert reason == ""
 
     @pytest.mark.fast
+    def test_none_chapter_index_no_penalty(self, mock_config):
+        """No penalty when chapter_index is None (no chapter structure detected)."""
+        scoring = MatchScoring(mock_config)
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=None, chapter_source_counts={0: {"a", "b", "c", "d", "e", "f"}}
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
     def test_no_source_counts_no_penalty(self, mock_config):
         """No penalty when chapter_source_counts is None."""
         scoring = MatchScoring(mock_config)
@@ -2373,7 +2383,7 @@ class TestChapterCoherencePenalty:
             current_chapter_index=0,
             chapter_source_counts=sources,
         )
-        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence']
+        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence_penalty']
         assert len(coherence_entries) == 1
         assert coherence_entries[0]['adjustment'] < 0
         assert 'chapter_coherence' in coherence_entries[0]['reason']
@@ -2387,7 +2397,7 @@ class TestChapterCoherencePenalty:
             vo_segment=sample_vo_segment,
             video_segment=sample_video_segment,
         )
-        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence']
+        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence_penalty']
         assert len(coherence_entries) == 0
 
 
