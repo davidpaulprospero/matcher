@@ -1,15 +1,15 @@
 """
-Unit tests for the listicle-to-chapter bridge (US-71-010).
+Tests for the listicle-to-chapter bridge module (US-71-010).
 
-Tests:
-- listicle_groups_to_chapters: conversion with topic_keywords populated
-- merge_chapters: YouTube chapters take precedence for overlapping ranges
-- build_unified_chapters: end-to-end bridge
-- build_segment_chapter_map: segment index to chapter mapping
+Verifies:
+- Conversion of ListicleGroup objects to ChapterCandidate objects
+- topic_keywords populated from ListicleGroup
+- Merge behavior with YouTube chapters taking precedence for overlapping ranges
+- Non-overlapping listicle chapters included in merge
+- Unified chapter list accessible via same interface as regular chapters
 """
 
 import pytest
-
 from src.chapter_detection.models import ChapterCandidate, ListicleGroup
 from src.chapter_detection.bridge import (
     listicle_groups_to_chapters,
@@ -22,12 +22,10 @@ from src.chapter_detection.bridge import (
 
 # --- Helpers ---
 
-def _lg(group_id: int, start: int, end: int,
-        keywords: list = None, label: str = "", expected_count=None) -> ListicleGroup:
-    """Create a ListicleGroup for testing."""
+def _make_listicle_group(group_id, start, end, label="item", keywords=None, expected_count=None):
     return ListicleGroup(
         group_id=group_id,
-        item_label=label or f"item {group_id + 1}",
+        item_label=label,
         start_segment_idx=start,
         end_segment_idx=end,
         topic_keywords=keywords or [],
@@ -35,15 +33,12 @@ def _lg(group_id: int, start: int, end: int,
     )
 
 
-def _ch(chapter_id: int, start: int, end: int,
-        title: str = "", strategy: str = "topic",
-        topics: list = None) -> ChapterCandidate:
-    """Create a ChapterCandidate for testing."""
+def _make_chapter(chapter_id, start, end, title="Chapter", topics=None, strategy="topic"):
     return ChapterCandidate(
         chapter_id=chapter_id,
         start_segment_idx=start,
         end_segment_idx=end,
-        title=title or f"Chapter {chapter_id}",
+        title=title,
         topics=topics or [],
         detection_strategy=strategy,
     )
@@ -56,127 +51,154 @@ class TestListicleGroupsToChapters:
         result = listicle_groups_to_chapters([])
         assert result == []
 
-    def test_single_group(self):
-        groups = [_lg(0, 0, 4, keywords=["travel", "paris", "europe"], label="first")]
-        result = listicle_groups_to_chapters(groups)
-        assert len(result) == 1
-        ch = result[0]
+    def test_single_group_converts_to_chapter(self):
+        group = _make_listicle_group(0, 0, 4, label="first", keywords=["travel", "paris"])
+        chapters = listicle_groups_to_chapters([group])
+        assert len(chapters) == 1
+        ch = chapters[0]
+        assert isinstance(ch, ChapterCandidate)
         assert ch.start_segment_idx == 0
         assert ch.end_segment_idx == 4
-        assert ch.detection_strategy == "listicle"
-        assert ch.topics == ["travel", "paris", "europe"]
-        assert "first" in ch.title
+        assert ch.detection_strategy == 'listicle'
 
     def test_topic_keywords_populated(self):
-        """AC: Converted chapters have topic_keywords populated from ListicleGroup."""
+        """Criterion: Converted chapters have topic_keywords populated from ListicleGroup."""
+        group = _make_listicle_group(0, 0, 3, keywords=["cooking", "recipes", "pasta"])
+        chapters = listicle_groups_to_chapters([group])
+        assert chapters[0].topics == ["cooking", "recipes", "pasta"]
+
+    def test_topic_keywords_empty_when_group_has_none(self):
+        group = _make_listicle_group(0, 0, 2, keywords=[])
+        chapters = listicle_groups_to_chapters([group])
+        assert chapters[0].topics == []
+
+    def test_multiple_groups_convert(self):
         groups = [
-            _lg(0, 0, 3, keywords=["beaches", "surfing"]),
-            _lg(1, 4, 7, keywords=["mountains", "hiking", "snow"]),
+            _make_listicle_group(0, 0, 4, label="first", keywords=["intro"]),
+            _make_listicle_group(1, 5, 9, label="second", keywords=["middle"]),
+            _make_listicle_group(2, 10, 14, label="third", keywords=["end"]),
         ]
-        result = listicle_groups_to_chapters(groups)
-        assert result[0].topics == ["beaches", "surfing"]
-        assert result[1].topics == ["mountains", "hiking", "snow"]
+        chapters = listicle_groups_to_chapters(groups)
+        assert len(chapters) == 3
+        assert all(ch.detection_strategy == 'listicle' for ch in chapters)
+        assert chapters[0].topics == ["intro"]
+        assert chapters[1].topics == ["middle"]
+        assert chapters[2].topics == ["end"]
+
+    def test_title_derived_from_label_and_keywords(self):
+        group = _make_listicle_group(0, 0, 3, label="first", keywords=["travel", "paris", "food"])
+        chapters = listicle_groups_to_chapters([group])
+        assert "first" in chapters[0].title
+        assert "travel" in chapters[0].title
+
+    def test_title_fallback_when_no_label_or_keywords(self):
+        group = _make_listicle_group(0, 0, 2, label="", keywords=[])
+        chapters = listicle_groups_to_chapters([group])
+        assert "Item 1" in chapters[0].title
 
     def test_confidence_with_expected_count(self):
-        """Confidence slightly higher when expected_count is set."""
-        without = _lg(0, 0, 3)
-        with_count = _lg(0, 0, 3, expected_count=5)
-        r1 = listicle_groups_to_chapters([without])
-        r2 = listicle_groups_to_chapters([with_count])
-        assert r2[0].confidence > r1[0].confidence
+        group = _make_listicle_group(0, 0, 3, expected_count=5)
+        chapters = listicle_groups_to_chapters([group])
+        assert chapters[0].confidence == 0.75
 
-    def test_title_from_label_and_keywords(self):
-        group = _lg(0, 0, 2, keywords=["food", "culture"], label="second")
-        result = listicle_groups_to_chapters([group])
-        assert "second" in result[0].title
-        assert "food" in result[0].title
+    def test_confidence_without_expected_count(self):
+        group = _make_listicle_group(0, 0, 3, expected_count=None)
+        chapters = listicle_groups_to_chapters([group])
+        assert chapters[0].confidence == 0.7
 
-    def test_title_fallback_no_label(self):
-        group = ListicleGroup(
-            group_id=0, item_label="", start_segment_idx=0,
-            end_segment_idx=2, topic_keywords=[],
-        )
-        result = listicle_groups_to_chapters([group])
-        assert "Item 1" in result[0].title
+    def test_chapter_id_preserved_from_group_id(self):
+        groups = [
+            _make_listicle_group(0, 0, 4),
+            _make_listicle_group(1, 5, 9),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        assert chapters[0].chapter_id == 0
+        assert chapters[1].chapter_id == 1
 
 
 # --- _ranges_overlap ---
 
 class TestRangesOverlap:
     def test_no_overlap(self):
-        assert not _ranges_overlap(0, 3, 5, 8)
+        assert not _ranges_overlap(0, 4, 5, 9)
 
-    def test_adjacent_no_overlap(self):
-        assert not _ranges_overlap(0, 3, 4, 8)
+    def test_touching_overlap(self):
+        # [0,5] and [5,9] share segment 5
+        assert _ranges_overlap(0, 5, 5, 9)
 
-    def test_overlap_partial(self):
-        assert _ranges_overlap(0, 5, 3, 8)
+    def test_full_overlap(self):
+        assert _ranges_overlap(0, 9, 2, 7)
 
-    def test_overlap_contained(self):
-        assert _ranges_overlap(0, 10, 3, 5)
+    def test_partial_overlap(self):
+        assert _ranges_overlap(0, 6, 4, 9)
 
-    def test_overlap_exact(self):
-        assert _ranges_overlap(0, 5, 0, 5)
-
-    def test_single_point_overlap(self):
-        assert _ranges_overlap(0, 3, 3, 5)
+    def test_identical_ranges(self):
+        assert _ranges_overlap(3, 7, 3, 7)
 
 
 # --- merge_chapters ---
 
 class TestMergeChapters:
-    def test_empty_both(self):
+    def test_both_empty(self):
         assert merge_chapters([], []) == []
 
     def test_only_youtube(self):
-        yt = [_ch(0, 0, 5, "Intro"), _ch(1, 6, 10, "Main")]
+        yt = [_make_chapter(0, 0, 4, title="YT1")]
         result = merge_chapters(yt, [])
-        assert len(result) == 2
+        assert len(result) == 1
+        assert result[0].title == "YT1"
 
     def test_only_listicle(self):
-        lc = [_ch(0, 0, 3, strategy="listicle"), _ch(1, 4, 7, strategy="listicle")]
+        lc = [_make_chapter(0, 0, 4, title="LC1", strategy="listicle")]
         result = merge_chapters([], lc)
-        assert len(result) == 2
+        assert len(result) == 1
+        assert result[0].title == "LC1"
 
-    def test_youtube_precedence_overlapping(self):
-        """AC: YouTube chapters take precedence for overlapping ranges."""
-        yt = [_ch(0, 0, 5, "YouTube Chapter")]
+    def test_youtube_takes_precedence_for_overlapping(self):
+        """Criterion: YouTube chapters take precedence for overlapping ranges."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube Chapter")]
+        lc = [_make_chapter(0, 3, 7, title="Listicle Item", strategy="listicle")]
+        result = merge_chapters(yt, lc)
+        # Listicle overlaps with YouTube, so only YouTube should remain
+        assert len(result) == 1
+        assert result[0].title == "YouTube Chapter"
+
+    def test_non_overlapping_listicle_included(self):
+        """Non-overlapping listicle chapters fill gaps."""
+        yt = [_make_chapter(0, 0, 4, title="YT1")]
+        lc = [_make_chapter(0, 10, 14, title="LC1", strategy="listicle")]
+        result = merge_chapters(yt, lc)
+        assert len(result) == 2
+        assert result[0].title == "YT1"
+        assert result[1].title == "LC1"
+
+    def test_mixed_overlap_and_non_overlap(self):
+        """YouTube overlaps with some listicle items, others fill gaps."""
+        yt = [_make_chapter(0, 0, 9, title="YT1")]
         lc = [
-            _ch(0, 2, 4, "Listicle Overlap", strategy="listicle"),  # overlaps with YouTube
-            _ch(1, 6, 9, "Listicle Gap", strategy="listicle"),      # no overlap
+            _make_chapter(0, 3, 7, title="LC-overlap", strategy="listicle"),
+            _make_chapter(1, 15, 19, title="LC-gap", strategy="listicle"),
         ]
         result = merge_chapters(yt, lc)
         assert len(result) == 2
-        # First should be YouTube chapter
-        assert result[0].title == "YouTube Chapter"
-        assert result[0].start_segment_idx == 0
-        # Second should be the non-overlapping listicle
-        assert result[1].title == "Listicle Gap"
-        assert result[1].start_segment_idx == 6
+        titles = [ch.title for ch in result]
+        assert "YT1" in titles
+        assert "LC-gap" in titles
+        assert "LC-overlap" not in titles
 
-    def test_chapter_ids_reassigned(self):
-        """After merge, chapter_ids are sequential."""
-        yt = [_ch(5, 10, 15, "Late YouTube")]
-        lc = [_ch(0, 0, 5, "Early Listicle", strategy="listicle")]
+    def test_chapter_ids_reassigned_sequentially(self):
+        yt = [_make_chapter(5, 0, 4, title="YT")]
+        lc = [_make_chapter(8, 10, 14, title="LC", strategy="listicle")]
         result = merge_chapters(yt, lc)
         assert result[0].chapter_id == 0
         assert result[1].chapter_id == 1
-        assert result[0].start_segment_idx < result[1].start_segment_idx
 
-    def test_sorted_by_start_index(self):
-        yt = [_ch(0, 10, 15)]
-        lc = [_ch(0, 0, 5, strategy="listicle")]
+    def test_sorted_by_start_segment_idx(self):
+        yt = [_make_chapter(0, 10, 14, title="YT-later")]
+        lc = [_make_chapter(0, 0, 4, title="LC-earlier", strategy="listicle")]
         result = merge_chapters(yt, lc)
-        assert result[0].start_segment_idx == 0
-        assert result[1].start_segment_idx == 10
-
-    def test_all_overlapping_keeps_only_youtube(self):
-        """When all listicle groups overlap with YouTube, only YouTube chapters remain."""
-        yt = [_ch(0, 0, 10)]
-        lc = [_ch(0, 2, 4, strategy="listicle"), _ch(1, 6, 8, strategy="listicle")]
-        result = merge_chapters(yt, lc)
-        assert len(result) == 1
-        assert result[0].title == "Chapter 0"
+        assert result[0].title == "LC-earlier"
+        assert result[1].title == "YT-later"
 
 
 # --- build_unified_chapters ---
@@ -186,61 +208,71 @@ class TestBuildUnifiedChapters:
         assert build_unified_chapters([], []) == []
 
     def test_only_listicle_groups(self):
-        """AC: Conversion from listicle groups to chapters works."""
         groups = [
-            _lg(0, 0, 3, keywords=["intro", "overview"]),
-            _lg(1, 4, 7, keywords=["details", "specs"]),
+            _make_listicle_group(0, 0, 4, keywords=["topic_a"]),
+            _make_listicle_group(1, 5, 9, keywords=["topic_b"]),
         ]
         result = build_unified_chapters([], groups)
         assert len(result) == 2
-        assert result[0].detection_strategy == "listicle"
-        assert result[0].topics == ["intro", "overview"]
-        assert result[1].topics == ["details", "specs"]
+        assert all(ch.detection_strategy == 'listicle' for ch in result)
+        assert result[0].topics == ["topic_a"]
+        assert result[1].topics == ["topic_b"]
 
-    def test_merge_with_youtube_precedence(self):
-        """AC: Merged with YouTube chapters taking precedence."""
-        yt_chapters = [_ch(0, 0, 5, "YouTube Intro")]
-        groups = [
-            _lg(0, 3, 6, keywords=["overlap"]),  # overlaps 3-5 with YouTube
-            _lg(1, 7, 10, keywords=["gap"]),      # no overlap
-        ]
-        result = build_unified_chapters(yt_chapters, groups)
+    def test_only_youtube_chapters(self):
+        yt = [_make_chapter(0, 0, 9, title="YT Only", topics=["travel"])]
+        result = build_unified_chapters(yt, [])
+        assert len(result) == 1
+        assert result[0].title == "YT Only"
+
+    def test_merge_with_overlap(self):
+        yt = [_make_chapter(0, 0, 9, title="YouTube")]
+        groups = [_make_listicle_group(0, 3, 7, keywords=["overlapping"])]
+        result = build_unified_chapters(yt, groups)
+        # Overlapping listicle excluded
+        assert len(result) == 1
+        assert result[0].title == "YouTube"
+
+    def test_merge_with_gap_filling(self):
+        yt = [_make_chapter(0, 0, 4, title="YouTube")]
+        groups = [_make_listicle_group(0, 10, 14, keywords=["gap_fill"])]
+        result = build_unified_chapters(yt, groups)
         assert len(result) == 2
-        assert result[0].title == "YouTube Intro"
-        assert result[1].detection_strategy == "listicle"
+        assert result[1].topics == ["gap_fill"]
 
-    def test_unified_available_as_chapters(self):
-        """AC: Unified list available via same interface as regular chapters."""
-        groups = [_lg(0, 0, 3, keywords=["test"])]
-        result = build_unified_chapters([], groups)
-        # Should be ChapterCandidate objects usable by chapter-aware scoring
-        assert isinstance(result[0], ChapterCandidate)
-        assert hasattr(result[0], 'topics')
-        assert hasattr(result[0], 'start_segment_idx')
-        assert hasattr(result[0], 'end_segment_idx')
+    def test_unified_interface_same_as_regular_chapters(self):
+        """Criterion: unified list accessible via same interface as regular chapters."""
+        yt = [_make_chapter(0, 0, 4, topics=["yt_topic"])]
+        groups = [_make_listicle_group(0, 10, 14, keywords=["listicle_topic"])]
+        result = build_unified_chapters(yt, groups)
+        # All items are ChapterCandidate -- same interface
+        for ch in result:
+            assert isinstance(ch, ChapterCandidate)
+            assert hasattr(ch, 'topics')
+            assert hasattr(ch, 'start_segment_idx')
+            assert hasattr(ch, 'end_segment_idx')
+            assert hasattr(ch, 'chapter_id')
+            assert hasattr(ch, 'detection_strategy')
+            assert hasattr(ch, 'confidence')
+            assert hasattr(ch, 'segment_range')
+            assert hasattr(ch, 'segment_count')
 
 
 # --- build_segment_chapter_map ---
 
 class TestBuildSegmentChapterMap:
-    def test_empty(self):
+    def test_empty_chapters(self):
         assert build_segment_chapter_map([]) == {}
 
     def test_single_chapter(self):
-        chapters = [_ch(0, 2, 5)]
-        result = build_segment_chapter_map(chapters)
-        assert result == {2: 0, 3: 0, 4: 0, 5: 0}
+        ch = _make_chapter(0, 0, 2)
+        result = build_segment_chapter_map([ch])
+        assert result == {0: 0, 1: 0, 2: 0}
 
     def test_multiple_chapters(self):
-        chapters = [_ch(0, 0, 2), _ch(1, 3, 5)]
+        chapters = [_make_chapter(0, 0, 2), _make_chapter(1, 5, 7)]
         result = build_segment_chapter_map(chapters)
         assert result[0] == 0
         assert result[2] == 0
-        assert result[3] == 1
         assert result[5] == 1
-
-    def test_gaps_not_in_map(self):
-        chapters = [_ch(0, 0, 2), _ch(1, 5, 7)]
-        result = build_segment_chapter_map(chapters)
-        assert 3 not in result
-        assert 4 not in result
+        assert result[7] == 1
+        assert 3 not in result  # Gap not mapped
