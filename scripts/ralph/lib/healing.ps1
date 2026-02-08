@@ -912,7 +912,9 @@ function Invoke-HealingSession {
         return @{ Success = $false; AttemptsUsed = 0; FixSummary = "No healing state found" }
     }
 
-    $claudePath = Get-ClaudePath
+    # Use agent abstraction for healing sessions
+    $provider = Get-AgentProvider
+    $claudePath = Get-AgentExecutable -Provider $provider
     $attempt = 0
     $lastOutput = ""
 
@@ -931,8 +933,10 @@ function Invoke-HealingSession {
             prompt      = ($prompt.Substring(0, [Math]::Min(500, $prompt.Length)) + "...")
         }
 
-        $model = if ($script:Config.model) { $script:Config.model } else { "opus" }
-        $claudeArgs = @("--print", "--dangerously-skip-permissions", "--model", $model)
+        $model = Get-AgentModel -Provider $provider
+        $agentCommand = Build-AgentCommand -Provider $provider -Model $model -Prompt $prompt -Options @{}
+        $claudeArgs = $agentCommand.Args
+        $promptMethod = $agentCommand.PromptMethod
         $outFile = Join-Path $script:RalphDir "healing_out_$attempt.log"
         $errFile = Join-Path $script:RalphDir "healing_err_$attempt.log"
 
@@ -941,7 +945,8 @@ function Invoke-HealingSession {
             -ClaudeArgs $claudeArgs `
             -Prompt $prompt `
             -OutFile $outFile `
-            -ErrFile $errFile
+            -ErrFile $errFile `
+            -PromptMethod $promptMethod
 
         $lastOutput = $subResult.Output
 

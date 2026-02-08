@@ -1,4 +1,17 @@
 {
+    "agent": {
+        "provider": "claude",
+        "providers": {
+            "claude": {
+                "executable": "claude",
+                "models": { "high": "opus", "fast": "sonnet", "default": "opus" }
+            },
+            "codex": {
+                "executable": "codex",
+                "models": { "high": "o4-mini", "fast": "o4-mini", "default": "o4-mini" }
+            }
+        }
+    },
     "claudePath": "claude",
     "model": "opus",
     "iterationTimeout": 600,
