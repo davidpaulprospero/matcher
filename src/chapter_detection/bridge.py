@@ -41,10 +41,18 @@ def listicle_groups_to_chapters(groups: List[ListicleGroup]) -> List[ChapterCand
             title_parts.append(' '.join(group.topic_keywords[:3]))
         title = ' - '.join(title_parts) if title_parts else f"Item {group.group_id + 1}"
 
-        # Confidence: higher if expected_count matches actual detection
-        confidence = 0.7  # Base confidence for listicle-derived chapters
-        if group.expected_count is not None:
-            confidence = 0.75  # Slightly higher when header count was detected
+        # Graduated confidence based on marker type
+        marker_confidence = {
+            'transition': 0.6,
+            'ordinal': 0.7,
+            'numbered': 0.8,
+        }
+        confidence = marker_confidence.get(group.marker_type, 0.7)
+
+        # Boost to 0.85 when expected_count matches detected group count
+        if (group.expected_count is not None
+                and group.expected_count == len(groups)):
+            confidence = 0.85
 
         chapter = ChapterCandidate(
             chapter_id=group.group_id,

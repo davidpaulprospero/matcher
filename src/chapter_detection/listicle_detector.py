@@ -383,6 +383,7 @@ def detect_listicle_groups(
         group = ListicleGroup(
             group_id=idx,
             item_label=label,
+            marker_type=marker_type,
             start_segment_idx=_get_segment_index(segments[pos], pos),
             end_segment_idx=_get_segment_index(segments[end_pos], end_pos),
             topic_keywords=topic_keywords,

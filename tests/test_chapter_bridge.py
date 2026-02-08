@@ -25,10 +25,11 @@ from src.state import TranscriptSegment
 
 # --- Helpers ---
 
-def _make_listicle_group(group_id, start, end, label="item", keywords=None, expected_count=None):
+def _make_listicle_group(group_id, start, end, label="item", keywords=None, expected_count=None, marker_type="ordinal"):
     return ListicleGroup(
         group_id=group_id,
         item_label=label,
+        marker_type=marker_type,
         start_segment_idx=start,
         end_segment_idx=end,
         topic_keywords=keywords or [],
@@ -99,13 +100,14 @@ class TestListicleGroupsToChapters:
         chapters = listicle_groups_to_chapters([group])
         assert "Item 1" in chapters[0].title
 
-    def test_confidence_with_expected_count(self):
-        group = _make_listicle_group(0, 0, 3, expected_count=5)
+    def test_confidence_with_matching_expected_count(self):
+        """When expected_count matches group count, confidence is 0.85."""
+        group = _make_listicle_group(0, 0, 3, expected_count=1, marker_type="transition")
         chapters = listicle_groups_to_chapters([group])
-        assert chapters[0].confidence == 0.75
+        assert chapters[0].confidence == 0.85
 
     def test_confidence_without_expected_count(self):
-        group = _make_listicle_group(0, 0, 3, expected_count=None)
+        group = _make_listicle_group(0, 0, 3, expected_count=None, marker_type="ordinal")
         chapters = listicle_groups_to_chapters([group])
         assert chapters[0].confidence == 0.7
 
@@ -117,6 +119,75 @@ class TestListicleGroupsToChapters:
         chapters = listicle_groups_to_chapters(groups)
         assert chapters[0].chapter_id == 0
         assert chapters[1].chapter_id == 1
+
+
+# --- Graduated confidence by marker density (US-76-003) ---
+
+class TestGraduatedConfidence:
+    """Tests for graduated bridge confidence by marker type."""
+
+    def test_transition_only_groups_get_0_6(self):
+        """Transition-only markers get confidence 0.6."""
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="transition"),
+            _make_listicle_group(1, 5, 9, marker_type="transition"),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        assert chapters[0].confidence == 0.6
+        assert chapters[1].confidence == 0.6
+
+    def test_ordinal_groups_get_0_7(self):
+        """Ordinal markers get confidence 0.7."""
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="ordinal"),
+            _make_listicle_group(1, 5, 9, marker_type="ordinal"),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        assert chapters[0].confidence == 0.7
+        assert chapters[1].confidence == 0.7
+
+    def test_numbered_groups_get_0_8(self):
+        """Numbered markers get confidence 0.8."""
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="numbered"),
+            _make_listicle_group(1, 5, 9, marker_type="numbered"),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        assert chapters[0].confidence == 0.8
+        assert chapters[1].confidence == 0.8
+
+    def test_matching_expected_count_gives_0_85(self):
+        """Groups with matching expected_count get 0.85 regardless of marker type."""
+        # 3 groups, expected_count=3 -> match
+        groups = [
+            _make_listicle_group(0, 0, 3, marker_type="transition", expected_count=3),
+            _make_listicle_group(1, 4, 7, marker_type="transition", expected_count=3),
+            _make_listicle_group(2, 8, 11, marker_type="transition", expected_count=3),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        for ch in chapters:
+            assert ch.confidence == 0.85
+
+    def test_matching_expected_count_overrides_numbered(self):
+        """expected_count match overrides even numbered (0.8) to 0.85."""
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="numbered", expected_count=2),
+            _make_listicle_group(1, 5, 9, marker_type="numbered", expected_count=2),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        assert chapters[0].confidence == 0.85
+        assert chapters[1].confidence == 0.85
+
+    def test_mismatched_expected_count_uses_marker_type(self):
+        """When expected_count doesn't match group count, fall back to marker type."""
+        # 2 groups, expected_count=5 -> mismatch
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="numbered", expected_count=5),
+            _make_listicle_group(1, 5, 9, marker_type="numbered", expected_count=5),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        assert chapters[0].confidence == 0.8
+        assert chapters[1].confidence == 0.8
 
 
 # --- _ranges_overlap ---

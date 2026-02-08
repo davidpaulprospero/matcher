@@ -191,6 +191,7 @@ class ListicleGroup:
     """
     group_id: int = 0                      # Sequential ID within the listicle
     item_label: str = ""                   # Detected label (e.g., "first", "#3", "step 2")
+    marker_type: str = ""                  # 'ordinal', 'numbered', or 'transition'
     start_segment_idx: int = 0
     end_segment_idx: int = 0
     topic_keywords: List[str] = field(default_factory=list)  # Key topics in this item
@@ -208,6 +209,7 @@ class ListicleGroup:
         return cls(
             group_id=data.get('group_id', 0),
             item_label=data.get('item_label', ''),
+            marker_type=data.get('marker_type', ''),
             start_segment_idx=data.get('start_segment_idx', 0),
             end_segment_idx=data.get('end_segment_idx', 0),
             topic_keywords=data.get('topic_keywords', []),
