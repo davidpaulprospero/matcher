@@ -126,9 +126,9 @@
                                 "Sensitive fields (api_keys) are redacted in the export by default, with option to include them",
                                 "Test: config roundtrip through to_yaml/from_yaml preserves all non-sensitive field values"
                             ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier: developer utility. Source: src/config/base.py — no to_dict() or to_yaml() method exists. Use dataclasses.asdict() as base, then filter sensitive fields. Useful for debugging ('what config is the pipeline actually using?') and for reproducible runs."
+                            "notes":  "Replaced incomplete private _to_dict/to_yaml with public to_dict(redact_sensitive=True) and to_yaml(path, redact_sensitive=True). to_dict() includes all section_mapping entries + duration_tiers with YAML-style keys. API keys redacted by default. 16 tests in test_config_export_yaml.py covering to_dict completeness, redaction, to_yaml file write, and full roundtrip (export->from_yaml->compare)."
                         },
                         {
                             "id":  "US-80-009",

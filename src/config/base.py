@@ -571,9 +571,74 @@ class Config:
 
         return tiers
 
-    def to_yaml(self, output_path: str = None) -> str:
-        """Serialize config to YAML"""
-        data = self._to_dict()
+    def to_dict(self, redact_sensitive: bool = True) -> Dict[str, Any]:
+        """Convert config to nested dict suitable for YAML serialization.
+
+        Args:
+            redact_sensitive: If True (default), redact API key values
+                with '***REDACTED***'. Set False to include actual values.
+
+        Returns:
+            Nested dictionary of all config sections.
+        """
+        result: Dict[str, Any] = {
+            'project': asdict(self.project),
+            'project_dir': self.project_dir,
+        }
+
+        # All sections from _from_dict's section_mapping
+        sections = [
+            'transcription', 'embedding', 'indexing', 'vision',
+            'scene_detection', 'audio_analysis', 'matching',
+            'negative_matching', 'remix', 'zero_download_remix',
+            'image_search', 'keyword', 'llm', 'enhanced',
+            'downloading', 'download', 'stock_footage', 'deduplication',
+            'output', 'multi_style', 'logging', 'cache', 'pipeline',
+            'api_keys', 'healing', 'iterative_matching', 'rate_limit',
+            'broll', 'global_cache', 'silent_video',
+        ]
+
+        for section in sections:
+            section_config = getattr(self, section, None)
+            if section_config and is_dataclass(section_config):
+                result[section] = asdict(section_config)
+
+        # Duration tiers (nested structure with non-standard field names)
+        if self.duration_tiers and is_dataclass(self.duration_tiers):
+            dt = self.duration_tiers
+            dt_dict = {}
+            for tier_name in ['short', 'medium', 'long', 'longer']:
+                tier = getattr(dt, tier_name, None)
+                if tier and is_dataclass(tier):
+                    dt_dict[tier_name] = {
+                        'min': tier.min_seconds,
+                        'max': tier.max_seconds,
+                        'count': tier.videos_per_keyword,
+                        'max_total': tier.max_total,
+                    }
+            if dt_dict:
+                result['duration_tiers'] = dt_dict
+
+        # Redact sensitive fields
+        if redact_sensitive and 'api_keys' in result:
+            redacted = {}
+            for key, value in result['api_keys'].items():
+                redacted[key] = '***REDACTED***' if value else ''
+            result['api_keys'] = redacted
+
+        return result
+
+    def to_yaml(self, output_path: str = None, *, redact_sensitive: bool = True) -> str:
+        """Serialize effective config to YAML.
+
+        Args:
+            output_path: If provided, write YAML to this file path.
+            redact_sensitive: If True (default), redact API keys.
+
+        Returns:
+            YAML string of the effective config.
+        """
+        data = self.to_dict(redact_sensitive=redact_sensitive)
         yaml_str = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
         if output_path:
@@ -582,28 +647,6 @@ class Config:
             logger.info(f"Saved config to {output_path}")
 
         return yaml_str
-
-    def _to_dict(self) -> Dict[str, Any]:
-        """Convert config to dictionary (excluding private fields)"""
-        result = {
-            'project': asdict(self.project),
-            'project_dir': self.project_dir,
-        }
-
-        sections = [
-            'transcription', 'embedding', 'indexing', 'vision',
-            'scene_detection', 'audio_analysis', 'matching', 'negative_matching', 'remix', 'image_search', 'keyword', 'llm',
-            'enhanced', 'downloading', 'download', 'stock_footage', 'deduplication',
-            'output', 'multi_style', 'logging', 'cache', 'pipeline'
-        ]
-
-        for section in sections:
-            section_config = getattr(self, section, None)
-            if section_config:
-                result[section] = asdict(section_config)
-
-        # Don't include API keys in serialization
-        return result
 
     def reload(self) -> bool:
         """
