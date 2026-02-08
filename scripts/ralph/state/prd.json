@@ -161,7 +161,7 @@
                             "id":  "US-78-011",
                             "title":  "Add adaptive timeout scaling based on retry budget consumption rate",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "CaptionRetryBudget tracks consumption rate as attempts_used/elapsed_seconds",
                                                        "When consumption rate exceeds 2x the expected rate (batch_size/timeout_budget), subsequent backoff delays are increased by 1.5x",

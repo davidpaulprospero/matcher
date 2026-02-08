@@ -12,6 +12,7 @@ Includes:
 from __future__ import annotations
 
 import logging
+import time
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -166,6 +167,15 @@ class CaptionRetryBudget:
     # US-62-010: Tracks which categories have triggered dominant pattern log (avoids spam)
     _logged_dominant_patterns: set = field(default_factory=set, repr=False, compare=False)
 
+    # US-78-011: Adaptive timeout scaling based on consumption rate
+    # Tracks when the budget started processing and last error time for cooldown
+    _start_time: Optional[float] = field(default=None, repr=False, compare=False)
+    _last_error_time: Optional[float] = field(default=None, repr=False, compare=False)
+    _adaptive_multiplier: float = field(default=1.0, repr=False, compare=False)
+    _adaptive_cooldown_seconds: float = field(default=60.0, repr=False, compare=False)
+    _adaptive_max_multiplier: float = field(default=3.0, repr=False, compare=False)
+    _adaptive_increase_factor: float = field(default=1.5, repr=False, compare=False)
+
     @classmethod
     def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
         """Create a CaptionRetryBudget from config.
@@ -228,6 +238,9 @@ class CaptionRetryBudget:
         with self._lock:
             self.attempts += 1
             attempts_count = self.attempts
+            # US-78-011: Initialize start time on first attempt
+            if self._start_time is None:
+                self._start_time = time.monotonic()
             # Track per-video attempts (US-41-005)
             if video_id:
                 self.attempts_per_video_id[video_id] = self.attempts_per_video_id.get(video_id, 0) + 1
@@ -291,6 +304,8 @@ class CaptionRetryBudget:
                 if format not in self.format_attempts:
                     self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
                 self.format_attempts[format]["failures"] += 1
+            # US-78-011: Update adaptive multiplier on failure
+            self._update_adaptive_multiplier()
         logger.debug(f"CaptionRetryBudget: failure for {video_id or 'unknown'} "
                      f"(total: {failures_count})"
                      f"{f' [{error_category.name}]' if error_category else ''}"
@@ -939,6 +954,83 @@ class CaptionRetryBudget:
                     # Only log the first dominant pattern found
                     break
 
+    def get_adaptive_backoff_multiplier(self, current_time: Optional[float] = None) -> float:
+        """Get the current adaptive backoff multiplier (US-78-011).
+
+        The multiplier increases when the consumption rate (attempts_used / elapsed_seconds)
+        exceeds 2x the expected rate (batch_size / timeout_budget). This indicates YouTube
+        is actively rate-limiting, so slowing down saves budget and improves success rate.
+
+        The multiplier resets to 1.0 after 60 seconds of no new errors (cooldown).
+
+        Returns:
+            Float between 1.0 and 3.0 inclusive. 1.0 = normal pace, higher = slower retries.
+        """
+        now = current_time if current_time is not None else time.monotonic()
+
+        with self._lock:
+            # Reset to 1.0 if no errors for cooldown period
+            if self._last_error_time is not None:
+                seconds_since_last_error = now - self._last_error_time
+                if seconds_since_last_error >= self._adaptive_cooldown_seconds:
+                    if self._adaptive_multiplier != 1.0:
+                        logger.debug(
+                            f"[US-78-011] Adaptive multiplier reset: {self._adaptive_multiplier:.1f} -> 1.0 "
+                            f"(no errors for {seconds_since_last_error:.0f}s)"
+                        )
+                        self._adaptive_multiplier = 1.0
+                    return self._adaptive_multiplier
+
+            return self._adaptive_multiplier
+
+    def _update_adaptive_multiplier(self, current_time: Optional[float] = None) -> None:
+        """Update the adaptive backoff multiplier based on consumption rate (US-78-011).
+
+        Called after each failure to check if consumption rate exceeds the expected rate.
+        Must be called while holding the lock.
+
+        The expected rate is: batch_size / max_backoff_time (videos per second we can afford).
+        The actual rate is: attempts / elapsed_seconds.
+        When actual > 2 * expected, multiply the current multiplier by 1.5 (capped at 3.0).
+
+        Args:
+            current_time: Optional monotonic time for testing.
+        """
+        now = current_time if current_time is not None else time.monotonic()
+
+        # Initialize start time on first call
+        if self._start_time is None:
+            self._start_time = now
+            return
+
+        # Record error time
+        self._last_error_time = now
+
+        # Need batch_size and max_backoff_time to compute expected rate
+        if not self.batch_size or self.batch_size <= 0 or self.max_backoff_time <= 0:
+            return
+
+        elapsed = now - self._start_time
+        if elapsed <= 0:
+            return
+
+        # Calculate rates
+        actual_rate = self.attempts / elapsed  # attempts per second
+        expected_rate = self.batch_size / self.max_backoff_time  # expected attempts per second
+
+        # When consumption rate exceeds 2x expected, increase multiplier
+        if expected_rate > 0 and actual_rate > 2 * expected_rate:
+            new_multiplier = min(
+                self._adaptive_multiplier * self._adaptive_increase_factor,
+                self._adaptive_max_multiplier
+            )
+            if new_multiplier != self._adaptive_multiplier:
+                logger.info(
+                    f"[US-78-011] Adaptive backoff increased: {self._adaptive_multiplier:.1f} -> "
+                    f"{new_multiplier:.1f} (rate {actual_rate:.2f}/s vs expected {expected_rate:.2f}/s)"
+                )
+                self._adaptive_multiplier = new_multiplier
+
     def get_progress_percentage(self) -> Optional[float]:
         """Get batch progress as percentage of videos processed (US-41-010).
 
@@ -1042,6 +1134,7 @@ class CaptionRetryBudget:
                 "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
                 "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
                 "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
+                "adaptive_backoff_multiplier": self._adaptive_multiplier,  # US-78-011
             }
 
             # Only include high_attempt_videos if there are any (US-41-005)
@@ -1339,6 +1432,10 @@ class CaptionRetryBudget:
             self.circuit_breaker_trips = 0  # US-41-006
             self.format_attempts.clear()  # US-59-010
             self._logged_dominant_patterns.clear()  # US-62-010
+            # US-78-011: Reset adaptive backoff state
+            self._start_time = None
+            self._last_error_time = None
+            self._adaptive_multiplier = 1.0
             if not preserve_vpn_count:
                 self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
             # US-37-009: Reset early termination state
