@@ -90,7 +90,7 @@
                             "id":  "US-77-006",
                             "title":  "Add adaptive confidence floor with chapter-type awareness",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Confidence floor in apply_all_adjustments can vary by chapter type (intro/conclusion segments get lower floor of 0.03, body gets default 0.05)",
                                                        "The chapter_type is resolved from segment_chapter_map or defaults to \u0027body\u0027 when unknown",
@@ -98,7 +98,7 @@
                                                        "When disabled, the static confidence_floor (0.05) is used for all segments as before",
                                                        "Tests verify: intro segment gets lower floor, body segment gets default floor, unknown chapter_type gets default floor, disabled config uses static floor"
                                                    ],
-                            "notes":  "Tier: feature (small). Currently confidence_floor is a static 0.05 applied uniformly at src/matching/scoring.py:3676-3683. Intro/conclusion segments are more important and should be allowed to survive with lower confidence rather than being floored out. Need to: (1) accept chapter_type parameter in apply_all_adjustments, (2) look up per-type floor, (3) add config toggle. Source files: src/matching/scoring.py:3676-3683, src/matching/scoring.py:2893-2898, src/config/sections/matching.py."
+                            "notes":  "DONE. Added adaptive_confidence_floor_enabled and adaptive_confidence_floor dict to MatchingScoringConfig. Added _resolve_chapter_type() and get_adaptive_confidence_floor() to MatchScoring. Modified apply_all_adjustments floor logic to use chapter-type-aware floor. 19 new tests in test_adaptive_confidence_floor.py covering all 5 acceptance criteria: intro/conclusion get 0.03, body gets 0.05, unknown defaults to body, disabled uses static 0.05."
                         },
                         {
                             "id":  "US-77-007",

@@ -149,6 +149,16 @@ class MatchingScoringConfig:
     semantic_coherence_smooth_boost: float = 0.03     # Boost for smooth flow
     semantic_coherence_abrupt_penalty: float = 0.05   # Penalty for abrupt transition
 
+    # Adaptive confidence floor by chapter type (US-77-006)
+    # Intro/conclusion segments are more important and get a lower floor
+    # so they survive even with lower confidence rather than being floored out
+    adaptive_confidence_floor_enabled: bool = True
+    adaptive_confidence_floor: Dict[str, float] = field(default_factory=lambda: {
+        'intro': 0.03,
+        'conclusion': 0.03,
+        'body': 0.05,
+    })
+
     # Pool normalization constants
     pool_normalization_reference_size: int = 50   # Reference pool size
     pool_normalization_min_factor: float = 0.8    # Min normalization factor

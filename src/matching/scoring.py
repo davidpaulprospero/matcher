@@ -2897,6 +2897,66 @@ class MatchScoring:
         """Confidence floor from config or class default."""
         return getattr(self._sc, 'confidence_floor', self.CONFIDENCE_FLOOR) if self._sc else self.CONFIDENCE_FLOOR
 
+    def get_adaptive_confidence_floor(self, chapter_type: str = 'body') -> float:
+        """Get confidence floor adjusted by chapter type (US-77-006).
+
+        Intro/conclusion segments get a lower floor so they survive even with
+        lower confidence rather than being floored out.
+
+        Args:
+            chapter_type: One of 'intro', 'body', 'conclusion', or other.
+                         Unknown types default to the body floor.
+
+        Returns:
+            The confidence floor for the given chapter type.
+        """
+        # Check if adaptive floor is enabled in config
+        if self._sc and getattr(self._sc, 'adaptive_confidence_floor_enabled', True):
+            floor_map = getattr(self._sc, 'adaptive_confidence_floor', None)
+            if floor_map and isinstance(floor_map, dict):
+                return floor_map.get(chapter_type, floor_map.get('body', self.confidence_floor))
+        # Disabled or no config — use static floor
+        return self.confidence_floor
+
+    @staticmethod
+    def _resolve_chapter_type(
+        vo_segment,
+        current_chapter_index: int = -1,
+        segment_chapter_map: Optional[dict] = None,
+    ) -> str:
+        """Resolve the chapter type (intro/body/conclusion) from segment position.
+
+        Uses segment_chapter_map to determine which chapter the segment belongs to,
+        then classifies: first chapter = intro, last chapter = conclusion, else body.
+
+        Args:
+            vo_segment: Voiceover segment with .index attribute
+            current_chapter_index: Pre-resolved chapter index (-1 = unknown)
+            segment_chapter_map: Dict mapping segment index -> chapter index
+
+        Returns:
+            One of 'intro', 'body', 'conclusion'.
+        """
+        if segment_chapter_map is None or len(segment_chapter_map) == 0:
+            return 'body'
+
+        # Resolve which chapter this segment is in
+        seg_idx = getattr(vo_segment, 'index', -1)
+        ch_idx = current_chapter_index if current_chapter_index >= 0 else segment_chapter_map.get(seg_idx, -1)
+        if ch_idx < 0:
+            return 'body'
+
+        # Determine total chapters from the map values
+        all_chapters = set(segment_chapter_map.values())
+        min_ch = min(all_chapters)
+        max_ch = max(all_chapters)
+
+        if ch_idx == min_ch:
+            return 'intro'
+        elif ch_idx == max_ch:
+            return 'conclusion'
+        return 'body'
+
     @property
     def low_confidence_warning_threshold(self) -> float:
         """Low confidence warning threshold from config or class default."""
@@ -3674,13 +3734,15 @@ class MatchScoring:
                 reasons.append(listicle_reason)
                 breakdown.append({'component': 'listicle_consistency', 'adjustment': round(confidence - prev, 4), 'reason': listicle_reason})
 
-        # 13. Enforce minimum confidence floor (US-46-004)
+        # 13. Enforce minimum confidence floor (US-46-004, US-77-006)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
-        floor = self.confidence_floor
+        # US-77-006: Adaptive floor by chapter type — intro/conclusion segments get lower floor
+        chapter_type = self._resolve_chapter_type(vo_segment, current_chapter_index, segment_chapter_map)
+        floor = self.get_adaptive_confidence_floor(chapter_type)
         if confidence < floor and original_confidence > floor:
-            breakdown.append({'component': 'confidence_floor', 'adjustment': round(floor - confidence, 4), 'reason': f'confidence floor applied: {floor}'})
+            breakdown.append({'component': 'confidence_floor', 'adjustment': round(floor - confidence, 4), 'reason': f'confidence floor applied: {floor} (chapter_type={chapter_type})'})
             confidence = floor
-            reasons.append(f"confidence floor applied: {floor}")
+            reasons.append(f"confidence floor applied: {floor} (chapter_type={chapter_type})")
 
         # 14. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
