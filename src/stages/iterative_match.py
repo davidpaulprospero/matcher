@@ -279,6 +279,7 @@ class IterativeMatchStage(Stage):
                 # 3. Analyze gap patterns
                 gap_analysis = None
                 gap_pattern_log = None
+                gap_segments = None
                 if getattr(iter_config, 'analyze_gap_patterns', True):
                     from ..iterative_match import (
                         analyze_gaps,
@@ -286,6 +287,7 @@ class IterativeMatchStage(Stage):
                         analyze_gap_patterns_for_logging,
                         log_gap_pattern_analysis,
                     )
+                    from ..iterative_match.gap_analyzer import annotate_gaps_with_chapters
                     gap_segments = [
                         GapSeg(
                             segment_index=g.segment_index,
@@ -324,6 +326,17 @@ class IterativeMatchStage(Stage):
 
                     # US-63-012: Track gap pattern log for checkpoint storage
                     all_gap_pattern_logs.append(gap_pattern_log)
+
+                    # US-71-007: Apply chapter-aware gap prioritization
+                    # Sort gap_segments by priority (intro/conclusion first)
+                    gap_segments = annotate_gaps_with_chapters(
+                        gap_segments,
+                        total_segments=total_count,
+                    )
+                    # Reorder the local gaps list to match the priority order
+                    gap_idx_order = [gs.segment_index for gs in gap_segments]
+                    gap_by_idx = {g.segment_index: g for g in gaps}
+                    gaps = [gap_by_idx[idx] for idx in gap_idx_order if idx in gap_by_idx]
 
                 # 4. Generate search queries
                 queries = self._generate_multi_strategy_queries(
@@ -404,7 +417,8 @@ class IterativeMatchStage(Stage):
                 # 8. Update learning DB
                 if learning_db and gap_analysis:
                     self._update_query_learning(
-                        queries, gaps_filled, gap_analysis, learning_db
+                        queries, gaps_filled, gap_analysis, learning_db,
+                        gap_segments=gap_segments
                     )
 
                 # Record pass metrics
@@ -1869,7 +1883,8 @@ class IterativeMatchStage(Stage):
         queries: List[Dict[str, Any]],
         gaps_filled: int,
         gap_analysis: Any,
-        learning_db: Any
+        learning_db: Any,
+        gap_segments: Optional[List[Any]] = None
     ):
         """
         Update query learning database with results.
@@ -1879,11 +1894,18 @@ class IterativeMatchStage(Stage):
             gaps_filled: Total gaps filled this pass
             gap_analysis: Gap pattern analysis
             learning_db: Learning database instance
+            gap_segments: Optional gap segments with chapter_type info
         """
         if not learning_db or not gap_analysis:
             return
 
         from ..iterative_match import QueryResult
+
+        # Build index -> chapter_type lookup from gap_segments
+        chapter_type_by_idx: Dict[int, str] = {}
+        if gap_segments:
+            for gs in gap_segments:
+                chapter_type_by_idx[gs.segment_index] = getattr(gs, 'chapter_type', 'body')
 
         # Create results for each query
         # (In practice, would track per-query success)
@@ -1901,6 +1923,9 @@ class IterativeMatchStage(Stage):
                     pattern = p
                     break
 
+            # Determine chapter type for this gap
+            chapter_type = chapter_type_by_idx.get(gap_indices[0], 'body')
+
             result = QueryResult(
                 query=q['query'],
                 strategy=q.get('strategy', 'unknown'),
@@ -1910,4 +1935,4 @@ class IterativeMatchStage(Stage):
                 avg_confidence_improvement=0.1 if gaps_filled > 0 else 0.0
             )
 
-            learning_db.record_result(result, pattern)
+            learning_db.record_result(result, pattern, chapter_type=chapter_type)

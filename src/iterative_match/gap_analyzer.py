@@ -100,6 +100,7 @@ class GapSegment:
     pattern_type: str = ""  # Detected pattern
     keywords: List[str] = field(default_factory=list)
     chapter_id: Optional[str] = None  # Containing chapter/listicle group
+    chapter_type: str = "body"  # intro, body, conclusion, listicle_item
     priority_boost: float = 0.0  # Boost for intro/conclusion chapters
 
 
@@ -273,6 +274,24 @@ def annotate_gaps_with_chapters(
                 if grp_start <= seg_idx < grp_end:
                     gap.chapter_id = grp.get('group_id', f"group_{grp_start}")
                     break
+
+        # Classify chapter_type using position-based heuristics
+        # Listicle items detected from listicle_groups take precedence
+        if listicle_groups:
+            for grp in listicle_groups:
+                grp_start = grp.get('start_segment', 0)
+                grp_end = grp.get('end_segment', total_segments)
+                if grp_start <= seg_idx < grp_end:
+                    gap.chapter_type = "listicle_item"
+                    break
+
+        if gap.chapter_type != "listicle_item":
+            if seg_idx < intro_threshold:
+                gap.chapter_type = "intro"
+            elif seg_idx >= conclusion_threshold:
+                gap.chapter_type = "conclusion"
+            else:
+                gap.chapter_type = "body"
 
         # Apply priority boost based on segment position
         if seg_idx < intro_threshold:

@@ -190,7 +190,7 @@ class TestQueryLearningDBPersistence:
         db.save()
         with open(db_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        assert data["version"] == "1.0"
+        assert data["version"] == "1.1"
 
 
 class TestGetBestStrategy:
@@ -487,3 +487,211 @@ class TestACNoContextFallback:
         """Synonym suggestions for empty string returns empty list."""
         db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
         assert db.get_synonym_suggestions("") == []
+
+
+# ============================================================================
+# Chapter-Type-Aware Query Learning (US-71-012)
+# ============================================================================
+
+class TestChapterTypeTracking:
+    """AC: Query success rates are bucketed by chapter type."""
+
+    def test_record_result_tracks_chapter_type(self, tmp_path):
+        """record_result with chapter_type updates chapter_strategy_success."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        result = QueryResult(
+            query="intro footage", strategy="entity", gap_indices=[0],
+            videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3
+        )
+        db.record_result(result, "abstract_concept", chapter_type="intro")
+        assert "intro" in db.chapter_strategy_success
+        assert "entity" in db.chapter_strategy_success["intro"]
+        assert db.chapter_strategy_success["intro"]["entity"] == pytest.approx(0.3)
+
+    def test_chapter_type_ema_updates(self, tmp_path):
+        """Chapter-type success rates use EMA like pattern rates."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        # First result: success -> EMA = 0.3 * 1.0 + 0.7 * 0.0 = 0.3
+        r1 = QueryResult(query="q1", strategy="voiceover", gap_indices=[0],
+                         videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+        db.record_result(r1, "other", chapter_type="conclusion")
+        assert db.chapter_strategy_success["conclusion"]["voiceover"] == pytest.approx(0.3)
+
+        # Second result: failure -> EMA = 0.3 * 0.0 + 0.7 * 0.3 = 0.21
+        r2 = QueryResult(query="q2", strategy="voiceover", gap_indices=[1],
+                         videos_found=2, gaps_filled=0, avg_confidence_improvement=0.0)
+        db.record_result(r2, "other", chapter_type="conclusion")
+        assert db.chapter_strategy_success["conclusion"]["voiceover"] == pytest.approx(0.21)
+
+    def test_all_four_chapter_types_tracked(self, tmp_path):
+        """All four chapter types (intro, body, conclusion, listicle_item) are tracked."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        for ct in ("intro", "body", "conclusion", "listicle_item"):
+            r = QueryResult(query=f"q_{ct}", strategy="voiceover", gap_indices=[0],
+                            videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+            db.record_result(r, "other", chapter_type=ct)
+        assert len(db.chapter_strategy_success) == 4
+
+    def test_invalid_chapter_type_ignored(self, tmp_path):
+        """Invalid chapter type does not create an entry."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        r = QueryResult(query="q", strategy="voiceover", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+        db.record_result(r, "other", chapter_type="invalid_type")
+        assert "invalid_type" not in db.chapter_strategy_success
+
+    def test_default_chapter_type_is_body(self, tmp_path):
+        """When no chapter_type is given, defaults to 'body'."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        r = QueryResult(query="q", strategy="voiceover", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+        db.record_result(r, "other")  # No chapter_type arg
+        assert "body" in db.chapter_strategy_success
+
+
+class TestChapterTypePreference:
+    """AC: When filling intro gaps, prefer historically successful query patterns for intro."""
+
+    def test_intro_successful_patterns_preferred_for_intro_gaps(self, tmp_path):
+        """Query patterns successful for 'intro' chapters are preferred when filling intro gaps."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Record entity strategy as successful for intro gaps (multiple times)
+        for _ in range(5):
+            r = QueryResult(query="intro entity footage", strategy="entity", gap_indices=[0],
+                            videos_found=10, gaps_filled=1, avg_confidence_improvement=0.4)
+            db.record_result(r, "abstract_concept", chapter_type="intro")
+
+        # Record voiceover strategy as failing for intro gaps
+        for _ in range(5):
+            r = QueryResult(query="intro voiceover text", strategy="voiceover", gap_indices=[1],
+                            videos_found=2, gaps_filled=0, avg_confidence_improvement=0.0)
+            db.record_result(r, "abstract_concept", chapter_type="intro")
+
+        # Record voiceover as successful for body (should NOT influence intro)
+        for _ in range(5):
+            r = QueryResult(query="body voiceover text", strategy="voiceover", gap_indices=[5],
+                            videos_found=8, gaps_filled=1, avg_confidence_improvement=0.3)
+            db.record_result(r, "abstract_concept", chapter_type="body")
+
+        # When asking for best strategy for intro, entity should win
+        best = db.get_best_strategy_for_chapter("abstract_concept", "intro")
+        assert best == "entity"
+
+    def test_chapter_type_ranking_reflects_learning(self, tmp_path):
+        """Strategy ranking for a chapter type reflects accumulated success."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Entity succeeds for conclusion
+        for _ in range(3):
+            r = QueryResult(query="conclusion footage", strategy="entity", gap_indices=[0],
+                            videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3)
+            db.record_result(r, "location", chapter_type="conclusion")
+
+        # Topic fails for conclusion
+        for _ in range(3):
+            r = QueryResult(query="conclusion topic", strategy="topic", gap_indices=[1],
+                            videos_found=1, gaps_filled=0, avg_confidence_improvement=0.0)
+            db.record_result(r, "location", chapter_type="conclusion")
+
+        ranking = db.get_strategy_ranking_for_chapter("location", "conclusion")
+        assert ranking[0] == "entity"
+
+    def test_no_chapter_data_falls_back_to_pattern(self, tmp_path):
+        """When no chapter-type data exists, falls back to pattern-level data."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Only pattern-level data (no chapter_type tracking yet)
+        db.pattern_strategy_success["proper_noun"]["entity"] = 0.9
+        db.pattern_strategy_success["proper_noun"]["voiceover"] = 0.2
+
+        # Chapter data empty for this type
+        best = db.get_best_strategy_for_chapter("proper_noun", "listicle_item")
+        assert best == "entity"  # Falls back to pattern data
+
+    def test_unknown_pattern_and_chapter_returns_default(self, tmp_path):
+        """Unknown pattern + chapter type returns 'voiceover' default."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        best = db.get_best_strategy_for_chapter("never_seen", "intro")
+        assert best == "voiceover"
+
+
+class TestChapterTypePersistence:
+    """AC: Chapter-type learning data persists across iterative match rounds."""
+
+    def test_chapter_data_survives_save_load(self, tmp_path):
+        """Chapter-type success rates persist through save/load cycle."""
+        db_path = str(tmp_path / "learn.json")
+        db = QueryLearningDB(db_path=db_path)
+
+        # Record some chapter-type data
+        r = QueryResult(query="q", strategy="entity", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3)
+        db.record_result(r, "abstract_concept", chapter_type="intro")
+        db.save()
+
+        # Load into new instance
+        db2 = QueryLearningDB(db_path=db_path)
+        assert "intro" in db2.chapter_strategy_success
+        assert db2.chapter_strategy_success["intro"]["entity"] == pytest.approx(0.3)
+
+    def test_version_updated(self, tmp_path):
+        """DB version is 1.1 with chapter type support."""
+        import json
+        db_path = str(tmp_path / "learn.json")
+        db = QueryLearningDB(db_path=db_path)
+        db.save()
+        with open(db_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        assert data["version"] == "1.1"
+
+    def test_summary_includes_chapter_types(self, tmp_path):
+        """Summary includes chapter_types_learned count."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        r = QueryResult(query="q", strategy="entity", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3)
+        db.record_result(r, "other", chapter_type="intro")
+        summary = db.get_summary()
+        assert summary["chapter_types_learned"] == 1
+
+
+class TestChapterTypeClassification:
+    """AC: Chapter type uses simple position-based heuristics."""
+
+    def test_intro_classification(self):
+        """First 10% of segments classified as intro."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=0, confidence=0.5, voiceover_text="intro text", position=0.0)]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        assert result[0].chapter_type == "intro"
+
+    def test_conclusion_classification(self):
+        """Last 10% of segments classified as conclusion."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=95, confidence=0.5, voiceover_text="conclusion text", position=950.0)]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        assert result[0].chapter_type == "conclusion"
+
+    def test_body_classification(self):
+        """Middle segments classified as body."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=50, confidence=0.5, voiceover_text="body text", position=500.0)]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        assert result[0].chapter_type == "body"
+
+    def test_listicle_item_classification(self):
+        """Segments within listicle groups classified as listicle_item."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=50, confidence=0.5, voiceover_text="list item", position=500.0)]
+        listicle_groups = [{'group_id': 'group_1', 'start_segment': 45, 'end_segment': 55}]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100, listicle_groups=listicle_groups)
+        assert result[0].chapter_type == "listicle_item"
+
+    def test_listicle_overrides_position(self):
+        """Listicle item classification overrides position-based intro/conclusion."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        # Segment at position 0 (would be intro) but inside a listicle group
+        gaps = [GapSegment(segment_index=2, confidence=0.5, voiceover_text="list item", position=20.0)]
+        listicle_groups = [{'group_id': 'group_1', 'start_segment': 0, 'end_segment': 10}]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100, listicle_groups=listicle_groups)
+        assert result[0].chapter_type == "listicle_item"

@@ -104,7 +104,10 @@ class QueryLearningDB:
     }
     """
 
-    VERSION = "1.0"
+    VERSION = "1.1"
+
+    # Valid chapter types for bucketed tracking
+    CHAPTER_TYPES = ("intro", "body", "conclusion", "listicle_item")
 
     def __init__(self, db_path: str = ".cache/query_learning.json"):
         """
@@ -125,6 +128,11 @@ class QueryLearningDB:
 
         # Strategy -> aggregate stats
         self.strategy_stats: Dict[str, StrategyStats] = defaultdict(StrategyStats)
+
+        # Chapter type -> strategy -> success rate (0.0 to 1.0)
+        self.chapter_strategy_success: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
 
         # Load existing data
         self._load()
@@ -151,6 +159,11 @@ class QueryLearningDB:
             for strategy, stats_dict in data.get('strategy_stats', {}).items():
                 self.strategy_stats[strategy] = StrategyStats.from_dict(stats_dict)
 
+            # Load chapter-type strategy success rates
+            for chapter_type, strategies in data.get('chapter_strategy_success', {}).items():
+                for strategy, rate in strategies.items():
+                    self.chapter_strategy_success[chapter_type][strategy] = rate
+
             logger.info(f"Loaded query learning DB with {len(self.pattern_strategy_success)} patterns")
 
         except Exception as e:
@@ -172,6 +185,10 @@ class QueryLearningDB:
                 'strategy_stats': {
                     strategy: stats.to_dict()
                     for strategy, stats in self.strategy_stats.items()
+                },
+                'chapter_strategy_success': {
+                    chapter_type: dict(strategies)
+                    for chapter_type, strategies in self.chapter_strategy_success.items()
                 },
             }
 
@@ -199,6 +216,75 @@ class QueryLearningDB:
 
         return max(strategies.items(), key=lambda x: x[1])[0]
 
+    def get_best_strategy_for_chapter(self, gap_pattern: str, chapter_type: str) -> str:
+        """
+        Return best strategy considering both gap pattern and chapter type.
+
+        Blends pattern-level and chapter-level success rates (60/40 weighting)
+        to prefer strategies that work well for this chapter type.
+
+        Args:
+            gap_pattern: Pattern type (e.g., 'abstract_concept')
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+
+        Returns:
+            Strategy name with best blended success rate, or 'voiceover' as default
+        """
+        pattern_strategies = self.pattern_strategy_success.get(gap_pattern, {})
+        chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
+
+        if not pattern_strategies and not chapter_strategies:
+            return 'voiceover'
+
+        # Collect all known strategies
+        all_strategies = set(pattern_strategies.keys()) | set(chapter_strategies.keys())
+        if not all_strategies:
+            return 'voiceover'
+
+        # Blend: 60% pattern, 40% chapter type
+        best_strategy = 'voiceover'
+        best_score = -1.0
+        for strategy in all_strategies:
+            p_rate = pattern_strategies.get(strategy, 0.0)
+            c_rate = chapter_strategies.get(strategy, 0.0)
+            blended = 0.6 * p_rate + 0.4 * c_rate
+            if blended > best_score:
+                best_score = blended
+                best_strategy = strategy
+
+        return best_strategy
+
+    def get_strategy_ranking_for_chapter(self, gap_pattern: str, chapter_type: str) -> List[str]:
+        """
+        Get strategies ranked by blended success rate for pattern + chapter type.
+
+        Args:
+            gap_pattern: Pattern type
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+
+        Returns:
+            List of strategy names ordered by blended success rate (best first)
+        """
+        pattern_strategies = self.pattern_strategy_success.get(gap_pattern, {})
+        chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
+
+        if not pattern_strategies and not chapter_strategies:
+            return ['voiceover', 'similar_locked', 'entity', 'topic']
+
+        all_strategies = set(pattern_strategies.keys()) | set(chapter_strategies.keys())
+        if not all_strategies:
+            return ['voiceover', 'similar_locked', 'entity', 'topic']
+
+        scored = []
+        for strategy in all_strategies:
+            p_rate = pattern_strategies.get(strategy, 0.0)
+            c_rate = chapter_strategies.get(strategy, 0.0)
+            blended = 0.6 * p_rate + 0.4 * c_rate
+            scored.append((strategy, blended))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [s[0] for s in scored]
+
     def get_strategy_ranking(self, gap_pattern: str) -> List[str]:
         """
         Get strategies ranked by success rate for a pattern.
@@ -217,13 +303,14 @@ class QueryLearningDB:
         sorted_strategies = sorted(strategies.items(), key=lambda x: x[1], reverse=True)
         return [s[0] for s in sorted_strategies]
 
-    def record_result(self, result: QueryResult, gap_pattern: str):
+    def record_result(self, result: QueryResult, gap_pattern: str, chapter_type: str = "body"):
         """
         Update learning DB with query outcome.
 
         Args:
             result: Query result with success metrics
             gap_pattern: Pattern type of the gaps targeted
+            chapter_type: Chapter type of the gap (intro, body, conclusion, listicle_item)
         """
         strategy = result.strategy
 
@@ -233,6 +320,12 @@ class QueryLearningDB:
         # EMA with alpha=0.3 (recent results weighted more heavily)
         updated_rate = 0.3 * new_rate + 0.7 * current_rate
         self.pattern_strategy_success[gap_pattern][strategy] = updated_rate
+
+        # Update chapter type -> strategy success rate (EMA)
+        if chapter_type in self.CHAPTER_TYPES:
+            current_ch_rate = self.chapter_strategy_success[chapter_type][strategy]
+            updated_ch_rate = 0.3 * new_rate + 0.7 * current_ch_rate
+            self.chapter_strategy_success[chapter_type][strategy] = updated_ch_rate
 
         # Update strategy stats
         self.strategy_stats[strategy].record(result)
@@ -348,6 +441,7 @@ class QueryLearningDB:
             'total_gaps_filled': total_filled,
             'patterns_learned': len(self.pattern_strategy_success),
             'templates_discovered': len(self.template_success),
+            'chapter_types_learned': len(self.chapter_strategy_success),
             'strategy_success_rates': {
                 strategy: stats.success_rate
                 for strategy, stats in self.strategy_stats.items()
