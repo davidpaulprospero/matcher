@@ -145,9 +145,9 @@
                                                        "Config toggle: matching.chapter_grouping.enabled (default true) controls whether matrix is computed and passed",
                                                        "Unit test: verify matrix dimensions, score normalization, edge cases, and that embedding_search receives the matrix"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier 4 (Cross-Chapter Grouping). Source files: src/chapter_detection/bridge.py, src/matching/embedding_search.py (search method ~line 88 already accepts relevance_matrix), src/matching/tiered_matcher.py. Depends on US-72-002 (video chapters in state) and US-72-003 (chapter indices on segments). The embedding_search already has _apply_chapter_boost() — this story just computes and passes the matrix."
+                            "notes":  "Added compute_relevance_matrix() to bridge.py (Jaccard similarity over ChapterCandidate.topics). Wired into match_all_segments() in matching/main.py: builds video chapter keywords from video segment topics, computes matrix when chapter_grouping.enabled, passes to embedding_search.search() with per-segment voiceover chapter index. 12 new unit tests in test_chapter_bridge.py. All 120 related tests pass."
                         },
                         {
                             "id":  "US-72-010",
@@ -160,9 +160,9 @@
                                                        "No penalty when voiceover chapter structure is not detected (chapter_index is None)",
                                                        "Unit test: verify penalty triggers at threshold, doesn\u0027t trigger below threshold, and is absent without chapter data"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier 4 (Cross-Chapter Grouping). Source files: src/matching/scoring.py. This is a quality-of-result polish adjustment. Requires tracking state across segments within a chapter — the scoring context needs to accumulate which video chapters have been used per voiceover chapter. Depends on US-72-003 for chapter_index."
+                            "notes":  "Pre-implemented in US-71-004. apply_chapter_coherence_penalty() exists in scoring.py:2347 with -0.03 per excess source, configurable threshold (default 5) via chapter_grouping.coherence_penalty_threshold, breakdown component 'chapter_coherence', no penalty when chapter_index < 0, and 11 unit tests all passing."
                         },
                         {
                             "id":  "US-72-011",
