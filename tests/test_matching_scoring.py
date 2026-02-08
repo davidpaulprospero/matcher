@@ -2016,5 +2016,130 @@ class TestChapterSourceConsistency:
         assert consistency_entry['adjustment'] == pytest.approx(0.03, abs=0.001)
 
 
+class TestTagKeywordBoost:
+    """Tests for apply_tag_keyword_boost (US-71-003)."""
+
+    @pytest.mark.fast
+    def test_no_tags_no_boost(self, mock_config):
+        """No video tags produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(0.7, vo, video_tags=None)
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_empty_tags_no_boost(self, mock_config):
+        """Empty video tags list produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(0.7, vo, video_tags=[])
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_zero_overlap_no_boost(self, mock_config):
+        """Tags with no keyword overlap produce no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["cooking", "recipes", "kitchen"]
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_one_tag_match_boost(self, mock_config):
+        """1 tag match gives +0.02 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "cooking", "recipes"]
+        )
+        assert adjusted == pytest.approx(0.72, abs=0.001)
+        assert "tag keyword boost +0.02" in reason
+        assert "1 tag" in reason
+
+    @pytest.mark.fast
+    def test_two_tag_matches_boost(self, mock_config):
+        """2 tag matches gives +0.04 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "travel", "recipes"]
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+        assert "tag keyword boost +0.04" in reason
+        assert "2 tags" in reason
+
+    @pytest.mark.fast
+    def test_three_plus_tag_matches_boost(self, mock_config):
+        """3+ tag matches gives +0.06 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide panoramic")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "travel", "guide", "panoramic"]
+        )
+        assert adjusted == pytest.approx(0.76, abs=0.001)
+        assert "tag keyword boost +0.06" in reason
+        assert "3+" in reason or "tags" in reason
+
+    @pytest.mark.fast
+    def test_case_insensitive_tag_matching(self, mock_config):
+        """Tag matching is case-insensitive."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="TOKYO travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["Tokyo", "TRAVEL", "cooking"]
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+
+    @pytest.mark.fast
+    def test_short_tags_filtered(self, mock_config):
+        """Tags shorter than 3 chars are excluded."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["to", "tr", "ab"]
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_breakdown_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records tag_keyword_boost in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            video_tags=["tokyo", "japan", "travel"]
+        )
+        tag_entries = [b for b in breakdown if b['component'] == 'tag_keyword_boost']
+        assert len(tag_entries) == 1
+        assert tag_entries[0]['adjustment'] > 0
+        assert 'tag keyword boost' in tag_entries[0]['reason']
+
+    @pytest.mark.fast
+    def test_no_tags_no_breakdown_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no video_tags produces no tag_keyword_boost entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        tag_entries = [b for b in breakdown if b['component'] == 'tag_keyword_boost']
+        assert len(tag_entries) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -2054,6 +2054,11 @@ class MatchScoring:
     # Chapter source consistency default (US-70-011)
     DEFAULT_SOURCE_CONSISTENCY_BOOST = 0.03
 
+    # Tag keyword boost thresholds (US-71-003)
+    TAG_KEYWORD_BOOST_1 = 0.02   # 1 tag match
+    TAG_KEYWORD_BOOST_2 = 0.04   # 2 tag matches
+    TAG_KEYWORD_BOOST_3_PLUS = 0.06  # 3+ tag matches
+
     # Stopwords for title keyword extraction
     _TITLE_STOPWORDS = frozenset({
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
@@ -2167,6 +2172,55 @@ class MatchScoring:
             reason = f"chapter topic mismatch {adjustment}"
 
         return confidence + adjustment, reason
+
+    def apply_tag_keyword_boost(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_tags: Optional[List[str]] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply tag-based keyword boost to confidence score (US-71-003).
+
+        Compares voiceover segment keywords against video tags extracted
+        during caption fetching. Applies graduated boost based on overlap.
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Voiceover segment with text
+            video_tags: List of video tags/keywords from CaptionResult
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if not video_tags:
+            return confidence, ""
+
+        vo_keywords = self._extract_keywords(vo_segment.text)
+        if not vo_keywords:
+            return confidence, ""
+
+        # Normalize tags to lowercase keyword set
+        tag_keywords = {t.lower().strip() for t in video_tags if t and len(t.strip()) >= 3}
+        if not tag_keywords:
+            return confidence, ""
+
+        overlap = vo_keywords & tag_keywords
+        match_count = len(overlap)
+
+        if match_count == 0:
+            return confidence, ""
+
+        if match_count >= 3:
+            boost = self.TAG_KEYWORD_BOOST_3_PLUS
+        elif match_count == 2:
+            boost = self.TAG_KEYWORD_BOOST_2
+        else:
+            boost = self.TAG_KEYWORD_BOOST_1
+
+        matched_words = ', '.join(sorted(overlap)[:5])
+        reason = f"tag keyword boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
+        return confidence + boost, reason
 
     def apply_chapter_source_consistency(
         self,
@@ -2291,13 +2345,14 @@ class MatchScoring:
         recent_matches: Optional[List['Match']] = None,
         current_chapter_index: int = -1,
         segment_chapter_map: Optional[dict] = None,
+        video_tags: Optional[List[str]] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
 
         Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty
                -> project_boost -> title_relevance -> chapter_topic_match
-               -> chapter_source_consistency
+               -> chapter_source_consistency -> tag_keyword_boost
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2313,6 +2368,7 @@ class MatchScoring:
             recent_matches: Optional list of recent Match objects for source consistency
             current_chapter_index: Chapter index for current voiceover segment (-1 = none)
             segment_chapter_map: Optional dict mapping segment index to chapter index
+            video_tags: Optional list of video tags for tag keyword boosting
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -2401,7 +2457,17 @@ class MatchScoring:
                 reasons.append(consistency_reason)
                 breakdown.append({'component': 'chapter_source_consistency', 'adjustment': round(confidence - prev, 4), 'reason': consistency_reason})
 
-        # 9. Enforce minimum confidence floor (US-46-004)
+        # 9. Tag keyword boost (US-71-003)
+        if video_tags:
+            prev = confidence
+            confidence, tag_reason = self.apply_tag_keyword_boost(
+                confidence, vo_segment, video_tags
+            )
+            if tag_reason:
+                reasons.append(tag_reason)
+                breakdown.append({'component': 'tag_keyword_boost', 'adjustment': round(confidence - prev, 4), 'reason': tag_reason})
+
+        # 10. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2409,7 +2475,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 10. Log warning for over-penalized matches (US-46-004)
+        # 11. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2420,7 +2486,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 11. Log confidence breakdown at DEBUG level (US-53-003)
+        # 12. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(
