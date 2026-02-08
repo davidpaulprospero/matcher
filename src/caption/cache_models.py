@@ -70,6 +70,9 @@ class CachedCaption:
                 end_time=seg.get('end', seg.get('end_time', 0.0)),
                 text=seg.get('text', ''),
                 source_file=seg.get('source_file', self.video_id),
+                # US-78-002: Gracefully handle missing chapter fields (backward compat)
+                chapter_index=seg.get('chapter_index', None),
+                chapter_title=seg.get('chapter_title', ''),
             )
             for i, seg in enumerate(self.segments)
         ]

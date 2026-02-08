@@ -31,16 +31,68 @@ class CaptionSegment:
     end_time: float
     text: str
     source_file: str = ""  # Video ID or path
+    # US-78-002: Chapter mapping fields (parity with TranscriptSegment)
+    chapter_index: Optional[int] = None  # Index of containing chapter (None = unmapped)
+    chapter_title: str = ''  # Title of containing chapter
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        result = {
             'index': self.index,
             'start': self.start_time,
             'end': self.end_time,
             'text': self.text,
             'source_file': self.source_file,
         }
+        # US-78-002: Include chapter fields when present
+        if self.chapter_index is not None:
+            result['chapter_index'] = self.chapter_index
+            result['chapter_title'] = self.chapter_title
+        return result
+
+
+def map_segments_to_chapters(
+    segments: List['CaptionSegment'],
+    chapters: List[Dict[str, Any]],
+) -> List['CaptionSegment']:
+    """Assign chapter_index and chapter_title to segments based on timestamp overlap.
+
+    For each segment, finds the chapter with the greatest time overlap and assigns
+    that chapter's index and title. Segments outside all chapters get chapter_index=None
+    and chapter_title=''.
+
+    Args:
+        segments: List of CaptionSegment instances.
+        chapters: List of chapter dicts with 'title', 'start_time', 'end_time' keys.
+
+    Returns:
+        The same list of segments (mutated in-place) with chapter fields set.
+    """
+    if not chapters or not segments:
+        return segments
+
+    for seg in segments:
+        best_overlap = 0.0
+        best_idx: Optional[int] = None
+        best_title = ''
+
+        for ch_idx, ch in enumerate(chapters):
+            ch_start = ch.get('start_time', 0.0)
+            ch_end = ch.get('end_time', 0.0)
+            # Calculate overlap between segment and chapter
+            overlap_start = max(seg.start_time, ch_start)
+            overlap_end = min(seg.end_time, ch_end)
+            overlap = max(0.0, overlap_end - overlap_start)
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_idx = ch_idx
+                best_title = ch.get('title', '')
+
+        seg.chapter_index = best_idx
+        seg.chapter_title = best_title
+
+    return segments
 
 
 @dataclass
