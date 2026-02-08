@@ -128,7 +128,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "low",
-                            "notes":  "All 5/5 criteria met. Added HEADER_PATTERNS with 6 regex patterns for 'top N', 'N <noun>', 'N <noun>' word-form, 'the N best'. detect_list_header() function + _parse_header_count() helper. expected_count field on ListicleGroup model. Warning logged when |detected - expected| > 1. 14 new tests (8 unit + 6 integration) all pass. 52 total tests pass."
+                            "notes":  "All 5/5 criteria verified. (1) HEADER_PATTERNS detect top 10, 5 reasons, 3 ways, seven tips etc. (2) expected_count stored on ListicleGroup via detect_list_header. (3) Warning logged when detected vs expected diff >1. (4) HEADER_NUMBER_WORDS handles word-form (two-twenty). (5) 6 header pattern tests + 2 integration tests (warning/no-warning) all pass. 52 total tests pass."
                         },
                         {
                             "id":  "US-71-009",
