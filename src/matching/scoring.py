@@ -1339,6 +1339,98 @@ def apply_cross_chapter_relevance_boost(
     return min(1.0, confidence + boost), reason
 
 
+# Listicle consistency boost constant (mirrors MatchScoring.LISTICLE_CONSISTENCY_BOOST)
+_DEFAULT_LISTICLE_CONSISTENCY_BOOST = 0.04
+
+
+def apply_listicle_consistency(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    listicle_groups: Optional[List[Any]] = None,
+    recent_matches: Optional[List['Match']] = None,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply consistency boost for segments within the same
+    listicle group that match the same video source (US-75-007).
+
+    When consecutive segments within the same listicle group match from the same
+    video source, apply a small boost to encourage source consistency within
+    list items. Segments at group boundaries (first segment of a new group)
+    get no boost — they are free to use a different source.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Current voiceover segment
+        video_segment: Candidate video segment
+        listicle_groups: Optional list of ListicleGroup objects from listicle detection
+        recent_matches: Optional list of recent Match objects (most recent first)
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not listicle_groups or not recent_matches:
+        return confidence, ""
+
+    # Find which listicle group this voiceover segment belongs to
+    seg_idx = getattr(vo_segment, 'index', -1)
+    if seg_idx < 0:
+        return confidence, ""
+
+    current_group = None
+    for group in listicle_groups:
+        start = group.start_segment_idx if not isinstance(group, dict) else group.get('start_segment_idx', -1)
+        end = group.end_segment_idx if not isinstance(group, dict) else group.get('end_segment_idx', -1)
+        if start <= seg_idx <= end:
+            current_group = group
+            break
+
+    if current_group is None:
+        return confidence, ""
+
+    # Check if this is a boundary segment (first segment of the group)
+    group_start = current_group.start_segment_idx if not isinstance(current_group, dict) else current_group.get('start_segment_idx', -1)
+    if seg_idx == group_start:
+        return confidence, ""
+
+    # Check if previous match is in the same group and from the same source
+    prev_match = recent_matches[0]
+    if prev_match is None or prev_match.video_segment is None:
+        return confidence, ""
+
+    prev_seg_idx = getattr(prev_match.voiceover_segment, 'index', -1) if prev_match.voiceover_segment else -1
+    if prev_seg_idx < 0:
+        return confidence, ""
+
+    # Previous segment must also be in the same listicle group
+    group_end = current_group.end_segment_idx if not isinstance(current_group, dict) else current_group.get('end_segment_idx', -1)
+    prev_in_group = group_start <= prev_seg_idx <= group_end
+    if not prev_in_group:
+        return confidence, ""
+
+    # Check source match
+    prev_source = getattr(prev_match.video_segment, 'source_file', None)
+    current_source = getattr(video_segment, 'source_file', None)
+
+    if not prev_source or not current_source or prev_source != current_source:
+        return confidence, ""
+
+    boost = _DEFAULT_LISTICLE_CONSISTENCY_BOOST
+    group_id = current_group.group_id if not isinstance(current_group, dict) else current_group.get('group_id', '?')
+
+    reason = (
+        f"listicle_consistency: +{boost:.2f} "
+        f"(same source in listicle group {group_id})"
+    )
+
+    logger.debug(
+        "US-75-007 listicle consistency boost: seg=%d, group=%s, source=%s, boost=%.2f",
+        seg_idx, group_id, current_source, boost,
+    )
+
+    return min(1.0, confidence + boost), reason
+
+
 def _extract_entity_texts(segment: SRTSegment) -> List[str]:
     """
     Extract entity text values from a segment.

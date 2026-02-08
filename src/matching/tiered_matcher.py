@@ -45,6 +45,7 @@ from .scoring import (
     apply_chapter_source_consistency,  # US-75-005
     apply_chapter_coherence_penalty,  # US-75-006
     apply_cross_chapter_relevance_boost,  # US-75-006
+    apply_listicle_consistency,  # US-75-007
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -132,7 +133,8 @@ class TieredMatcher:
 
     def __init__(self, config: Optional['Config'] = None, cache: Optional[CacheManager] = None, video_topics: Optional[Dict[str, VideoTopics]] = None,
                  video_metadata: Optional[Dict[str, Dict[str, str]]] = None,
-                 relevance_matrix: Optional[List[List[float]]] = None):
+                 relevance_matrix: Optional[List[List[float]]] = None,
+                 listicle_groups: Optional[List] = None):
         """
         Initialize TieredMatcher.
 
@@ -144,12 +146,15 @@ class TieredMatcher:
                 {"title": str, "description": str} for LLM reranker context
             relevance_matrix: 2D list [vo_chapter][vid_chapter] of relevance scores
                 for cross-chapter relevance boost (US-75-006)
+            listicle_groups: Optional list of ListicleGroup objects for
+                listicle consistency boost (US-75-007)
         """
         self.config = config or get_config()
         self.cache = cache
         self.video_topics = video_topics or {}
         self.video_metadata = video_metadata or {}
         self.relevance_matrix = relevance_matrix
+        self.listicle_groups = listicle_groups or []
 
         # US-75-006: Track unique video sources per voiceover chapter for coherence penalty
         self._chapter_source_counts: Dict[int, set] = {}
@@ -891,6 +896,15 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
 
+            # US-75-007: Apply listicle consistency boost
+            prev = adjusted_confidence
+            adjusted_confidence, listicle_reason = apply_listicle_consistency(
+                adjusted_confidence, vo_segment, best_seg,
+                listicle_groups=self.listicle_groups,
+                recent_matches=self._recent_matches
+            )
+            _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
+
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -921,6 +935,8 @@ class TieredMatcher:
                 final_reasoning += f" [{chapter_topic_reason}]"
             if chapter_source_reason:
                 final_reasoning += f" [{chapter_source_reason}]"
+            if listicle_reason:
+                final_reasoning += f" [{listicle_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1078,6 +1094,15 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
 
+            # US-75-007: Apply listicle consistency boost
+            prev = adjusted_confidence
+            adjusted_confidence, listicle_reason = apply_listicle_consistency(
+                adjusted_confidence, vo_segment, best_seg,
+                listicle_groups=self.listicle_groups,
+                recent_matches=self._recent_matches
+            )
+            _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
+
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -1104,6 +1129,8 @@ class TieredMatcher:
                 reasoning += f" [{chapter_topic_reason}]"
             if chapter_source_reason:
                 reasoning += f" [{chapter_source_reason}]"
+            if listicle_reason:
+                reasoning += f" [{listicle_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1318,6 +1345,15 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
 
+        # US-75-007: Apply listicle consistency boost
+        prev = adjusted_confidence
+        adjusted_confidence, listicle_reason = apply_listicle_consistency(
+            adjusted_confidence, vo_segment, best_seg,
+            listicle_groups=self.listicle_groups,
+            recent_matches=self._recent_matches
+        )
+        _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
+
         # US-75-006: Update chapter source tracking
         self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -1346,6 +1382,8 @@ class TieredMatcher:
             final_reasoning += f" [{chapter_topic_reason}]"
         if chapter_source_reason:
             final_reasoning += f" [{chapter_source_reason}]"
+        if listicle_reason:
+            final_reasoning += f" [{listicle_reason}]"
 
         # US-63-007: Store confidence breakdown on Match object
         match = Match(
