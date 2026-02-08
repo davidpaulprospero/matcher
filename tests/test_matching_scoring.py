@@ -1608,5 +1608,143 @@ class TestConsecutiveSourcePenalty:
         assert "consecutive" in breakdown[0]['reason']
 
 
+# ============================================================================
+# Test Title Relevance Adjustment (US-70-006)
+# ============================================================================
+
+class TestTitleRelevanceAdjustment:
+    """Test apply_title_relevance_adjustment graduated boost."""
+
+    @pytest.mark.fast
+    def test_one_keyword_match_boost(self, mock_config):
+        """1 keyword match -> +0.03 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="The history of ancient Rome and its empire")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="Rome travel guide"
+        )
+        assert adjusted == pytest.approx(0.73, abs=0.001)
+        assert "title relevance boost +0.03" in reason
+        assert "1 keyword" in reason
+
+    @pytest.mark.fast
+    def test_two_keyword_match_boost(self, mock_config):
+        """2 keyword matches -> +0.05 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo skyline and Japanese culture travel")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="Tokyo culture documentary"
+        )
+        assert adjusted == pytest.approx(0.75, abs=0.001)
+        assert "title relevance boost +0.05" in reason
+        assert "2 keywords" in reason
+
+    @pytest.mark.fast
+    def test_three_plus_keyword_match_boost(self, mock_config):
+        """3+ keyword matches -> +0.08 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="ancient Roman architecture ruins temples heritage")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="ancient Roman architecture temples"
+        )
+        assert adjusted == pytest.approx(0.78, abs=0.001)
+        assert "title relevance boost +0.08" in reason
+        assert "3+" in reason or "keyword" in reason
+
+    @pytest.mark.fast
+    def test_no_keyword_overlap_no_boost(self, mock_config):
+        """No keyword overlap -> no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="underwater coral reef marine biology")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="mountain hiking trails"
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_empty_title_no_boost(self, mock_config):
+        """Empty video title -> no adjustment (graceful no-op)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title=""
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_none_title_no_boost(self, mock_config):
+        """None video title -> no adjustment (graceful no-op)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title=None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_breakdown_entry_format_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records title_relevance in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        # Use a title that overlaps with sample_vo_segment text "Sample voiceover text about Tokyo"
+        adjusted, reason, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            video_title="Tokyo travel guide sample"
+        )
+        title_entries = [b for b in breakdown if b['component'] == 'title_relevance']
+        assert len(title_entries) == 1
+        entry = title_entries[0]
+        assert entry['component'] == 'title_relevance'
+        assert entry['adjustment'] > 0
+        assert isinstance(entry['reason'], str)
+        assert 'title relevance boost' in entry['reason']
+
+    @pytest.mark.fast
+    def test_apply_all_no_title_no_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no video_title produces no title_relevance entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        title_entries = [b for b in breakdown if b['component'] == 'title_relevance']
+        assert len(title_entries) == 0
+
+    @pytest.mark.fast
+    def test_stopwords_excluded(self, mock_config):
+        """Stopwords like 'the', 'and', 'with' don't count as keyword matches."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="the and with this that from")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="the and with this that from"
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_case_insensitive_matching(self, mock_config):
+        """Keywords match case-insensitively."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="TOKYO skyline panoramic")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="tokyo Skyline view"
+        )
+        assert adjusted > 0.7
+        assert "tokyo" in reason.lower() or "skyline" in reason.lower()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

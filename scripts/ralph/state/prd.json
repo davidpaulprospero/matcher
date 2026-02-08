@@ -77,7 +77,7 @@
                             "id":  "US-70-005",
                             "title":  "Parse YouTube chapters from video description text",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "New function parse_description_chapters(description: str) -\u003e List[dict] that extracts timestamp-title pairs from description text",
                                                        "Handles common YouTube description chapter formats: \u00270:00 Introduction\u0027, \u002701:23 Topic Name\u0027, \u00271:02:30 Long Topic\u0027",
@@ -92,7 +92,7 @@
                             "id":  "US-70-006",
                             "title":  "Add title keyword overlap scoring to confidence adjustments",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "New method apply_title_relevance_adjustment() in MatchScoring class (src/matching/scoring.py) computes keyword overlap between voiceover segment text and video title",
                                                        "Graduated boost applied: 1 keyword match -\u003e +0.03, 2 matches -\u003e +0.05, 3+ matches -\u003e +0.08",

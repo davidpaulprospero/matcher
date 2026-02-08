@@ -2041,6 +2041,79 @@ class MatchScoring:
         """Low confidence warning threshold from config or class default."""
         return getattr(self._sc, 'low_confidence_warning_threshold', self.LOW_CONFIDENCE_WARNING_THRESHOLD) if self._sc else self.LOW_CONFIDENCE_WARNING_THRESHOLD
 
+    # Title relevance boost thresholds (US-70-006)
+    TITLE_BOOST_1_KEYWORD = 0.03  # 1 keyword match
+    TITLE_BOOST_2_KEYWORDS = 0.05  # 2 keyword matches
+    TITLE_BOOST_3_PLUS_KEYWORDS = 0.08  # 3+ keyword matches
+
+    # Stopwords for title keyword extraction
+    _TITLE_STOPWORDS = frozenset({
+        'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
+        'can', 'her', 'was', 'one', 'our', 'out', 'has', 'have',
+        'been', 'from', 'this', 'that', 'with', 'they', 'what',
+        'will', 'there', 'their', 'about', 'would', 'which', 'into',
+        'how', 'why', 'who', 'when', 'where', 'does', 'did', 'its',
+        'than', 'then', 'just', 'more', 'some', 'also', 'very',
+    })
+
+    def _extract_keywords(self, text: str) -> set:
+        """Extract significant keywords from text (>= 3 chars, not stopwords)."""
+        if not text:
+            return set()
+        words = text.lower().split()
+        return {
+            w.strip('.,!?:;"\'()[]{}|-')
+            for w in words
+            if len(w.strip('.,!?:;"\'()[]{}|-')) >= 3
+            and w.lower().strip('.,!?:;"\'()[]{}|-') not in self._TITLE_STOPWORDS
+        }
+
+    def apply_title_relevance_adjustment(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_title: Optional[str] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply title keyword overlap boost to confidence score.
+
+        Extracts keywords from both the voiceover segment text and the video title,
+        then applies a graduated boost based on overlap count.
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Voiceover segment with text
+            video_title: Video title string
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if not video_title:
+            return confidence, ""
+
+        vo_keywords = self._extract_keywords(vo_segment.text)
+        title_keywords = self._extract_keywords(video_title)
+
+        if not vo_keywords or not title_keywords:
+            return confidence, ""
+
+        overlap = vo_keywords & title_keywords
+        match_count = len(overlap)
+
+        if match_count == 0:
+            return confidence, ""
+
+        if match_count >= 3:
+            boost = self.TITLE_BOOST_3_PLUS_KEYWORDS
+        elif match_count == 2:
+            boost = self.TITLE_BOOST_2_KEYWORDS
+        else:
+            boost = self.TITLE_BOOST_1_KEYWORD
+
+        matched_words = ', '.join(sorted(overlap)[:5])
+        reason = f"title relevance boost +{boost} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
+        return confidence + boost, reason
+
     def apply_all_adjustments(
         self,
         confidence: float,
@@ -2048,12 +2121,13 @@ class MatchScoring:
         video_segment: SRTSegment,
         video_topics: Optional[dict] = None,
         chapter_matching_enabled: bool = False,
-        topic_mismatch_penalty: float = 0.15
+        topic_mismatch_penalty: float = 0.15,
+        video_title: Optional[str] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
 
-        Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty -> project_boost
+        Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty -> project_boost -> title_relevance
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2121,7 +2195,17 @@ class MatchScoring:
             reasons.append(project_reason)
             breakdown.append({'component': 'project_boost', 'adjustment': round(confidence - prev, 4), 'reason': project_reason})
 
-        # 6. Enforce minimum confidence floor (US-46-004)
+        # 6. Title relevance boost (US-70-006)
+        if video_title:
+            prev = confidence
+            confidence, title_reason = self.apply_title_relevance_adjustment(
+                confidence, vo_segment, video_title
+            )
+            if title_reason:
+                reasons.append(title_reason)
+                breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
+
+        # 7. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2129,7 +2213,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 7. Log warning for over-penalized matches (US-46-004)
+        # 8. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2140,7 +2224,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 8. Log confidence breakdown at DEBUG level (US-53-003)
+        # 9. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(
