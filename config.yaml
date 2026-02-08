@@ -194,7 +194,7 @@ transcription:
 
 embedding:
   # Options: gemini, openai, local, sentence_transformers, ollama
-  provider: gemini
+  provider: ollama
 
   # Model names per provider
   gemini_model: models/gemini-embedding-001
@@ -563,6 +563,17 @@ matching:
     landmark_bonus: 0.2  # Bonus when landmark detected in video
     use_llm_disambiguation: true  # Use LLM to resolve ambiguous locations (Paris FR vs TX)
     cache_dir: ".cache/locations"  # Cache geocoding results
+
+  # Context enrichment (US-70-004)
+  # Controls extraction of video metadata (description, chapters, tags) from yt-dlp info_dict
+  # for context-aware matching. Enriches caption data with additional video signals.
+  context_enrichment:
+    extract_video_description: true    # Extract video description text
+    extract_video_chapters: true       # Extract chapter markers from video
+    extract_video_tags: true           # Extract video tags/keywords
+    max_description_length: 500        # Truncate descriptions longer than this (chars)
+    parse_description_chapters: true   # Parse chapter timestamps from description text
+    title_enriched_embeddings: true    # Include title+description in embedding generation
 
   # Negative matching rules are defined in the top-level 'negative_matching:' section below.
   # See NegativeMatchingConfig in src/config/sections/matching.py for the dataclass definition.

@@ -14,6 +14,7 @@ __all__ = [
     'NegativeMatchingConfig',
     'ChapterDetectionConfig',
     'MatchingScoringConfig',
+    'ContextEnrichmentConfig',
     'MatchingConfig',
 ]
 
@@ -161,6 +162,21 @@ class MatchingScoringConfig:
             self.entity_match_boosts = {str(k): v for k, v in self.entity_match_boosts.items()}
         if isinstance(self.keyword_overlap_thresholds, dict):
             self.keyword_overlap_thresholds = {str(k): v for k, v in self.keyword_overlap_thresholds.items()}
+
+
+@dataclass
+class ContextEnrichmentConfig:
+    """Controls extraction of video metadata for context-aware matching.
+
+    When enabled, video description, chapters, and tags from yt-dlp info_dict
+    are extracted and stored alongside captions to enrich matching signals.
+    """
+    extract_video_description: bool = True   # Extract video description text
+    extract_video_chapters: bool = True      # Extract chapter markers from video
+    extract_video_tags: bool = True          # Extract video tags/keywords
+    max_description_length: int = 500        # Truncate descriptions longer than this
+    parse_description_chapters: bool = True  # Parse chapter timestamps from description text
+    title_enriched_embeddings: bool = True   # Include title+description in embedding generation
 
 
 @dataclass
@@ -386,6 +402,9 @@ class MatchingConfig:
     # Scoring thresholds (US-53-002)
     scoring: MatchingScoringConfig = None
 
+    # Context enrichment (US-70-004)
+    context_enrichment: ContextEnrichmentConfig = None
+
     def __post_init__(self):
         import logging
         logger = logging.getLogger(__name__)
@@ -442,3 +461,8 @@ class MatchingConfig:
             self.scoring = MatchingScoringConfig()
         elif isinstance(self.scoring, dict):
             self.scoring = MatchingScoringConfig(**self.scoring)
+
+        if self.context_enrichment is None:
+            self.context_enrichment = ContextEnrichmentConfig()
+        elif isinstance(self.context_enrichment, dict):
+            self.context_enrichment = ContextEnrichmentConfig(**self.context_enrichment)

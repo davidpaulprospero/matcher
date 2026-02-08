@@ -57,13 +57,13 @@
                                                        "When info_dict fields are missing or None, extraction gracefully defaults to empty string/list without raising errors",
                                                        "Unit tests verify extraction from a mock info_dict with all fields present, partially present, and completely absent"
                                                    ],
-                            "notes":  "All 5/5 criteria verified. Added extract_video_metadata_from_info_dict() function and CaptionResult.enrich_with_metadata() method to caption_fetcher.py. Also synced video_description/chapters/tags fields + __post_init__ + to_dict to caption_fetcher.py CaptionResult (matching models.py). 16 tests: 11 extraction tests (full/partial/absent/None/truncation/chapter-keys/tag-None/non-dict) + 5 enrich/serialization/post_init tests."
+                            "notes":  "All 5/5 criteria verified. extract_video_metadata_from_info_dict extracts description (truncated to 500), chapters (list of dicts), tags (list of strings). Graceful None/missing handling via isinstance checks and defaults. 16 tests pass: all-fields, partial, absent, None values, empty/None dict, truncation, chapter key defaults, tag None filtering, non-dict chapter skipping, enrich_with_metadata, to_dict serialization, __post_init__ None-safety."
                         },
                         {
                             "id":  "US-70-004",
                             "title":  "Add context_enrichment config section for matching",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "New ContextEnrichmentConfig dataclass in src/config/sections/matching.py with fields: extract_video_description (bool, True), extract_video_chapters (bool, True), extract_video_tags (bool, True), max_description_length (int, 500), parse_description_chapters (bool, True), title_enriched_embeddings (bool, True)",
                                                        "MatchingConfig has new field context_enrichment of type ContextEnrichmentConfig with __post_init__ dict-to-dataclass conversion",
@@ -71,7 +71,7 @@
                                                        "getattr() fallback access pattern works when config is loaded from older config files missing this section",
                                                        "py_compile succeeds on src/config/sections/matching.py"
                                                    ],
-                            "notes":  "Tier: foundation (Area 1). Files: src/config/sections/matching.py (lines 166-445, MatchingConfig dataclass - add ContextEnrichmentConfig and wire it in with __post_init__), config.yaml (matching section around line 331). Follow Rule 1: update BOTH config dataclass AND config.yaml. Follow Rule 6: handle dict-vs-object in __post_init__."
+                            "notes":  "All 5/5 criteria verified. ContextEnrichmentConfig dataclass added with 6 fields (all defaults). MatchingConfig.context_enrichment field with None default and __post_init__ dict-to-dataclass conversion. config.yaml updated with matching.context_enrichment section. getattr fallback works (None->default ContextEnrichmentConfig). py_compile passes."
                         },
                         {
                             "id":  "US-70-005",
