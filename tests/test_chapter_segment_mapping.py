@@ -30,6 +30,7 @@ def _mock_config():
     matching.caption_quality_low_penalty = 0.1
     matching.apply_timing_penalty = True
     matching.skip_llm_threshold = 0.85
+    matching.language_confidence_penalty = 0.0
     # Scoring sub-config: use Mock with spec to avoid duck-type check passing
     matching.scoring = None
     config.matching = matching
@@ -166,43 +167,50 @@ class TestApplyChapterTopicMatch:
     def test_no_chapter_title_no_change(self):
         """No chapter title returns unchanged confidence."""
         seg = _seg(0, 10, text="ocean wildlife documentary")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, None)
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, None, vo_chapter_index=0)
         assert conf == 0.7
         assert reason == ""
 
     def test_empty_chapter_title_no_change(self):
         """Empty chapter title returns unchanged confidence."""
         seg = _seg(0, 10, text="ocean wildlife documentary")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "", vo_chapter_index=0)
+        assert conf == 0.7
+        assert reason == ""
+
+    def test_no_vo_chapter_index_no_change(self):
+        """No vo_chapter_index (None) returns unchanged confidence."""
+        seg = _seg(0, 10, text="ocean wildlife documentary")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Ocean Wildlife", vo_chapter_index=None)
         assert conf == 0.7
         assert reason == ""
 
     def test_matching_single_keyword_boost(self):
-        """Single keyword match gives +0.05 boost."""
+        """Single keyword match gives +0.05 partial boost."""
         seg = _seg(0, 10, text="the ocean is vast and deep")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Ocean Exploration")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Ocean Exploration", vo_chapter_index=0)
         assert conf == pytest.approx(0.75)
-        assert "chapter topic boost" in reason
+        assert "partial match" in reason
         assert "ocean" in reason
 
     def test_matching_multiple_keywords_strong_boost(self):
-        """Two+ keyword matches give +0.10 strong boost."""
-        seg = _seg(0, 10, text="ocean wildlife and marine biology")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Ocean Wildlife Documentary")
+        """3+ keyword matches give +0.10 strong boost."""
+        seg = _seg(0, 10, text="ocean wildlife marine biology documentary")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Ocean Wildlife Marine Documentary", vo_chapter_index=0)
         assert conf == pytest.approx(0.80)
         assert "+0.1" in reason
 
     def test_no_keyword_overlap_penalty(self):
         """No keyword overlap gives -0.05 mismatch penalty."""
         seg = _seg(0, 10, text="technology and innovation trends")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Cooking Recipes")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "Cooking Recipes", vo_chapter_index=0)
         assert conf == pytest.approx(0.65)
         assert "mismatch" in reason
 
     def test_stopwords_excluded(self):
         """Stopwords are excluded from matching."""
         seg = _seg(0, 10, text="the and for are but not")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "The And For")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "The And For", vo_chapter_index=0)
         # All words are stopwords or < 3 chars, so no keywords extracted -> no change
         assert conf == 0.7
         assert reason == ""
@@ -210,7 +218,7 @@ class TestApplyChapterTopicMatch:
     def test_short_words_excluded(self):
         """Words shorter than 3 chars are excluded."""
         seg = _seg(0, 10, text="AI is an ML model")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "AI ML")
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "AI ML", vo_chapter_index=0)
         # "ai" and "ml" are only 2 chars -> excluded
         assert conf == 0.7
         assert reason == ""
@@ -218,8 +226,9 @@ class TestApplyChapterTopicMatch:
     def test_case_insensitive(self):
         """Matching is case-insensitive."""
         seg = _seg(0, 10, text="OCEAN WILDLIFE documentary")
-        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "ocean wildlife")
-        assert conf == pytest.approx(0.80)
+        conf, reason = self.scoring.apply_chapter_topic_match(0.7, seg, "ocean wildlife", vo_chapter_index=0)
+        assert conf == pytest.approx(0.75)
+        assert "partial match" in reason
 
     def test_recorded_in_confidence_breakdown(self):
         """Chapter topic match is recorded in confidence_breakdown."""
@@ -227,11 +236,11 @@ class TestApplyChapterTopicMatch:
         vo = _seg(0, 10, text="ocean wildlife documentary")
         vid = _seg(0, 10, text="some video caption")
         conf, reason, breakdown = scoring.apply_all_adjustments(
-            0.7, vo, vid, chapter_title="Ocean Wildlife"
+            0.7, vo, vid, chapter_title="Ocean Wildlife", current_chapter_index=0
         )
         chapter_entries = [b for b in breakdown if b['component'] == 'chapter_topic_match']
         assert len(chapter_entries) == 1
-        assert chapter_entries[0]['adjustment'] == pytest.approx(0.10)
+        assert chapter_entries[0]['adjustment'] == pytest.approx(0.05)
 
     def test_no_chapter_title_no_breakdown_entry(self):
         """No chapter_title produces no chapter_topic_match breakdown entry."""
