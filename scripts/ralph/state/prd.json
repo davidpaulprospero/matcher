@@ -118,7 +118,8 @@
                             "id":  "US-77-008",
                             "title":  "Add scoring adjustment audit summary to match stage output",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
+                            "notes":  "Added compute_scoring_audit_summary() and log_scoring_audit_summary() to tiered_matcher.py. Called from match_all_segments in main.py after diversity enforcement. Logs total segments, avg confidence, per-adjustment fire counts and avg magnitudes, top-3 most impactful, and unused adjustments at INFO level. 12 tests in test_scoring_audit_summary.py cover all acceptance criteria.",
                             "acceptanceCriteria":  [
                                                        "After match stage completes, a summary log line reports: total segments matched, average confidence, count of each scoring adjustment that fired (title_relevance, chapter_topic_match, etc.)",
                                                        "Adjustments that never fired are reported as \u0027unused\u0027 to help identify dead config",
@@ -131,14 +132,14 @@
                             "id":  "US-77-009",
                             "title":  "Add embedding search result deduplication by video source",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "EmbeddingSearch._search_candidates in src/matching/embedding_search.py deduplicates results so the same video_id appears at most max_per_source times (default: 3) in the candidate pool",
                                                        "After deduplication, additional candidates from other sources are pulled in to maintain the target candidate count",
                                                        "Configuration option matching.embedding_search.max_candidates_per_source (default: 3) controls the cap",
                                                        "Tests verify: 10 candidates from same source get capped to 3, remaining slots filled from other sources, max_candidates_per_source=0 disables dedup"
                                                    ],
-                            "notes":  "Tier: feature (small). Currently embedding_search.py returns top-K candidates by similarity with no source diversity constraint. If a single popular video has many good segments, it dominates the candidate pool, reducing downstream diversity. The chapter_boost in _apply_chapter_boost (~line 130) helps but only when chapters exist. Need to add source-diversity filtering. Source files: src/matching/embedding_search.py:29-130 (EmbeddingSearch class), src/config/sections/matching.py (add EmbeddingSearchConfig field)."
+                            "notes":  "Added max_candidates_per_source (default 3) to EmbeddingSearchConfig and MatchingConfig. _deduplicate_by_source caps per-video candidates and backfills from other sources. 4 tests cover capping, backfill, disable (0), and ordering."
                         },
                         {
                             "id":  "US-77-010",
