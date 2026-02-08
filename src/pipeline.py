@@ -449,6 +449,9 @@ class PipelineOrchestrator:
         if resume:
             self.load_checkpoint()
 
+        # Freeze config to prevent mutation during pipeline execution
+        self.config.freeze()
+
         # Track processed parallel groups to avoid running same group twice
         processed_parallel_groups: set = set()
 

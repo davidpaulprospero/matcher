@@ -154,9 +154,9 @@
                                                        "Test: loading a config with invalid YAML syntax raises ConfigError with line number in message",
                                                        "Test: loading a config with wrong field type (e.g., matching.min_confidence=\u0027abc\u0027) includes the field name and expected type"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier: DX improvement. Source: src/config/base.py lines 337-370 (from_yaml) and lines 458-531 (_build_dataclass). Currently YAML parse errors surface raw yaml.YAMLError which can be cryptic. TypeError from dataclass construction shows the raw Python error. Wrap both with user-friendly messages."
+                            "notes":  "YAML parse errors now raise ConfigError with line/column context. _build_dataclass TypeError includes field suggestions from unexpected keys. 9 new tests added, all 49 tests in test file passing. 3 pre-existing failures in other test files unrelated to changes."
                         },
                         {
                             "id":  "US-80-011",
@@ -169,9 +169,9 @@
                                                        "Test: TranscriptionConfig with invalid whisper_model warns about unknown model",
                                                        "All tests pass with pytest tests/test_config_section_validation.py -v"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier: test coverage. Source: tests/test_config_section_validation.py exists but may not cover all 14 section files (src/config/sections/*.py). Check existing coverage and fill gaps. Existing test files: test_config.py, test_config_dataclasses.py, test_config_post_init.py, test_config_post_init_edge_cases.py, test_config_section_validation.py. Focus on sections not yet covered."
+                            "notes":  "Added 78 new tests covering broll, entity, rate_limit, keywords, iterative_matching, core (TranscriptionConfig, ProjectConfig, IndexingConfig), matching (ContextEnrichmentConfig, ChapterGroupingConfig, MatchingScoringConfig) sections. Added parallel_workers >= 1 validation to DownloadConfig. All 324 tests pass."
                         },
                         {
                             "id":  "US-80-012",
@@ -184,9 +184,9 @@
                                                        "Test: setting config.matching.min_confidence after freeze() raises FrozenConfigError",
                                                        "Test: config before freeze() allows normal attribute setting"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier: safety/architecture. Source: src/config/base.py (Config class) and src/pipeline.py (Pipeline.run). Currently config is mutable throughout pipeline execution, which can cause subtle bugs if a stage modifies config that downstream stages depend on. Use __setattr__ override with _frozen check. FrozenConfigError subclass of ConfigError."
+                            "notes":  "Added FrozenConfigError, Config.freeze()/unfreeze(), __setattr__ override with _frozen check. freeze() recursively freezes all section dataclasses. Pipeline.run() calls config.freeze() before first stage. 9 tests covering freeze/unfreeze/section blocking/error subclass. All 497 config tests pass."
                         }
                     ]
 }

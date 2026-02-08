@@ -21,6 +21,7 @@ from __future__ import annotations
 from .base import (
     Config,
     ConfigError,
+    FrozenConfigError,
     CRITICAL_SECTIONS,
     load_config,
     get_config,
@@ -94,6 +95,7 @@ __all__ = [
     # Main config and functions
     'Config',
     'ConfigError',
+    'FrozenConfigError',
     'CRITICAL_SECTIONS',
     'load_config',
     'get_config',

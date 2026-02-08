@@ -145,6 +145,11 @@ class ConfigError(Exception):
     pass
 
 
+class FrozenConfigError(ConfigError):
+    """Raised when attempting to modify a frozen config after pipeline start."""
+    pass
+
+
 # Sections whose construction failure should raise ConfigError instead of
 # silently returning empty defaults.  These are the sections without which
 # the pipeline cannot produce meaningful output.
@@ -176,6 +181,56 @@ def get_config_metrics() -> Dict[str, Any]:
 # =============================================================================
 # MAIN CONFIG CLASS
 # =============================================================================
+
+def _frozen_setattr(self: Any, name: str, value: Any) -> None:
+    """Shared __setattr__ for section dataclasses that support freezing."""
+    if name.startswith('_') or not getattr(self, '_frozen', False):
+        object.__setattr__(self, name, value)
+    else:
+        raise FrozenConfigError(
+            f"Cannot set '{name}' on frozen {type(self).__name__}. "
+            f"Config is immutable after pipeline start."
+        )
+
+
+def _freeze_dataclass(obj: Any) -> None:
+    """Recursively set _frozen=True on a dataclass and its nested dataclass fields.
+
+    Also installs _frozen_setattr as __setattr__ on the class so that
+    attribute writes are blocked for all instances of that class while frozen.
+    """
+    cls = type(obj)
+    # Install frozen __setattr__ if not already installed
+    if getattr(cls, '_original_setattr', None) is None:
+        cls._original_setattr = cls.__dict__.get('__setattr__', None)
+        cls.__setattr__ = _frozen_setattr
+    object.__setattr__(obj, '_frozen', True)
+    for f in fields(obj):
+        child = getattr(obj, f.name)
+        if is_dataclass(child) and not isinstance(child, type):
+            _freeze_dataclass(child)
+
+
+def _unfreeze_dataclass(obj: Any) -> None:
+    """Recursively set _frozen=False on a dataclass and its nested dataclass fields.
+
+    Restores the original __setattr__ on the class.
+    """
+    cls = type(obj)
+    object.__setattr__(obj, '_frozen', False)
+    # Restore original __setattr__
+    original = getattr(cls, '_original_setattr', None)
+    if original is not None:
+        cls.__setattr__ = original
+        del cls._original_setattr
+    elif hasattr(cls, '_original_setattr'):
+        # _original_setattr was None (no custom __setattr__ existed),
+        # remove our override to restore default behavior
+        if '__setattr__' in cls.__dict__:
+            delattr(cls, '__setattr__')
+        if '_original_setattr' in cls.__dict__:
+            delattr(cls, '_original_setattr')
+
 
 @dataclass
 class Config:
@@ -243,6 +298,38 @@ class Config:
     _config_hash: str = ""
     _loaded_at: str = ""
     _load_time_ms: float = 0.0
+
+    # Internal frozen state (not a dataclass field to avoid __init__ issues)
+    _frozen: bool = False
+
+    def __setattr__(self, name: str, value: Any):
+        """Prevent attribute mutation when config is frozen."""
+        # Allow setting private/internal attrs and the _frozen flag itself
+        if name.startswith('_') or not getattr(self, '_frozen', False):
+            object.__setattr__(self, name, value)
+        else:
+            raise FrozenConfigError(
+                f"Cannot set '{name}' on frozen Config. "
+                f"Call config.unfreeze() first (test scenarios only)."
+            )
+
+    def freeze(self):
+        """Mark config as immutable. Called by Pipeline.run() before first stage."""
+        object.__setattr__(self, '_frozen', True)
+        # Also freeze all section dataclasses
+        for f in fields(self):
+            section = getattr(self, f.name)
+            if is_dataclass(section) and not isinstance(section, type):
+                _freeze_dataclass(section)
+
+    def unfreeze(self):
+        """Unmark config as immutable. For test scenarios that need mutation."""
+        object.__setattr__(self, '_frozen', False)
+        # Also unfreeze all section dataclasses
+        for f in fields(self):
+            section = getattr(self, f.name)
+            if is_dataclass(section) and not isinstance(section, type):
+                _unfreeze_dataclass(section)
 
     def __post_init__(self):
         """Initialize after dataclass creation"""
@@ -1116,7 +1203,8 @@ def log_hardcoded_warning(component: str, value_name: str, value: Any):
 # Export section configs for backward compatibility
 __all__ = [
     # Main config and functions
-    'Config', 'load_config', 'get_config', 'set_config', 'reload_config',
+    'Config', 'ConfigError', 'FrozenConfigError',
+    'load_config', 'get_config', 'set_config', 'reload_config',
     'ensure_dirs', 'get_api_key', 'get_config_metrics', 'log_hardcoded_warning',
     # Section configs (for backward compatibility)
     'TranscriptionConfig', 'EmbeddingConfig', 'MatchingConfig', 'OutputConfig',

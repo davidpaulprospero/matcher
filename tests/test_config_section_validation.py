@@ -15,6 +15,8 @@ import pytest
 import os
 from unittest.mock import patch
 
+from src.config.base import Config, ConfigError, FrozenConfigError
+
 # Infrastructure config imports
 from src.config.sections.infrastructure import (
     HealingConfig,
@@ -2517,6 +2519,86 @@ class TestMatchingScoringConfigCoverage:
         )
         assert '1' in config.entity_match_boosts
         assert '2' in config.entity_match_boosts
+
+
+class TestConfigFreezeMechanism:
+    """US-80-012: Config freeze mechanism prevents mutation after pipeline start."""
+
+    def test_config_before_freeze_allows_normal_setting(self):
+        """Before freeze(), normal attribute setting works."""
+        config = Config()
+        config.matching.min_confidence = 0.99
+        assert config.matching.min_confidence == 0.99
+
+    def test_config_freeze_blocks_top_level_setattr(self):
+        """After freeze(), setting attributes on Config raises FrozenConfigError."""
+        config = Config()
+        config.freeze()
+        try:
+            with pytest.raises(FrozenConfigError):
+                config.project_dir = "/new/path"
+        finally:
+            config.unfreeze()
+
+    def test_config_freeze_blocks_section_setattr(self):
+        """After freeze(), setting config.matching.min_confidence raises FrozenConfigError."""
+        config = Config()
+        config.freeze()
+        try:
+            with pytest.raises(FrozenConfigError):
+                config.matching.min_confidence = 0.99
+        finally:
+            config.unfreeze()
+
+    def test_config_unfreeze_restores_mutability(self):
+        """After unfreeze(), attributes can be set again."""
+        config = Config()
+        config.freeze()
+        config.unfreeze()
+        config.matching.min_confidence = 0.42
+        assert config.matching.min_confidence == 0.42
+
+    def test_freeze_sets_frozen_flag(self):
+        """freeze() sets internal _frozen flag."""
+        config = Config()
+        assert not getattr(config, '_frozen', False)
+        config.freeze()
+        try:
+            assert config._frozen is True
+        finally:
+            config.unfreeze()
+
+    def test_unfreeze_clears_frozen_flag(self):
+        """unfreeze() clears internal _frozen flag."""
+        config = Config()
+        config.freeze()
+        config.unfreeze()
+        assert config._frozen is False
+
+    def test_freeze_blocks_nested_section_setattr(self):
+        """After freeze(), setting deeply nested config raises FrozenConfigError."""
+        config = Config()
+        config.freeze()
+        try:
+            with pytest.raises(FrozenConfigError):
+                config.download.parallel_workers = 8
+        finally:
+            config.unfreeze()
+
+    def test_frozen_config_error_is_config_error_subclass(self):
+        """FrozenConfigError is a subclass of ConfigError."""
+        assert issubclass(FrozenConfigError, ConfigError)
+
+    def test_freeze_allows_private_attr_setting(self):
+        """Frozen config still allows setting private/internal attributes."""
+        config = Config()
+        config.freeze()
+        try:
+            # Private attrs should still work (e.g., for internal bookkeeping)
+            config._config_hash = "test_hash"
+            assert config._config_hash == "test_hash"
+        finally:
+            config.unfreeze()
 
 
 if __name__ == "__main__":
