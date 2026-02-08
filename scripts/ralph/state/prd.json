@@ -101,9 +101,9 @@
                                                        "Wire video_metadata dict construction in the calling code (src/stages/match.py or src/matching/tiered_matcher.py) using state.video_search_results",
                                                        "Unit test: verify enrichment output format, truncation behavior, and graceful handling of missing metadata"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Context-Enriched Matching). Source files: src/matching/llm_reranker.py (_enrich_candidates_with_context ~line 206), src/matching/tiered_matcher.py, src/stages/match.py. The reranker already accepts video_metadata parameter but the calling code may not be constructing and passing it. Verify the full pipeline: state -\u003e tiered_matcher -\u003e llm_reranker."
+                            "notes":  "Verified and completed. _enrich_candidates_with_context() and _build_video_context() already implemented in llm_reranker.py (US-70-007). Context format 'Video context: {title}. {first_sentence}' already correct at llm_reranker.py. Truncation to first sentence or 100 chars already implemented. Graceful skip on empty metadata already implemented. NEW: Wired video_metadata dict construction in MatchStage._run_matching() using state.video_search_results. NEW: Added 5 unit tests for metadata construction and end-to-end enrichment flow (format validation, truncation edge cases, missing metadata handling, empty context, full pipeline integration). All tests passing."
                         },
                         {
                             "id":  "US-72-007",

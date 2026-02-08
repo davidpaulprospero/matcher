@@ -665,6 +665,17 @@ class MatchStage(Stage):
         # Run matching
         print(f"  Running two-stage matching...")
 
+        # US-72-006: Build video_metadata dict for LLM reranker context enrichment
+        video_metadata = {}
+        for vsr in getattr(state, 'video_search_results', []) or []:
+            vid_id = vsr.video_id if hasattr(vsr, 'video_id') else vsr.get('video_id', '') if isinstance(vsr, dict) else ''
+            title = vsr.title if hasattr(vsr, 'title') else vsr.get('title', '') if isinstance(vsr, dict) else ''
+            desc = vsr.description if hasattr(vsr, 'description') else vsr.get('description', '') if isinstance(vsr, dict) else ''
+            if vid_id and (title or desc):
+                video_metadata[vid_id] = {'title': title, 'description': desc}
+        if video_metadata:
+            logger.info(f"US-72-006: Built video_metadata for {len(video_metadata)} videos")
+
         matches = match_all_segments(
             voiceover_segments=vo_segments,
             video_segments=video_segments,
@@ -677,7 +688,8 @@ class MatchStage(Stage):
             face_preference=state.face_preference,
             video_topics=None,
             location_chapters=getattr(state, 'location_chapters', None),
-            video_locations=None
+            video_locations=None,
+            video_metadata=video_metadata
         )
 
         return matches

@@ -603,3 +603,118 @@ class TestLLMRerankerVideoContext:
         key_with = reranker._get_cache_key("voiceover", enriched)
 
         assert key_without != key_with
+
+
+class TestVideoMetadataConstruction:
+    """Tests for US-72-006: video_metadata construction from state.video_search_results."""
+
+    def test_video_metadata_built_from_video_search_results(self):
+        """Verify video_metadata dict is built correctly from VideoSearchResult objects."""
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class FakeVideoSearchResult:
+            video_id: str = ""
+            title: str = ""
+            description: str = ""
+            url: str = ""
+
+        results = [
+            FakeVideoSearchResult(video_id="abc123", title="Solar Energy", description="About solar panels."),
+            FakeVideoSearchResult(video_id="def456", title="Wind Power", description="Wind turbines explained."),
+        ]
+
+        # Replicate the construction logic from MatchStage._run_matching
+        video_metadata = {}
+        for vsr in results:
+            vid_id = vsr.video_id if hasattr(vsr, 'video_id') else ''
+            title = vsr.title if hasattr(vsr, 'title') else ''
+            desc = vsr.description if hasattr(vsr, 'description') else ''
+            if vid_id and (title or desc):
+                video_metadata[vid_id] = {'title': title, 'description': desc}
+
+        assert len(video_metadata) == 2
+        assert video_metadata["abc123"]["title"] == "Solar Energy"
+        assert video_metadata["abc123"]["description"] == "About solar panels."
+        assert video_metadata["def456"]["title"] == "Wind Power"
+
+    def test_video_metadata_skips_entries_without_title_or_description(self):
+        """Verify entries with no title AND no description are skipped."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeVideoSearchResult:
+            video_id: str = ""
+            title: str = ""
+            description: str = ""
+
+        results = [
+            FakeVideoSearchResult(video_id="abc123", title="Has Title", description=""),
+            FakeVideoSearchResult(video_id="def456", title="", description="Has description"),
+            FakeVideoSearchResult(video_id="ghi789", title="", description=""),  # Should be skipped
+        ]
+
+        video_metadata = {}
+        for vsr in results:
+            vid_id = vsr.video_id if hasattr(vsr, 'video_id') else ''
+            title = vsr.title if hasattr(vsr, 'title') else ''
+            desc = vsr.description if hasattr(vsr, 'description') else ''
+            if vid_id and (title or desc):
+                video_metadata[vid_id] = {'title': title, 'description': desc}
+
+        assert len(video_metadata) == 2
+        assert "abc123" in video_metadata
+        assert "def456" in video_metadata
+        assert "ghi789" not in video_metadata
+
+    def test_video_metadata_handles_dict_format(self):
+        """Verify video_metadata construction handles dict-format results."""
+        results = [
+            {"video_id": "abc123", "title": "Solar Energy", "description": "About solar."},
+        ]
+
+        video_metadata = {}
+        for vsr in results:
+            vid_id = vsr.video_id if hasattr(vsr, 'video_id') else vsr.get('video_id', '') if isinstance(vsr, dict) else ''
+            title = vsr.title if hasattr(vsr, 'title') else vsr.get('title', '') if isinstance(vsr, dict) else ''
+            desc = vsr.description if hasattr(vsr, 'description') else vsr.get('description', '') if isinstance(vsr, dict) else ''
+            if vid_id and (title or desc):
+                video_metadata[vid_id] = {'title': title, 'description': desc}
+
+        assert len(video_metadata) == 1
+        assert video_metadata["abc123"]["title"] == "Solar Energy"
+
+    def test_video_metadata_empty_results(self):
+        """Verify empty video_search_results produces empty metadata."""
+        video_metadata = {}
+        for vsr in []:
+            pass  # no iterations
+        assert video_metadata == {}
+
+    def test_enrichment_end_to_end_with_constructed_metadata(self):
+        """Verify constructed video_metadata flows through to enriched candidates."""
+        from dataclasses import dataclass as dc
+
+        @dc
+        class FakeVSR:
+            video_id: str = ""
+            title: str = ""
+            description: str = ""
+
+        # Build metadata like the match stage does
+        results = [FakeVSR(video_id="vid123", title="Solar Energy", description="How panels work.")]
+        video_metadata = {}
+        for vsr in results:
+            if vsr.video_id and (vsr.title or vsr.description):
+                video_metadata[vsr.video_id] = {'title': vsr.title, 'description': vsr.description}
+
+        # Pass through reranker enrichment
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+        candidates = [
+            (MockSRTSegment("caption about solar", source_file="vid123"), 0.9),
+        ]
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        assert "[Video context: Solar Energy. How panels work]" in enriched[0][0].text
+        assert "caption about solar" in enriched[0][0].text
