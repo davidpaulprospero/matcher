@@ -6016,6 +6016,10 @@ class CachedCaption:
     fetch_timestamp: float  # Unix timestamp when fetched
     duration: float = 0.0  # Total caption duration
     unavailable: bool = False  # US-59-003: True if captions known unavailable
+    # US-73-005: Video metadata for backward-compatible cache deserialization
+    video_description: str = ""  # Full video description text
+    video_chapters: List[Dict[str, Any]] = field(default_factory=list)  # Parsed chapter markers
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -6030,6 +6034,13 @@ class CachedCaption:
         }
         if self.unavailable:
             d['unavailable'] = True
+        # US-73-005: Serialize metadata (only when non-empty to save space)
+        if self.video_description:
+            d['video_description'] = self.video_description
+        if self.video_chapters:
+            d['video_chapters'] = self.video_chapters
+        if self.video_tags:
+            d['video_tags'] = self.video_tags
         return d
 
     @classmethod
@@ -6055,6 +6066,10 @@ class CachedCaption:
             language=self.language,
             is_auto_generated=self.is_auto_generated,
             format_source=self.format_source,
+            # US-73-005: Preserve metadata through cache round-trip
+            video_description=self.video_description,
+            video_chapters=self.video_chapters,
+            video_tags=self.video_tags,
         )
 
 
@@ -6719,6 +6734,10 @@ class CaptionCache(BaseCache):
             format_source=result.format_source,
             fetch_timestamp=time.time(),
             duration=result.duration,
+            # US-73-005: Persist metadata through cache
+            video_description=getattr(result, 'video_description', ''),
+            video_chapters=getattr(result, 'video_chapters', []),
+            video_tags=getattr(result, 'video_tags', []),
         )
 
         self.set(key, cached.to_dict())
