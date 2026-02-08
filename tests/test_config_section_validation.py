@@ -2064,5 +2064,460 @@ class TestConvertNestedConfigsAllSections:
         assert isinstance(config.matching, MatchingConfig)
 
 
+# =============================================================================
+# US-80-011: Comprehensive config section coverage for all 14 section files
+# =============================================================================
+
+# --- BrollConfig (broll.py) ---
+
+from src.config.sections.broll import BrollConfig, BrollSourceBoostConfig
+
+
+@pytest.mark.fast
+class TestBrollConfigDefaults:
+    """Test BrollConfig default construction and dict conversion."""
+
+    def test_default_construction(self):
+        """Test BrollConfig constructs with defaults."""
+        config = BrollConfig()
+        assert config.enabled is True
+        assert config.downloads_per_term == 3
+        assert config.max_total_downloads == 30
+        assert config.min_match_score == 0.3
+        assert isinstance(config.source_boost, BrollSourceBoostConfig)
+
+    def test_dict_construction(self):
+        """Test BrollConfig from **kwargs."""
+        config = BrollConfig(
+            enabled=False, downloads_per_term=5, min_match_score=0.5
+        )
+        assert config.enabled is False
+        assert config.downloads_per_term == 5
+        assert config.min_match_score == 0.5
+
+    def test_source_boost_dict_converted(self):
+        """Test source_boost dict is converted to BrollSourceBoostConfig."""
+        config = BrollConfig(
+            source_boost={'youtube': 0.2, 'pexels': 0.1, 'pixabay': 0.0}
+        )
+        assert isinstance(config.source_boost, BrollSourceBoostConfig)
+        assert config.source_boost.youtube == 0.2
+
+    def test_source_boost_dataclass_unchanged(self):
+        """Test source_boost dataclass instance is left unchanged."""
+        boost = BrollSourceBoostConfig(youtube=0.3)
+        config = BrollConfig(source_boost=boost)
+        assert config.source_boost is boost
+
+
+# --- ImageSearchConfig (entity.py) ---
+
+from src.config.sections.entity import (
+    ImageSearchConfig, EntityCacheConfig, StockVideoConfig, SilentVideoConfig,
+)
+
+
+@pytest.mark.fast
+class TestImageSearchConfigDefaults:
+    """Test ImageSearchConfig default construction and dict conversion."""
+
+    def test_default_construction(self):
+        """Test ImageSearchConfig constructs with defaults."""
+        config = ImageSearchConfig()
+        assert config.enabled is True
+        assert config.images_per_entity == 5
+        assert isinstance(config.stock_video, StockVideoConfig)
+        assert isinstance(config.entity_cache, EntityCacheConfig)
+
+    def test_dict_construction(self):
+        """Test ImageSearchConfig from **kwargs."""
+        config = ImageSearchConfig(enabled=False, images_per_entity=10)
+        assert config.enabled is False
+        assert config.images_per_entity == 10
+
+    def test_stock_video_dict_converted(self):
+        """Test stock_video dict is converted to StockVideoConfig."""
+        config = ImageSearchConfig(
+            stock_video={'min_duration': 5.0, 'max_duration': 60.0}
+        )
+        assert isinstance(config.stock_video, StockVideoConfig)
+        assert config.stock_video.min_duration == 5.0
+
+    def test_entity_cache_dict_converted(self):
+        """Test entity_cache dict is converted to EntityCacheConfig."""
+        config = ImageSearchConfig(
+            entity_cache={'enabled': True, 'fuzzy_threshold': 0.9}
+        )
+        assert isinstance(config.entity_cache, EntityCacheConfig)
+        assert config.entity_cache.fuzzy_threshold == 0.9
+
+
+@pytest.mark.fast
+class TestEntityCacheConfigDefaults:
+    """Test EntityCacheConfig default values."""
+
+    def test_default_values(self):
+        config = EntityCacheConfig()
+        assert config.enabled is False
+        assert config.fuzzy_threshold == 0.85
+        assert config.cache_strategy == "copy"
+
+
+@pytest.mark.fast
+class TestSilentVideoConfigDefaults:
+    """Test SilentVideoConfig default values."""
+
+    def test_default_values(self):
+        config = SilentVideoConfig()
+        assert config.enabled is True
+        assert config.min_words_threshold == 10
+        assert config.use_vision_api is True
+
+
+# --- RateLimitConfig (rate_limit.py) ---
+
+from src.config.sections.rate_limit import RateLimitConfig as RLConfig
+
+
+@pytest.mark.fast
+class TestRateLimitConfigDefaults:
+    """Test RateLimitConfig default construction."""
+
+    def test_default_construction(self):
+        """Test RateLimitConfig constructs with defaults."""
+        config = RLConfig()
+        assert config.slots_per_second == 0.5
+        assert config.burst_size == 3
+        assert config.jitter_factor == 0.2
+        assert config.max_backoff_seconds == 60.0
+
+    def test_dict_construction(self):
+        """Test RateLimitConfig from **kwargs."""
+        config = RLConfig(slots_per_second=1.0, burst_size=5)
+        assert config.slots_per_second == 1.0
+        assert config.burst_size == 5
+
+
+# --- KeywordConfig (keywords.py) ---
+
+from src.config.sections.keywords import KeywordConfig, ListDetectionConfig
+
+
+@pytest.mark.fast
+class TestKeywordConfigDefaults:
+    """Test KeywordConfig default construction and dict conversion."""
+
+    def test_default_construction(self):
+        """Test KeywordConfig constructs with defaults."""
+        config = KeywordConfig()
+        assert config.provider == "gemini"
+        assert config.max_keywords == 30
+        assert isinstance(config.list_detection, ListDetectionConfig)
+
+    def test_dict_construction(self):
+        """Test KeywordConfig from **kwargs."""
+        config = KeywordConfig(provider="anthropic", max_keywords=50)
+        assert config.provider == "anthropic"
+        assert config.max_keywords == 50
+
+    def test_list_detection_none_creates_default(self):
+        """Test list_detection=None creates default ListDetectionConfig."""
+        config = KeywordConfig(list_detection=None)
+        assert isinstance(config.list_detection, ListDetectionConfig)
+        assert config.list_detection.enabled is True
+
+    def test_list_detection_dict_converted(self):
+        """Test list_detection dict is converted to ListDetectionConfig."""
+        config = KeywordConfig(
+            list_detection={'enabled': False, 'keyword_suffix': 'video'}
+        )
+        assert isinstance(config.list_detection, ListDetectionConfig)
+        assert config.list_detection.enabled is False
+        assert config.list_detection.keyword_suffix == 'video'
+
+
+# --- IterativeMatchingConfig (iterative_matching.py) ---
+
+from src.config.sections.iterative_matching import IterativeMatchingConfig
+
+
+@pytest.mark.fast
+class TestIterativeMatchingConfigDefaults:
+    """Test IterativeMatchingConfig default construction and clamping."""
+
+    def test_default_construction(self):
+        """Test IterativeMatchingConfig constructs with defaults."""
+        config = IterativeMatchingConfig()
+        assert config.enabled is True
+        assert config.target_confidence == 0.90
+        assert config.source_spacing_seconds == 300.0
+        assert config.max_iterations == 5
+
+    def test_dict_construction(self):
+        """Test IterativeMatchingConfig from **kwargs."""
+        config = IterativeMatchingConfig(
+            target_confidence=0.85, max_iterations=3
+        )
+        assert config.target_confidence == 0.85
+        assert config.max_iterations == 3
+
+    def test_target_confidence_clamped_above_one(self):
+        """Test target_confidence > 1.0 is clamped to 1.0."""
+        config = IterativeMatchingConfig(target_confidence=1.5)
+        assert config.target_confidence == 1.0
+
+    def test_target_confidence_clamped_below_zero(self):
+        """Test target_confidence < 0.0 is clamped to 0.0."""
+        config = IterativeMatchingConfig(target_confidence=-0.5)
+        assert config.target_confidence == 0.0
+
+    def test_max_iterations_clamped_to_one(self):
+        """Test max_iterations < 1 is clamped to 1."""
+        config = IterativeMatchingConfig(max_iterations=0)
+        assert config.max_iterations == 1
+
+    def test_negative_spacing_clamped_to_zero(self):
+        """Test source_spacing_seconds < 0 is clamped to 0."""
+        config = IterativeMatchingConfig(source_spacing_seconds=-100)
+        assert config.source_spacing_seconds == 0.0
+
+
+# --- TranscriptionConfig (core.py) ---
+
+from src.config.sections.core import (
+    TranscriptionConfig, PauseSplitConfig, ProjectConfig, IndexingConfig,
+)
+
+
+@pytest.mark.fast
+class TestTranscriptionConfigDefaults:
+    """Test TranscriptionConfig default construction and validation."""
+
+    def test_default_construction(self):
+        """Test TranscriptionConfig constructs with defaults."""
+        config = TranscriptionConfig()
+        assert config.model == "base"
+        assert config.language == "en"
+        assert config.use_gpu is True
+        assert isinstance(config.pause_split, PauseSplitConfig)
+
+    def test_dict_construction(self):
+        """Test TranscriptionConfig from **kwargs."""
+        config = TranscriptionConfig(model="small", language="fr")
+        assert config.model == "small"
+        assert config.language == "fr"
+
+    def test_invalid_whisper_model_raises_valueerror(self):
+        """AC5: TranscriptionConfig with invalid whisper_model raises ValueError."""
+        with pytest.raises(ValueError, match="not a known Whisper model"):
+            TranscriptionConfig(model="super-large")
+
+    def test_invalid_compute_type_raises_valueerror(self):
+        """Test invalid compute_type raises ValueError."""
+        with pytest.raises(ValueError, match="compute_type"):
+            TranscriptionConfig(compute_type="bfloat16")
+
+    def test_low_gpu_memory_raises_valueerror(self):
+        """Test minimum_gpu_memory_mb < 100 raises ValueError."""
+        with pytest.raises(ValueError, match="minimum_gpu_memory_mb"):
+            TranscriptionConfig(minimum_gpu_memory_mb=50)
+
+    def test_zero_max_workers_raises_valueerror(self):
+        """Test max_workers=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_workers"):
+            TranscriptionConfig(max_workers=0)
+
+    def test_zero_batch_size_raises_valueerror(self):
+        """Test batch_size=0 raises ValueError."""
+        with pytest.raises(ValueError, match="batch_size"):
+            TranscriptionConfig(batch_size=0)
+
+    def test_gpu_timeout_too_low_raises_valueerror(self):
+        """Test gpu_transcription_timeout < 30 raises ValueError."""
+        with pytest.raises(ValueError, match="gpu_transcription_timeout"):
+            TranscriptionConfig(gpu_transcription_timeout=10)
+
+    def test_valid_models_accepted(self):
+        """Test all known Whisper models are accepted."""
+        for model in ['tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3']:
+            config = TranscriptionConfig(model=model)
+            assert config.model == model
+
+    def test_pause_split_none_creates_default(self):
+        """Test pause_split=None creates default PauseSplitConfig."""
+        config = TranscriptionConfig(pause_split=None)
+        assert isinstance(config.pause_split, PauseSplitConfig)
+
+
+@pytest.mark.fast
+class TestProjectConfigDefaults:
+    """Test ProjectConfig default values."""
+
+    def test_default_values(self):
+        config = ProjectConfig()
+        assert config.name == "matcher-alt"
+        assert config.version == "3.0.0"
+
+    def test_dict_construction(self):
+        config = ProjectConfig(name="my-project", description="test")
+        assert config.name == "my-project"
+        assert config.description == "test"
+
+
+@pytest.mark.fast
+class TestIndexingConfigDefaults:
+    """Test IndexingConfig default values."""
+
+    def test_default_values(self):
+        config = IndexingConfig()
+        assert config.index_type == "flat"
+        assert config.use_faiss is True
+        assert config.similarity_metric == "cosine"
+
+
+# --- DownloadConfig parallel_workers validation ---
+
+
+@pytest.mark.fast
+class TestDownloadConfigParallelWorkersValidation:
+    """AC3: Test DownloadConfig with negative parallel_workers raises ValueError."""
+
+    def test_negative_parallel_workers_raises_valueerror(self):
+        """Test parallel_workers=-1 raises ValueError."""
+        with pytest.raises(ValueError, match="parallel_workers"):
+            DownloadConfig(parallel_workers=-1)
+
+    def test_zero_parallel_workers_raises_valueerror(self):
+        """Test parallel_workers=0 raises ValueError."""
+        with pytest.raises(ValueError, match="parallel_workers"):
+            DownloadConfig(parallel_workers=0)
+
+    def test_valid_parallel_workers_accepted(self):
+        """Test parallel_workers=1 (minimum) is accepted."""
+        config = DownloadConfig(parallel_workers=1)
+        assert config.parallel_workers == 1
+
+    def test_default_parallel_workers_valid(self):
+        """Test default parallel_workers passes validation."""
+        config = DownloadConfig()
+        assert config.parallel_workers >= 1
+
+
+# --- MatchingConfig confidence threshold ordering (warns + clamps) ---
+
+
+@pytest.mark.fast
+class TestMatchingConfigConfidenceClampingAndWarning:
+    """AC4: Test MatchingConfig with confidence thresholds out of order warns and clamps."""
+
+    def test_confidence_above_one_clamped(self):
+        """Test confidence > 1.0 is warn+clamped to 1.0."""
+        config = MatchingConfig(min_confidence=1.5)
+        assert config.min_confidence == 1.0
+
+    def test_high_confidence_threshold_clamped(self):
+        """Test high_confidence_threshold > 1.0 is clamped."""
+        config = MatchingConfig(high_confidence_threshold=2.0)
+        assert config.high_confidence_threshold == 1.0
+
+    def test_low_confidence_threshold_clamped(self):
+        """Test low_confidence_threshold > 1.0 is clamped."""
+        config = MatchingConfig(low_confidence_threshold=1.1)
+        assert config.low_confidence_threshold == 1.0
+
+    def test_ambiguous_threshold_clamped(self):
+        """Test ambiguous_threshold > 1.0 is clamped."""
+        config = MatchingConfig(ambiguous_threshold=1.3)
+        assert config.ambiguous_threshold == 1.0
+
+    def test_negative_confidence_raises_valueerror(self):
+        """Test negative confidence raises ValueError."""
+        with pytest.raises(ValueError, match="negative"):
+            MatchingConfig(min_confidence=-0.1)
+
+    def test_all_thresholds_at_boundary_accepted(self):
+        """Test all thresholds at 0.0 and 1.0 boundaries are accepted."""
+        config = MatchingConfig(
+            min_confidence=0.0,
+            high_confidence_threshold=1.0,
+            low_confidence_threshold=0.0,
+            ambiguous_threshold=0.0,
+        )
+        assert config.min_confidence == 0.0
+        assert config.high_confidence_threshold == 1.0
+
+
+# --- ContextEnrichmentConfig and ChapterGroupingConfig (matching.py) ---
+
+from src.config.sections.matching import ContextEnrichmentConfig, ChapterGroupingConfig
+
+
+@pytest.mark.fast
+class TestContextEnrichmentConfigCoverage:
+    """Test ContextEnrichmentConfig validation coverage."""
+
+    def test_default_construction(self):
+        config = ContextEnrichmentConfig()
+        assert config.max_description_length == 500
+        assert config.extract_video_description is True
+
+    def test_negative_description_length_raises_valueerror(self):
+        with pytest.raises(ValueError, match="max_description_length"):
+            ContextEnrichmentConfig(max_description_length=-1)
+
+    def test_large_description_length_clamped(self):
+        config = ContextEnrichmentConfig(max_description_length=20000)
+        assert config.max_description_length == 10000
+
+
+@pytest.mark.fast
+class TestChapterGroupingConfigCoverage:
+    """Test ChapterGroupingConfig validation coverage."""
+
+    def test_default_construction(self):
+        config = ChapterGroupingConfig()
+        assert config.enabled is True
+        assert config.coherence_penalty_threshold == 5
+
+    def test_zero_coherence_threshold_raises_valueerror(self):
+        with pytest.raises(ValueError, match="coherence_penalty_threshold"):
+            ChapterGroupingConfig(coherence_penalty_threshold=0)
+
+    def test_positive_mismatch_penalty_raises_valueerror(self):
+        with pytest.raises(ValueError, match="chapter_topic_mismatch_penalty"):
+            ChapterGroupingConfig(chapter_topic_mismatch_penalty=0.1)
+
+    def test_negative_relevance_boost_raises_valueerror(self):
+        with pytest.raises(ValueError, match="relevance_boost_weight"):
+            ChapterGroupingConfig(relevance_boost_weight=-0.5)
+
+    def test_boost_min_greater_than_max_raises_valueerror(self):
+        with pytest.raises(ValueError, match="chapter_topic_match_boost"):
+            ChapterGroupingConfig(chapter_topic_match_boost=[0.2, 0.1])
+
+
+# --- MatchingScoringConfig (matching.py) ---
+
+from src.config.sections.matching import MatchingScoringConfig
+
+
+@pytest.mark.fast
+class TestMatchingScoringConfigCoverage:
+    """Test MatchingScoringConfig default construction and dict conversion."""
+
+    def test_default_construction(self):
+        config = MatchingScoringConfig()
+        assert config.confidence_floor == 0.05
+        assert isinstance(config.entity_match_boosts, dict)
+
+    def test_dict_keys_converted_to_strings(self):
+        """Test numeric dict keys are converted to strings in __post_init__."""
+        config = MatchingScoringConfig(
+            entity_match_boosts={1: 0.05, 2: 0.08}
+        )
+        assert '1' in config.entity_match_boosts
+        assert '2' in config.entity_match_boosts
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

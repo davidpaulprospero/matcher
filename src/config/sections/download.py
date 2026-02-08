@@ -1430,6 +1430,13 @@ class DownloadConfig:
         if isinstance(self.rate_limit_budget, dict):
             self.rate_limit_budget = RateLimitBudgetConfig(**self.rate_limit_budget)
 
+        # Validate parallel_workers >= 1 (positive integer)
+        if self.parallel_workers < 1:
+            raise ValueError(
+                f"DownloadConfig.parallel_workers={self.parallel_workers} must be >= 1. "
+                f"Check download.parallel_workers in config.yaml"
+            )
+
         # Validate cookies_from_browser is a known browser or empty (disabled)
         _valid_browsers = {'firefox', 'chrome', 'edge', 'safari', 'opera', 'brave', ''}
         if self.cookies_from_browser not in _valid_browsers:
