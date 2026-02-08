@@ -463,6 +463,50 @@ def apply_tiered_caption_penalties(
     return adjusted, breakdown_entries
 
 
+def apply_language_confidence_penalty(
+    confidence: float,
+    video_segment: SRTSegment,
+    config
+) -> Tuple[float, str]:
+    """Apply penalty for low language confidence captions (US-73-012).
+
+    When captions are auto-translated from a different language, language_confidence
+    is lower (0.5). This function applies a configurable penalty proportional to
+    how far language_confidence is from 1.0.
+
+    Formula: penalty = (1.0 - language_confidence) * language_confidence_penalty
+    Default language_confidence_penalty is 0.0 (disabled).
+
+    Args:
+        confidence: Current confidence score.
+        video_segment: Video segment with language_confidence metadata.
+        config: Config with language_confidence_penalty setting.
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string).
+    """
+    mc = config.matching
+    penalty_factor = getattr(mc, 'language_confidence_penalty', 0.0)
+    if penalty_factor <= 0.0:
+        return confidence, ""
+
+    lang_conf = getattr(video_segment, 'language_confidence', 1.0)
+    if lang_conf is None:
+        lang_conf = 1.0
+
+    if lang_conf >= 1.0:
+        return confidence, ""
+
+    penalty = (1.0 - lang_conf) * penalty_factor
+    adjusted = max(0.0, confidence - penalty)
+    reason = f"language confidence {lang_conf:.1f}: -{penalty:.3f}"
+    logger.debug(
+        f"Language confidence penalty applied: {confidence:.2f} -> {adjusted:.2f} "
+        f"(lang_conf={lang_conf}, penalty_factor={penalty_factor})"
+    )
+    return adjusted, reason
+
+
 def apply_timing_penalty(
     confidence: float,
     video_segment: SRTSegment,
@@ -2828,6 +2872,15 @@ class MatchScoring:
             for entry in tiered_entries:
                 reasons.append(entry['reason'])
                 breakdown.append(entry)
+
+        # 3c. Language confidence penalty (US-73-012)
+        prev = confidence
+        confidence, lang_conf_reason = apply_language_confidence_penalty(
+            confidence, video_segment, self.config
+        )
+        if lang_conf_reason:
+            reasons.append(lang_conf_reason)
+            breakdown.append({'component': 'language_confidence', 'adjustment': round(confidence - prev, 4), 'reason': lang_conf_reason})
 
         # 4. Timing penalty
         prev = confidence

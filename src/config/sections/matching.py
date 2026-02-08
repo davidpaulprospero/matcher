@@ -338,6 +338,12 @@ class MatchingConfig:
     caption_penalty_missing_timing: float = -0.03  # Penalty for missing/poor timing data
     max_caption_penalty: float = -0.12             # Maximum combined caption penalty (cap)
 
+    # Language confidence penalty (US-73-012)
+    # Penalty multiplier for low language_confidence captions (auto-translated)
+    # Final penalty = (1.0 - language_confidence) * language_confidence_penalty
+    # Default 0.0 = disabled; reasonable value when enabled: 0.1
+    language_confidence_penalty: float = 0.0
+
     # Caption timing penalty (US-008 Sprint 7)
     # Penalizes matches when caption timing is poor (low coverage, exceeds video duration)
     # Formula: adjusted = raw * quality_weight * timing_penalty

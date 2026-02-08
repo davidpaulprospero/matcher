@@ -180,9 +180,9 @@
                                                        "Scoring can optionally apply a small penalty for low language_confidence (new config: caption_quality.language_confidence_penalty, default 0.0 - disabled by default)",
                                                        "Unit test verifies language_confidence values for each caption source type"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier: Quality signal. Files: src/caption/models.py (CaptionResult), src/caption_fetcher.py (language selection logic), src/matching/scoring.py. Auto-translated captions are lower quality than native language captions. Tracking this separately from the general caption_quality lets us tune penalties independently."
+                            "notes":  "All 5 criteria met. language_confidence (float 0.0-1.0, default 1.0) and fallback_language fields added to both CaptionResult classes. caption_fetcher.py sets confidence based on source type: manual=1.0, auto target=0.8, auto translated=0.5 with fallback_language tracking. language_confidence_penalty config added (default 0.0 = disabled). apply_language_confidence_penalty scoring function wired into apply_all_adjustments. 19 unit tests covering all source types, penalty math, cache round-trip, backward compat."
                         }
                     ]
 }

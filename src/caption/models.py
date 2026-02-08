@@ -570,6 +570,9 @@ class CaptionResult:
     video_description: str = ""  # Full video description text
     video_chapters: List[dict] = field(default_factory=list)  # Parsed chapter markers [{title, start_time, end_time}]
     video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-73-012: Language confidence and fallback tracking
+    language_confidence: float = 1.0  # 0.0-1.0: manual=1.0, auto target=0.8, auto translated=0.5
+    fallback_language: str = ""  # Language actually used when different from requested
 
     def __post_init__(self):
         """Ensure list fields are never None (dict-vs-object safety, Rule 2/6).
@@ -847,4 +850,6 @@ class CaptionResult:
             'video_description': self.video_description,  # US-70-002
             'video_chapters': self.video_chapters,  # US-70-002
             'video_tags': self.video_tags,  # US-70-002
+            'language_confidence': self.language_confidence,  # US-73-012
+            'fallback_language': self.fallback_language,  # US-73-012
         }

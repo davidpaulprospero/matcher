@@ -1976,6 +1976,9 @@ class CaptionResult:
     video_description: str = ""  # Full video description text
     video_chapters: List[dict] = field(default_factory=list)  # Parsed chapter markers [{title, start_time, end_time}]
     video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-73-012: Language confidence and fallback tracking
+    language_confidence: float = 1.0  # 0.0-1.0: manual=1.0, auto target=0.8, auto translated=0.5
+    fallback_language: str = ""  # Language actually used when different from requested
 
     def __post_init__(self):
         """Ensure list fields are never None (dict-vs-object safety, Rule 2/6)."""
@@ -2256,6 +2259,8 @@ class CaptionResult:
             'video_description': self.video_description,  # US-70-002
             'video_chapters': self.video_chapters,  # US-70-002
             'video_tags': self.video_tags,  # US-70-002
+            'language_confidence': self.language_confidence,  # US-73-012
+            'fallback_language': self.fallback_language,  # US-73-012
         }
 
     def enrich_with_metadata(self, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
@@ -4637,6 +4642,19 @@ class CaptionFetcher:
                     if self._rate_limiter:
                         self._rate_limiter.record_success()
 
+                    # US-73-012: Set language confidence based on caption source type
+                    lang_matches = selected_lang.lower() == language.lower()
+                    if not selected_auto:
+                        # Manual captions in target language
+                        result.language_confidence = 1.0
+                    elif lang_matches:
+                        # Auto-generated in target language
+                        result.language_confidence = 0.8
+                    else:
+                        # Auto-generated in different language (translated)
+                        result.language_confidence = 0.5
+                        result.fallback_language = selected_lang
+
                     # US-60-005: Log timing - 2 subprocess calls total (list-subs + write-sub)
                     _elapsed = time.monotonic() - _fetch_start
                     logger.info(
@@ -6076,6 +6094,9 @@ class CachedCaption:
     video_description: str = ""  # Full video description text
     video_chapters: List[Dict[str, Any]] = field(default_factory=list)  # Parsed chapter markers
     video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-73-012: Language confidence and fallback tracking
+    language_confidence: float = 1.0
+    fallback_language: str = ""
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -6097,6 +6118,11 @@ class CachedCaption:
             d['video_chapters'] = self.video_chapters
         if self.video_tags:
             d['video_tags'] = self.video_tags
+        # US-73-012: Language confidence (only when non-default)
+        if self.language_confidence != 1.0:
+            d['language_confidence'] = self.language_confidence
+        if self.fallback_language:
+            d['fallback_language'] = self.fallback_language
         return d
 
     @classmethod
@@ -6126,6 +6152,9 @@ class CachedCaption:
             video_description=self.video_description,
             video_chapters=self.video_chapters,
             video_tags=self.video_tags,
+            # US-73-012: Preserve language confidence through cache
+            language_confidence=self.language_confidence,
+            fallback_language=self.fallback_language,
         )
 
 
@@ -6794,6 +6823,9 @@ class CaptionCache(BaseCache):
             video_description=getattr(result, 'video_description', ''),
             video_chapters=getattr(result, 'video_chapters', []),
             video_tags=getattr(result, 'video_tags', []),
+            # US-73-012: Persist language confidence through cache
+            language_confidence=getattr(result, 'language_confidence', 1.0),
+            fallback_language=getattr(result, 'fallback_language', ''),
         )
 
         self.set(key, cached.to_dict())
