@@ -1297,6 +1297,10 @@ class CaptionStage(Stage):
             }
             logger.info("caption_stage_summary %s", caption_stage_metrics)
 
+            # US-78-005: Caption coverage gap summary
+            # Compute CoverageAnalysis per video and log aggregate summary
+            self._log_coverage_gap_summary(caption_results, video_durations)
+
             # US-002 Sprint 7: Save format statistics for cross-run learning
             # This enables adaptive format ordering in future runs
             if caption_cache.enabled and metrics.format_success_counts:
@@ -1495,6 +1499,90 @@ class CaptionStage(Stage):
         return None
 
     # === Helper Methods ===
+
+    def _log_coverage_gap_summary(
+        self,
+        caption_results: Dict[str, Any],
+        video_durations: Dict[str, float],
+    ) -> None:
+        """Log a structured caption coverage gap summary after batch processing.
+
+        US-78-005: Surfaces aggregate coverage stats at INFO level so coverage
+        issues are visible without --verbose. Uses CoverageAnalysis from
+        src/caption/models.py as the data source.
+
+        Args:
+            caption_results: Dict mapping video_id to caption result dicts.
+            video_durations: Dict mapping video_id to duration in seconds.
+        """
+        from ..caption.models import CoverageAnalysis, CaptionSegment, analyze_caption_coverage
+
+        analyses: List[tuple] = []  # (video_id, CoverageAnalysis)
+
+        for video_id, result in caption_results.items():
+            segments_data = result.get('segments')
+            if not segments_data:
+                continue
+            video_duration = result.get('video_duration') or video_durations.get(video_id)
+            if not video_duration or video_duration <= 0:
+                continue
+
+            # Reconstruct CaptionSegment objects from dicts
+            segments = []
+            for i, seg in enumerate(segments_data):
+                if isinstance(seg, dict):
+                    segments.append(CaptionSegment(
+                        index=seg.get('index', i),
+                        start_time=seg.get('start_time', 0.0),
+                        end_time=seg.get('end_time', 0.0),
+                        text=seg.get('text', ''),
+                    ))
+                elif isinstance(seg, CaptionSegment):
+                    segments.append(seg)
+
+            if not segments:
+                continue
+
+            analysis = analyze_caption_coverage(segments, video_duration)
+            if analysis:
+                analyses.append((video_id, analysis))
+
+        if not analyses:
+            logger.info("caption_coverage_gap_summary: no videos with coverage data")
+            return
+
+        total_videos = len(analyses)
+        captioned_count = sum(1 for _, a in analyses if a.coverage_ratio > 0)
+        avg_coverage = sum(a.coverage_ratio for _, a in analyses) / total_videos
+        videos_with_large_gaps = [
+            (vid, a) for vid, a in analyses if a.largest_gap_seconds > 10.0
+        ]
+
+        # Top 3 largest gaps across all videos
+        sorted_by_gap = sorted(analyses, key=lambda x: x[1].largest_gap_seconds, reverse=True)
+        top_3_gaps = sorted_by_gap[:3]
+
+        summary = {
+            'total_videos': total_videos,
+            'captioned_count': captioned_count,
+            'avg_coverage_ratio': round(avg_coverage, 3),
+            'videos_with_gaps_over_10s': len(videos_with_large_gaps),
+            'top_3_largest_gaps': [
+                {'video_id': vid, 'gap_seconds': round(a.largest_gap_seconds, 1)}
+                for vid, a in top_3_gaps
+            ],
+        }
+        logger.info("caption_coverage_gap_summary %s", summary)
+
+        # Print user-facing summary
+        print(f"\n  + Caption coverage summary (US-78-005):")
+        print(f"    - Videos with coverage data: {total_videos}")
+        print(f"    - Average coverage: {avg_coverage:.0%}")
+        if videos_with_large_gaps:
+            print(f"    - Videos with gaps >10s: {len(videos_with_large_gaps)}")
+        if top_3_gaps:
+            gap_strs = [f"{vid}={a.largest_gap_seconds:.1f}s" for vid, a in top_3_gaps]
+            print(f"    - Largest gaps: {', '.join(gap_strs)}")
 
     def _validate_budget_for_batch(
         self,
