@@ -646,8 +646,14 @@ def generate_resolve_xml_with_bins(
                         f'                                <in>{alt_start_frames}</in>',
                         f'                                <out>{alt_out_frames}</out>',
                         f'                                <file id="{file_id}"/>',
-                        '                            </clipitem>',
                     ])
+
+                    # Add chapter title as comment if available on the alt video segment
+                    alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                    if alt_chapter_title:
+                        xml_lines.append(f'                                <comment>{escape_xml(alt_chapter_title)}</comment>')
+
+                    xml_lines.append('                            </clipitem>')
 
             alt_timeline_pos += target_frames
 
@@ -1096,8 +1102,14 @@ def _add_sequence_alt_tracks(
                     '                            </media>',
                     '                        </file>',
                     '                        <compositemode>normal</compositemode>',
-                    '                    </clipitem>',
                 ])
+
+                # Add chapter title as comment if available on the alt video segment
+                alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                if alt_chapter_title:
+                    xml_lines.append(f'                        <comment>{escape_xml(alt_chapter_title)}</comment>')
+
+                xml_lines.append('                    </clipitem>')
 
             alt_timeline_pos += target_frames
 
