@@ -56,9 +56,9 @@
         "Handle edge case: segments outside any chapter range get chapter_index=None",
         "Unit test: assign_chapter_indices with segments fully inside, spanning, and outside chapter boundaries"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "high",
-      "notes": "Tier 1 (Foundation). Source files: src/state.py (TranscriptSegment ~line 48). The helper function should live in src/chapter_detection/bridge.py (file already exists). This enables chapter-aware scoring by tagging each segment with its video chapter context. Depends on US-72-002 for chapter data being available in state."
+      "notes": "Added chapter_index: Optional[int] and chapter_title: str fields to TranscriptSegment. Implemented assign_chapter_indices(segments, chapters) in bridge.py using timestamp overlap (>50% rule for spanning segments). 9 new tests cover: fully inside, spanning two chapters (both directions), outside all chapters, empty inputs, gap between chapters, missing title. All 41 bridge tests pass."
     },
     {
       "id": "US-72-004",
@@ -71,9 +71,9 @@
         "Call the method from apply_all_adjustments() with video title passed from match candidates",
         "Unit test: verify graduated boost values for 0, 1, 2, and 3+ keyword matches"
       ],
-      "passes": false,
+      "passes": true,
       "priority": "high",
-      "notes": "Tier 2 (Context-Enriched Matching). Source files: src/matching/scoring.py (apply_all_adjustments ~line 2586). Keywords should be extracted by splitting on whitespace and filtering stopwords. Use a simple stopword set (the, a, an, is, are, in, on, at, to, for, of, and, or, but, with). The apply_title_relevance_adjustment method may already exist as a stub — check before creating."
+      "notes": "Pre-implemented in US-70-006. All 6 criteria verified: apply_title_relevance_adjustment() at line 2130, graduated boosts (0.03/0.05/0.08) at lines 2081-2083, breakdown entry at line 2698, empty/None title guard at lines 2150 and 2691, called from apply_all_adjustments() at line 2693, 10 unit tests pass covering 0/1/2/3+ matches plus edge cases."
     },
     {
       "id": "US-72-005",
