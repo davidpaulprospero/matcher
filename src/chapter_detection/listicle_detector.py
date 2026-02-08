@@ -37,12 +37,28 @@ ORDINAL_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# Mid-segment ordinal pattern (no ^ anchor, matches anywhere)
+ORDINAL_MID_PATTERN = re.compile(
+    r'(?:and\s+)?(?:the\s+)?(' +
+    '|'.join(re.escape(w) for w in ORDINAL_WORDS) +
+    r')\b',
+    re.IGNORECASE
+)
+
 # Patterns for numbered markers: #1, number 1, step 1, item 1, no. 1, etc.
 NUMBERED_PATTERNS = [
     re.compile(r'^\s*#\s*(\d+)\b', re.IGNORECASE),
     re.compile(r'^\s*(?:number|num\.?)\s+(\w+)\b', re.IGNORECASE),
     re.compile(r'^\s*(?:step|item|point|reason|tip|thing|way)\s+(\w+)\b', re.IGNORECASE),
     re.compile(r'^\s*(?:no\.?|n°)\s*(\d+)\b', re.IGNORECASE),
+]
+
+# Mid-segment numbered patterns (no ^ anchor)
+NUMBERED_MID_PATTERNS = [
+    re.compile(r'#\s*(\d+)\b', re.IGNORECASE),
+    re.compile(r'(?:number|num\.?)\s+(\w+)\b', re.IGNORECASE),
+    re.compile(r'(?:step|item|point|reason|tip|thing|way)\s+(\w+)\b', re.IGNORECASE),
+    re.compile(r'(?:no\.?|n°)\s*(\d+)\b', re.IGNORECASE),
 ]
 
 # Number words for "number one", "step two", etc.
@@ -60,6 +76,17 @@ TRANSITION_PATTERNS = [
     re.compile(r'^\s*now\s+(?:for|let\'?s\s+look\s+at)\b', re.IGNORECASE),
     re.compile(r'^\s*another\s+(?:thing|reason|way|tip|point)\b', re.IGNORECASE),
     re.compile(r'^\s*on\s+to\s+(?:the\s+)?(?:next|our\s+next)\b', re.IGNORECASE),
+]
+
+# Mid-segment transition patterns (no ^ anchor)
+TRANSITION_MID_PATTERNS = [
+    re.compile(r'next\s+up\b', re.IGNORECASE),
+    re.compile(r'moving\s+on\s+to\b', re.IGNORECASE),
+    re.compile(r"let'?s\s+talk\s+about\b", re.IGNORECASE),
+    re.compile(r"let'?s\s+move\s+on\s+to\b", re.IGNORECASE),
+    re.compile(r'now\s+(?:for|let\'?s\s+look\s+at)\b', re.IGNORECASE),
+    re.compile(r'another\s+(?:thing|reason|way|tip|point)\b', re.IGNORECASE),
+    re.compile(r'on\s+to\s+(?:the\s+)?(?:next|our\s+next)\b', re.IGNORECASE),
 ]
 
 # Word-form numbers for header detection (e.g., "five reasons", "seven tips")
@@ -134,48 +161,74 @@ def _extract_topic_keywords(text: str, max_keywords: int = 5) -> List[str]:
     return unique[:max_keywords]
 
 
-def _detect_ordinal(text: str) -> Optional[Tuple[str, str]]:
+def _detect_ordinal(text: str, scan_full_text: bool = False) -> Optional[Tuple[str, str, int]]:
     """
-    Detect ordinal marker at start of text.
+    Detect ordinal marker in text.
 
-    Returns (marker_type, label) or None.
-    marker_type is 'ordinal'.
+    Args:
+        text: Text to search.
+        scan_full_text: If True, search anywhere in text (not just start).
+
+    Returns (marker_type, label, char_offset) or None.
+    marker_type is 'ordinal'. char_offset is the character position of the match.
     """
     match = ORDINAL_PATTERN.match(text)
     if match:
         word = match.group(1).lower()
-        return ('ordinal', word)
+        return ('ordinal', word, match.start(1))
+    if scan_full_text:
+        match = ORDINAL_MID_PATTERN.search(text)
+        if match and match.start() > 0:  # Only mid-segment (not start)
+            word = match.group(1).lower()
+            return ('ordinal', word, match.start())
     return None
 
 
-def _detect_numbered(text: str) -> Optional[Tuple[str, str]]:
+def _detect_numbered(text: str, scan_full_text: bool = False) -> Optional[Tuple[str, str, int]]:
     """
-    Detect numbered marker at start of text.
+    Detect numbered marker in text.
 
-    Returns (marker_type, label) or None.
-    marker_type is 'numbered'.
+    Args:
+        text: Text to search.
+        scan_full_text: If True, search anywhere in text (not just start).
+
+    Returns (marker_type, label, char_offset) or None.
+    marker_type is 'numbered'. char_offset is the character position of the match.
     """
     for pattern in NUMBERED_PATTERNS:
         match = pattern.match(text)
         if match:
-            value = match.group(1)
-            # Reconstruct the full label from the pattern match
             full_match = match.group(0).strip()
-            return ('numbered', full_match)
+            return ('numbered', full_match, match.start())
+    if scan_full_text:
+        for pattern in NUMBERED_MID_PATTERNS:
+            match = pattern.search(text)
+            if match and match.start() > 0:  # Only mid-segment
+                full_match = match.group(0).strip()
+                return ('numbered', full_match, match.start())
     return None
 
 
-def _detect_transition(text: str) -> Optional[Tuple[str, str]]:
+def _detect_transition(text: str, scan_full_text: bool = False) -> Optional[Tuple[str, str, int]]:
     """
-    Detect transition marker at start of text.
+    Detect transition marker in text.
 
-    Returns (marker_type, label) or None.
-    marker_type is 'transition'.
+    Args:
+        text: Text to search.
+        scan_full_text: If True, search anywhere in text (not just start).
+
+    Returns (marker_type, label, char_offset) or None.
+    marker_type is 'transition'. char_offset is the character position of the match.
     """
     for pattern in TRANSITION_PATTERNS:
         match = pattern.match(text)
         if match:
-            return ('transition', match.group(0).strip())
+            return ('transition', match.group(0).strip(), match.start())
+    if scan_full_text:
+        for pattern in TRANSITION_MID_PATTERNS:
+            match = pattern.search(text)
+            if match and match.start() > 0:  # Only mid-segment
+                return ('transition', match.group(0).strip(), match.start())
     return None
 
 
@@ -220,7 +273,10 @@ def detect_list_header(text: str) -> Optional[int]:
     return None
 
 
-def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
+def detect_listicle_groups(
+    segments: List[Any],
+    max_chars_offset: int = 50,
+) -> List[ListicleGroup]:
     """
     Detect listicle (list-style) structure in voiceover segments.
 
@@ -228,8 +284,17 @@ def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
     markers to identify list items. Each detected marker starts a new group
     that extends until the next marker or end of segments.
 
+    Performs two passes:
+    1. Start-of-text markers (existing behavior)
+    2. Mid-segment markers within the first max_chars_offset characters
+
+    Mid-segment markers split the segment: text before the marker belongs to
+    the previous group.
+
     Args:
         segments: List of VoiceoverSegment objects (or dicts with 'text' field)
+        max_chars_offset: Maximum character offset for mid-segment detection.
+            Markers beyond this offset are ignored. Default 50.
 
     Returns:
         List[ListicleGroup] representing detected list items.
@@ -239,15 +304,15 @@ def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
     if not segments:
         return []
 
-    # First pass: find all marker positions
-    markers: List[Tuple[int, str, str]] = []  # (position, marker_type, label)
+    # (position, marker_type, label, is_mid_segment, char_offset)
+    markers: List[Tuple[int, str, str, bool, int]] = []
 
     for i, segment in enumerate(segments):
         text = _get_segment_text(segment)
         if not text:
             continue
 
-        # Try each marker type in priority order
+        # First pass: start-of-text markers (priority)
         result = _detect_ordinal(text)
         if result is None:
             result = _detect_numbered(text)
@@ -255,8 +320,24 @@ def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
             result = _detect_transition(text)
 
         if result is not None:
-            marker_type, label = result
-            markers.append((i, marker_type, label))
+            marker_type, label, char_offset = result
+            markers.append((i, marker_type, label, False, char_offset))
+            continue
+
+        # Second pass: mid-segment markers within max_chars_offset
+        scan_text = text[:max_chars_offset] if max_chars_offset > 0 else ''
+        if not scan_text:
+            continue
+
+        result = _detect_ordinal(scan_text, scan_full_text=True)
+        if result is None:
+            result = _detect_numbered(scan_text, scan_full_text=True)
+        if result is None:
+            result = _detect_transition(scan_text, scan_full_text=True)
+
+        if result is not None:
+            marker_type, label, char_offset = result
+            markers.append((i, marker_type, label, True, char_offset))
 
     # Need at least 2 markers to confirm listicle structure
     if len(markers) < 2:
@@ -272,13 +353,23 @@ def detect_listicle_groups(segments: List[Any]) -> List[ListicleGroup]:
                 expected_count = count
                 break  # Use the first header found
 
-    # Second pass: build groups from markers
+    # Build groups from markers
     groups: List[ListicleGroup] = []
 
-    for idx, (pos, marker_type, label) in enumerate(markers):
+    for idx, (pos, marker_type, label, is_mid, char_off) in enumerate(markers):
         # Determine end of this group: next marker start - 1, or end of segments
         if idx + 1 < len(markers):
-            end_pos = markers[idx + 1][0] - 1
+            next_pos = markers[idx + 1][0]
+            next_is_mid = markers[idx + 1][3]
+            # If next marker is mid-segment, this group includes that segment too
+            # (the text before the marker belongs to this group)
+            if next_is_mid and next_pos > pos:
+                end_pos = next_pos
+            elif next_pos > pos:
+                end_pos = next_pos - 1
+            else:
+                # Same segment (consecutive mid-segment markers) or adjacent
+                end_pos = pos
         else:
             end_pos = len(segments) - 1
 
