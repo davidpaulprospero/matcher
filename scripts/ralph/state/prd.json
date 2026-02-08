@@ -1,199 +1,199 @@
-{
-    "sprintNumber": 76,
-    "focusArea": "listicle-matching",
-    "branchName": "ralph/sprint-76",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
-    },
-    "userStories": [
-        {
-            "id": "US-76-001",
-            "title": "Generate sprint stories for listicle-matching focus area",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'listicle-matching' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'listicle-matching'",
-                "Add stories US-76-002 through US-76-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-76-NNN to be unique across sprints",
-                "Mark this story (US-76-001) as passes: true when done"
-            ],
-            "notes": "Seed story completed. Generated 11 stories (US-76-002 through US-76-012) covering listicle detection robustness, chapter confidence calibration, description-enriched embeddings, iterative match chapter-type strategy, cross-chapter coherence diagnostics, mixed numbering normalization, chunking boundary dedup, mid-segment marker detection, bridge confidence graduation, embedding similarity in relevance matrix, and chapter-aware gap query diversity."
-        },
-        {
-            "id": "US-76-002",
-            "title": "Add mid-segment listicle marker detection",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Listicle detector detects markers that appear mid-segment (not just at start of text) with configurable max_chars_offset (default 50)",
-                "Mid-segment markers split the segment into two logical groups: text before the marker belongs to the previous group",
-                "Detection helper functions (_detect_ordinal, _detect_numbered, _detect_transition) accept an optional scan_full_text parameter",
-                "Unit test: marker at character position 30 in a segment is detected when max_chars_offset=50",
-                "Unit test: marker at character position 100 is NOT detected when max_chars_offset=50",
-                "Unit test: mid-segment detection produces correct group boundaries (previous group ends at marker position)"
-            ],
-            "notes": "Added mid-segment regex patterns (ORDINAL_MID_PATTERN, NUMBERED_MID_PATTERNS, TRANSITION_MID_PATTERNS), scan_full_text param to detection helpers, two-pass scanning in detect_listicle_groups with configurable max_chars_offset (default 50). 6 new tests covering offset detection, boundary correctness, and priority. All 61 tests pass."
-        },
-        {
-            "id": "US-76-003",
-            "title": "Graduate listicle-to-chapter bridge confidence by marker density",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Bridge confidence in listicle_groups_to_chapters is graduated: 0.6 for transition-only markers, 0.7 for ordinal markers, 0.8 for numbered markers, 0.85 when expected_count matches detected count",
-                "ListicleGroup dataclass stores a marker_type field ('ordinal', 'numbered', 'transition') set during detection",
-                "listicle_groups_to_chapters reads marker_type from each group to compute graduated confidence",
-                "Unit test: transition-only groups get confidence 0.6",
-                "Unit test: ordinal groups get confidence 0.7, numbered get 0.8",
-                "Unit test: groups with matching expected_count get 0.85 regardless of marker type"
-            ],
-            "notes": "Added marker_type field to ListicleGroup dataclass (models.py), set during detect_listicle_groups (listicle_detector.py), graduated confidence in bridge.py: transition=0.6, ordinal=0.7, numbered=0.8, expected_count match=0.85. Added TestGraduatedConfidence class with 6 tests. All 120 tests pass."
-        },
-        {
-            "id": "US-76-004",
-            "title": "Enable and validate description-enriched embeddings",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Config default for description_enriched_embeddings changed from false to true in ContextEnrichmentConfig",
-                "config.yaml updated to set description_enriched_embeddings: true",
-                "Caption stage _populate_text_metadata appends top 3 description keywords (not full description) to embedding text, prefixed with '[desc:' and suffixed with ']'",
-                "Unit test: embedding text includes description keywords when description_enriched_embeddings=true and video has description",
-                "Unit test: embedding text unchanged when video has no description (empty string)",
-                "Unit test: description keywords are extracted using _extract_topic_keywords (reuse from listicle_detector or equivalent)"
-            ],
-            "notes": "Enabled description_enriched_embeddings by default (config + yaml), changed embedding format to [desc: kw1 kw2 kw3] with top 3 keywords, updated/added tests (12 pass)"
-        },
-        {
-            "id": "US-76-005",
-            "title": "Wire chapter-type strategy ranking into iterative match query generation",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "IterativeMatchStage._run_iteration uses query_learning.get_strategy_ranking_for_chapter() to order query strategies by chapter type effectiveness",
-                "When generating queries for a gap, the stage passes the gap's chapter_type to get_strategy_ranking_for_chapter and uses the returned ranking to prioritize strategies",
-                "Fallback to default strategy ordering when chapter_type is 'body' or unknown",
-                "Unit test: intro chapter_type gaps use strategy ranking from query learning DB",
-                "Unit test: listicle_item chapter_type gaps use strategy ranking from query learning DB",
-                "Unit test: body/unknown chapter_type falls back to default strategy ordering"
-            ],
-            "notes": "Tier: integration. Source files: src/stages/iterative_match.py (lines 1935-1976 where chapter_type_by_idx is built but only used for record_result -- need to also use for query generation around line 868+), src/iterative_match/query_learning.py (lines 220-270 get_best_strategy_for_chapter and get_strategy_ranking_for_chapter already exist but are not called from the stage). Test file: tests/test_iterative_match_stage.py or new test."
-        },
-        {
-            "id": "US-76-006",
-            "title": "Add cross-chapter coherence diagnostics logging",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "After apply_all_adjustments completes for a full matching pass, a summary log line reports: total chapters detected, avg source consistency score, chapters exceeding coherence_penalty_threshold, and top 3 most-scattered chapters",
-                "Diagnostic info is added to the match stage's checkpoint data under a 'chapter_diagnostics' key",
-                "Log level is INFO for summary, DEBUG for per-chapter detail",
-                "Unit test: diagnostics summary includes correct chapter count and scatter metrics",
-                "Unit test: checkpoint data contains chapter_diagnostics dict with expected keys",
-                "Unit test: diagnostics gracefully handle zero chapters (no chapter detection)"
-            ],
-            "notes": "Tier: diagnostics. Source files: src/matching/scoring.py (after apply_all_adjustments around line 3400 -- add diagnostic aggregation), src/stages/match.py (where match results are saved to checkpoint -- add chapter_diagnostics). Currently chapter_coherence_penalty fires per-candidate but no aggregated view exists. Test file: tests/test_matching_scoring.py or new test_chapter_diagnostics.py."
-        },
-        {
-            "id": "US-76-007",
-            "title": "Normalize mixed listicle numbering to consistent sequence",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "When detect_listicle_groups finds mixed marker types (e.g., 'first', '#2', 'third'), it normalizes group_id to a consistent 0-based sequence regardless of detected label",
-                "A new _normalize_marker_sequence function resolves ordinal words to numeric positions and sorts groups by detected position when possible",
-                "Mixed numbering where ordinal position can be inferred (e.g., 'first'=1, '#2'=2, 'third'=3) produces groups in correct order",
-                "Unit test: 'first', '#2', 'third' produces groups with group_ids 0, 1, 2 in correct order",
-                "Unit test: purely transition-based markers preserve original detection order",
-                "Unit test: gap in numbering (e.g., '#1', '#3', '#5') preserves relative order without inserting phantom groups"
-            ],
-            "notes": "Tier: robustness. Source files: src/chapter_detection/listicle_detector.py (lines 276-300 where groups are built -- add normalization pass after group creation, lines 22-29 ORDINAL_WORDS mapping already exists for position lookup). The current code assigns group_id=idx (enumeration index) which works for single-type markers but fails for mixed sequences where a transition marker at position 2 should logically be item #2 based on surrounding ordinals. Test file: tests/test_listicle_detector.py (test_mixed_numbering_styles at line 219 exists but doesn't test normalization)."
-        },
-        {
-            "id": "US-76-008",
-            "title": "Deduplicate chapters at chunk overlap boundaries",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "merge_chunk_results in chunking.py deduplicates chapters whose segment ranges overlap by more than 50% between adjacent chunks",
-                "When two overlapping chapters from adjacent chunks are detected, the one with higher confidence is kept",
-                "Deduplication only applies to chapters in the overlap region (defined by overlap_segments parameter)",
-                "Unit test: two chunks with 3-segment overlap produce a single chapter (not duplicate) for chapters in the overlap zone",
-                "Unit test: chapters outside the overlap zone are preserved from both chunks",
-                "Unit test: higher-confidence chapter wins when deduplicating"
-            ],
-            "notes": "Tier: robustness. Source files: src/chapter_detection/chunking.py (lines 142-234 merge_chunk_results -- currently merges by segment index but doesn't explicitly deduplicate overlapping chapters from the overlap zone). The overlap_segments parameter in create_chunks (line 44) defines how many segments overlap between chunks, but merge_chunk_results may produce near-duplicate chapters at boundaries. Test file: new tests/test_chapter_chunking.py or extend existing tests."
-        },
-        {
-            "id": "US-76-009",
-            "title": "Add embedding similarity to cross-chapter relevance matrix",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "compute_relevance_matrix accepts an optional embedding_fn parameter that computes cosine similarity between chapter text embeddings",
-                "When embedding_fn is provided, relevance score is a weighted blend: 0.6 * Jaccard keyword similarity + 0.4 * embedding cosine similarity",
-                "When embedding_fn is None, behavior is unchanged (pure Jaccard, backward compatible)",
-                "Unit test: with mock embedding_fn, blended score is correctly weighted",
-                "Unit test: without embedding_fn, output is identical to current Jaccard-only behavior",
-                "Unit test: embedding similarity of 1.0 with Jaccard 0.0 produces score of 0.4"
-            ],
-            "notes": "Tier: quality improvement. Source files: src/chapter_detection/bridge.py (lines 169-208 compute_relevance_matrix -- currently pure Jaccard). The existing compute_relevance_matrix is called from src/stages/match.py. Adding embedding_fn as optional parameter maintains backward compat. The caller in match.py can pass the project's embedding function if available. Test file: tests/test_chapter_bridge.py (TestComputeRelevanceMatrix class starting around line 401)."
-        },
-        {
-            "id": "US-76-010",
-            "title": "Add chapter-aware gap query diversity enforcement",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "When generating search queries for gaps within the same chapter, the iterative match stage enforces query diversity: no two gaps in the same chapter use identical query text",
-                "A per-chapter query dedup set tracks used queries and triggers query variation (synonym substitution or keyword rotation) when duplicates are detected",
-                "Query variation appends chapter-specific context keywords to differentiate otherwise identical queries",
-                "Unit test: two gaps in the same chapter with identical voiceover text produce different search queries",
-                "Unit test: gaps in different chapters can use identical queries (no cross-chapter dedup)",
-                "Unit test: query variation preserves the original query's semantic intent (contains original keywords)"
-            ],
-            "notes": "Tier: quality improvement. Source files: src/stages/iterative_match.py (around line 868 where queries are generated -- add per-chapter dedup tracking), src/iterative_match/gap_analyzer.py (GapSegment.chapter_id at line 102 provides the chapter grouping key). Currently duplicate queries within a chapter waste search budget by finding the same videos. Test file: tests/test_iterative_match_stage.py or new test."
-        },
-        {
-            "id": "US-76-011",
-            "title": "Add listicle expected-count validation with auto-correction",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "When detect_list_header finds expected_count and detected marker count differs by more than 1, the detector attempts auto-correction by lowering marker detection thresholds",
-                "Auto-correction re-scans segments with relaxed patterns (e.g., accepting markers beyond first 50 chars, case-insensitive number words)",
-                "Auto-correction only runs once (no recursive correction) and logs the before/after marker counts",
-                "Unit test: 'top 5 reasons' header with only 3 detected markers triggers re-scan and finds 2 additional markers",
-                "Unit test: auto-correction does not increase marker count beyond expected_count + 1",
-                "Unit test: auto-correction logs warning when it cannot close the gap between expected and detected"
-            ],
-            "notes": "Tier: robustness. Source files: src/chapter_detection/listicle_detector.py (lines 302-307 where expected_count mismatch is logged -- currently just warns, should trigger re-scan), (lines 223-309 detect_listicle_groups -- add correction pass after initial detection). This improves recall for voiceovers where some list items use non-standard markers that the first pass misses. Test file: tests/test_listicle_detector.py (TestExpectedCount class around line 402)."
-        },
-        {
-            "id": "US-76-012",
-            "title": "Add chapter boundary confidence to scoring weight",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "ChapterCandidate.confidence is used as a weight multiplier for chapter-based scoring adjustments (chapter_topic_match, chapter_source_consistency, chapter_coherence_penalty)",
-                "High-confidence chapters (>0.8) apply full scoring adjustment; low-confidence chapters (<0.5) apply 50% of the adjustment",
-                "Linear interpolation between 0.5 and 1.0 multiplier for confidence values between 0.5 and 0.8",
-                "Unit test: chapter with confidence 0.9 applies full chapter_topic_match boost",
-                "Unit test: chapter with confidence 0.4 applies 50% of chapter_topic_match boost",
-                "Unit test: chapter with confidence 0.65 applies ~75% of chapter_topic_match boost (linear interpolation)"
-            ],
-            "notes": "Tier: quality improvement. Source files: src/matching/scoring.py (apply_chapter_topic_match around line 3303+, apply_chapter_source_consistency, apply_chapter_coherence_penalty -- all currently apply flat adjustments regardless of chapter confidence), src/chapter_detection/models.py (ChapterCandidate.confidence at line 44+ is already populated but not propagated to scoring). Need to pass chapter confidence through tiered_matcher.py into scoring functions. Test file: tests/test_chapter_scoring_us75005.py (extend existing tests)."
-        }
-    ]
+﻿{
+    "sprintNumber":  76,
+    "focusArea":  "listicle-matching",
+    "branchName":  "ralph/sprint-76",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-76-001",
+                            "title":  "Generate sprint stories for listicle-matching focus area",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027listicle-matching\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027listicle-matching\u0027",
+                                                       "Add stories US-76-002 through US-76-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-76-NNN to be unique across sprints",
+                                                       "Mark this story (US-76-001) as passes: true when done"
+                                                   ],
+                            "notes":  "Seed story completed. Generated 11 stories (US-76-002 through US-76-012) covering listicle detection robustness, chapter confidence calibration, description-enriched embeddings, iterative match chapter-type strategy, cross-chapter coherence diagnostics, mixed numbering normalization, chunking boundary dedup, mid-segment marker detection, bridge confidence graduation, embedding similarity in relevance matrix, and chapter-aware gap query diversity."
+                        },
+                        {
+                            "id":  "US-76-002",
+                            "title":  "Add mid-segment listicle marker detection",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Listicle detector detects markers that appear mid-segment (not just at start of text) with configurable max_chars_offset (default 50)",
+                                                       "Mid-segment markers split the segment into two logical groups: text before the marker belongs to the previous group",
+                                                       "Detection helper functions (_detect_ordinal, _detect_numbered, _detect_transition) accept an optional scan_full_text parameter",
+                                                       "Unit test: marker at character position 30 in a segment is detected when max_chars_offset=50",
+                                                       "Unit test: marker at character position 100 is NOT detected when max_chars_offset=50",
+                                                       "Unit test: mid-segment detection produces correct group boundaries (previous group ends at marker position)"
+                                                   ],
+                            "notes":  "Added mid-segment regex patterns (ORDINAL_MID_PATTERN, NUMBERED_MID_PATTERNS, TRANSITION_MID_PATTERNS), scan_full_text param to detection helpers, two-pass scanning in detect_listicle_groups with configurable max_chars_offset (default 50). 6 new tests covering offset detection, boundary correctness, and priority. All 61 tests pass."
+                        },
+                        {
+                            "id":  "US-76-003",
+                            "title":  "Graduate listicle-to-chapter bridge confidence by marker density",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Bridge confidence in listicle_groups_to_chapters is graduated: 0.6 for transition-only markers, 0.7 for ordinal markers, 0.8 for numbered markers, 0.85 when expected_count matches detected count",
+                                                       "ListicleGroup dataclass stores a marker_type field (\u0027ordinal\u0027, \u0027numbered\u0027, \u0027transition\u0027) set during detection",
+                                                       "listicle_groups_to_chapters reads marker_type from each group to compute graduated confidence",
+                                                       "Unit test: transition-only groups get confidence 0.6",
+                                                       "Unit test: ordinal groups get confidence 0.7, numbered get 0.8",
+                                                       "Unit test: groups with matching expected_count get 0.85 regardless of marker type"
+                                                   ],
+                            "notes":  "Added marker_type field to ListicleGroup dataclass (models.py), set during detect_listicle_groups (listicle_detector.py), graduated confidence in bridge.py: transition=0.6, ordinal=0.7, numbered=0.8, expected_count match=0.85. Added TestGraduatedConfidence class with 6 tests. All 120 tests pass."
+                        },
+                        {
+                            "id":  "US-76-004",
+                            "title":  "Enable and validate description-enriched embeddings",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Config default for description_enriched_embeddings changed from false to true in ContextEnrichmentConfig",
+                                                       "config.yaml updated to set description_enriched_embeddings: true",
+                                                       "Caption stage _populate_text_metadata appends top 3 description keywords (not full description) to embedding text, prefixed with \u0027[desc:\u0027 and suffixed with \u0027]\u0027",
+                                                       "Unit test: embedding text includes description keywords when description_enriched_embeddings=true and video has description",
+                                                       "Unit test: embedding text unchanged when video has no description (empty string)",
+                                                       "Unit test: description keywords are extracted using _extract_topic_keywords (reuse from listicle_detector or equivalent)"
+                                                   ],
+                            "notes":  "Pre-implemented in previous attempt. All 6 criteria verified: config default=true (matching.py:182), config.yaml=true (line 591), _populate_text_metadata appends [desc: kw1 kw2 kw3] with max_keywords=3 (caption_stage.py:1844-1847), _extract_description_keywords method with frequency-based extraction (caption_stage.py:1889-1919). All 12 tests pass in test_description_enriched_embeddings.py."
+                        },
+                        {
+                            "id":  "US-76-005",
+                            "title":  "Wire chapter-type strategy ranking into iterative match query generation",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "IterativeMatchStage._run_iteration uses query_learning.get_strategy_ranking_for_chapter() to order query strategies by chapter type effectiveness",
+                                                       "When generating queries for a gap, the stage passes the gap\u0027s chapter_type to get_strategy_ranking_for_chapter and uses the returned ranking to prioritize strategies",
+                                                       "Fallback to default strategy ordering when chapter_type is \u0027body\u0027 or unknown",
+                                                       "Unit test: intro chapter_type gaps use strategy ranking from query learning DB",
+                                                       "Unit test: listicle_item chapter_type gaps use strategy ranking from query learning DB",
+                                                       "Unit test: body/unknown chapter_type falls back to default strategy ordering"
+                                                   ],
+                            "notes":  "Tier: integration. Source files: src/stages/iterative_match.py (lines 1935-1976 where chapter_type_by_idx is built but only used for record_result -- need to also use for query generation around line 868+), src/iterative_match/query_learning.py (lines 220-270 get_best_strategy_for_chapter and get_strategy_ranking_for_chapter already exist but are not called from the stage). Test file: tests/test_iterative_match_stage.py or new test."
+                        },
+                        {
+                            "id":  "US-76-006",
+                            "title":  "Add cross-chapter coherence diagnostics logging",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "After apply_all_adjustments completes for a full matching pass, a summary log line reports: total chapters detected, avg source consistency score, chapters exceeding coherence_penalty_threshold, and top 3 most-scattered chapters",
+                                                       "Diagnostic info is added to the match stage\u0027s checkpoint data under a \u0027chapter_diagnostics\u0027 key",
+                                                       "Log level is INFO for summary, DEBUG for per-chapter detail",
+                                                       "Unit test: diagnostics summary includes correct chapter count and scatter metrics",
+                                                       "Unit test: checkpoint data contains chapter_diagnostics dict with expected keys",
+                                                       "Unit test: diagnostics gracefully handle zero chapters (no chapter detection)"
+                                                   ],
+                            "notes":  "Tier: diagnostics. Source files: src/matching/scoring.py (after apply_all_adjustments around line 3400 -- add diagnostic aggregation), src/stages/match.py (where match results are saved to checkpoint -- add chapter_diagnostics). Currently chapter_coherence_penalty fires per-candidate but no aggregated view exists. Test file: tests/test_matching_scoring.py or new test_chapter_diagnostics.py."
+                        },
+                        {
+                            "id":  "US-76-007",
+                            "title":  "Normalize mixed listicle numbering to consistent sequence",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "When detect_listicle_groups finds mixed marker types (e.g., \u0027first\u0027, \u0027#2\u0027, \u0027third\u0027), it normalizes group_id to a consistent 0-based sequence regardless of detected label",
+                                                       "A new _normalize_marker_sequence function resolves ordinal words to numeric positions and sorts groups by detected position when possible",
+                                                       "Mixed numbering where ordinal position can be inferred (e.g., \u0027first\u0027=1, \u0027#2\u0027=2, \u0027third\u0027=3) produces groups in correct order",
+                                                       "Unit test: \u0027first\u0027, \u0027#2\u0027, \u0027third\u0027 produces groups with group_ids 0, 1, 2 in correct order",
+                                                       "Unit test: purely transition-based markers preserve original detection order",
+                                                       "Unit test: gap in numbering (e.g., \u0027#1\u0027, \u0027#3\u0027, \u0027#5\u0027) preserves relative order without inserting phantom groups"
+                                                   ],
+                            "notes":  "Tier: robustness. Source files: src/chapter_detection/listicle_detector.py (lines 276-300 where groups are built -- add normalization pass after group creation, lines 22-29 ORDINAL_WORDS mapping already exists for position lookup). The current code assigns group_id=idx (enumeration index) which works for single-type markers but fails for mixed sequences where a transition marker at position 2 should logically be item #2 based on surrounding ordinals. Test file: tests/test_listicle_detector.py (test_mixed_numbering_styles at line 219 exists but doesn\u0027t test normalization)."
+                        },
+                        {
+                            "id":  "US-76-008",
+                            "title":  "Deduplicate chapters at chunk overlap boundaries",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "merge_chunk_results in chunking.py deduplicates chapters whose segment ranges overlap by more than 50% between adjacent chunks",
+                                                       "When two overlapping chapters from adjacent chunks are detected, the one with higher confidence is kept",
+                                                       "Deduplication only applies to chapters in the overlap region (defined by overlap_segments parameter)",
+                                                       "Unit test: two chunks with 3-segment overlap produce a single chapter (not duplicate) for chapters in the overlap zone",
+                                                       "Unit test: chapters outside the overlap zone are preserved from both chunks",
+                                                       "Unit test: higher-confidence chapter wins when deduplicating"
+                                                   ],
+                            "notes":  "Tier: robustness. Source files: src/chapter_detection/chunking.py (lines 142-234 merge_chunk_results -- currently merges by segment index but doesn\u0027t explicitly deduplicate overlapping chapters from the overlap zone). The overlap_segments parameter in create_chunks (line 44) defines how many segments overlap between chunks, but merge_chunk_results may produce near-duplicate chapters at boundaries. Test file: new tests/test_chapter_chunking.py or extend existing tests."
+                        },
+                        {
+                            "id":  "US-76-009",
+                            "title":  "Add embedding similarity to cross-chapter relevance matrix",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "compute_relevance_matrix accepts an optional embedding_fn parameter that computes cosine similarity between chapter text embeddings",
+                                                       "When embedding_fn is provided, relevance score is a weighted blend: 0.6 * Jaccard keyword similarity + 0.4 * embedding cosine similarity",
+                                                       "When embedding_fn is None, behavior is unchanged (pure Jaccard, backward compatible)",
+                                                       "Unit test: with mock embedding_fn, blended score is correctly weighted",
+                                                       "Unit test: without embedding_fn, output is identical to current Jaccard-only behavior",
+                                                       "Unit test: embedding similarity of 1.0 with Jaccard 0.0 produces score of 0.4"
+                                                   ],
+                            "notes":  "Tier: quality improvement. Source files: src/chapter_detection/bridge.py (lines 169-208 compute_relevance_matrix -- currently pure Jaccard). The existing compute_relevance_matrix is called from src/stages/match.py. Adding embedding_fn as optional parameter maintains backward compat. The caller in match.py can pass the project\u0027s embedding function if available. Test file: tests/test_chapter_bridge.py (TestComputeRelevanceMatrix class starting around line 401)."
+                        },
+                        {
+                            "id":  "US-76-010",
+                            "title":  "Add chapter-aware gap query diversity enforcement",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "When generating search queries for gaps within the same chapter, the iterative match stage enforces query diversity: no two gaps in the same chapter use identical query text",
+                                                       "A per-chapter query dedup set tracks used queries and triggers query variation (synonym substitution or keyword rotation) when duplicates are detected",
+                                                       "Query variation appends chapter-specific context keywords to differentiate otherwise identical queries",
+                                                       "Unit test: two gaps in the same chapter with identical voiceover text produce different search queries",
+                                                       "Unit test: gaps in different chapters can use identical queries (no cross-chapter dedup)",
+                                                       "Unit test: query variation preserves the original query\u0027s semantic intent (contains original keywords)"
+                                                   ],
+                            "notes":  "Tier: quality improvement. Source files: src/stages/iterative_match.py (around line 868 where queries are generated -- add per-chapter dedup tracking), src/iterative_match/gap_analyzer.py (GapSegment.chapter_id at line 102 provides the chapter grouping key). Currently duplicate queries within a chapter waste search budget by finding the same videos. Test file: tests/test_iterative_match_stage.py or new test."
+                        },
+                        {
+                            "id":  "US-76-011",
+                            "title":  "Add listicle expected-count validation with auto-correction",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "When detect_list_header finds expected_count and detected marker count differs by more than 1, the detector attempts auto-correction by lowering marker detection thresholds",
+                                                       "Auto-correction re-scans segments with relaxed patterns (e.g., accepting markers beyond first 50 chars, case-insensitive number words)",
+                                                       "Auto-correction only runs once (no recursive correction) and logs the before/after marker counts",
+                                                       "Unit test: \u0027top 5 reasons\u0027 header with only 3 detected markers triggers re-scan and finds 2 additional markers",
+                                                       "Unit test: auto-correction does not increase marker count beyond expected_count + 1",
+                                                       "Unit test: auto-correction logs warning when it cannot close the gap between expected and detected"
+                                                   ],
+                            "notes":  "Tier: robustness. Source files: src/chapter_detection/listicle_detector.py (lines 302-307 where expected_count mismatch is logged -- currently just warns, should trigger re-scan), (lines 223-309 detect_listicle_groups -- add correction pass after initial detection). This improves recall for voiceovers where some list items use non-standard markers that the first pass misses. Test file: tests/test_listicle_detector.py (TestExpectedCount class around line 402)."
+                        },
+                        {
+                            "id":  "US-76-012",
+                            "title":  "Add chapter boundary confidence to scoring weight",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "ChapterCandidate.confidence is used as a weight multiplier for chapter-based scoring adjustments (chapter_topic_match, chapter_source_consistency, chapter_coherence_penalty)",
+                                                       "High-confidence chapters (\u003e0.8) apply full scoring adjustment; low-confidence chapters (\u003c0.5) apply 50% of the adjustment",
+                                                       "Linear interpolation between 0.5 and 1.0 multiplier for confidence values between 0.5 and 0.8",
+                                                       "Unit test: chapter with confidence 0.9 applies full chapter_topic_match boost",
+                                                       "Unit test: chapter with confidence 0.4 applies 50% of chapter_topic_match boost",
+                                                       "Unit test: chapter with confidence 0.65 applies ~75% of chapter_topic_match boost (linear interpolation)"
+                                                   ],
+                            "notes":  "Tier: quality improvement. Source files: src/matching/scoring.py (apply_chapter_topic_match around line 3303+, apply_chapter_source_consistency, apply_chapter_coherence_penalty -- all currently apply flat adjustments regardless of chapter confidence), src/chapter_detection/models.py (ChapterCandidate.confidence at line 44+ is already populated but not propagated to scoring). Need to pass chapter confidence through tiered_matcher.py into scoring functions. Test file: tests/test_chapter_scoring_us75005.py (extend existing tests)."
+                        }
+                    ]
 }
