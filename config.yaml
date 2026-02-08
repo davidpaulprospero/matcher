@@ -197,6 +197,12 @@ transcription:
   # Each retry uses exponential backoff (1s, 2s, 4s...)
   max_retries: 2
 
+  # Cache max age in days (US-79-005)
+  # Cache entries older than this are removed by cleanup_stale_entries()
+  # Short-lived test projects may use lower values; long-running production higher
+  # Must be >= 1
+  cache_max_age_days: 30
+
 # -----------------------------------------------------------------------------
 # EMBEDDINGS
 # -----------------------------------------------------------------------------

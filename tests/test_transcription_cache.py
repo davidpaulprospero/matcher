@@ -888,6 +888,93 @@ class TestCleanupStaleEntries:
         assert not cache_file.exists()
 
 
+class TestCleanupStaleEntriesConfigurable:
+    """Tests for cleanup_stale_entries with configurable max_age_days (US-79-005)"""
+
+    @pytest.mark.fast
+    def test_configured_max_age_removes_old_entries(self, tmp_cache_dir):
+        """Test that entries older than configured max_age_days are removed"""
+        import os
+        import time
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a cache file 10 days old
+        cache_file = transcriptions_dir / "ten_days_old.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Test", "source_file": "/test.mp4"}]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        os.utime(cache_file, (old_time, old_time))
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # With configured max_age_days=7, 10-day-old entry should be removed
+        removed = cache.cleanup_stale_entries(max_age_days=7)
+        assert removed == 1
+        assert not cache_file.exists()
+
+    @pytest.mark.fast
+    def test_configured_max_age_preserves_newer_entries(self, tmp_cache_dir):
+        """Test that entries newer than configured max_age_days are preserved"""
+        import os
+        import time
+
+        transcriptions_dir = tmp_cache_dir / "transcriptions"
+        transcriptions_dir.mkdir()
+
+        # Create a cache file 10 days old
+        cache_file = transcriptions_dir / "ten_days_old.json"
+        data = [{"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Test", "source_file": "/test.mp4"}]
+        with open(cache_file, 'w') as f:
+            json.dump(data, f)
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        os.utime(cache_file, (old_time, old_time))
+
+        cache = TranscriptCache(str(tmp_cache_dir))
+
+        # With configured max_age_days=14, 10-day-old entry should be preserved
+        removed = cache.cleanup_stale_entries(max_age_days=14)
+        assert removed == 0
+        assert cache_file.exists()
+
+    @pytest.mark.fast
+    def test_config_field_default_value(self):
+        """Test that TranscriptionConfig has cache_max_age_days=30 by default"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig()
+        assert config.cache_max_age_days == 30
+
+    @pytest.mark.fast
+    def test_config_field_validation_rejects_zero(self):
+        """Test that cache_max_age_days=0 raises ValueError"""
+        from src.config.sections.core import TranscriptionConfig
+        with pytest.raises(ValueError, match="cache_max_age_days"):
+            TranscriptionConfig(cache_max_age_days=0)
+
+    @pytest.mark.fast
+    def test_config_field_validation_rejects_negative(self):
+        """Test that cache_max_age_days=-1 raises ValueError"""
+        from src.config.sections.core import TranscriptionConfig
+        with pytest.raises(ValueError, match="cache_max_age_days"):
+            TranscriptionConfig(cache_max_age_days=-1)
+
+    @pytest.mark.fast
+    def test_config_field_accepts_custom_value(self):
+        """Test that cache_max_age_days can be set to custom value"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig(cache_max_age_days=7)
+        assert config.cache_max_age_days == 7
+
+    @pytest.mark.fast
+    def test_config_field_accepts_boundary_value(self):
+        """Test that cache_max_age_days=1 (minimum) is accepted"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig(cache_max_age_days=1)
+        assert config.cache_max_age_days == 1
+
+
 class TestWarmupFromProject:
     """Tests for warmup_from_project method (US-60-008)"""
 

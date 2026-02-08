@@ -119,6 +119,11 @@ class TranscriptionConfig:
     # 0 = no retries (single attempt only), max 5
     max_retries: int = 2
 
+    # Cache max age in days (US-79-005)
+    # Cache entries older than this are removed by cleanup_stale_entries()
+    # Must be >= 1 day
+    cache_max_age_days: int = 30
+
     # Known Whisper model names
     KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
     # Known compute types for faster-whisper
@@ -177,6 +182,13 @@ class TranscriptionConfig:
             raise ValueError(
                 f"TranscriptionConfig.max_retries={self.max_retries} "
                 f"must be >= 0 and <= 5. Check transcription.max_retries in config.yaml"
+            )
+
+        # Validate cache_max_age_days (US-79-005)
+        if self.cache_max_age_days < 1:
+            raise ValueError(
+                f"TranscriptionConfig.cache_max_age_days={self.cache_max_age_days} "
+                f"must be >= 1. Check transcription.cache_max_age_days in config.yaml"
             )
 
         # Validate and set audio_extraction_workers (US-60-010)
