@@ -126,9 +126,9 @@
                                                        "Both numeric (\u00275 reasons\u0027) and word-form (\u0027five reasons\u0027) counts are recognized",
                                                        "Unit test verifies detection of at least 4 different header patterns with correct expected_count extraction"
                                                    ],
-                            "passes":  true,
+                            "passes":  false,
                             "priority":  "low",
-                            "notes":  "All 5/5 criteria verified. HEADER_PATTERNS detect 'top N', 'N <noun>', word-form counts. expected_count stored on ListicleGroup. Warning logged when diff>1. Both numeric and word-form recognized via HEADER_NUMBER_WORDS + _parse_header_count(). 52 tests pass including 8 header-specific tests (TestDetectListHeader: 8 tests, TestListHeaderIntegration: 7 tests)."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-71-009",
@@ -140,9 +140,9 @@
                                                        "Backward compatibility: loading a checkpoint without chapter data produces empty lists, not errors",
                                                        "Unit test verifies round-trip serialization of VideoChapter and ListicleGroup through checkpoint"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Infrastructure). VideoChapter and ListicleGroup both have to_dict()/from_dict() methods in src/chapter_detection/models.py. Checkpoint persistence is in src/checkpoint.py. The chapter data needs to be added to the checkpoint save/load cycle, likely in the match stage completion data. This enables the output stage (src/stages/output.py) to use chapter info for timeline markers/annotations without re-running detection."
+                            "notes":  "Added chapter_data field to CheckpointData, serialize chapters/listicle groups in match stage save, restore on resume, backward compat with empty dict, 8 unit tests pass."
                         },
                         {
                             "id":  "US-71-010",
