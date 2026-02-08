@@ -71,7 +71,7 @@
                                                        "Unit test verifies prompt construction with various title/description combinations"
                                                    ],
                             "passes":  true,
-                            "notes":  "Pre-implemented in US-70-007. All 5 criteria verified: (1) _build_video_context formats 'Video context: {title}. {first_sentence}' (line 204), (2) description split on '.' then capped at 100 chars (lines 198-200), (3) empty description yields title only without trailing period ('. '.join on single-element list), (4) both empty returns '' and no context added (lines 190-191, 227), (5) 36 tests in test_matching_llm_reranker.py cover all combinations including test_build_video_context_* and test_enrich_candidates_*. All 36 tests pass."
+                            "notes":  "Pre-implemented in US-70-007. All 5 criteria verified: (1) _build_video_context formats \u0027Video context: {title}. {first_sentence}\u0027 (line 204), (2) description split on \u0027.\u0027 then capped at 100 chars (lines 198-200), (3) empty description yields title only without trailing period (\u0027. \u0027.join on single-element list), (4) both empty returns \u0027\u0027 and no context added (lines 190-191, 227), (5) 36 tests in test_matching_llm_reranker.py cover all combinations including test_build_video_context_* and test_enrich_candidates_*. All 36 tests pass."
                         },
                         {
                             "id":  "US-74-005",
@@ -99,7 +99,7 @@
                                                        "Adjustment appears in confidence_breakdown under key \u0027chapter_topic_match\u0027"
                                                    ],
                             "passes":  true,
-                            "notes":  "Pre-implemented in US-72-007 (commit 705cd74). apply_chapter_topic_match() in scoring.py:2361 with constants CHAPTER_TOPIC_BOOST_PARTIAL=0.05, CHAPTER_TOPIC_BOOST_STRONG=0.10, CHAPTER_TOPIC_MISMATCH_PENALTY=-0.05. Wired into apply_all_adjustments() step 7. All 8 tests pass in TestChapterTopicMatch."
+                            "notes":  "Pre-implemented in US-72-007. apply_chapter_topic_match() at scoring.py:2361 with graduated boost (+0.05 partial, +0.10 strong) and -0.05 mismatch penalty. Integrated in apply_all_adjustments() at line 2923. All 19 tests pass (8 in test_matching_scoring.py + 11 in test_chapter_segment_mapping.py)."
                         },
                         {
                             "id":  "US-74-007",
