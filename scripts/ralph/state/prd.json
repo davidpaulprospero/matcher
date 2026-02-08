@@ -49,8 +49,8 @@
             "id": "US-75-003",
             "title": "Wire description_relevance adjustment into TieredMatcher scoring pipeline",
             "priority": "high",
-            "passes": false,
-            "notes": "Tier: CRITICAL WIRE-UP. apply_description_relevance_adjustment exists in scoring.py (US-75-002 implementation) and is called within apply_all_adjustments, but TieredMatcher never invokes it. video_description is available in text_metadata entries (added in US-75-003 caption stage work) but not accessed by TieredMatcher. Files: src/matching/tiered_matcher.py (scoring block ~line 730), src/matching/scoring.py (apply_description_relevance_adjustment). Must resolve video_description from text_metadata or from checkpoint data. Test: tests/test_description_relevance_us75002.py, tests/test_matching_scoring.py.",
+            "passes": true,
+            "notes": "DONE: Added _get_video_description() helper to TieredMatcher (mirrors _get_video_title). Imported apply_description_relevance_adjustment from scoring.py. Wired into all 3 scoring blocks (obvious match, high similarity, LLM fallback) after title_relevance. video_description resolved from self.video_metadata[video_id]['description']. All 9 description_relevance tests pass (7 standalone + 2 breakdown integration). 7 pre-existing Mock config failures unchanged.",
             "acceptanceCriteria": [
                 "TieredMatcher scoring block calls apply_description_relevance_adjustment for each candidate",
                 "video_description is resolved from text_metadata entry or video_metadata dict using candidate's video_id",
