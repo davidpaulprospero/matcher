@@ -443,6 +443,9 @@ class MatchStage(Stage):
                 # US-008 Sprint 7: Timing penalty for confidence adjustment
                 if meta.get('timing_penalty') is not None:
                     vid_segment.timing_penalty = meta['timing_penalty']
+                # US-70-008: Title-enriched embedding text
+                if meta.get('embedding_text'):
+                    vid_segment.embedding_text = meta['embedding_text']
                 video_paths_set.add(meta.get('video_path', ''))
             else:
                 vid_segment = meta
@@ -494,8 +497,9 @@ class MatchStage(Stage):
             return []
 
         # Compute video embeddings locally (no longer stored on PipelineState)
+        # US-70-008: Use embedding_text (title-enriched) when available, fall back to text
         print(f"  Computing video embeddings...")
-        vid_texts = [seg.text for seg in video_segments]
+        vid_texts = [getattr(seg, 'embedding_text', seg.text) for seg in video_segments]
 
         video_embeddings = compute_embeddings(
             texts=vid_texts,

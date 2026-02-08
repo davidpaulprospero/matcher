@@ -874,7 +874,7 @@ class CaptionStage(Stage):
 
                         # Populate text_metadata for consistency
                         try:
-                            self._populate_text_metadata(state, caption_results)
+                            self._populate_text_metadata(state, caption_results, config)
                         except Exception as e:
                             logger.warning(f"Failed to populate text_metadata: {e}")
 
@@ -1162,7 +1162,7 @@ class CaptionStage(Stage):
 
             # Store caption data in state.text_metadata for matching
             try:
-                self._populate_text_metadata(state, caption_results)
+                self._populate_text_metadata(state, caption_results, config)
             except AttributeError as e:
                 # US-39-008: Log AttributeError with state type and available attributes
                 state_type = type(state).__name__
@@ -1402,7 +1402,7 @@ class CaptionStage(Stage):
             # Restore caption results to state
             caption_results = data.get('caption_results', {})
             if caption_results:
-                self._populate_text_metadata(state, caption_results)
+                self._populate_text_metadata(state, caption_results, config)
 
                 # US-011: Log metrics if available
                 metrics_data = data.get('caption_metrics')
@@ -1700,7 +1700,8 @@ class CaptionStage(Stage):
     def _populate_text_metadata(
         self,
         state: 'PipelineState',
-        caption_results: Dict[str, Dict[str, Any]]
+        caption_results: Dict[str, Dict[str, Any]],
+        config: 'Config' = None
     ):
         """Populate state.text_metadata from caption results.
 
@@ -1710,6 +1711,8 @@ class CaptionStage(Stage):
         US-007: Includes caption_quality field for matching confidence adjustment.
         US-008 Sprint 7: Includes timing_penalty for timing-based confidence adjustment.
         US-41-007: Defensive state validation before attribute access.
+        US-70-008: When title_enriched_embeddings is enabled, adds embedding_text field
+        with '[{video_title}] {text}' prefix for richer embedding context.
         """
         # US-41-007: Belt-and-suspenders defense - validate state at usage point
         # Import PipelineState here to avoid circular import issues
@@ -1737,6 +1740,20 @@ class CaptionStage(Stage):
 
         text_metadata = []
 
+        # US-70-008: Build title lookup and check config for title-enriched embeddings
+        title_enriched = False
+        title_lookup = {}
+        if config is not None:
+            ce = getattr(getattr(config, 'matching', None), 'context_enrichment', None)
+            title_enriched = getattr(ce, 'title_enriched_embeddings', False)
+
+        if title_enriched and hasattr(state, 'video_search_results'):
+            for vsr in state.video_search_results:
+                vid = getattr(vsr, 'video_id', None) if not isinstance(vsr, dict) else vsr.get('video_id')
+                ttl = getattr(vsr, 'title', '') if not isinstance(vsr, dict) else vsr.get('title', '')
+                if vid and ttl:
+                    title_lookup[vid] = ttl
+
         for video_id, result in caption_results.items():
             # Skip unavailable/errored captions
             if result.get('unavailable') or result.get('error'):
@@ -1747,10 +1764,13 @@ class CaptionStage(Stage):
             is_auto = result.get('is_auto_generated', False)
             caption_quality = result.get('caption_quality', 'medium')  # US-007
             timing_penalty = result.get('timing_penalty', 1.0)  # US-008 Sprint 7
+            # US-70-008: Get video title for this video
+            video_title = title_lookup.get(video_id, '')
 
             for seg in segments:
-                text_metadata.append({
-                    'text': seg.get('text', ''),
+                seg_text = seg.get('text', '')
+                entry = {
+                    'text': seg_text,
                     'video_path': video_id,  # In caption-first mode, this is video ID
                     'start_time': seg.get('start', 0),
                     'end_time': seg.get('end', 0),
@@ -1761,7 +1781,11 @@ class CaptionStage(Stage):
                     'caption_auto_generated': is_auto,
                     'caption_quality': caption_quality,  # US-007: Quality indicator
                     'timing_penalty': timing_penalty,  # US-008 Sprint 7: Timing penalty factor
-                })
+                }
+                # US-70-008: Add embedding_text with title prefix when enabled
+                if title_enriched and video_title:
+                    entry['embedding_text'] = f'[{video_title}] {seg_text}'
+                text_metadata.append(entry)
 
         # US-37-010/US-41-002/US-41-007: Final safety check before extending
         # This is a secondary fallback after the validate_state_attributes() call at the start
