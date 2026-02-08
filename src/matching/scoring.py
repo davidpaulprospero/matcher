@@ -2059,6 +2059,10 @@ class MatchScoring:
     TAG_KEYWORD_BOOST_2 = 0.04   # 2 tag matches
     TAG_KEYWORD_BOOST_3_PLUS = 0.06  # 3+ tag matches
 
+    # Chapter coherence penalty (US-71-004)
+    CHAPTER_COHERENCE_PENALTY_PER_SOURCE = -0.03  # Penalty per excess source
+    CHAPTER_COHERENCE_PENALTY_CAP = -0.10  # Maximum penalty cap
+
     # Stopwords for title keyword extraction
     _TITLE_STOPWORDS = frozenset({
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
@@ -2292,6 +2296,62 @@ class MatchScoring:
 
         return confidence + boost, reason
 
+    def apply_chapter_coherence_penalty(
+        self,
+        confidence: float,
+        current_chapter_index: int,
+        chapter_source_counts: Optional[dict] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply coherence penalty when a voiceover chapter uses too many different video sources (US-71-004).
+
+        When segments in the same chapter are sourced from many different videos,
+        it creates a scattered viewing experience. This penalty discourages
+        excessive source diversity within a single chapter.
+
+        Args:
+            confidence: Current confidence score
+            current_chapter_index: Chapter index for current voiceover segment (-1 = none)
+            chapter_source_counts: Dict mapping chapter_index -> set of unique source video IDs
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if current_chapter_index < 0 or not chapter_source_counts:
+            return confidence, ""
+
+        cg = getattr(self._mc, 'chapter_grouping', None) if self._mc else None
+        if cg is None or not getattr(cg, 'enabled', True):
+            return confidence, ""
+
+        sources = chapter_source_counts.get(current_chapter_index)
+        if not sources:
+            return confidence, ""
+
+        threshold = getattr(cg, 'coherence_penalty_threshold', 5)
+        source_count = len(sources)
+        excess = source_count - threshold
+
+        if excess <= 0:
+            return confidence, ""
+
+        penalty = max(
+            self.CHAPTER_COHERENCE_PENALTY_CAP,
+            excess * self.CHAPTER_COHERENCE_PENALTY_PER_SOURCE,
+        )
+
+        reason = (
+            f"chapter_coherence: {penalty:.2f} "
+            f"({source_count} sources in chapter {current_chapter_index}, threshold {threshold})"
+        )
+
+        logger.debug(
+            f"US-71-004 chapter coherence penalty: chapter={current_chapter_index}, "
+            f"sources={source_count}, threshold={threshold}, penalty={penalty:.2f}"
+        )
+
+        return confidence + penalty, reason
+
     def is_within_chapter(
         self,
         current_chapter_index: int,
@@ -2346,6 +2406,7 @@ class MatchScoring:
         current_chapter_index: int = -1,
         segment_chapter_map: Optional[dict] = None,
         video_tags: Optional[List[str]] = None,
+        chapter_source_counts: Optional[dict] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
@@ -2353,6 +2414,7 @@ class MatchScoring:
         Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty
                -> project_boost -> title_relevance -> chapter_topic_match
                -> chapter_source_consistency -> tag_keyword_boost
+               -> chapter_coherence_penalty
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2369,6 +2431,7 @@ class MatchScoring:
             current_chapter_index: Chapter index for current voiceover segment (-1 = none)
             segment_chapter_map: Optional dict mapping segment index to chapter index
             video_tags: Optional list of video tags for tag keyword boosting
+            chapter_source_counts: Optional dict mapping chapter_index -> set of unique source IDs
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -2467,7 +2530,17 @@ class MatchScoring:
                 reasons.append(tag_reason)
                 breakdown.append({'component': 'tag_keyword_boost', 'adjustment': round(confidence - prev, 4), 'reason': tag_reason})
 
-        # 10. Enforce minimum confidence floor (US-46-004)
+        # 10. Chapter coherence penalty (US-71-004)
+        if chapter_source_counts is not None:
+            prev = confidence
+            confidence, coherence_reason = self.apply_chapter_coherence_penalty(
+                confidence, current_chapter_index, chapter_source_counts
+            )
+            if coherence_reason:
+                reasons.append(coherence_reason)
+                breakdown.append({'component': 'chapter_coherence', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
+
+        # 11. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2475,7 +2548,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 11. Log warning for over-penalized matches (US-46-004)
+        # 12. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2486,7 +2559,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 12. Log confidence breakdown at DEBUG level (US-53-003)
+        # 13. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(

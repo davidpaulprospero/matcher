@@ -2141,5 +2141,183 @@ class TestTagKeywordBoost:
         assert len(tag_entries) == 0
 
 
+# ============================================================================
+# Chapter Coherence Penalty Tests (US-71-004)
+# ============================================================================
+
+class TestChapterCoherencePenalty:
+    """Tests for apply_chapter_coherence_penalty (US-71-004)."""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Config with chapter_grouping enabled and coherence_penalty_threshold=5."""
+        config = Mock()
+        matching = Mock()
+        matching.multimodal_enabled = True
+        matching.multimodal_weights = None
+        matching.pool_normalization_enabled = True
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        matching.broll_boost = 0.1
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_high_boost = 0.05
+        matching.caption_quality_low_penalty = 0.1
+        matching.apply_timing_penalty = True
+        matching.skip_llm_threshold = 0.85
+        cg = Mock()
+        cg.enabled = True
+        cg.source_consistency_boost = 0.03
+        cg.coherence_penalty_threshold = 5
+        matching.chapter_grouping = cg
+        matching.scoring = None
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def sample_vo_segment(self):
+        return SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                          text="Tokyo travel guide exploration")
+
+    @pytest.fixture
+    def sample_video_segment(self):
+        seg = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                         text="Beautiful scenery in Tokyo Japan")
+        seg.source_file = "vid_A"
+        return seg
+
+    @pytest.mark.fast
+    def test_no_chapter_no_penalty(self, mock_config):
+        """No penalty when chapter_index is -1."""
+        scoring = MatchScoring(mock_config)
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=-1, chapter_source_counts={0: {"a", "b", "c", "d", "e", "f"}}
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_source_counts_no_penalty(self, mock_config):
+        """No penalty when chapter_source_counts is None."""
+        scoring = MatchScoring(mock_config)
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_below_threshold_no_penalty(self, mock_config):
+        """No penalty when source count <= threshold (5)."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"vid_A", "vid_B", "vid_C", "vid_D", "vid_E"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_one_excess_source_penalty(self, mock_config):
+        """1 excess source (6 total, threshold 5) -> -0.03 penalty."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.67, abs=0.001)
+        assert "chapter_coherence" in reason
+        assert "6 sources" in reason
+
+    @pytest.mark.fast
+    def test_two_excess_sources_penalty(self, mock_config):
+        """2 excess sources (7 total) -> -0.06 penalty."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f", "g"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.64, abs=0.001)
+
+    @pytest.mark.fast
+    def test_penalty_capped_at_max(self, mock_config):
+        """Penalty caps at -0.10 regardless of excess count."""
+        scoring = MatchScoring(mock_config)
+        # 10 sources = 5 excess -> 5*(-0.03) = -0.15 but capped at -0.10
+        sources = {0: {f"vid_{i}" for i in range(10)}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.60, abs=0.001)
+
+    @pytest.mark.fast
+    def test_chapter_grouping_disabled_no_penalty(self, mock_config):
+        """No penalty when chapter_grouping is disabled."""
+        mock_config.matching.chapter_grouping.enabled = False
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f", "g", "h"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_different_chapter_index(self, mock_config):
+        """Penalty uses correct chapter from the counts dict."""
+        scoring = MatchScoring(mock_config)
+        sources = {
+            0: {"a", "b"},  # chapter 0: 2 sources, no penalty
+            1: {"a", "b", "c", "d", "e", "f", "g"},  # chapter 1: 7 sources, penalty
+        }
+        adj_ch0, reason0 = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        adj_ch1, reason1 = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=1, chapter_source_counts=sources
+        )
+        assert adj_ch0 == pytest.approx(0.7, abs=0.001)
+        assert adj_ch1 == pytest.approx(0.64, abs=0.001)
+
+    @pytest.mark.fast
+    def test_custom_threshold_from_config(self, mock_config):
+        """Config coherence_penalty_threshold is respected."""
+        mock_config.matching.chapter_grouping.coherence_penalty_threshold = 3
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d"}}  # 4 sources, threshold 3 -> 1 excess
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.67, abs=0.001)
+
+    @pytest.mark.fast
+    def test_breakdown_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records chapter_coherence in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f"}}
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            current_chapter_index=0,
+            chapter_source_counts=sources,
+        )
+        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence']
+        assert len(coherence_entries) == 1
+        assert coherence_entries[0]['adjustment'] < 0
+        assert 'chapter_coherence' in coherence_entries[0]['reason']
+
+    @pytest.mark.fast
+    def test_no_counts_no_breakdown_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no chapter_source_counts produces no chapter_coherence entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence']
+        assert len(coherence_entries) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

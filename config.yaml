@@ -581,6 +581,7 @@ matching:
   chapter_grouping:
     enabled: true                     # Enable chapter-level source grouping
     source_consistency_boost: 0.03    # Boost when same source reused within chapter
+    coherence_penalty_threshold: 5    # Max unique sources per chapter before penalty (-0.03 per excess, capped -0.10)
 
   # Negative matching rules are defined in the top-level 'negative_matching:' section below.
   # See NegativeMatchingConfig in src/config/sections/matching.py for the dataclass definition.
