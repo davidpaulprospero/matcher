@@ -126,7 +126,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 5/5 criteria verified. Per-attempt structured dict logged with video_id, attempt_number, success, error_type, duration_ms, method keys. Summary log at stage end with total_attempts, success_count, failure_count, error_type_distribution, avg_duration_ms. Summary written to checkpoint under caption_stage_metrics. Existing CaptionRetryBudget logging preserved (record_success/record_attempt still called). 6 tests total: 5 fast + 1 integration."
+                            "notes":  "All 5 criteria verified. Per-attempt logging in caption_fetcher.py (4 code paths: success, unavailable, fetch error, unexpected error). Summary log + checkpoint metrics in caption_stage.py. Existing retry budget logging preserved. 6/6 tests pass."
                         },
                         {
                             "id":  "US-73-009",
