@@ -13,6 +13,7 @@ __all__ = [
     'LoggingConfig',
     'CacheConfig',
     'GlobalCacheConfig',
+    'QualityGatesConfig',
     'PipelineConfig',
     'APIKeysConfig',
     'HealingConfig',
@@ -106,6 +107,18 @@ class GlobalCacheConfig:
 
 
 @dataclass
+class QualityGatesConfig:
+    """Quality gate thresholds checked between pipeline stages.
+
+    Quality gates validate intermediate results and emit warnings
+    when coverage or quality falls below expected thresholds.
+    Gates are non-blocking by default — they log warnings but
+    do not abort the pipeline.
+    """
+    min_match_coverage: float = 0.5  # Minimum fraction of segments that must have a match
+
+
+@dataclass
 class PipelineConfig:
     """Pipeline automation settings"""
     # Stage control - skip individual stages
@@ -129,6 +142,14 @@ class PipelineConfig:
     # Parallel processing
     parallel_transcription: bool = True
     parallel_embedding: bool = True
+
+    # Quality gates (US-81-005)
+    quality_gates: QualityGatesConfig = field(default_factory=QualityGatesConfig)
+
+    def __post_init__(self):
+        """Convert dict configs to dataclass instances (per Rule 2)."""
+        if isinstance(self.quality_gates, dict):
+            self.quality_gates = QualityGatesConfig(**self.quality_gates)
 
 
 @dataclass

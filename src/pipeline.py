@@ -392,6 +392,46 @@ class PipelineOrchestrator:
 
         return suggestions.get(stage_name, "Try: --fresh to restart the pipeline from scratch.")
 
+    def _check_match_coverage_gate(self, stage_name: str) -> None:
+        """
+        Check match coverage quality gate after a matching stage.
+
+        Logs a warning if fewer than the configured threshold of voiceover
+        segments have a match. Non-blocking — the pipeline continues regardless.
+
+        Args:
+            stage_name: Name of the stage that just completed (for log context).
+        """
+        segments = getattr(self.state, 'voiceover_segments', None)
+        matches = getattr(self.state, 'matches', None)
+
+        if not segments:
+            return  # No segments to check against
+
+        total_segments = len(segments)
+        if total_segments == 0:
+            return
+
+        matched_count = len(matches) if matches else 0
+        coverage = matched_count / total_segments
+
+        # Get threshold from config
+        pipeline_config = getattr(self.config, 'pipeline', None)
+        quality_gates = getattr(pipeline_config, 'quality_gates', None)
+        threshold = getattr(quality_gates, 'min_match_coverage', 0.5)
+
+        if coverage < threshold:
+            logger.warning(
+                f"Quality gate [{stage_name}]: Only {matched_count}/{total_segments} "
+                f"segments matched ({coverage:.0%}). "
+                f"Consider running with --force-rematch or checking video search results."
+            )
+        else:
+            logger.info(
+                f"Quality gate [{stage_name}]: {matched_count}/{total_segments} "
+                f"segments matched ({coverage:.0%}) — above {threshold:.0%} threshold."
+            )
+
     def run(
         self,
         resume: bool = True,
@@ -596,6 +636,10 @@ class PipelineOrchestrator:
 
             self.progress_reporter.finish_stage()
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
+
+            # Run quality gate after matching stages (US-81-005)
+            if stage_name in ('MATCH', 'ITERATIVE_MATCH'):
+                self._check_match_coverage_gate(stage_name)
 
         self.current_stage = None
 

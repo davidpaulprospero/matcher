@@ -76,7 +76,8 @@
                             "id":  "US-81-005",
                             "title":  "Add data quality gate between MATCH and OUTPUT stages",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
+                            "notes":  "Added QualityGatesConfig dataclass, config.yaml entry, _check_match_coverage_gate in pipeline.py after MATCH/ITERATIVE_MATCH, 7 tests all pass",
                             "acceptanceCriteria":  [
                                                        "After MATCH stage completes, a validation check verifies that at least 50% of voiceover segments have a match (configurable threshold)",
                                                        "If match coverage is below threshold, a warning is logged with specific guidance: \u0027Only N/M segments matched (X%). Consider running with --force-rematch or checking video search results.\u0027",

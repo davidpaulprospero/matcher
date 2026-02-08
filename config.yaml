@@ -1868,6 +1868,11 @@ pipeline:
   parallel_transcription: true
   parallel_embedding: true
 
+  # Quality gates (US-81-005)
+  # Non-blocking checks between pipeline stages that warn on low coverage.
+  quality_gates:
+    min_match_coverage: 0.5  # Minimum fraction of voiceover segments with a match (0.0-1.0)
+
 # -----------------------------------------------------------------------------
 # SELF-HEALING PIPELINE
 # -----------------------------------------------------------------------------
