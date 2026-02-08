@@ -94,6 +94,10 @@ class CheckpointData:
     # Maps stage name -> serialized StageMetrics dict
     stage_metrics: Dict[str, Any] = field(default_factory=dict)
 
+    # US-79-012: Transcription metrics summary from batch processing
+    # Stores TranscriptionMetrics.get_summary_dict() output for cross-run comparison
+    transcription_metrics: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return asdict(self)
     
@@ -318,6 +322,9 @@ class CheckpointManager:
             logger.warning(f"Checkpoint consistency: {warning}")
 
         self.data = data
+
+        # US-79-012: Log previous transcription metrics for cross-run comparison
+        self.log_previous_transcription_metrics()
 
         # Log load time
         elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -975,6 +982,66 @@ class CheckpointManager:
             return {}
         return self.data.chapter_data or {}
 
+    def save_transcription_metrics(self, metrics_summary: Dict[str, Any]) -> None:
+        """Persist transcription metrics summary to checkpoint (US-79-012).
+
+        Called after transcribe_videos_parallel() completes to enable
+        cross-run comparison and debugging slow transcription batches.
+
+        Args:
+            metrics_summary: Dict from TranscriptionMetrics.get_summary_dict().
+                Must include: total_videos, cached_videos (cached_hits),
+                transcribed_videos (transcribed_count), failed_videos (failed_count),
+                total_duration_seconds (total_duration_s), average_speed_ratio (avg_speed_ratio).
+        """
+        if self.data is None:
+            self.data = CheckpointData(
+                created_at=datetime.now().isoformat(),
+                config_hash=self.config_hash
+            )
+
+        self.data.transcription_metrics = metrics_summary
+        self.data.updated_at = datetime.now().isoformat()
+        self._atomic_save()
+        logger.info(
+            f"Saved transcription metrics: {metrics_summary.get('transcribed_count', 0)} transcribed, "
+            f"{metrics_summary.get('cached_hits', 0)} cached, "
+            f"{metrics_summary.get('failed_count', 0)} failed"
+        )
+
+    def get_transcription_metrics(self) -> Dict[str, Any]:
+        """Get persisted transcription metrics from checkpoint (US-79-012).
+
+        Returns:
+            Dict with transcription metrics summary, or empty dict if not available.
+        """
+        if not self.data:
+            return {}
+        return self.data.transcription_metrics or {}
+
+    def log_previous_transcription_metrics(self) -> None:
+        """Log previous transcription metrics at INFO level for comparison (US-79-012).
+
+        Called during checkpoint resume to show the user what the previous
+        transcription performance was, enabling cross-run comparison.
+        """
+        prev_metrics = self.get_transcription_metrics()
+        if not prev_metrics:
+            return
+
+        total = prev_metrics.get('total_videos', 0)
+        cached = prev_metrics.get('cached_videos', 0)
+        transcribed = prev_metrics.get('transcribed_videos', 0)
+        failed = prev_metrics.get('failed_videos', 0)
+        speed = prev_metrics.get('average_speed_ratio', 0.0)
+        duration = prev_metrics.get('total_duration_seconds', 0.0)
+
+        logger.info(
+            f"Previous transcription metrics: {total} videos "
+            f"({cached} cached, {transcribed} transcribed, {failed} failed), "
+            f"{speed:.1f}x realtime, {duration:.0f}s total audio"
+        )
+
     def get_stage_metrics(self, stage: str) -> Dict[str, Any]:
         """Get persisted stage metrics for a specific stage (US-49-012).
 
@@ -1050,6 +1117,16 @@ class CheckpointManager:
                     f"  • {stage_name} metrics: "
                     f"{processed} processed, {failed} failed, {duration:.1f}s"
                 )
+
+        # US-79-012: Show transcription metrics if available
+        if self.data.transcription_metrics:
+            tm = self.data.transcription_metrics
+            lines.append(
+                f"  • Transcription: {tm.get('transcribed_videos', 0)} transcribed, "
+                f"{tm.get('cached_videos', 0)} cached, "
+                f"{tm.get('failed_videos', 0)} failed, "
+                f"{tm.get('average_speed_ratio', 0):.1f}x realtime"
+            )
 
         return "\n".join(lines)
 

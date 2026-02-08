@@ -61,7 +61,8 @@ def transcribe_videos_parallel(
     force_reprocess: bool = False,
     show_progress: bool = True,
     skip_if_cached: bool = True,
-    return_metrics: bool = False
+    return_metrics: bool = False,
+    checkpoint: Any = None
 ) -> Union[Dict[str, List[TranscriptSegment]], TranscriptionResult]:
     """
     Transcribe multiple videos with parallel audio extraction but sequential GPU.
@@ -83,6 +84,9 @@ def transcribe_videos_parallel(
                        If False, reprocess all videos ignoring cache.
         return_metrics: If True, return (results, metrics) tuple instead of just results.
                        Added in US-60-009 for batch transcription progress tracking.
+        checkpoint: Optional CheckpointManager instance. If provided, persists
+                   TranscriptionMetrics summary to checkpoint after batch completion.
+                   Added in US-79-012 for cross-run comparison.
 
     Returns:
         If return_metrics=False: Dict mapping video path to list of TranscriptSegments
@@ -233,7 +237,28 @@ def transcribe_videos_parallel(
 
         if not uncached_videos:
             # Log metrics summary even when all cached (US-60-009)
-            logger.info(f"Transcription metrics: {metrics.get_summary_dict()}")
+            summary = metrics.get_summary_dict()
+            logger.info(f"Transcription metrics: {summary}")
+
+            # US-79-012: Persist metrics even when all cached
+            if checkpoint is not None:
+                try:
+                    checkpoint_summary = {
+                        'total_videos': summary['total_videos'],
+                        'cached_videos': summary['cached_hits'],
+                        'transcribed_videos': summary['transcribed_count'],
+                        'failed_videos': summary['failed_count'],
+                        'total_duration_seconds': summary['total_duration_s'],
+                        'average_speed_ratio': summary['avg_speed_ratio'],
+                        'cache_hit_rate': summary['cache_hit_rate'],
+                        'success_rate': summary['success_rate'],
+                        'phase1_time_s': 0.0,
+                        'phase2_time_s': 0.0,
+                    }
+                    checkpoint.save_transcription_metrics(checkpoint_summary)
+                except Exception as e:
+                    logger.warning(f"Could not persist transcription metrics to checkpoint: {e}")
+
             if return_metrics:
                 return results, metrics
             return results
@@ -427,6 +452,30 @@ def transcribe_videos_parallel(
                 f"Speed: {summary['avg_speed_ratio']:.1f}x realtime "
                 f"({summary['total_duration_s']:.0f}s audio in {summary['total_time_s']:.0f}s)"
             )
+
+        # US-79-012: Persist transcription metrics to checkpoint for cross-run comparison
+        if checkpoint is not None:
+            try:
+                # Build summary with acceptance-criteria field names
+                checkpoint_summary = {
+                    'total_videos': summary['total_videos'],
+                    'cached_videos': summary['cached_hits'],
+                    'transcribed_videos': summary['transcribed_count'],
+                    'failed_videos': summary['failed_count'],
+                    'total_duration_seconds': summary['total_duration_s'],
+                    'average_speed_ratio': summary['avg_speed_ratio'],
+                    # Also include detailed fields for debugging
+                    'cache_hit_rate': summary['cache_hit_rate'],
+                    'success_rate': summary['success_rate'],
+                    'phase1_time_s': summary['phase1_time_s'],
+                    'phase2_time_s': summary['phase2_time_s'],
+                    'budget_total_attempts': summary.get('budget_total_attempts', 0),
+                    'budget_failed_attempts': summary.get('budget_failed_attempts', 0),
+                    'budget_exhausted_count': summary.get('budget_exhausted_count', 0),
+                }
+                checkpoint.save_transcription_metrics(checkpoint_summary)
+            except Exception as e:
+                logger.warning(f"Could not persist transcription metrics to checkpoint: {e}")
 
         # Clean up temp directory
         try:
