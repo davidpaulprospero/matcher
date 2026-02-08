@@ -124,6 +124,15 @@ class TranscriptionConfig:
     # Must be >= 1 day
     cache_max_age_days: int = 30
 
+    # Whisper model threading (US-79-007)
+    # num_workers: Number of workers for WhisperModel batched decoding
+    # Keep at 1 for GPU to avoid CUDA serialization overhead; increase only for CPU-only mode
+    whisper_num_workers: int = 1
+    # cpu_threads: Number of CPU threads for WhisperModel (ctranslate2)
+    # Higher values benefit CPU-bound operations (beam search, preprocessing)
+    # Default 4 is conservative; systems with many cores can increase
+    whisper_cpu_threads: int = 4
+
     # Known Whisper model names
     KNOWN_MODELS = {'tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'}
     # Known compute types for faster-whisper
@@ -189,6 +198,20 @@ class TranscriptionConfig:
             raise ValueError(
                 f"TranscriptionConfig.cache_max_age_days={self.cache_max_age_days} "
                 f"must be >= 1. Check transcription.cache_max_age_days in config.yaml"
+            )
+
+        # Validate whisper_num_workers (US-79-007)
+        if self.whisper_num_workers < 1:
+            raise ValueError(
+                f"TranscriptionConfig.whisper_num_workers={self.whisper_num_workers} "
+                f"must be >= 1. Check transcription.whisper_num_workers in config.yaml"
+            )
+
+        # Validate whisper_cpu_threads (US-79-007)
+        if self.whisper_cpu_threads < 1:
+            raise ValueError(
+                f"TranscriptionConfig.whisper_cpu_threads={self.whisper_cpu_threads} "
+                f"must be >= 1. Check transcription.whisper_cpu_threads in config.yaml"
             )
 
         # Validate and set audio_extraction_workers (US-60-010)

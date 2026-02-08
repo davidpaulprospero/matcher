@@ -151,7 +151,9 @@ class WhisperClient:
         compute_type: str = "auto",
         minimum_gpu_memory_mb: int = 2000,
         auto_downgrade_model: bool = True,
-        gpu_transcription_timeout: int = 300
+        gpu_transcription_timeout: int = 300,
+        num_workers: int = 1,
+        cpu_threads: int = 4
     ):
         """
         Initialize Whisper client with model configuration.
@@ -162,12 +164,16 @@ class WhisperClient:
             minimum_gpu_memory_mb: Minimum GPU memory required (US-60-007)
             auto_downgrade_model: Automatically downgrade model if insufficient memory
             gpu_transcription_timeout: Max seconds for a single transcribe() call (US-79-002)
+            num_workers: Workers for WhisperModel batched decoding (US-79-007)
+            cpu_threads: CPU threads for ctranslate2 operations (US-79-007)
         """
         self.model_name = model_name
         self.compute_type = compute_type
         self.minimum_gpu_memory_mb = minimum_gpu_memory_mb
         self.auto_downgrade_model = auto_downgrade_model
         self.gpu_transcription_timeout = gpu_transcription_timeout
+        self.num_workers = num_workers
+        self.cpu_threads = cpu_threads
 
     def get_model(self):
         """
@@ -260,8 +266,8 @@ class WhisperClient:
                     actual_model,
                     device=device,
                     compute_type=actual_compute,
-                    num_workers=1,
-                    cpu_threads=4
+                    num_workers=self.num_workers,
+                    cpu_threads=self.cpu_threads
                 )
                 _model_config = current_config
 

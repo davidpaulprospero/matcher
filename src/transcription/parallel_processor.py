@@ -139,10 +139,19 @@ def transcribe_videos_parallel(
     if config:
         max_retries = getattr(config.transcription, 'max_retries', 2)
 
+    # Get Whisper model threading settings (US-79-007)
+    whisper_num_workers = 1  # Default 1 for GPU serialization
+    whisper_cpu_threads = 4  # Default 4 threads
+    if config:
+        whisper_num_workers = getattr(config.transcription, 'whisper_num_workers', 1)
+        whisper_cpu_threads = getattr(config.transcription, 'whisper_cpu_threads', 4)
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
-        gpu_transcription_timeout=gpu_transcription_timeout
+        gpu_transcription_timeout=gpu_transcription_timeout,
+        num_workers=whisper_num_workers,
+        cpu_threads=whisper_cpu_threads
     )
     transcript_cache = TranscriptCache(cache_dir)
     results = {}
@@ -359,7 +368,9 @@ def transcribe_video(
     max_retries: int = 2,
     base_delay: float = 1.0,
     gpu_transcription_timeout: int = 300,
-    audio_extraction_timeout: int = 60
+    audio_extraction_timeout: int = 60,
+    num_workers: int = 1,
+    cpu_threads: int = 4
 ) -> List[TranscriptSegment]:
     """
     Transcribe a single video file with retry logic for transient errors.
@@ -410,7 +421,8 @@ def transcribe_video(
     # Transcribe with WhisperClient (GPU-locked) - with retry for transient errors
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
-        gpu_transcription_timeout=gpu_transcription_timeout
+        gpu_transcription_timeout=gpu_transcription_timeout,
+        num_workers=num_workers, cpu_threads=cpu_threads
     )
     raw_segments = None
     last_error = None
@@ -493,7 +505,9 @@ def transcribe_voiceover_audio(
     compute_type: str = "auto",
     language: str = None,
     vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
-    gpu_transcription_timeout: int = 300
+    gpu_transcription_timeout: int = 300,
+    num_workers: int = 1,
+    cpu_threads: int = 4
 ) -> List[dict]:
     """
     Transcribe a voiceover audio file.
@@ -506,7 +520,8 @@ def transcribe_voiceover_audio(
     """
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
-        gpu_transcription_timeout=gpu_transcription_timeout
+        gpu_transcription_timeout=gpu_transcription_timeout,
+        num_workers=num_workers, cpu_threads=cpu_threads
     )
     logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
     return whisper_client.transcribe(
@@ -526,7 +541,9 @@ def transcribe_voiceover_media(
     word_timestamps: bool = True,
     vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
     gpu_transcription_timeout: int = 300,
-    audio_extraction_timeout: int = 60
+    audio_extraction_timeout: int = 60,
+    num_workers: int = 1,
+    cpu_threads: int = 4
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
@@ -560,7 +577,8 @@ def transcribe_voiceover_media(
     segments = []
     whisper_client = WhisperClient(
         model_name=model_name, compute_type=compute_type,
-        gpu_transcription_timeout=gpu_transcription_timeout
+        gpu_transcription_timeout=gpu_transcription_timeout,
+        num_workers=num_workers, cpu_threads=cpu_threads
     )
 
     if media_path.suffix.lower() in video_extensions:

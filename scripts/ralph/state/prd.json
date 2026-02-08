@@ -106,7 +106,7 @@
       "id": "US-79-007",
       "title": "Make Whisper num_workers and cpu_threads configurable",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Add `whisper_num_workers: int = 1` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",
         "Add `whisper_cpu_threads: int = 4` field to TranscriptionConfig in src/config/sections/core.py with validation >= 1",

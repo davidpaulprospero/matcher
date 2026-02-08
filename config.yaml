@@ -203,6 +203,16 @@ transcription:
   # Must be >= 1
   cache_max_age_days: 30
 
+  # Whisper model threading (US-79-007)
+  # num_workers: Workers for WhisperModel batched decoding (ctranslate2)
+  # Keep at 1 for GPU - CUDA serializes anyway, >1 just wastes memory
+  # Only increase for CPU-only transcription with multiple audio files
+  whisper_num_workers: 1
+  # cpu_threads: CPU threads for beam search, tokenization, preprocessing
+  # Default 4 is conservative; increase to match available cores on CPU-heavy workloads
+  # Must be >= 1
+  whisper_cpu_threads: 4
+
 # -----------------------------------------------------------------------------
 # EMBEDDINGS
 # -----------------------------------------------------------------------------

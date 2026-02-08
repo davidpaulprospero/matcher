@@ -1126,6 +1126,132 @@ class TestGPUMemoryPreCheck:
             assert any('below threshold' in c for c in warning_calls)
 
 
+class TestWhisperThreadingConfig:
+    """Tests for configurable whisper_num_workers and whisper_cpu_threads (US-79-007)"""
+
+    @pytest.mark.fast
+    def test_config_default_whisper_num_workers(self):
+        """Test TranscriptionConfig default whisper_num_workers is 1"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig()
+        assert config.whisper_num_workers == 1
+
+    @pytest.mark.fast
+    def test_config_default_whisper_cpu_threads(self):
+        """Test TranscriptionConfig default whisper_cpu_threads is 4"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig()
+        assert config.whisper_cpu_threads == 4
+
+    @pytest.mark.fast
+    def test_config_custom_whisper_num_workers(self):
+        """Test TranscriptionConfig accepts custom whisper_num_workers"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig(whisper_num_workers=2)
+        assert config.whisper_num_workers == 2
+
+    @pytest.mark.fast
+    def test_config_custom_whisper_cpu_threads(self):
+        """Test TranscriptionConfig accepts custom whisper_cpu_threads"""
+        from src.config.sections.core import TranscriptionConfig
+        config = TranscriptionConfig(whisper_cpu_threads=8)
+        assert config.whisper_cpu_threads == 8
+
+    @pytest.mark.fast
+    def test_config_rejects_whisper_num_workers_below_1(self):
+        """Test TranscriptionConfig rejects whisper_num_workers < 1"""
+        from src.config.sections.core import TranscriptionConfig
+        with pytest.raises(ValueError, match="whisper_num_workers"):
+            TranscriptionConfig(whisper_num_workers=0)
+
+    @pytest.mark.fast
+    def test_config_rejects_whisper_cpu_threads_below_1(self):
+        """Test TranscriptionConfig rejects whisper_cpu_threads < 1"""
+        from src.config.sections.core import TranscriptionConfig
+        with pytest.raises(ValueError, match="whisper_cpu_threads"):
+            TranscriptionConfig(whisper_cpu_threads=0)
+
+    @pytest.mark.fast
+    def test_whisper_client_accepts_num_workers(self):
+        """Test WhisperClient accepts custom num_workers"""
+        client = WhisperClient(num_workers=2)
+        assert client.num_workers == 2
+
+    @pytest.mark.fast
+    def test_whisper_client_accepts_cpu_threads(self):
+        """Test WhisperClient accepts custom cpu_threads"""
+        client = WhisperClient(cpu_threads=8)
+        assert client.cpu_threads == 8
+
+    @pytest.mark.fast
+    def test_whisper_client_default_num_workers(self):
+        """Test WhisperClient default num_workers is 1"""
+        client = WhisperClient()
+        assert client.num_workers == 1
+
+    @pytest.mark.fast
+    def test_whisper_client_default_cpu_threads(self):
+        """Test WhisperClient default cpu_threads is 4"""
+        client = WhisperClient()
+        assert client.cpu_threads == 4
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_custom_num_workers_passed_to_whisper_model(self, mock_logger):
+        """Test custom whisper_num_workers value is passed to WhisperModel constructor"""
+        mock_model_instance = Mock()
+        MockWhisperModel = Mock(return_value=mock_model_instance)
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                raise ImportError("No torch")
+            return __import__(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            client = WhisperClient(model_name="base", compute_type="auto", num_workers=3)
+            client.get_model()
+
+            MockWhisperModel.assert_called_once_with(
+                "base",
+                device="cpu",
+                compute_type="int8",
+                num_workers=3,
+                cpu_threads=4
+            )
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_custom_cpu_threads_passed_to_whisper_model(self, mock_logger):
+        """Test custom whisper_cpu_threads value is passed to WhisperModel constructor"""
+        mock_model_instance = Mock()
+        MockWhisperModel = Mock(return_value=mock_model_instance)
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'faster_whisper':
+                mock_module = Mock()
+                mock_module.WhisperModel = MockWhisperModel
+                return mock_module
+            elif name == 'torch':
+                raise ImportError("No torch")
+            return __import__(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=mock_import):
+            client = WhisperClient(model_name="base", compute_type="auto", cpu_threads=12)
+            client.get_model()
+
+            MockWhisperModel.assert_called_once_with(
+                "base",
+                device="cpu",
+                compute_type="int8",
+                num_workers=1,
+                cpu_threads=12
+            )
+
+
 class TestGPUTranscriptionTimeout:
     """Tests for GPU transcription timeout guard (US-79-002)"""
 
