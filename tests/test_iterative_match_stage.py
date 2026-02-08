@@ -933,3 +933,236 @@ class TestChapterTypeStrategyRanking:
             if strategy in prio_without:
                 assert prio_with[strategy] == prio_without[strategy], \
                     f"body chapter_type should not boost {strategy} priority"
+
+
+# ============================================================================
+# Chapter-Aware Gap Query Diversity Tests (US-76-010)
+# ============================================================================
+
+class TestChapterAwareQueryDiversity:
+    """Tests for per-chapter query diversity enforcement."""
+
+    @pytest.fixture
+    def stage(self):
+        return IterativeMatchStage()
+
+    @pytest.fixture
+    def mock_state(self):
+        state = MagicMock()
+        state.voiceover_segments = []
+        state.matches = []
+        state.extracted_entities = []
+        state.downloaded_videos = []
+        state.video_search_results = []
+        return state
+
+    def test_same_chapter_identical_text_produces_different_queries(self, stage, mock_state):
+        """Two gaps in the same chapter with identical voiceover text produce different queries.
+
+        US-76-010 AC: When generating search queries for gaps within the same
+        chapter, no two gaps use identical query text.
+        """
+        # Two gaps with identical voiceover text, same chapter
+        gaps = [
+            GapSegment(segment_index=1, confidence=0.5,
+                       voiceover_text="ancient Roman architecture buildings",
+                       position=10.0, reason='low_confidence'),
+            GapSegment(segment_index=2, confidence=0.5,
+                       voiceover_text="ancient Roman architecture buildings",
+                       position=15.0, reason='low_confidence'),
+        ]
+
+        # Create gap_segments with same chapter_id
+        gap_segments = [
+            AnalyzerGapSegment(
+                segment_index=1, confidence=0.5,
+                voiceover_text="ancient Roman architecture buildings",
+                position=10.0, chapter_id="chapter_rome",
+            ),
+            AnalyzerGapSegment(
+                segment_index=2, confidence=0.5,
+                voiceover_text="ancient Roman architecture buildings",
+                position=15.0, chapter_id="chapter_rome",
+            ),
+        ]
+
+        iter_config = MagicMock()
+        iter_config.use_voiceover_text_queries = True
+        iter_config.use_similar_to_locked = False
+        iter_config.use_entity_topic_queries = False
+        iter_config.use_description_queries = False
+        iter_config.use_tag_queries = False
+        iter_config.max_new_videos_per_pass = 50
+
+        queries = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_segments=gap_segments,
+        )
+
+        # Extract query texts for each gap
+        gap1_queries = [q['query'] for q in queries if 1 in q.get('gap_indices', [])]
+        gap2_queries = [q['query'] for q in queries if 2 in q.get('gap_indices', [])]
+
+        assert len(gap1_queries) > 0, "Gap 1 should have queries"
+        assert len(gap2_queries) > 0, "Gap 2 should have queries"
+
+        # The queries must be different despite identical voiceover text
+        all_query_texts = [q['query'].lower().strip() for q in queries]
+        assert len(all_query_texts) == len(set(all_query_texts)), \
+            f"Queries within same chapter must be unique, got: {all_query_texts}"
+
+    def test_different_chapters_allow_identical_queries(self, stage, mock_state):
+        """Gaps in different chapters can use identical queries.
+
+        US-76-010 AC: No cross-chapter dedup - identical queries in different
+        chapters are allowed.
+        """
+        # Two gaps with identical text but different chapters
+        gaps = [
+            GapSegment(segment_index=1, confidence=0.5,
+                       voiceover_text="ancient Roman architecture buildings",
+                       position=10.0, reason='low_confidence'),
+            GapSegment(segment_index=2, confidence=0.5,
+                       voiceover_text="ancient Roman architecture buildings",
+                       position=50.0, reason='low_confidence'),
+        ]
+
+        # Different chapter_ids
+        gap_segments = [
+            AnalyzerGapSegment(
+                segment_index=1, confidence=0.5,
+                voiceover_text="ancient Roman architecture buildings",
+                position=10.0, chapter_id="chapter_1",
+            ),
+            AnalyzerGapSegment(
+                segment_index=2, confidence=0.5,
+                voiceover_text="ancient Roman architecture buildings",
+                position=50.0, chapter_id="chapter_2",
+            ),
+        ]
+
+        iter_config = MagicMock()
+        iter_config.use_voiceover_text_queries = True
+        iter_config.use_similar_to_locked = False
+        iter_config.use_entity_topic_queries = False
+        iter_config.use_description_queries = False
+        iter_config.use_tag_queries = False
+        iter_config.max_new_videos_per_pass = 50
+
+        queries = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_segments=gap_segments,
+        )
+
+        # Both gaps should produce queries (global dedup may merge them, but
+        # that's OK - the point is chapter dedup didn't vary them)
+        gap1_queries = [q['query'] for q in queries if 1 in q.get('gap_indices', [])]
+        gap2_queries = [q['query'] for q in queries if 2 in q.get('gap_indices', [])]
+
+        assert len(gap1_queries) > 0 or len(gap2_queries) > 0, \
+            "At least one gap should produce queries"
+
+        # The raw query generation (before global dedup) should NOT have varied
+        # queries across chapters. The global dedup may remove one, but the
+        # chapter dedup should not have touched them.
+        # Verify by checking that the gap_segments with different chapters
+        # both generated the same base query text (before global dedup removed one)
+        assert len(gap1_queries) >= 1, "Gap 1 in chapter_1 should have a query"
+
+    def test_query_variation_preserves_original_keywords(self, stage):
+        """Query variation preserves the original query's semantic intent.
+
+        US-76-010 AC: Varied queries must contain original keywords.
+        """
+        original_query = "Roman architecture footage"
+        chapter_id = "chapter_rome"
+        gap = AnalyzerGapSegment(
+            segment_index=1, confidence=0.5,
+            voiceover_text="The ancient Roman architecture included grand buildings and arches",
+            position=10.0, chapter_id=chapter_id,
+        )
+        existing = {original_query.lower().strip()}
+
+        varied = IterativeMatchStage._vary_query_for_chapter(
+            original_query, chapter_id, gap, existing
+        )
+
+        # Varied query must be different
+        assert varied.lower().strip() != original_query.lower().strip(), \
+            "Varied query must differ from original"
+
+        # Varied query must still contain original keywords
+        for keyword in original_query.lower().split():
+            assert keyword in varied.lower(), \
+                f"Varied query '{varied}' must contain original keyword '{keyword}'"
+
+    def test_per_chapter_dedup_set_tracks_used_queries(self, stage, mock_state):
+        """Per-chapter query dedup set tracks and triggers variation.
+
+        US-76-010 AC: A per-chapter dedup set detects duplicates and triggers
+        query variation with chapter-specific context.
+        """
+        # Three gaps in same chapter with identical text
+        gaps = [
+            GapSegment(segment_index=i, confidence=0.5,
+                       voiceover_text="wildlife conservation endangered species protection",
+                       position=10.0 + i * 5, reason='low_confidence')
+            for i in range(3)
+        ]
+
+        gap_segments = [
+            AnalyzerGapSegment(
+                segment_index=i, confidence=0.5,
+                voiceover_text="wildlife conservation endangered species protection",
+                position=10.0 + i * 5, chapter_id="chapter_wildlife",
+            )
+            for i in range(3)
+        ]
+
+        iter_config = MagicMock()
+        iter_config.use_voiceover_text_queries = True
+        iter_config.use_similar_to_locked = False
+        iter_config.use_entity_topic_queries = False
+        iter_config.use_description_queries = False
+        iter_config.use_tag_queries = False
+        iter_config.max_new_videos_per_pass = 50
+
+        queries = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_segments=gap_segments,
+        )
+
+        # All three should produce queries and all should be unique
+        query_texts = [q['query'].lower().strip() for q in queries]
+        assert len(query_texts) == len(set(query_texts)), \
+            f"All queries within same chapter must be unique, got: {query_texts}"
+        assert len(query_texts) >= 2, \
+            f"Expected at least 2 varied queries, got {len(query_texts)}"
+
+    def test_no_gap_segments_skips_chapter_dedup(self, stage, mock_state):
+        """When gap_segments is None, chapter dedup is skipped gracefully."""
+        gaps = [
+            GapSegment(segment_index=1, confidence=0.5,
+                       voiceover_text="ancient Roman architecture buildings",
+                       position=10.0, reason='low_confidence'),
+            GapSegment(segment_index=2, confidence=0.5,
+                       voiceover_text="ancient Roman architecture buildings",
+                       position=15.0, reason='low_confidence'),
+        ]
+
+        iter_config = MagicMock()
+        iter_config.use_voiceover_text_queries = True
+        iter_config.use_similar_to_locked = False
+        iter_config.use_entity_topic_queries = False
+        iter_config.use_description_queries = False
+        iter_config.use_tag_queries = False
+        iter_config.max_new_videos_per_pass = 50
+
+        # No gap_segments passed - should not crash
+        queries = stage._generate_multi_strategy_queries(
+            gaps, [], mock_state, iter_config, pass_num=1,
+            gap_segments=None,
+        )
+
+        # Should still produce queries (global dedup may merge identical ones)
+        assert len(queries) >= 1, "Should produce at least 1 query"

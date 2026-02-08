@@ -154,7 +154,7 @@
                             "id":  "US-76-010",
                             "title":  "Add chapter-aware gap query diversity enforcement",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "When generating search queries for gaps within the same chapter, the iterative match stage enforces query diversity: no two gaps in the same chapter use identical query text",
                                                        "A per-chapter query dedup set tracks used queries and triggers query variation (synonym substitution or keyword rotation) when duplicates are detected",
@@ -163,7 +163,7 @@
                                                        "Unit test: gaps in different chapters can use identical queries (no cross-chapter dedup)",
                                                        "Unit test: query variation preserves the original query\u0027s semantic intent (contains original keywords)"
                                                    ],
-                            "notes":  "Tier: quality improvement. Source files: src/stages/iterative_match.py (around line 868 where queries are generated -- add per-chapter dedup tracking), src/iterative_match/gap_analyzer.py (GapSegment.chapter_id at line 102 provides the chapter grouping key). Currently duplicate queries within a chapter waste search budget by finding the same videos. Test file: tests/test_iterative_match_stage.py or new test."
+                            "notes":  "Done. Added per-chapter query dedup in _generate_multi_strategy_queries using chapter_id_by_idx lookup from gap_segments. _vary_query_for_chapter static method appends context words from gap voiceover text or chapter-derived keywords. 5 new tests in TestChapterAwareQueryDiversity, all pass."
                         },
                         {
                             "id":  "US-76-011",

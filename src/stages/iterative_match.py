@@ -812,6 +812,12 @@ class IterativeMatchStage(Stage):
         """
         queries = []
 
+        # US-76-010: Build chapter_id lookup from gap_segments for per-chapter dedup
+        chapter_id_by_idx: Dict[int, Optional[str]] = {}
+        if gap_segments:
+            for gs in gap_segments:
+                chapter_id_by_idx[gs.segment_index] = getattr(gs, 'chapter_id', None)
+
         # Strategy 1: Voiceover text keywords
         if getattr(config, 'use_voiceover_text_queries', True):
             from ..iterative_match.gap_analyzer import extract_keywords_for_gap
@@ -930,6 +936,32 @@ class IterativeMatchStage(Stage):
                         'gap_indices': [gap.segment_index],
                         'priority': 2
                     })
+
+        # US-76-010: Per-chapter query diversity enforcement
+        # Within the same chapter, duplicate queries waste search budget.
+        # Vary duplicates by appending chapter-specific context keywords.
+        if chapter_id_by_idx:
+            chapter_query_sets: Dict[str, set] = {}  # chapter_id -> set of query keys
+            for q in queries:
+                gap_indices = q.get('gap_indices', [])
+                if not gap_indices:
+                    continue  # Broad queries (no gap) skip chapter dedup
+                ch_id = chapter_id_by_idx.get(gap_indices[0])
+                if ch_id is None:
+                    continue  # No chapter assigned
+                query_key = q['query'].lower().strip()
+                if ch_id not in chapter_query_sets:
+                    chapter_query_sets[ch_id] = set()
+                if query_key in chapter_query_sets[ch_id]:
+                    # Duplicate within chapter - vary the query
+                    gap_idx = gap_indices[0]
+                    gap_obj = next((g for g in gaps if g.segment_index == gap_idx), None)
+                    varied = self._vary_query_for_chapter(
+                        q['query'], ch_id, gap_obj, chapter_query_sets[ch_id]
+                    )
+                    q['query'] = varied
+                    query_key = varied.lower().strip()
+                chapter_query_sets[ch_id].add(query_key)
 
         # Deduplicate by query string AND exclude already-used queries
         seen_queries = set()
@@ -1106,6 +1138,61 @@ class IterativeMatchStage(Stage):
                             })
 
         return variants
+
+    @staticmethod
+    def _vary_query_for_chapter(
+        query: str,
+        chapter_id: str,
+        gap: Optional[GapSegment],
+        existing_queries: set,
+    ) -> str:
+        """
+        Vary a duplicate query within a chapter to enforce diversity.
+
+        US-76-010: When two gaps in the same chapter would produce identical
+        queries, append chapter-specific context keywords to differentiate them
+        while preserving original semantic intent.
+
+        Args:
+            query: Original query text
+            chapter_id: Chapter identifier for context
+            gap: Gap segment (used to extract unique keywords)
+            existing_queries: Set of already-used query keys in this chapter
+
+        Returns:
+            Varied query string that differs from existing queries
+        """
+        import re
+
+        # Extract unique words from gap voiceover text for context
+        context_words = []
+        if gap and gap.voiceover_text:
+            words = gap.voiceover_text.split()
+            # Pick content words (>4 chars) not already in the query
+            query_lower = query.lower()
+            for w in words:
+                cleaned = re.sub(r'[^\w]', '', w).lower()
+                if len(cleaned) > 4 and cleaned not in query_lower:
+                    context_words.append(cleaned)
+
+        # Try appending context words one by one until we get a unique query
+        for cw in context_words[:5]:
+            candidate = f"{query} {cw}"
+            if candidate.lower().strip() not in existing_queries:
+                return candidate
+
+        # Fallback: append a chapter-derived keyword
+        # Extract a short label from chapter_id (e.g., "chapter_0" -> "section 1")
+        ch_label = chapter_id.split('_')[-1] if '_' in chapter_id else chapter_id
+        # Use a rotation suffix to ensure uniqueness
+        for i in range(1, 10):
+            suffix = f"context {ch_label}" if i == 1 else f"context {ch_label} {i}"
+            candidate = f"{query} {suffix}"
+            if candidate.lower().strip() not in existing_queries:
+                return candidate
+
+        # Last resort: just append a number
+        return f"{query} alt"
 
     def _refine_queries_progressive(
         self,
