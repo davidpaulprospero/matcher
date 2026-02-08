@@ -954,6 +954,7 @@ class TestEmbeddingProviderParametrized:
         "openai",
         "local",
         "sentence_transformers",
+        "ollama",
     ])
     @pytest.mark.fast
     def test_valid_embedding_providers(self, provider, tmp_path):
