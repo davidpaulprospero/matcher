@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from src.config.base import (
     Config,
+    ConfigError,
     load_config,
     get_config,
     set_config,
@@ -72,13 +73,12 @@ matching:
 
     @pytest.mark.fast
     def test_from_yaml_load_error(self, tmp_path):
-        """Test handling of YAML load error."""
+        """Test handling of YAML load error raises ConfigError with location."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("invalid: yaml: content: [")
 
-        config = Config.from_yaml(str(config_file))
-        # Should return default config on error
-        assert config is not None
+        with pytest.raises(ConfigError, match="YAML syntax error"):
+            Config.from_yaml(str(config_file))
 
     @pytest.mark.fast
     def test_from_yaml_empty_file(self, tmp_path):

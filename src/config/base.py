@@ -366,6 +366,17 @@ class Config:
             with open(config_path, 'r', encoding='utf-8') as f:
                 # Use CSafeLoader for 40-60% faster parsing
                 data = yaml.load(f, Loader=SafeLoader) or {}
+        except yaml.YAMLError as e:
+            # Extract line/column from YAML error marks
+            location = ""
+            if hasattr(e, 'problem_mark') and e.problem_mark is not None:
+                mark = e.problem_mark
+                location = f" at line {mark.line + 1}, column {mark.column + 1}"
+            problem = getattr(e, 'problem', str(e))
+            _config_metrics['validation_errors'] += 1
+            raise ConfigError(
+                f"YAML syntax error in '{config_path}'{location}: {problem}"
+            ) from e
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
             _config_metrics['validation_errors'] += 1
@@ -534,22 +545,38 @@ class Config:
                         f"{dataclass_type.__name__}: {key}{suggestion}"
                     )
 
+        # Track unexpected keys with suggestions for error context
+        unexpected_keys = [k for k in data.keys() if k not in valid_fields]
+        unexpected_with_suggestions = []
+        for uk in unexpected_keys:
+            close = difflib.get_close_matches(uk, list(valid_fields.keys()), n=1, cutoff=0.6)
+            if close:
+                unexpected_with_suggestions.append(f"'{uk}' (did you mean '{close[0]}'?)")
+            else:
+                unexpected_with_suggestions.append(f"'{uk}'")
+
         try:
             return dataclass_type(**filtered_data)
         except TypeError as e:
             failed_fields = list(data.keys())
             is_critical = section_name is not None and section_name in CRITICAL_SECTIONS
 
+            unexpected_ctx = ""
+            if unexpected_with_suggestions:
+                unexpected_ctx = f" Unexpected keys: {', '.join(unexpected_with_suggestions)}."
+
             if is_critical:
                 raise ConfigError(
                     f"Critical config section '{section_name}' ({dataclass_type.__name__}) "
-                    f"failed to build: {e}. Fields provided: {failed_fields}"
+                    f"failed to build: {e}.{unexpected_ctx} "
+                    f"Fields provided: {failed_fields}"
                 ) from e
             else:
                 # Optional section — fall back to empty defaults
                 logger.debug(
                     f"Optional config section '{section_name or dataclass_type.__name__}' "
-                    f"falling back to defaults: {e}. Fields that failed: {failed_fields}"
+                    f"falling back to defaults: {e}.{unexpected_ctx} "
+                    f"Fields that failed: {failed_fields}"
                 )
                 return dataclass_type()
 
