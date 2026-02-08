@@ -492,3 +492,218 @@ class TestSimilarityCalculation:
             assert adjustment == -0.05
         else:
             assert adjustment == 0.0
+
+
+# ===========================================================================
+# US-77-002: Integration tests for semantic coherence in TieredMatcher
+# ===========================================================================
+class TestTieredMatcherSemanticCoherenceIntegration:
+    """Tests that compute_semantic_coherence is wired into TieredMatcher match paths."""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Create a mock config for TieredMatcher."""
+        from dataclasses import dataclass, field
+        from unittest.mock import MagicMock
+
+        @dataclass
+        class MockMatchingConfig:
+            gemini_model: str = "gemini-2.0-flash"
+            anthropic_model: str = "claude-3-haiku-20240307"
+            ollama_model: str = "llama3.2"
+            ollama_host: str = "http://localhost:11434"
+            primary_provider: str = "gemini"
+            secondary_provider: str = ""
+            use_local_for_review: bool = False
+            min_confidence: float = 0.3
+            embedding_candidates: int = 10
+            high_confidence_threshold: float = 0.85
+            low_confidence_threshold: float = 0.5
+            skip_llm_threshold: float = 0.70
+            ambiguous_threshold: float = 0.6
+            confidence_threshold: float = 0.3
+            max_clip_reuse: int = 10
+            reuse_penalty: float = 0.01
+            chapter_matching_enabled: bool = False
+            topic_mismatch_penalty: float = 0.15
+            location_matching: None = None
+            cache_llm_responses: bool = False
+            face_preference: str = "neutral"
+            caption_quality_adjustment_enabled: bool = False
+            timing_penalty_enabled: bool = False
+            max_consecutive_same_source: int = 3
+            consecutive_source_penalty: float = 0.05
+            adaptive_threshold_enabled: bool = False
+            current_project_boost: float = 0.0
+            broll_boost: float = 0.0
+            obvious_match_min_confidence: float = 0.0
+            semantic_coherence_enabled: bool = True
+            multimodal_enabled: bool = False
+            llm_rerank_candidates: int = 5
+
+        @dataclass
+        class MockOutputConfig:
+            num_alternatives: int = 2
+            secondary_matches_enabled: bool = False
+            strategy_matches_enabled: bool = False
+
+        @dataclass
+        class MockConfig:
+            matching: MockMatchingConfig = field(default_factory=MockMatchingConfig)
+            output: MockOutputConfig = field(default_factory=MockOutputConfig)
+            gemini_api_key: str = None
+            anthropic_api_key: str = None
+            negative_matching: MagicMock = field(default_factory=lambda: MagicMock(enabled=False))
+
+        return MockConfig()
+
+    def _make_segments_and_embeddings(self):
+        """Create video segments with parallel embeddings for lookup."""
+        from src.utils import SRTSegment
+        seg1 = SRTSegment(index=0, start_time=0, end_time=10, text="Video about solar energy panels",
+                          source_file="vid_001")
+        seg2 = SRTSegment(index=1, start_time=0, end_time=10, text="Video about underwater diving",
+                          source_file="vid_002")
+        # Embedding for seg1: similar direction
+        emb1 = np.array([1.0, 0.0, 0.0])
+        # Embedding for seg2: orthogonal direction
+        emb2 = np.array([0.0, 1.0, 0.0])
+        return [seg1, seg2], [emb1, emb2]
+
+    def _create_matcher(self, config):
+        """Create a TieredMatcher with mocked config."""
+        from src.matching.tiered_matcher import TieredMatcher
+        with patch('src.matching.tiered_matcher.get_config', return_value=config):
+            matcher = TieredMatcher(config=config)
+        return matcher
+
+    @pytest.mark.fast
+    def test_smooth_transition_boost_in_breakdown(self, mock_config):
+        """Smooth topic flow between consecutive matches adds semantic_coherence to breakdown."""
+        segments, embeddings = self._make_segments_and_embeddings()
+        matcher = self._create_matcher(mock_config)
+        matcher.set_embedding_lookup(segments, embeddings)
+
+        # Simulate: previous match used seg1 (emb [1,0,0])
+        matcher._previous_match_embedding = embeddings[0]
+
+        # Current match also uses seg1 (same embedding -> smooth flow)
+        confidence_breakdown = []
+        result_conf, reason = matcher._apply_semantic_coherence(
+            0.80, segments[0], confidence_breakdown
+        )
+
+        assert result_conf == pytest.approx(0.80 + SEMANTIC_COHERENCE_SMOOTH_BOOST)
+        assert any(b['component'] == 'semantic_coherence' for b in confidence_breakdown)
+        assert "smooth_topic_flow" in reason
+
+    @pytest.mark.fast
+    def test_abrupt_transition_penalty_in_breakdown(self, mock_config):
+        """Abrupt topic flow between consecutive matches applies penalty."""
+        segments, embeddings = self._make_segments_and_embeddings()
+        matcher = self._create_matcher(mock_config)
+        matcher.set_embedding_lookup(segments, embeddings)
+
+        # Previous match used seg1 (emb [1,0,0])
+        matcher._previous_match_embedding = embeddings[0]
+
+        # Current match uses seg2 (emb [0,1,0] -> orthogonal = abrupt)
+        confidence_breakdown = []
+        result_conf, reason = matcher._apply_semantic_coherence(
+            0.80, segments[1], confidence_breakdown
+        )
+
+        assert result_conf == pytest.approx(0.80 - SEMANTIC_COHERENCE_ABRUPT_PENALTY)
+        assert any(b['component'] == 'semantic_coherence' for b in confidence_breakdown)
+        assert "abrupt_topic_flow" in reason
+
+    @pytest.mark.fast
+    def test_disabled_returns_zero(self, mock_config):
+        """When semantic_coherence_enabled=False, no adjustment is applied."""
+        mock_config.matching.semantic_coherence_enabled = False
+        segments, embeddings = self._make_segments_and_embeddings()
+        matcher = self._create_matcher(mock_config)
+        matcher.set_embedding_lookup(segments, embeddings)
+
+        matcher._previous_match_embedding = embeddings[0]
+
+        confidence_breakdown = []
+        result_conf, reason = matcher._apply_semantic_coherence(
+            0.80, segments[0], confidence_breakdown
+        )
+
+        assert result_conf == 0.80
+        assert reason == "semantic_coherence_disabled"
+
+    @pytest.mark.fast
+    def test_first_segment_no_previous_returns_zero(self, mock_config):
+        """First segment (no previous embedding) returns 0.0 adjustment."""
+        segments, embeddings = self._make_segments_and_embeddings()
+        matcher = self._create_matcher(mock_config)
+        matcher.set_embedding_lookup(segments, embeddings)
+
+        # _previous_match_embedding is None (default for first segment)
+        assert matcher._previous_match_embedding is None
+
+        confidence_breakdown = []
+        result_conf, reason = matcher._apply_semantic_coherence(
+            0.80, segments[0], confidence_breakdown
+        )
+
+        assert result_conf == 0.80
+        assert reason == "missing_embedding"
+
+    @pytest.mark.fast
+    def test_previous_embedding_updated_after_match(self, mock_config):
+        """_apply_semantic_coherence updates _previous_match_embedding for next call."""
+        segments, embeddings = self._make_segments_and_embeddings()
+        matcher = self._create_matcher(mock_config)
+        matcher.set_embedding_lookup(segments, embeddings)
+
+        assert matcher._previous_match_embedding is None
+
+        # First call with seg1
+        matcher._apply_semantic_coherence(0.80, segments[0], [])
+
+        # Previous embedding should now be seg1's embedding
+        assert matcher._previous_match_embedding is not None
+        np.testing.assert_array_equal(matcher._previous_match_embedding, embeddings[0])
+
+        # Second call with seg2
+        matcher._apply_semantic_coherence(0.80, segments[1], [])
+
+        # Previous embedding should now be seg2's embedding
+        np.testing.assert_array_equal(matcher._previous_match_embedding, embeddings[1])
+
+    @pytest.mark.fast
+    def test_set_embedding_lookup_builds_mapping(self, mock_config):
+        """set_embedding_lookup creates id-based mapping from segments to embeddings."""
+        segments, embeddings = self._make_segments_and_embeddings()
+        matcher = self._create_matcher(mock_config)
+        matcher.set_embedding_lookup(segments, embeddings)
+
+        assert matcher._video_embeddings is embeddings
+        assert len(matcher._embedding_lookup) == 2
+        # Can look up each segment's embedding
+        for i, seg in enumerate(segments):
+            emb = matcher._get_segment_embedding(seg)
+            assert emb is not None
+            np.testing.assert_array_equal(emb, embeddings[i])
+
+    @pytest.mark.fast
+    def test_no_embedding_lookup_returns_zero(self, mock_config):
+        """Without set_embedding_lookup, _apply_semantic_coherence returns 0.0."""
+        from src.utils import SRTSegment
+        matcher = self._create_matcher(mock_config)
+
+        # Set a previous embedding manually
+        matcher._previous_match_embedding = np.array([1.0, 0.0, 0.0])
+
+        # Create a segment that is NOT in the lookup
+        seg = SRTSegment(index=99, start_time=0, end_time=10, text="test", source_file="x")
+        confidence_breakdown = []
+        result_conf, reason = matcher._apply_semantic_coherence(0.80, seg, [])
+
+        # current_embedding is None (not in lookup), so returns 0.0
+        assert result_conf == 0.80
+        assert reason == "missing_embedding"

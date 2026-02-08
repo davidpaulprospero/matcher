@@ -283,6 +283,10 @@ def match_all_segments(
     if vo_segment_chapter_map:
         matcher.segment_chapter_map = vo_segment_chapter_map
 
+    # US-77-002: Pass embedding lookup for semantic coherence scoring
+    if video_embeddings and video_segments:
+        matcher.set_embedding_lookup(video_segments, video_embeddings)
+
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
         # Log first segment to confirm loop started
         if i == 0:

@@ -46,6 +46,7 @@ from .scoring import (
     apply_chapter_coherence_penalty,  # US-75-006
     apply_cross_chapter_relevance_boost,  # US-75-006
     apply_listicle_consistency,  # US-75-007
+    compute_semantic_coherence,  # US-77-002
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -162,6 +163,10 @@ class TieredMatcher:
         self.segment_chapter_map: Dict[int, int] = {}
         # US-76-012: Chapter confidence map (chapter_index -> confidence score)
         self._chapter_confidence_map: Dict[int, float] = {}
+        # US-77-002: Semantic coherence - store previous match embedding for topic flow
+        self._previous_match_embedding: Optional[Any] = None
+        self._embedding_lookup: Dict[int, int] = {}  # id(segment) -> index in video_embeddings
+        self._video_embeddings: Optional[List] = None  # Reference to video embeddings list
         mc = self.config.matching
 
         # Matching thresholds
@@ -661,6 +666,53 @@ class TieredMatcher:
         """
         self._recent_matches = []
 
+    def set_embedding_lookup(self, video_segments: List[SRTSegment], video_embeddings: List) -> None:
+        """
+        Build embedding lookup from video segments and their embeddings (US-77-002).
+
+        Creates a mapping from segment identity to embedding index so we can
+        retrieve the embedding of a matched video segment for semantic coherence scoring.
+        """
+        self._video_embeddings = video_embeddings
+        self._embedding_lookup = {id(seg): i for i, seg in enumerate(video_segments)}
+
+    def _get_segment_embedding(self, segment: SRTSegment) -> Optional[Any]:
+        """Look up embedding vector for a video segment (US-77-002)."""
+        if self._video_embeddings is None:
+            return None
+        idx = self._embedding_lookup.get(id(segment))
+        if idx is not None and idx < len(self._video_embeddings):
+            return self._video_embeddings[idx]
+        return None
+
+    def _apply_semantic_coherence(
+        self, adjusted_confidence: float, best_seg: SRTSegment,
+        confidence_breakdown: list
+    ) -> Tuple[float, str]:
+        """
+        Apply semantic coherence scoring and update previous embedding (US-77-002).
+
+        Returns (adjusted_confidence, reason).
+        """
+        mc = self.config.matching
+        semantic_enabled = getattr(mc, 'semantic_coherence_enabled', True)
+        current_embedding = self._get_segment_embedding(best_seg)
+
+        prev = adjusted_confidence
+        adjustment, reason = compute_semantic_coherence(
+            current_embedding, self._previous_match_embedding,
+            semantic_coherence_enabled=semantic_enabled,
+            scoring_config=mc,
+        )
+        adjusted_confidence += adjustment
+        _record_breakdown(confidence_breakdown, 'semantic_coherence', prev, adjusted_confidence, reason)
+
+        # Update previous embedding for next segment
+        if current_embedding is not None:
+            self._previous_match_embedding = current_embedding
+
+        return adjusted_confidence, reason
+
     def _get_video_title(self, segment: SRTSegment) -> Optional[str]:
         """Resolve video title from video_metadata using segment's source_file."""
         if not self.video_metadata:
@@ -952,6 +1004,11 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
 
+            # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
+            adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+                adjusted_confidence, best_seg, confidence_breakdown
+            )
+
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -1153,6 +1210,11 @@ class TieredMatcher:
                 recent_matches=self._recent_matches
             )
             _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
+
+            # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
+            adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+                adjusted_confidence, best_seg, confidence_breakdown
+            )
 
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
@@ -1408,6 +1470,11 @@ class TieredMatcher:
             recent_matches=self._recent_matches
         )
         _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
+
+        # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
+        adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+            adjusted_confidence, best_seg, confidence_breakdown
+        )
 
         # US-75-006: Update chapter source tracking
         self._update_chapter_source_counts(vo_segment, best_seg)
