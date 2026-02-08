@@ -585,6 +585,56 @@ function Ask-Client {
     return $response
 }
 
+function Ask-Agent {
+    <#
+    .SYNOPSIS
+        Asks which AI agent to use for this session
+    .RETURNS
+        "claude" or "codex"
+    #>
+
+    Write-Host ""
+    Write-Host "  Which AI agent?" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  [C] Claude Code (default)" -ForegroundColor White
+    Write-Host "  [X] OpenAI Codex" -ForegroundColor White
+    Write-Host ""
+
+    $selection = Read-Host "  "
+
+    switch -Regex ($selection) {
+        "^[Xx]" { return "codex" }
+        default { return "claude" }
+    }
+}
+
+function Save-AgentChoice {
+    <#
+    .SYNOPSIS
+        Save agent provider choice to ralph-config.json
+    .PARAMETER Provider
+        The provider name ("claude" or "codex")
+    #>
+    param([string]$Provider)
+
+    $configPath = Join-Path $script:RalphDir "config\ralph-config.json"
+    if (-not (Test-Path $configPath)) { return }
+
+    try {
+        $configData = Get-Content $configPath -Raw | ConvertFrom-Json
+        if (-not $configData.agent) {
+            $configData | Add-Member -NotePropertyName 'agent' -NotePropertyValue @{ provider = $Provider } -Force
+        } else {
+            $configData.agent.provider = $Provider
+        }
+        $configData | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8
+        Write-Host "  Agent set to: $Provider" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  Warning: Could not save agent choice: $_" -ForegroundColor Yellow
+    }
+}
+
 function Ask-Priority {
     <#
     .SYNOPSIS
@@ -1253,10 +1303,15 @@ if (-not $Mode -and -not $FocusArea -and -not $FocusAreas -and -not $Resume -and
         # Ralph's Choice TrueAuto - show focus area selection, then launch with TrueAuto
         $selectedFocus = Show-CategorizedFocusAreaSelection
 
+        # Ask which AI agent to use
+        $agentChoice = Ask-Agent
+        Save-AgentChoice -Provider $agentChoice
+        Write-InterviewLog "Agent selected: $agentChoice"
+
         if ($selectedFocus) {
             # User selected a specific area
             Write-Host ""
-            Write-Host "  Launching Ralph's Choice TrueAuto with: $selectedFocus" -ForegroundColor Green
+            Write-Host "  Launching Ralph's Choice TrueAuto with: $selectedFocus (agent: $agentChoice)" -ForegroundColor Green
             Write-InterviewLog "TrueAuto mode with focus area: $selectedFocus"
 
             if (-not $NoLaunch) {
@@ -1266,7 +1321,7 @@ if (-not $Mode -and -not $FocusArea -and -not $FocusAreas -and -not $Resume -and
         } else {
             # No area selected - use Ralph's Choice Auto (fully autonomous)
             Write-Host ""
-            Write-Host "  Launching Ralph's Choice Auto (fully autonomous)" -ForegroundColor Magenta
+            Write-Host "  Launching Ralph's Choice Auto (fully autonomous, agent: $agentChoice)" -ForegroundColor Magenta
             Write-InterviewLog "Ralph's Choice Auto mode (no focus area)"
 
             if (-not $NoLaunch) {
@@ -1589,6 +1644,11 @@ if (-not $script:ResumeMode) {
     }
 
     Write-InterviewLog "Mode selected: $script:SelectedMode"
+
+    # Ask which AI agent to use
+    $agentChoice = Ask-Agent
+    Save-AgentChoice -Provider $agentChoice
+    Write-InterviewLog "Agent selected: $agentChoice"
 
     # Launch Ralph windows (unless -NoLaunch was specified)
     if (-not $NoLaunch) {

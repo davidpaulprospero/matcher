@@ -184,15 +184,15 @@ function Test-APIHealth {
 function Invoke-ClaudeWithInfiniteRetry {
     <#
     .SYNOPSIS
-        Invoke Claude subprocess with infinite retry on API timeout
+        Invoke agent subprocess with infinite retry on API timeout
     .DESCRIPTION
         Keeps retrying forever on API timeout (not just 3 times) with exponential backoff.
         Has a 30-minute max per story to prevent infinite loops.
         Properly handles non-timeout exceptions.
     .PARAMETER ClaudePath
-        Path to Claude executable
+        Path to agent executable
     .PARAMETER ClaudeArgs
-        Arguments for Claude CLI
+        Arguments for agent CLI
     .PARAMETER Prompt
         Prompt to send
     .PARAMETER OutFile
@@ -205,6 +205,9 @@ function Invoke-ClaudeWithInfiniteRetry {
         When this story started (for 30-min limit)
     .PARAMETER FocusArea
         Focus area ID (for stall threshold override - testing areas get longer timeouts)
+    .PARAMETER PromptMethod
+        How to deliver the prompt: "stdin" (pipe to stdin) or "arg" (already in args).
+        Default: "stdin" for backward compatibility.
     .RETURNS
         Hashtable with: TimedOut, Decompose, Reason, Attempts, and all Invoke-ClaudeSubprocess fields
     #>
@@ -216,7 +219,8 @@ function Invoke-ClaudeWithInfiniteRetry {
         [Parameter(Mandatory)][string]$ErrFile,
         [string]$StoryId = "",
         [datetime]$StoryStartTime = (Get-Date),
-        [string]$FocusArea = ""
+        [string]$FocusArea = "",
+        [string]$PromptMethod = "stdin"
     )
 
     $attempt = 0
@@ -261,7 +265,8 @@ function Invoke-ClaudeWithInfiniteRetry {
                 -OutFile $OutFile `
                 -ErrFile $ErrFile `
                 -FocusArea $FocusArea `
-                -StoryId $StoryId
+                -StoryId $StoryId `
+                -PromptMethod $PromptMethod
 
             # Success or non-timeout failure
             if (-not $result.TimedOut) {
@@ -335,20 +340,24 @@ function Get-PromptHash {
 function Invoke-ClaudeSubprocess {
     <#
     .SYNOPSIS
-        Spawn Claude CLI process with stdin pipe, async output capture, and
+        Spawn agent CLI process with async output capture and
         activity-based timeout monitoring. Kills process on timeout.
+        Supports both stdin and arg-based prompt delivery.
     .PARAMETER ClaudePath
-        Full path to claude executable
+        Full path to agent executable
     .PARAMETER ClaudeArgs
-        Arguments array for claude CLI
+        Arguments array for agent CLI
     .PARAMETER Prompt
-        Prompt text to pipe via stdin
+        Prompt text to pipe via stdin (ignored when PromptMethod is "arg")
     .PARAMETER OutFile
         Path to write stdout log
     .PARAMETER ErrFile
         Path to write stderr log
     .PARAMETER StoryId
         Story ID to monitor for early exit when marked passes:true in prd.json
+    .PARAMETER PromptMethod
+        How to deliver the prompt: "stdin" (pipe to stdin) or "arg" (already in args).
+        Default: "stdin" for backward compatibility.
     .RETURNS
         Hashtable: Exited, ExitCode, Output, ResourceSamples, ExecutionStart, ExecutionEnd, TimedOut
     #>
@@ -359,7 +368,8 @@ function Invoke-ClaudeSubprocess {
         [Parameter(Mandatory)][string]$OutFile,
         [Parameter(Mandatory)][string]$ErrFile,
         [string]$FocusArea = "",
-        [string]$StoryId = ""
+        [string]$StoryId = "",
+        [string]$PromptMethod = "stdin"
     )
 
     # Get timeout from config
@@ -396,7 +406,7 @@ function Invoke-ClaudeSubprocess {
     $psi.Arguments = $flagsString
     $psi.WorkingDirectory = $script:ProjectRoot
     $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardInput = ($PromptMethod -eq "stdin")
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
@@ -422,8 +432,11 @@ function Invoke-ClaudeSubprocess {
         $process.BeginOutputReadLine()
         $process.BeginErrorReadLine()
 
-        $process.StandardInput.Write($Prompt)
-        $process.StandardInput.Close()
+        # Deliver prompt via stdin (for claude) or skip (for arg-based providers like codex)
+        if ($PromptMethod -eq "stdin") {
+            $process.StandardInput.Write($Prompt)
+            $process.StandardInput.Close()
+        }
 
         # Activity-based timeout monitoring
         $checkIntervalSec = 5
@@ -925,7 +938,7 @@ function Resolve-ClaudeResult {
             if ($evidenceResult -and $evidenceResult.criteriaTotal -gt 0 -and $evidenceResult.percentage -lt $evidenceMinPct) {
                 Write-Host "  Evidence below threshold ($($evidenceResult.percentage)% < $($evidenceMinPct)%) - rejecting story" -ForegroundColor Red
                 [Console]::Out.Flush()
-                Update-StoryStatus -StoryId $Ctx.StoryId -Passes $false -Notes "Evidence gate: $($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal) criteria verified ($($evidenceResult.percentage)%). Minimum: $($evidenceMinPct)%."
+                $null = Update-StoryStatus -StoryId $Ctx.StoryId -Passes $false -Notes "Evidence gate: $($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal) criteria verified ($($evidenceResult.percentage)%). Minimum: $($evidenceMinPct)%."
                 $success = $false
                 $iterationStatus = "evidence_rejected"
                 $script:State.ConsecutiveFailures++

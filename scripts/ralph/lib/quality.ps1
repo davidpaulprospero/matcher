@@ -84,12 +84,16 @@ Please output your review as JSON.
     $model = if ($config.review -and $config.review.model) { $config.review.model } else { "sonnet" }
 
     try {
-        $claudePath = Get-ClaudePath
+        # Use agent abstraction for review sessions (read-only)
+        $provider = Get-AgentProvider
+        $claudePath = Get-AgentExecutable -Provider $provider
+        $reviewModel = $model  # Review uses its own model config (usually sonnet)
+        $reviewCommand = Build-AgentCommand -Provider $provider -Model $reviewModel -Prompt $reviewRequest -Options @{ ReadOnly = $true }
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $claudePath
-        $psi.Arguments = "--print --dangerously-skip-permissions --model $model"
-        $psi.RedirectStandardInput = $true
+        $psi.Arguments = ($reviewCommand.Args -join ' ')
+        $psi.RedirectStandardInput = ($reviewCommand.PromptMethod -eq "stdin")
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.UseShellExecute = $false
@@ -107,9 +111,11 @@ Please output your review as JSON.
             $process.Start() | Out-Null
             $process.BeginOutputReadLine()
 
-            # Pipe prompt via stdin to avoid CLI argument length limits
-            $process.StandardInput.Write($reviewRequest)
-            $process.StandardInput.Close()
+            # Deliver prompt via stdin for stdin-based providers
+            if ($reviewCommand.PromptMethod -eq "stdin") {
+                $process.StandardInput.Write($reviewRequest)
+                $process.StandardInput.Close()
+            }
 
             # Poll HasExited instead of WaitForExit to avoid .NET Framework deadlock
             # when child processes inherit stdout/stderr pipe handles
@@ -1038,7 +1044,7 @@ function Invoke-StoryRollback {
             Write-Host "  Rollback: Successfully reverted $StoryId" -ForegroundColor Green
 
             # Record in learning DB
-            Update-LearningDb -Entry @{
+            $null = Update-LearningDb -Entry @{
                 type = 'rollback'
                 storyId = $StoryId
                 commitHash = $canRollback.commitHash
@@ -1117,12 +1123,16 @@ function Invoke-CodeReview {
     $reviewFile = Join-Path $script:SessionLogDir "review_${StoryId}.json"
 
     try {
-        $claudeFullPath = Get-ClaudePath
+        # Use agent abstraction for provider-agnostic spawning
+        $provider = Get-AgentProvider
+        $agentPath = Get-AgentExecutable -Provider $provider
+        $reviewCommand = Build-AgentCommand -Provider $provider -Model $model -Prompt $reviewPrompt -Options @{ ReadOnly = $true }
+        $promptMethod = $reviewCommand.PromptMethod
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = $claudeFullPath
-        $psi.Arguments = "--print --dangerously-skip-permissions --model $model"
-        $psi.RedirectStandardInput = $true
+        $psi.FileName = $agentPath
+        $psi.Arguments = ($reviewCommand.Args -join ' ')
+        $psi.RedirectStandardInput = ($promptMethod -eq "stdin")
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.UseShellExecute = $false
@@ -1140,9 +1150,11 @@ function Invoke-CodeReview {
             $process.Start() | Out-Null
             $process.BeginOutputReadLine()
 
-            # Pipe prompt via stdin to avoid CLI argument length limits
-            $process.StandardInput.Write($reviewPrompt)
-            $process.StandardInput.Close()
+            # Pipe prompt via stdin for providers that use it
+            if ($promptMethod -eq "stdin") {
+                $process.StandardInput.Write($reviewPrompt)
+                $process.StandardInput.Close()
+            }
 
             # Poll HasExited instead of WaitForExit to avoid .NET Framework deadlock
             $deadline = (Get-Date).AddSeconds($timeout)
@@ -1335,7 +1347,7 @@ function Invoke-BatchPreFlight {
                 Write-Host "    Pre-flight: Added refined story $($refined.id) to sprint" -ForegroundColor Cyan
             }
         }
-        Save-Sprint -Sprint $prd
+        $null = Save-Sprint -Sprint $prd
         Write-Host "  Pre-flight: Generated $($refinedStories.Count) refined follow-on stories" -ForegroundColor Cyan
     }
 

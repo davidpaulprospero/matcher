@@ -113,6 +113,9 @@ if (-not (Test-Path $script:ArchiveDir)) {
 . "$script:LibPath\healing.ps1"
 . "$script:LibPath\prompts.ps1"
 . "$script:LibPath\claude.ps1"
+. "$script:LibPath\agents\claude_provider.ps1"
+. "$script:LibPath\agents\codex_provider.ps1"
+. "$script:LibPath\agent.ps1"
 . "$script:LibPath\display.ps1"
 
 # Disable Quick Edit Mode to prevent console Mark mode from freezing the monitoring loop.
@@ -247,15 +250,15 @@ function Invoke-ClaudeProcess {
 
     Write-IterationBanner -Iteration $script:State.IterationCount -FocusArea $focusAreaId -StoryId $storyId
 
-    # Get Claude path
-    $claudePath = Get-ClaudePath
-
-    # Build arguments
-    $model = if ($script:Config.model) { $script:Config.model } else { "opus" }
-    $claudeArgs = @("--print", "--dangerously-skip-permissions", "--model", $model)
-    if ($AllowedTools) {
-        $claudeArgs += "--allowedTools=Bash,Read,Write,Edit,Glob,Grep,WebSearch"
+    # Get agent provider and build command
+    $provider = Get-AgentProvider
+    $model = Get-AgentModel -Provider $provider
+    $claudePath = Get-AgentExecutable -Provider $provider
+    $agentCommand = Build-AgentCommand -Provider $provider -Model $model -Prompt $Prompt -Options @{
+        AllowedTools = [bool]$AllowedTools
     }
+    $claudeArgs = $agentCommand.Args
+    $promptMethod = $agentCommand.PromptMethod
 
     $displayPrompt = if ($isStoryWork) { "Work on $storyId" } elseif ($PromptType -eq "prd_generation") { "Generate PRD for $focusAreaId" } else { "Focus on $focusAreaId" }
     Write-Host "  Invoking Claude..." -ForegroundColor Cyan
@@ -297,7 +300,8 @@ function Invoke-ClaudeProcess {
             -ErrFile $errFile `
             -StoryId $(if ($storyId) { $storyId } else { $Identifier }) `
             -StoryStartTime $script:State.CurrentStoryStartTime `
-            -FocusArea $focusAreaId
+            -FocusArea $focusAreaId `
+            -PromptMethod $promptMethod
 
         # === COMPUTE METRICS ===
         $iterationDuration = (Get-Date) - $iterationStart
@@ -382,7 +386,10 @@ function Invoke-ClaudeProcess {
 function Get-ClaudePath {
     <#
     .SYNOPSIS
-        Resolve the path to Claude CLI
+        Resolve the path to Claude CLI.
+        Kept as backward-compat entry point. Used by Get-AgentExecutable
+        for the "claude" provider, and by healing/quality/exploration
+        sessions that haven't been migrated to the agent abstraction yet.
     .RETURNS
         Full path to claude executable
     #>
@@ -588,14 +595,14 @@ function Invoke-ClaudeForStory {
 
                 if ($phantomCount -ge 2) {
                     Write-Host "  [PHANTOM] $StoryId has $phantomCount phantom successes - marking as hard story" -ForegroundColor Red
-                    Mark-AsHardStory `
+                    $null = Mark-AsHardStory `
                         -StoryId $StoryId `
                         -Errors @(@{ ErrorType = "phantom_success"; ErrorMessage = "Story reports success but passes remains false ($phantomCount times)"; Timestamp = (Get-Date).ToString("o") }) `
                         -Reason "phantom_success" `
                         -FocusArea $focusArea `
                         -StoryTitle $(if ($storyObj) { $storyObj.title } else { "Unknown" })
 
-                    Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "HARD STORY: Phantom success - exits 0 but never sets passes: true"
+                    $null = Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "HARD STORY: Phantom success - exits 0 but never sets passes: true"
 
                     # Reset tracking
                     $script:PhantomSuccesses.Remove($StoryId)
@@ -625,8 +632,8 @@ function Invoke-ClaudeForStory {
             if ($script:State.CurrentRetryCount -ge $triggerAfter -and $storyObj) {
                 $subStories = Split-StuckStory -StoryId $StoryId -Story $storyObj
                 if ($subStories.Count -gt 0) {
-                    Add-DecomposedStoriesToPRD -Stories $subStories
-                    Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "Delta-split into $($subStories.Count) sub-stories"
+                    $null = Add-DecomposedStoriesToPRD -Stories $subStories
+                    $null = Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "Delta-split into $($subStories.Count) sub-stories"
                     Write-SessionLog -Event "delta_split" -Data @{ storyId = $StoryId; subCount = $subStories.Count }
                     Write-Host "  [DELTA] Split $StoryId into $($subStories.Count) per-criterion sub-stories" -ForegroundColor Cyan
                     # Reset error tracking — sub-stories picked up by Get-OptimalNextStory
@@ -662,7 +669,7 @@ function Invoke-ClaudeForStory {
 
         if ($shouldMarkHard) {
             Write-Host "  [HARD STORY] $StoryId marked as hard ($reason)" -ForegroundColor Yellow
-            Mark-AsHardStory `
+            $null = Mark-AsHardStory `
                 -StoryId $StoryId `
                 -Errors $script:State.CurrentStoryErrors `
                 -Reason $reason `
@@ -674,7 +681,7 @@ function Invoke-ClaudeForStory {
             $script:State.CurrentStoryStartTime = $null
 
             # Update PRD to mark story as skipped (special status)
-            Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "HARD STORY: Skipped after $reason - pending decomposition"
+            $null = Update-StoryStatus -StoryId $StoryId -Passes $false -Notes "HARD STORY: Skipped after $reason - pending decomposition"
         }
     }
     else {
@@ -845,7 +852,7 @@ function Get-SprintStatus {
     # Delta debugging: check if any delta-split parents can be completed
     $parentUpdated = Complete-DeltaSplitParents -Stories $prd.userStories
     if ($parentUpdated) {
-        Save-Sprint -Sprint $prd
+        $null = Save-Sprint -Sprint $prd
         # Recount after parent completion
         $passed = 0; $failed = 0
         foreach ($story in $prd.userStories) {
@@ -917,22 +924,25 @@ if (Test-Path $staleSignal) {
     Remove-Item $staleSignal -Force -ErrorAction SilentlyContinue
 }
 
-# Validate Claude is available
-$claudePath = Get-ClaudePath
-Write-Host "  Claude path: $claudePath" -ForegroundColor DarkGray
+# Validate agent is available
+$agentProvider = Get-AgentProvider
+$claudePath = Get-AgentExecutable -Provider $agentProvider
+$agentModel = Get-AgentModel -Provider $agentProvider
+Write-Host "  Agent: $agentProvider (model: $agentModel)" -ForegroundColor DarkGray
+Write-Host "  Executable: $claudePath" -ForegroundColor DarkGray
 
-# Check for Claude availability
+# Check for agent availability
 try {
     $versionCheck = & $claudePath --version 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Warning: Claude may not be available" -ForegroundColor Yellow
+        Write-Host "  Warning: $agentProvider may not be available" -ForegroundColor Yellow
     }
     else {
-        Write-Host "  Claude version: $versionCheck" -ForegroundColor DarkGray
+        Write-Host "  $agentProvider version: $versionCheck" -ForegroundColor DarkGray
     }
 }
 catch {
-    Write-Host "  Warning: Could not verify Claude installation" -ForegroundColor Yellow
+    Write-Host "  Warning: Could not verify $agentProvider installation" -ForegroundColor Yellow
     Write-Host "  Error: $_" -ForegroundColor Red
 }
 

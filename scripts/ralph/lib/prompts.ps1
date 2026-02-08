@@ -403,12 +403,21 @@ function Build-StoryPrompt {
     $recommendation = Get-PromptRecommendation
     $maxLength = $recommendation.maxLength
 
+    # Provider-specific preamble (e.g., Codex instructions)
+    $provider = Get-AgentProvider
+    $providerInstructions = Get-ProviderInstructions -Provider $provider
+
     # Check for adaptive pruning flag
     $useBudgeting = $config.flags -and $config.flags.adaptivePruning
 
     if ($useBudgeting) {
         # === BUDGETED PATH: Build tagged sections, then assemble with priority-based pruning ===
         $sections = @()
+
+        # Section: Provider instructions — P1 (never trimmed), displayOrder -1
+        if ($providerInstructions) {
+            $sections += @{ name = "providerInstructions"; content = $providerInstructions; priority = 1; displayOrder = -1 }
+        }
 
         # Section: Failure context (on retries) — P2, displayOrder 0
         if ($recommendation.useFailureContext -and $RetryCount -gt 0) {
@@ -567,6 +576,11 @@ function Build-StoryPrompt {
     else {
         # === LEGACY PATH: Flat $promptParts array with naive truncation (existing behavior) ===
         $promptParts = @()
+
+        # Section 0: Provider instructions (e.g., Codex-specific preamble)
+        if ($providerInstructions) {
+            $promptParts += $providerInstructions
+        }
 
         # Section 1: Failure context (on retries)
         if ($recommendation.useFailureContext -and $RetryCount -gt 0) {
