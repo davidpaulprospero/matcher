@@ -1,199 +1,199 @@
 {
-  "sprintNumber": 75,
-  "focusArea": "context-matching",
-  "branchName": "ralph/sprint-75",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-75-001",
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'context-matching' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'context-matching'",
-        "Add stories US-75-002 through US-75-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-75-NNN to be unique across sprints",
-        "Mark this story (US-75-001) as passes: true when done"
-      ],
-      "passes": true,
-      "priority": "high",
-      "title": "Generate sprint stories for context-matching focus area",
-      "notes": "Generated 11 stories (US-75-002 through US-75-012) covering context-matching focus area: description relevance scoring, metadata propagation, LLM reranker context expansion, description-enriched embeddings, tag-based scoring, video_metadata plumbing, chapter-aware scoring, chapter source consistency, description-derived iterative queries, chapter coherence penalty, and comprehensive test coverage."
+    "sprintNumber": 75,
+    "focusArea": "context-matching",
+    "branchName": "ralph/sprint-75",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
     },
-    {
-      "id": "US-75-002",
-      "title": "Add description relevance scoring adjustment to apply_all_adjustments",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "New function `apply_description_relevance_adjustment` exists in `src/matching/scoring.py` that computes keyword overlap between voiceover segment text and video description",
-        "Graduated boost applied: 1 keyword match -> +0.02, 2 matches -> +0.04, 3+ matches -> +0.06",
-        "Adjustment appears in `confidence_breakdown` dict as `description_relevance` entry with numeric value",
-        "Function is called from `apply_all_adjustments()` when video_metadata contains a description",
-        "Unit test verifies graduated boost values for 0, 1, 2, 3+ keyword matches",
-        "Unit test verifies `description_relevance` key exists in confidence_breakdown after adjustment"
-      ],
-      "notes": "Evidence gate: 2/6 criteria verified (33%). Minimum: 90%.",
-      "status": "done"
-    },
-    {
-      "id": "US-75-003",
-      "title": "Propagate video_description from caption_results to text_metadata in caption_stage",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "`_populate_text_metadata()` in `src/stages/caption_stage.py` copies `video_description` from each `CaptionResult` into text_metadata dict keyed by video_id",
-        "Description is available in text_metadata alongside existing title data for downstream consumers",
-        "Backward compatible: missing description defaults to empty string, no crash on old cache data",
-        "Unit test verifies description propagation from CaptionResult to text_metadata",
-        "Unit test verifies graceful handling when CaptionResult has no video_description field (old cache)"
-      ],
-      "notes": "Added `video_description = result.get('video_description', '')` extraction and included it in text_metadata entry dict. 5 tests in test_description_propagation_us75_003.py covering: propagation, multi-segment, missing field (old cache), coexistence with other fields, multi-video independence.",
-      "status": "done"
-      "notes": "Tier: FOUNDATION (enables US-75-002, US-75-004, US-75-005). Files: `src/stages/caption_stage.py` lines ~1717-1777 (`_populate_text_metadata`). Currently only title_lookup is built from video_search_results. Need to also build description_lookup from caption_results[video_id].video_description. The CaptionResult already has the field (line 570 of models.py) but it's not propagated."
-    },
-    {
-      "id": "US-75-004",
-      "title": "Expand LLM reranker to use full description context instead of first sentence only",
-      "priority": "high",
-      "passes": false,
-      "acceptanceCriteria": [
-        "`_enrich_candidates_with_context()` in `src/matching/llm_reranker.py` uses up to 300 chars of description (not just first sentence/100 chars)",
-        "New config option `context_enrichment.reranker_max_description_length: 300` controls truncation length",
-        "Config dataclass `ContextEnrichmentConfig` in `src/config/sections/matching.py` has `reranker_max_description_length: int = 300` field",
-        "Config also added to `config.yaml` under `matching.context_enrichment`",
-        "Unit test verifies description truncation respects configurable max length",
-        "Unit test verifies enriched text format includes longer description"
-      ],
-      "notes": "Tier: HIGH IMPACT (LLM gets more context signal). Files: `src/matching/llm_reranker.py` lines ~198-224 (`_enrich_candidates_with_context`), `src/config/sections/matching.py` lines ~167-181 (ContextEnrichmentConfig), `config.yaml` lines ~583-590. Currently truncates to first sentence or 100 chars (line ~200). Increasing to 300 gives LLM much better context without overwhelming the prompt."
-    },
-    {
-      "id": "US-75-005",
-      "title": "Add description-enriched embeddings option alongside title enrichment",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New config option `context_enrichment.description_enriched_embeddings: bool = False` in ContextEnrichmentConfig",
-        "When enabled, `_populate_text_metadata()` prepends `[{title} - {first_50_chars_of_description}]` to embedding text instead of just `[{title}]`",
-        "Config added to both `src/config/sections/matching.py` and `config.yaml`",
-        "Default is False (description enrichment is experimental, title-only is proven)",
-        "Unit test verifies embedding text format with description enrichment enabled vs disabled",
-        "Unit test verifies description truncated to 50 chars for embedding prefix"
-      ],
-      "notes": "Tier: MEDIUM (experimental - embedding models may or may not benefit from description context). Files: `src/stages/caption_stage.py` lines ~1765-1777 (where title_enriched_embeddings is applied), `src/config/sections/matching.py` line ~177. Default False because adding too much text to embedding prefix can dilute semantic signal. Test file: `tests/test_caption_stage.py` or `tests/test_context_enrichment.py`."
-    },
-    {
-      "id": "US-75-006",
-      "title": "Add tag-based semantic keyword boost in scoring",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New function `apply_tag_keyword_boost` in `src/matching/scoring.py` computes overlap between voiceover segment keywords and video tags from video_metadata",
-        "Tags are lowercased and split on commas/spaces before comparison",
-        "Graduated boost: 1 tag match -> +0.02, 2+ matches -> +0.04, with cap at +0.06",
-        "Adjustment appears in `confidence_breakdown` as `tag_relevance` entry",
-        "Unit test verifies tag matching with various tag formats (single words, multi-word tags, mixed case)",
-        "Unit test verifies boost cap prevents excessive scoring from videos with many tags"
-      ],
-      "notes": "Tier: MEDIUM (tags are noisy but can be useful signal). Files: `src/matching/scoring.py` (add near other relevance adjustments ~line 2268). video_tags are already extracted and stored in CaptionResult (line 572 of models.py) and DownloadedVideo (line 84 of state.py). Need to pass tags through video_metadata dict from tiered_matcher.py. The interview notes mention reusing existing keyword_boost mechanism, but a separate function is cleaner for audit trail."
-    },
-    {
-      "id": "US-75-007",
-      "title": "Pass video_metadata with description and tags through TieredMatcher to scoring",
-      "priority": "high",
-      "passes": false,
-      "acceptanceCriteria": [
-        "TieredMatcher's `video_metadata` dict includes `description` and `tags` fields per video (not just `title`)",
-        "Match stage (`src/stages/match.py`) populates video_metadata with description from caption_results and tags from caption_results",
-        "Scoring functions receive video_metadata containing title, description, and tags for each candidate",
-        "Unit test verifies video_metadata dict structure includes title, description, and tags",
-        "Unit test verifies scoring functions can access description and tags from video_metadata"
-      ],
-      "notes": "Tier: HIGH (plumbing prerequisite for US-75-002 and US-75-006). Files: `src/matching/tiered_matcher.py` lines ~127-141 (init), ~636-644 (metadata usage), ~968 (reranker call). `src/stages/match.py` where TieredMatcher is instantiated and video_metadata is built. Currently video_metadata = {video_id: {title: str, description: str}} but description may not be populated from caption_results. Need to verify and fix the plumbing from caption_results -> video_metadata -> scoring."
-    },
-    {
-      "id": "US-75-008",
-      "title": "Add chapter-aware scoring adjustment for video chapter topic matching",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New function `apply_chapter_topic_match_adjustment` in `src/matching/scoring.py` checks if candidate segment falls within a video chapter whose title/keywords overlap with voiceover segment text",
-        "Topic match boost: +0.05 for 1 keyword overlap, +0.08 for 2+ overlaps between chapter title words and voiceover keywords",
-        "Adjustment appears in `confidence_breakdown` as `chapter_topic_match` entry",
-        "Gracefully skips when video has no chapters (most videos won't have chapters)",
-        "Unit test verifies boost values for chapter title keyword overlap",
-        "Unit test verifies no crash or penalty when video_chapters is empty"
-      ],
-      "notes": "Tier: MEDIUM (only applies to videos with YouTube chapters, which is a subset). Files: `src/matching/scoring.py` (add new adjustment function), `src/caption/models.py` (VideoChapter already exists if chapter_detection module is present). video_chapters are extracted in caption_fetcher.py (line ~2314-2323) and stored in CaptionResult (line 571). Need to pass chapter data through video_metadata to scoring. Depends on US-75-007 for plumbing."
-    },
-    {
-      "id": "US-75-009",
-      "title": "Add chapter source consistency boost within voiceover sections",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New function `apply_chapter_source_consistency_boost` in `src/matching/scoring.py` adds +0.03 when candidate is from same video source as previous match in the same voiceover chapter/listicle group",
-        "Requires voiceover chapter context (chapter boundaries from chapter_detection module)",
-        "Boost only applies within chapter boundaries - cross-chapter diversity is preserved",
-        "Adjustment appears in `confidence_breakdown` as `chapter_source_consistency` entry",
-        "Unit test verifies boost applied for same-source within chapter",
-        "Unit test verifies no boost applied across chapter boundaries"
-      ],
-      "notes": "Tier: LOW (polish - requires both chapter detection and sequential match awareness). Files: `src/matching/scoring.py`. This adjustment needs knowledge of previous matches within the same voiceover chapter, which requires passing chapter grouping info and match history into the scoring context. May need to extend scoring function signature or add a scoring context object. Depends on chapter_detection module being functional."
-    },
-    {
-      "id": "US-75-010",
-      "title": "Add description-derived search queries for iterative match gap filling",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Gap analyzer in `src/iterative_match/gap_analyzer.py` extracts key phrases from descriptions of already-matched videos when generating search queries for unfilled gaps",
-        "New config option `iterative_match.use_description_queries: bool = True` in iterative matching config",
-        "Config added to both config dataclass and config.yaml",
-        "Key phrase extraction uses simple noun-phrase heuristic (2-3 word phrases from description text)",
-        "Unit test verifies key phrase extraction from sample video descriptions",
-        "Unit test verifies description-derived queries are included in gap-filling search queries"
-      ],
-      "notes": "Tier: MEDIUM (improves iterative match quality for hard-to-fill gaps). Files: `src/iterative_match/gap_analyzer.py` (lines ~30-149), `src/config/sections/matching.py` or iterative match config. Gap analyzer currently uses word lists (ABSTRACT_CONCEPTS, EMOTION_WORDS, ACTION_VERBS, LOCATION_INDICATORS) to classify gaps. Adding description-derived queries gives more targeted search terms from videos that already matched well."
-    },
-    {
-      "id": "US-75-011",
-      "title": "Add chapter coherence penalty for scattered video sources within voiceover sections",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New function `apply_chapter_coherence_penalty` in `src/matching/scoring.py` tracks unique video sources used within each voiceover chapter/section",
-        "Penalty of -0.03 applied when a voiceover section already uses 5+ different video sources and candidate would add another",
-        "Configurable threshold via `matching.chapter_grouping.coherence_penalty_threshold: int = 5`",
-        "Config added to matching config dataclass and config.yaml",
-        "Adjustment appears in `confidence_breakdown` as `chapter_coherence` entry",
-        "Unit test verifies penalty triggers at threshold and not below it"
-      ],
-      "notes": "Tier: LOW (polish - prevents excessive scatter but requires match history tracking). Files: `src/matching/scoring.py`, `src/config/sections/matching.py`, `config.yaml`. This is a quality-of-output improvement that prevents a voiceover section about one topic from pulling clips from too many unrelated videos. Requires tracking which sources have been selected for each voiceover section during matching."
-    },
-    {
-      "id": "US-75-012",
-      "title": "Add comprehensive test coverage for context-enriched matching pipeline",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "New test file `tests/test_context_enrichment.py` with at least 8 test cases covering the context-matching feature set",
-        "Tests cover: description extraction from info_dict, description propagation through pipeline, title+description enriched scoring, tag matching, chapter topic matching, LLM reranker context injection, config toggle behavior",
-        "All tests use mock data (no network calls) and run with `--non-interactive`",
-        "Tests verify backward compatibility: old cache entries without description/chapters/tags fields don't crash",
-        "Tests verify config toggles: disabling `extract_video_description` prevents description from appearing in scoring"
-      ],
-      "notes": "Tier: MEDIUM (test coverage for the full context-matching feature set). Files: new `tests/test_context_enrichment.py`. Should import from `src/matching/scoring.py`, `src/matching/llm_reranker.py`, `src/caption/models.py`, `src/config/sections/matching.py`. Use fixtures from `tests/conftest.py` where applicable. Mark tests with `@pytest.mark.fast` for inclusion in quick test runs."
-    }
-  ]
+    "userStories": [
+        {
+            "id": "US-75-001",
+            "title": "Generate sprint stories for context-matching focus area",
+            "priority": "high",
+            "passes": true,
+            "notes": "Seed story. Generated 11 stories (US-75-002 through US-75-012) targeting context-matching wire-up gaps. Key finding: MatchScoring.apply_all_adjustments() has title_relevance, description_relevance, tag_keyword_boost, chapter_topic_match, chapter_source_consistency, chapter_coherence_penalty, cross_chapter_relevance, and listicle_consistency adjustments, but TieredMatcher only calls basic adjustments (topic_penalty, broll_boost, caption_quality, timing_penalty, project_boost, consecutive_source_penalty). The advanced adjustments are orphaned code.",
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'listicle-matching' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'context-matching'",
+                "Add stories US-75-002 through US-75-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-75-NNN to be unique across sprints",
+                "Mark this story (US-75-001) as passes: true when done"
+            ]
+        },
+        {
+            "id": "US-75-002",
+            "title": "Wire title_relevance adjustment into TieredMatcher scoring pipeline",
+            "priority": "high",
+            "passes": true,
+            "notes": "DONE: Created standalone apply_title_relevance_adjustment() in scoring.py mirroring MatchScoring class method. Added _get_video_title() helper to TieredMatcher. Wired into all 3 scoring blocks (obvious match, high similarity, LLM fallback). 12 tests pass covering standalone function, TieredMatcher integration with/without video_metadata, and helper method.",
+            "acceptanceCriteria": [
+                "TieredMatcher._score_and_select_best (or equivalent scoring block) calls apply_title_relevance_adjustment for each candidate",
+                "video_title is resolved from self.video_metadata using the candidate segment's source_file/video_id",
+                "title_relevance appears in confidence_breakdown when video_title has keyword overlap with voiceover text",
+                "title_relevance adjustment is zero (no-op) when video_title is empty or None",
+                "Unit test: TieredMatcher with video_metadata containing titles produces title_relevance in breakdown",
+                "Unit test: TieredMatcher without video_metadata produces no title_relevance entry"
+            ]
+        },
+        {
+            "id": "US-75-003",
+            "title": "Wire description_relevance adjustment into TieredMatcher scoring pipeline",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: CRITICAL WIRE-UP. apply_description_relevance_adjustment exists in scoring.py (US-75-002 implementation) and is called within apply_all_adjustments, but TieredMatcher never invokes it. video_description is available in text_metadata entries (added in US-75-003 caption stage work) but not accessed by TieredMatcher. Files: src/matching/tiered_matcher.py (scoring block ~line 730), src/matching/scoring.py (apply_description_relevance_adjustment). Must resolve video_description from text_metadata or from checkpoint data. Test: tests/test_description_relevance_us75002.py, tests/test_matching_scoring.py.",
+            "acceptanceCriteria": [
+                "TieredMatcher scoring block calls apply_description_relevance_adjustment for each candidate",
+                "video_description is resolved from text_metadata entry or video_metadata dict using candidate's video_id",
+                "description_relevance appears in confidence_breakdown when description has keyword overlap",
+                "description_relevance adjustment is zero when video_description is empty or None",
+                "Unit test: candidate with matching description keywords gets positive description_relevance boost",
+                "Unit test: candidate with empty description gets zero adjustment"
+            ]
+        },
+        {
+            "id": "US-75-004",
+            "title": "Wire tag_keyword_boost adjustment into TieredMatcher scoring pipeline",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: CRITICAL WIRE-UP. MatchScoring.apply_tag_keyword_boost exists (scoring.py ~line 2494) and is in apply_all_adjustments (~line 3021), but TieredMatcher never calls it. video_tags are stored on CaptionResult and propagated to VideoSearchResult/DownloadedVideo, but not passed through to the scoring call site. Need to build a video_id-to-tags lookup from caption_results or state. Files: src/matching/tiered_matcher.py (scoring block ~line 730), src/matching/scoring.py (apply_tag_keyword_boost ~line 2494). Test: tests/test_matching_scoring.py.",
+            "acceptanceCriteria": [
+                "TieredMatcher scoring block calls apply_tag_keyword_boost for each candidate",
+                "video_tags are resolved from caption_results or a video_id-to-tags lookup dict",
+                "tag_keyword_boost appears in confidence_breakdown when voiceover keywords overlap with video tags",
+                "tag_keyword_boost is zero (no-op) when video_tags is empty or None",
+                "Unit test: candidate whose video has tags matching voiceover keywords gets positive boost",
+                "Unit test: candidate with no tags gets zero tag_keyword_boost"
+            ]
+        },
+        {
+            "id": "US-75-005",
+            "title": "Wire chapter_topic_match and chapter_source_consistency into TieredMatcher",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: CRITICAL WIRE-UP. Both apply_chapter_topic_match (~line 2436) and apply_chapter_source_consistency (~line 2538) exist in MatchScoring but are only reachable through apply_all_adjustments, which is never called from TieredMatcher. The chapter infrastructure (chapter_index on segments, chapter_title in text_metadata, chapter_grouping config) is all in place. Need to wire these into the TieredMatcher scoring block, passing current_chapter_index, chapter_title, recent_matches, and chapter_source_counts. Files: src/matching/tiered_matcher.py (~line 730-780), src/matching/scoring.py (~lines 2436, 2538).",
+            "acceptanceCriteria": [
+                "TieredMatcher scoring block applies chapter_topic_match when chapter_matching_enabled is True",
+                "TieredMatcher scoring block applies chapter_source_consistency using chapter_source_counts from recent matches",
+                "chapter_topic_match appears in confidence_breakdown with graduated boost/penalty values",
+                "chapter_source_consistency applies +0.03 boost when same source reused within chapter",
+                "Unit test: voiceover segment in chapter X matched to video from same-topic chapter gets boost",
+                "Unit test: consecutive matches from same source within a chapter get consistency boost"
+            ]
+        },
+        {
+            "id": "US-75-006",
+            "title": "Wire chapter_coherence_penalty and cross_chapter_relevance into TieredMatcher",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: WIRE-UP. apply_chapter_coherence_penalty (~line 2608) penalizes using >5 different video chapters in a single voiceover section. apply_cross_chapter_relevance_boost (~line 2664) uses the relevance_matrix to boost candidates from relevant chapters. Both exist in MatchScoring.apply_all_adjustments but are unreachable from TieredMatcher. The relevance_matrix is already computed in main.py (~line 256) but only passed to embedding_search, not to TieredMatcher for scoring. Files: src/matching/tiered_matcher.py, src/matching/main.py (~line 256-262, ~288), src/matching/scoring.py (~lines 2608, 2664).",
+            "acceptanceCriteria": [
+                "TieredMatcher receives relevance_matrix (passed from match_all_segments)",
+                "chapter_coherence_penalty fires when >5 unique video chapters used in a voiceover chapter",
+                "cross_chapter_relevance boost is applied when relevance_matrix entry is high for the candidate's chapter",
+                "Both adjustments appear in confidence_breakdown with descriptive reasons",
+                "Unit test: voiceover chapter with 6+ different video sources gets coherence penalty",
+                "Unit test: candidate from high-relevance video chapter gets cross_chapter_relevance boost"
+            ]
+        },
+        {
+            "id": "US-75-007",
+            "title": "Wire listicle_consistency adjustment into TieredMatcher scoring pipeline",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: WIRE-UP. Listicle detector (src/chapter_detection/listicle_detector.py) and bridge (src/chapter_detection/bridge.py) exist and produce ListicleGroup objects. The scoring function for listicle consistency exists in apply_all_adjustments but is unreachable. Listicle groups need to be passed through from detection to the TieredMatcher scoring calls. Files: src/matching/tiered_matcher.py (scoring block), src/matching/scoring.py (listicle_consistency section in apply_all_adjustments), src/chapter_detection/listicle_detector.py, src/chapter_detection/bridge.py.",
+            "acceptanceCriteria": [
+                "TieredMatcher receives listicle_groups from the match stage",
+                "listicle_consistency adjustment fires for segments within detected listicle groups",
+                "Same-source preference is applied within listicle group boundaries",
+                "listicle_consistency appears in confidence_breakdown when listicle groups are active",
+                "Unit test: segments within a listicle group prefer same video source as other segments in group",
+                "Unit test: segments outside any listicle group get no listicle_consistency adjustment"
+            ]
+        },
+        {
+            "id": "US-75-008",
+            "title": "Add MatchScoring.apply_all_adjustments integration test with full pipeline",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: TESTING. Once US-75-002 through US-75-007 wire up individual adjustments, we need an integration test that verifies the complete adjustment chain works end-to-end through TieredMatcher. The test should create a realistic matching scenario with chapters, video metadata, tags, and listicle groups to verify all adjustments fire correctly. This also serves as a regression guard to ensure future refactors don't disconnect adjustments again. Files: tests/test_matching_scoring.py or new tests/test_tiered_matcher_adjustments.py, src/matching/tiered_matcher.py, src/matching/scoring.py.",
+            "acceptanceCriteria": [
+                "Integration test creates a TieredMatcher with full video_metadata (titles, descriptions, tags, chapters)",
+                "Test exercises match_segment and verifies confidence_breakdown contains all adjustment types",
+                "Test verifies title_relevance, description_relevance, tag_keyword_boost all appear in breakdown",
+                "Test verifies chapter_topic_match and chapter_source_consistency appear when chapters are active",
+                "Test verifies the final confidence is different from the base embedding similarity",
+                "All adjustment values are within documented ranges (no unbounded boosts)"
+            ]
+        },
+        {
+            "id": "US-75-009",
+            "title": "Build video_id-to-metadata lookup for efficient context access during matching",
+            "priority": "high",
+            "passes": false,
+            "notes": "Tier: INFRASTRUCTURE. Multiple stories (US-75-002 through US-75-007) need to resolve video_title, video_description, and video_tags from a video_id during scoring. Currently video_metadata is a Dict[str, Dict[str, str]] with only title and description. This story extends it to include tags and chapters, and builds the lookup once in the match stage (src/stages/match.py) from caption_results and video_search_results. Files: src/stages/match.py (where match_all_segments is called), src/matching/main.py (match_all_segments signature ~line 32), src/matching/tiered_matcher.py (self.video_metadata usage).",
+            "acceptanceCriteria": [
+                "video_metadata dict includes 'tags' key (List[str]) for each video_id",
+                "video_metadata dict includes 'chapters' key (List[dict]) for each video_id",
+                "Lookup is built once in match stage from caption_results before calling match_all_segments",
+                "Missing metadata fields default to empty (empty string, empty list) - never None",
+                "Unit test: video_metadata built from mock caption_results contains title, description, tags, chapters",
+                "Unit test: video with no caption_result still gets empty-string defaults in metadata"
+            ]
+        },
+        {
+            "id": "US-75-010",
+            "title": "Propagate chapter and listicle state from detection to match stage",
+            "priority": "medium",
+            "passes": false,
+            "notes": "Tier: INFRASTRUCTURE. Chapter detection runs in caption_stage and produces chapter data. Listicle detection also runs there. The results need to flow into match_all_segments so TieredMatcher can use them for chapter_topic_match, chapter_source_consistency, chapter_coherence, and listicle_consistency. Currently match stage receives location_chapters but not the full chapter/listicle context needed for scoring. Files: src/stages/match.py (run method - where match_all_segments is called), src/stages/caption_stage.py (where chapters are detected), src/matching/main.py (match_all_segments signature), src/checkpoint.py (chapter data in checkpoint).",
+            "acceptanceCriteria": [
+                "match_all_segments receives listicle_groups parameter from match stage",
+                "TieredMatcher constructor accepts and stores listicle_groups",
+                "segment_chapter_map is passed to TieredMatcher for per-segment chapter lookups",
+                "chapter_source_counts is tracked across segments and passed to scoring",
+                "Unit test: match stage passes listicle_groups from checkpoint to match_all_segments",
+                "Unit test: TieredMatcher receives and stores chapter/listicle state"
+            ]
+        },
+        {
+            "id": "US-75-011",
+            "title": "Add description keywords to embedding text for enriched semantic search",
+            "priority": "low",
+            "passes": false,
+            "notes": "Tier: ENHANCEMENT. Currently embedding_text includes [title] and optionally [title | chapter] prefix, but video description keywords are not included. For videos with rich descriptions (common for educational/documentary content), adding top 3-5 description keywords to embedding text could improve semantic matching. This should be gated behind a config flag since it changes embedding dimensions/cache. Files: src/stages/caption_stage.py (_populate_text_metadata ~line where embedding_text is built), src/config/sections/matching.py (ContextEnrichmentConfig - add description_enriched_embeddings flag).",
+            "acceptanceCriteria": [
+                "New config flag matching.context_enrichment.description_enriched_embeddings (default: false)",
+                "When enabled, top 3-5 content keywords from video description are appended to embedding_text",
+                "Keywords are extracted using simple word frequency (no LLM call needed)",
+                "Stop words and YouTube-specific words (subscribe, like, video, channel) are filtered out",
+                "Unit test: embedding_text includes description keywords when flag is true",
+                "Unit test: embedding_text is unchanged when flag is false (backward compat)"
+            ]
+        },
+        {
+            "id": "US-75-012",
+            "title": "Add gap-specific description-derived queries to iterative match",
+            "priority": "low",
+            "passes": false,
+            "notes": "Tier: ENHANCEMENT. derive_queries_from_descriptions exists in gap_analyzer.py (~line 927) and is called from iterative_match stage (~line 868), but the current call passes all locked match descriptions as broad queries (priority=1, gap_indices=[]). The function supports gap-specific targeting (scores phrases by relevance to gap text) but the stage doesn't use per-gap description queries. Should call derive_queries_from_descriptions per gap segment for targeted queries. Files: src/stages/iterative_match.py (~line 867-889), src/iterative_match/gap_analyzer.py (derive_queries_from_descriptions ~line 927).",
+            "acceptanceCriteria": [
+                "For each gap segment, derive_queries_from_descriptions is called with that gap's context",
+                "Gap-specific description queries have higher priority (2) than broad description queries (1)",
+                "Gap-specific queries include gap_indices pointing to the specific gap segment",
+                "Broad description queries are still generated as fallback",
+                "Unit test: gap-specific query generation returns queries relevant to gap text",
+                "Unit test: queries include correct gap_indices and elevated priority"
+            ]
+        }
+    ]
 }

@@ -906,6 +906,133 @@ def apply_entity_match_boost(
     return boosted, reason, matched_entities
 
 
+# Stopwords for keyword extraction in standalone functions
+_STOPWORDS = frozenset({
+    'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
+    'can', 'her', 'was', 'one', 'our', 'out', 'has', 'have',
+    'been', 'from', 'this', 'that', 'with', 'they', 'what',
+    'will', 'there', 'their', 'about', 'would', 'which', 'into',
+    'how', 'why', 'who', 'when', 'where', 'does', 'did', 'its',
+    'than', 'then', 'just', 'more', 'some', 'also', 'very',
+})
+
+
+def _extract_keywords(text: str) -> set:
+    """Extract significant keywords from text (>= 3 chars, not stopwords)."""
+    if not text:
+        return set()
+    words = text.lower().split()
+    return {
+        w.strip('.,!?:;"\'()[]{}|-')
+        for w in words
+        if len(w.strip('.,!?:;"\'()[]{}|-')) >= 3
+        and w.lower().strip('.,!?:;"\'()[]{}|-') not in _STOPWORDS
+    }
+
+
+def apply_description_relevance_adjustment(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_description: Optional[str] = None,
+) -> Tuple[float, str]:
+    """
+    Compute keyword overlap between voiceover segment text and video description,
+    then apply a graduated boost to the confidence score (US-75-002).
+
+    Graduated boost values:
+    - 1 keyword match:  +0.02
+    - 2 keyword matches: +0.04
+    - 3+ keyword matches: +0.06
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with text
+        video_description: Video description string
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not video_description:
+        return confidence, ""
+
+    # Truncate description to first 200 chars
+    truncated = video_description[:200]
+    vo_keywords = _extract_keywords(vo_segment.text)
+    desc_keywords = _extract_keywords(truncated)
+
+    if not vo_keywords or not desc_keywords:
+        return confidence, ""
+
+    overlap = vo_keywords & desc_keywords
+    match_count = len(overlap)
+
+    if match_count == 0:
+        return confidence, ""
+
+    if match_count >= 3:
+        boost = 0.06
+    elif match_count == 2:
+        boost = 0.04
+    else:
+        boost = 0.02
+
+    matched_words = ', '.join(sorted(overlap)[:5])
+    reason = f"description relevance boost +{boost} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
+    return min(1.0, confidence + boost), reason
+
+
+# Title relevance boost constants (mirror MatchScoring class constants)
+_TITLE_BOOST_1_KEYWORD = 0.03
+_TITLE_BOOST_2_KEYWORDS = 0.05
+_TITLE_BOOST_3_PLUS_KEYWORDS = 0.08
+
+
+def apply_title_relevance_adjustment(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_title: Optional[str] = None,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply title keyword overlap boost to confidence score (US-75-002).
+
+    Extracts keywords from both voiceover text and video title, then applies
+    a graduated boost based on overlap count.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with text
+        video_title: Video title string
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not video_title:
+        return confidence, ""
+
+    vo_keywords = _extract_keywords(vo_segment.text)
+    title_keywords = _extract_keywords(video_title)
+
+    if not vo_keywords or not title_keywords:
+        return confidence, ""
+
+    overlap = vo_keywords & title_keywords
+    match_count = len(overlap)
+
+    if match_count == 0:
+        return confidence, ""
+
+    if match_count >= 3:
+        boost = _TITLE_BOOST_3_PLUS_KEYWORDS
+    elif match_count == 2:
+        boost = _TITLE_BOOST_2_KEYWORDS
+    else:
+        boost = _TITLE_BOOST_1_KEYWORD
+
+    matched_words = ', '.join(sorted(overlap)[:5])
+    reason = f"title relevance boost +{boost} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
+    return min(1.0, confidence + boost), reason
+
+
 def _extract_entity_texts(segment: SRTSegment) -> List[str]:
     """
     Extract entity text values from a segment.
@@ -2910,10 +3037,10 @@ class MatchScoring:
                 reasons.append(title_reason)
                 breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
 
-        # 6b. Description relevance boost (US-73-003)
+        # 6b. Description relevance boost (US-73-003, US-75-002)
         if video_description:
             prev = confidence
-            confidence, desc_reason = self.apply_description_relevance(
+            confidence, desc_reason = apply_description_relevance_adjustment(
                 confidence, vo_segment, video_description
             )
             if desc_reason:
