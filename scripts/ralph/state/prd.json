@@ -112,7 +112,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 5/5 criteria verified. deduplicate_caption_segments() in src/caption/models.py with >80% temporal + >70% text similarity thresholds, keeps higher quality text. DEBUG logging with segment indices. CaptionResult.__post_init__ calls dedup. 25 tests pass covering: token overlap, temporal overlap, text quality, merge behavior, pass-through, reindexing, chained duplicates, debug logging, and CaptionResult post_init integration."
+                            "notes":  "All 5/5 criteria verified. deduplicate_caption_segments() in src/caption/models.py with \u003e80% temporal + \u003e70% text similarity thresholds, keeps higher quality text. DEBUG logging with segment indices. CaptionResult.__post_init__ calls dedup. 25 tests pass covering: token overlap, temporal overlap, text quality, merge behavior, pass-through, reindexing, chained duplicates, debug logging, and CaptionResult post_init integration."
                         },
                         {
                             "id":  "US-73-008",
@@ -126,7 +126,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 5/5 criteria verified. Added per-attempt structured dict logging in fetch_captions_batch across 4 code paths (success, unavailable, fetch error, unexpected error) with keys: video_id, attempt_number, success, error_type, duration_ms, method. Added caption_stage_summary log at end of caption stage with total_attempts, success_count, failure_count, error_type_distribution, avg_duration_ms. Summary written to checkpoint data under caption_stage_metrics for post-run analysis. Existing CaptionRetryBudget logging preserved. 3 unit tests in tests/test_caption_stage.py verify structured log entries for success and failure cases."
+                            "notes":  "All 5/5 criteria verified. Per-attempt structured dict logged with video_id, attempt_number, success, error_type, duration_ms, method keys. Summary log at stage end with total_attempts, success_count, failure_count, error_type_distribution, avg_duration_ms. Summary written to checkpoint under caption_stage_metrics. Existing CaptionRetryBudget logging preserved (record_success/record_attempt still called). 6 tests total: 5 fast + 1 integration."
                         },
                         {
                             "id":  "US-73-009",
