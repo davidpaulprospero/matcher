@@ -140,9 +140,9 @@
                                 "Test: merge_config with override matching.min_confidence=2.0 logs a warning about value > 1.0",
                                 "Test: merge_config with valid overrides produces no validation warnings"
                             ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier: safety improvement. Source: src/cli/config_utils.py merge_config() function. Currently merges without re-validating. The section-level __post_init__ may catch some issues on re-run (_revalidate_modified_sections), but the cross-section constraints in Config.validate() are never re-checked after merge."
+                            "notes":  "Added config.validate() call after merge + revalidation in merge_config(). Validation errors logged at WARNING level with 'Post-merge validation:' prefix. Does not raise — only logs. 4 tests in test_merge_config_validates_us80_009.py: invalid min_confidence=2.0 logs warning, does not raise, valid overrides produce no range warnings, override value applied correctly. All 70 config_utils + config_merge tests pass."
                         },
                         {
                             "id":  "US-80-010",

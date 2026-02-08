@@ -327,6 +327,11 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
     # Re-validate modified sections (convert nested dicts, check constraints)
     _revalidate_modified_sections(config, modified_sections)
 
+    # Run cross-section validation to catch invalid overrides
+    validation_errors = config.validate()
+    for error in validation_errors:
+        logger.warning("Post-merge validation: %s", error)
+
     return config
 
 
