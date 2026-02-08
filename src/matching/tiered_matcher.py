@@ -27,7 +27,7 @@ import math
 import statistics
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 # Refactored modules - REUSE instead of duplicating (406 lines saved)
 from .scoring import (
@@ -132,7 +132,7 @@ class TieredMatcher:
     """
 
     def __init__(self, config: Optional['Config'] = None, cache: Optional[CacheManager] = None, video_topics: Optional[Dict[str, VideoTopics]] = None,
-                 video_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+                 video_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
                  relevance_matrix: Optional[List[List[float]]] = None,
                  listicle_groups: Optional[List] = None):
         """
@@ -143,7 +143,7 @@ class TieredMatcher:
             cache: Cache manager for LLM responses
             video_topics: Dict mapping video paths to VideoTopics for chapter matching
             video_metadata: Optional dict mapping source_file (video ID) to
-                {"title": str, "description": str} for LLM reranker context
+                {"title": str, "description": str, "tags": List[str], "chapters": List[dict]}
             relevance_matrix: 2D list [vo_chapter][vid_chapter] of relevance scores
                 for cross-chapter relevance boost (US-75-006)
             listicle_groups: Optional list of ListicleGroup objects for
@@ -656,6 +656,18 @@ class TieredMatcher:
         if isinstance(meta, dict):
             return meta.get('tags')
         return None
+
+    def _get_video_chapters(self, segment: SRTSegment) -> List[dict]:
+        """Resolve video chapters from video_metadata using segment's source_file.
+
+        US-75-009: Returns chapter list from the video_metadata lookup.
+        """
+        if not self.video_metadata:
+            return []
+        meta = self.video_metadata.get(segment.source_file)
+        if isinstance(meta, dict):
+            return meta.get('chapters', []) or []
+        return []
 
     def _get_chapter_title(self, segment: SRTSegment) -> Optional[str]:
         """Resolve chapter title from the video segment's chapter_title attribute."""

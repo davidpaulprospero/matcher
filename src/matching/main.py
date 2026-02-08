@@ -42,7 +42,7 @@ def match_all_segments(
     video_topics: Optional[Dict[str, 'VideoTopics']] = None,
     location_chapters: Optional[List['LocationChapter']] = None,
     video_locations: Optional[Dict[str, 'GeoLocation']] = None,
-    video_metadata: Optional[Dict[str, Dict[str, str]]] = None
+    video_metadata: Optional[Dict[str, Dict[str, Any]]] = None
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.

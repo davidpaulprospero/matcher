@@ -492,6 +492,68 @@ class MatchStage(Stage):
         else:
             state.listicle_groups = getattr(state, 'listicle_groups', []) or []
 
+    def _build_video_metadata(self, state: 'PipelineState') -> Dict[str, Dict[str, Any]]:
+        """Build video_id-to-metadata lookup for efficient context access during matching.
+
+        US-75-009: Merges data from video_search_results and caption_results into a single
+        dict keyed by video_id. Each entry contains 'title', 'description', 'tags', and
+        'chapters'. Missing fields default to empty (empty string / empty list), never None.
+
+        Args:
+            state: PipelineState with video_search_results and caption_results.
+
+        Returns:
+            Dict mapping video_id to metadata dict with keys:
+            title (str), description (str), tags (List[str]), chapters (List[dict]).
+        """
+        video_metadata: Dict[str, Dict[str, Any]] = {}
+
+        # Seed from video_search_results (title, description, tags)
+        for vsr in getattr(state, 'video_search_results', []) or []:
+            if isinstance(vsr, dict):
+                vid_id = vsr.get('video_id', '')
+                title = vsr.get('title', '')
+                desc = vsr.get('description', '')
+                tags = vsr.get('video_tags', [])
+            else:
+                vid_id = getattr(vsr, 'video_id', '')
+                title = getattr(vsr, 'title', '')
+                desc = getattr(vsr, 'description', '')
+                tags = getattr(vsr, 'video_tags', [])
+            if vid_id:
+                video_metadata[vid_id] = {
+                    'title': title or '',
+                    'description': desc or '',
+                    'tags': tags or [],
+                    'chapters': [],
+                }
+
+        # Enrich from caption_results (tags, chapters — may have data VSR lacks)
+        caption_results = getattr(state, 'caption_results', {}) or {}
+        for video_id, result in caption_results.items():
+            if not isinstance(result, dict):
+                continue
+            cr_tags = result.get('video_tags', []) or []
+            cr_chapters = result.get('video_chapters', []) or []
+
+            if video_id in video_metadata:
+                # Merge: prefer non-empty caption_results data over empty VSR data
+                entry = video_metadata[video_id]
+                if not entry['tags'] and cr_tags:
+                    entry['tags'] = cr_tags
+                if cr_chapters:
+                    entry['chapters'] = cr_chapters
+            else:
+                # Video exists in caption_results but not in video_search_results
+                video_metadata[video_id] = {
+                    'title': '',
+                    'description': '',
+                    'tags': cr_tags,
+                    'chapters': cr_chapters,
+                }
+
+        return video_metadata
+
     def _print_settings(self, config: 'Config'):
         """Print matching settings"""
         print(f"  Matching settings (from config):")
@@ -665,17 +727,10 @@ class MatchStage(Stage):
         # Run matching
         print(f"  Running two-stage matching...")
 
-        # US-72-006: Build video_metadata dict for LLM reranker context enrichment
-        video_metadata = {}
-        for vsr in getattr(state, 'video_search_results', []) or []:
-            vid_id = vsr.video_id if hasattr(vsr, 'video_id') else vsr.get('video_id', '') if isinstance(vsr, dict) else ''
-            title = vsr.title if hasattr(vsr, 'title') else vsr.get('title', '') if isinstance(vsr, dict) else ''
-            desc = vsr.description if hasattr(vsr, 'description') else vsr.get('description', '') if isinstance(vsr, dict) else ''
-            tags = vsr.video_tags if hasattr(vsr, 'video_tags') else vsr.get('video_tags', []) if isinstance(vsr, dict) else []
-            if vid_id and (title or desc or tags):
-                video_metadata[vid_id] = {'title': title, 'description': desc, 'tags': tags or []}
+        # US-72-006 / US-75-009: Build video_metadata dict for context enrichment
+        video_metadata = self._build_video_metadata(state)
         if video_metadata:
-            logger.info(f"US-72-006: Built video_metadata for {len(video_metadata)} videos")
+            logger.info(f"US-75-009: Built video_metadata for {len(video_metadata)} videos")
 
         matches = match_all_segments(
             voiceover_segments=vo_segments,
