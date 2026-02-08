@@ -439,6 +439,13 @@ matching:
   #   medium: 0.9  # Auto captions - reduce by 10%
   #   low: 0.75    # Fallback/poor - reduce by 25%
 
+  # Tiered caption quality penalties (US-73-006)
+  # Graduated penalties for specific quality issues - stack up to max_caption_penalty
+  caption_penalty_auto_generated: -0.05  # Penalty for auto-generated captions
+  caption_penalty_low_quality: -0.08     # Penalty for low quality captions
+  caption_penalty_missing_timing: -0.03  # Penalty for missing/poor timing data
+  max_caption_penalty: -0.12             # Maximum combined caption penalty (cap)
+
   # Caption timing penalty (US-008 Sprint 7)
   # Penalizes matches when caption timing is poor (low coverage, exceeds video duration)
   # Formula: adjusted = raw * quality_weight * timing_penalty

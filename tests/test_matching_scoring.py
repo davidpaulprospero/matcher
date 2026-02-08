@@ -3040,5 +3040,36 @@ class TestTieredCaptionQualityPenalties:
         assert 'caption_timing_gap' in components
 
 
+class TestTieredPenaltyConfigDefaults:
+    """Verify MatchingConfig has tiered penalty fields with correct defaults (US-73-006)."""
+
+    @pytest.mark.fast
+    def test_matching_config_has_tiered_penalty_fields(self):
+        """Config fields for each penalty value exist with correct defaults."""
+        from src.config.sections.matching import MatchingConfig
+        mc = MatchingConfig()
+
+        assert mc.caption_penalty_auto_generated == -0.05
+        assert mc.caption_penalty_low_quality == -0.08
+        assert mc.caption_penalty_missing_timing == -0.03
+        assert mc.max_caption_penalty == -0.12
+
+    @pytest.mark.fast
+    def test_matching_config_penalty_fields_configurable(self):
+        """Config penalty fields can be overridden via constructor."""
+        from src.config.sections.matching import MatchingConfig
+        mc = MatchingConfig(
+            caption_penalty_auto_generated=-0.10,
+            caption_penalty_low_quality=-0.15,
+            caption_penalty_missing_timing=-0.06,
+            max_caption_penalty=-0.20,
+        )
+
+        assert mc.caption_penalty_auto_generated == -0.10
+        assert mc.caption_penalty_low_quality == -0.15
+        assert mc.caption_penalty_missing_timing == -0.06
+        assert mc.max_caption_penalty == -0.20
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
