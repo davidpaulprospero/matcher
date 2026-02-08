@@ -71,20 +71,20 @@
                                                        "When explanation_validation_enabled=False in config, validation is skipped",
                                                        "Tests verify: valid explanation passes through unchanged, invalid explanation receives penalty, disabled config skips validation"
                                                    ],
-                            "notes":  "Tier: feature (medium). validate_explanation_confidence exists at src/matching/llm_providers.py:242 with full implementation (keyword extraction, verification ratio, penalty calculation). It is NEVER called from tiered_matcher.py:match_segment_with_llm. The function returns ExplanationValidation with is_valid, confidence_penalty, and verified_keywords. Need to call it after LLM returns a match explanation, and apply penalty_factor if validation fails. Tests exist in tests/test_explanation_validation.py for the function itself. Source files: src/matching/llm_providers.py:242-330, src/matching/tiered_matcher.py:1050-1160."
+                            "notes":  "HARD STORY: Phantom success - exits 0 but never sets passes: true"
                         },
                         {
                             "id":  "US-77-005",
                             "title":  "Add chapter-type aware query strategy ranking to iterative match",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "QueryLearning in src/iterative_match/query_learning.py tracks query success rates per chapter_type (intro, body, conclusion, listicle_item)",
                                                        "When generating queries for a gap, the learner boosts strategies that historically perform well for that chapter type",
                                                        "Gap segments annotated with chapter_type from gap_analyzer.py propagate their type to query learning",
                                                        "Tests verify: strategy success is recorded per chapter_type, query ranking differs between intro and body chapters, missing chapter_type defaults to \u0027body\u0027"
                                                    ],
-                            "notes":  "Tier: feature (medium). src/iterative_match/gap_analyzer.py:102-104 already annotates GapSegment with chapter_type (\u0027intro\u0027, \u0027body\u0027, \u0027conclusion\u0027, \u0027listicle_item\u0027). src/iterative_match/query_learning.py exists but has no chapter_type awareness. US-76-005 wired chapter-type strategy ranking into iterative match query generation, but query_learning.py doesn\u0027t track success rates per chapter_type for learning. Need to: (1) add chapter_type field to learning records, (2) weight historical performance by chapter_type when ranking strategies. Source files: src/iterative_match/query_learning.py, src/iterative_match/gap_analyzer.py:100-110, src/stages/iterative_match.py:878-920."
+                            "notes":  "Pre-implemented: chapter_strategy_success dict with EMA tracking, get_best_strategy_for_chapter/get_strategy_ranking_for_chapter/get_preferred_strategies methods, stage wiring at lines 988-1010 and 2067-2101. 72 tests pass including TestChapterTypeTracking, TestChapterTypePreference, TestChapterTypePersistence, TestChapterTypeClassification, TestGetPreferredStrategies."
                         },
                         {
                             "id":  "US-77-006",
