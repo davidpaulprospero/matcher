@@ -1,186 +1,186 @@
-{
-    "sprintNumber": 77,
-    "focusArea": "quality",
-    "branchName": "ralph/sprint-77",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
-    },
-    "userStories": [
-        {
-            "id": "US-77-001",
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'quality'",
-                "Add stories US-77-002 through US-77-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-77-NNN to be unique across sprints",
-                "Mark this story (US-77-001) as passes: true when done"
-            ],
-            "passes": true,
-            "priority": "high",
-            "title": "Generate sprint stories for quality focus area",
-            "notes": "Seed story. Generated 11 quality-focused stories (US-77-002 through US-77-012). Focused on wiring existing but unused scoring functions (semantic/temporal coherence), explanation validation integration, chapter-type query learning, adaptive confidence tuning, match diversity improvements, and scoring audit trail enhancements."
-        },
-        {
-            "id": "US-77-002",
-            "title": "Wire semantic coherence scoring into TieredMatcher",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "compute_semantic_coherence from src/matching/scoring.py is called in all 3 match paths (fast_path, with_llm, embedding_only) in src/matching/tiered_matcher.py",
-                "Previous segment's embedding is stored and passed to compute_semantic_coherence for the current segment",
-                "The semantic coherence adjustment appears in confidence_breakdown as 'semantic_coherence' entry",
-                "When semantic_coherence_enabled=False in config, no adjustment is applied (backward compat)",
-                "New tests verify: smooth transition boost, abrupt transition penalty, disabled returns 0.0, first segment (no previous) returns 0.0"
-            ],
-            "notes": "DONE. Added _apply_semantic_coherence helper method, set_embedding_lookup, _get_segment_embedding to TieredMatcher. Wired into all 3 match paths (obvious, high-similarity, LLM). main.py calls set_embedding_lookup after embedding search creation. 7 new integration tests in test_semantic_coherence.py. All 41 tests pass."
-        },
-        {
-            "id": "US-77-003",
-            "title": "Wire temporal coherence scoring into TieredMatcher",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "compute_temporal_coherence from src/matching/scoring.py is called in all 3 match paths in src/matching/tiered_matcher.py",
-                "Previous match's video source_file is tracked and passed for temporal continuity detection",
-                "The temporal coherence adjustment appears in confidence_breakdown as 'temporal_coherence' entry",
-                "Same-source boost (+0.05 default) is applied when consecutive segments match the same video",
-                "Context-switch penalty is applied when consecutive segments switch to different video sources",
-                "When temporal_coherence_enabled=False in config, no adjustment is applied"
-            ],
-            "notes": "DONE. Added _apply_temporal_coherence helper method and _previous_match_segment tracking to TieredMatcher. Imported compute_temporal_coherence from scoring.py. Wired into all 3 match paths (obvious, high-similarity, LLM) right after semantic coherence. Records 'temporal_coherence' in breakdown. Updates _previous_match_segment after each match for continuity. All 39 temporal coherence tests pass, all 33 chapter/contract tests pass."
-        },
-        {
-            "id": "US-77-004",
-            "title": "Wire explanation validation into LLM match path",
-            "priority": "high",
-            "passes": false,
-            "acceptanceCriteria": [
-                "validate_explanation_confidence from src/matching/llm_providers.py is called after LLM matching in match_segment_with_llm",
-                "When explanation validation fails (is_valid=False), confidence is penalized by the penalty_factor",
-                "The validation result appears in confidence_breakdown as 'explanation_validation' entry",
-                "When explanation_validation_enabled=False in config, validation is skipped",
-                "Tests verify: valid explanation passes through unchanged, invalid explanation receives penalty, disabled config skips validation"
-            ],
-            "notes": "Tier: feature (medium). validate_explanation_confidence exists at src/matching/llm_providers.py:242 with full implementation (keyword extraction, verification ratio, penalty calculation). It is NEVER called from tiered_matcher.py:match_segment_with_llm. The function returns ExplanationValidation with is_valid, confidence_penalty, and verified_keywords. Need to call it after LLM returns a match explanation, and apply penalty_factor if validation fails. Tests exist in tests/test_explanation_validation.py for the function itself. Source files: src/matching/llm_providers.py:242-330, src/matching/tiered_matcher.py:1050-1160."
-        },
-        {
-            "id": "US-77-005",
-            "title": "Add chapter-type aware query strategy ranking to iterative match",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "QueryLearning in src/iterative_match/query_learning.py tracks query success rates per chapter_type (intro, body, conclusion, listicle_item)",
-                "When generating queries for a gap, the learner boosts strategies that historically perform well for that chapter type",
-                "Gap segments annotated with chapter_type from gap_analyzer.py propagate their type to query learning",
-                "Tests verify: strategy success is recorded per chapter_type, query ranking differs between intro and body chapters, missing chapter_type defaults to 'body'"
-            ],
-            "notes": "Tier: feature (medium). src/iterative_match/gap_analyzer.py:102-104 already annotates GapSegment with chapter_type ('intro', 'body', 'conclusion', 'listicle_item'). src/iterative_match/query_learning.py exists but has no chapter_type awareness. US-76-005 wired chapter-type strategy ranking into iterative match query generation, but query_learning.py doesn't track success rates per chapter_type for learning. Need to: (1) add chapter_type field to learning records, (2) weight historical performance by chapter_type when ranking strategies. Source files: src/iterative_match/query_learning.py, src/iterative_match/gap_analyzer.py:100-110, src/stages/iterative_match.py:878-920."
-        },
-        {
-            "id": "US-77-006",
-            "title": "Add adaptive confidence floor with chapter-type awareness",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "Confidence floor in apply_all_adjustments can vary by chapter type (intro/conclusion segments get lower floor of 0.03, body gets default 0.05)",
-                "The chapter_type is resolved from segment_chapter_map or defaults to 'body' when unknown",
-                "Configuration option matching.scoring.adaptive_confidence_floor_enabled toggles this behavior (default: true)",
-                "When disabled, the static confidence_floor (0.05) is used for all segments as before",
-                "Tests verify: intro segment gets lower floor, body segment gets default floor, unknown chapter_type gets default floor, disabled config uses static floor"
-            ],
-            "notes": "Tier: feature (small). Currently confidence_floor is a static 0.05 applied uniformly at src/matching/scoring.py:3676-3683. Intro/conclusion segments are more important and should be allowed to survive with lower confidence rather than being floored out. Need to: (1) accept chapter_type parameter in apply_all_adjustments, (2) look up per-type floor, (3) add config toggle. Source files: src/matching/scoring.py:3676-3683, src/matching/scoring.py:2893-2898, src/config/sections/matching.py."
-        },
-        {
-            "id": "US-77-007",
-            "title": "Add match diversity enforcement across voiceover chapters",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "After initial matching completes, a post-processing pass checks if any voiceover chapter uses only a single video source for all segments",
-                "When a chapter has >4 segments all from the same source, mark lowest-confidence segments as candidates for re-matching with source exclusion",
-                "The diversity pass is configurable via matching.chapter_grouping.min_source_diversity (default: 2, meaning at least 2 different sources per chapter)",
-                "A confidence_breakdown entry 'diversity_recheck' is added to segments that were re-matched",
-                "Tests verify: all-same-source chapter triggers re-match, chapter with adequate diversity is untouched, config min_source_diversity=1 disables the check"
-            ],
-            "notes": "Tier: feature (medium). Currently chapter_source_consistency boosts same-source within chapters (good), but there's no guard against pathological cases where an entire chapter maps to a single video. This creates monotonous timelines. Need a post-processing pass in src/matching/tiered_matcher.py after the main match loop. Source files: src/matching/tiered_matcher.py (new method after match loop), src/matching/scoring.py (confidence_breakdown entry), src/config/sections/matching.py:186-192 (add min_source_diversity field)."
-        },
-        {
-            "id": "US-77-008",
-            "title": "Add scoring adjustment audit summary to match stage output",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "After match stage completes, a summary log line reports: total segments matched, average confidence, count of each scoring adjustment that fired (title_relevance, chapter_topic_match, etc.)",
-                "Adjustments that never fired are reported as 'unused' to help identify dead config",
-                "The summary is logged at INFO level and includes the top-3 most impactful adjustments by average magnitude",
-                "Tests verify: summary includes all active adjustment names, unused adjustments are flagged, average magnitudes are computed correctly"
-            ],
-            "notes": "Tier: feature (small). Currently confidence_breakdown is per-segment and only visible in debug logs. There's no aggregate view of which scoring adjustments are actually contributing across all segments. This makes tuning difficult. Need to: (1) collect all confidence_breakdown dicts after matching, (2) compute aggregate stats, (3) log summary. Source files: src/matching/tiered_matcher.py (add summary method called after match loop), src/stages/match.py (call summary after tiered_matcher returns)."
-        },
-        {
-            "id": "US-77-009",
-            "title": "Add embedding search result deduplication by video source",
-            "priority": "medium",
-            "passes": false,
-            "acceptanceCriteria": [
-                "EmbeddingSearch._search_candidates in src/matching/embedding_search.py deduplicates results so the same video_id appears at most max_per_source times (default: 3) in the candidate pool",
-                "After deduplication, additional candidates from other sources are pulled in to maintain the target candidate count",
-                "Configuration option matching.embedding_search.max_candidates_per_source (default: 3) controls the cap",
-                "Tests verify: 10 candidates from same source get capped to 3, remaining slots filled from other sources, max_candidates_per_source=0 disables dedup"
-            ],
-            "notes": "Tier: feature (small). Currently embedding_search.py returns top-K candidates by similarity with no source diversity constraint. If a single popular video has many good segments, it dominates the candidate pool, reducing downstream diversity. The chapter_boost in _apply_chapter_boost (~line 130) helps but only when chapters exist. Need to add source-diversity filtering. Source files: src/matching/embedding_search.py:29-130 (EmbeddingSearch class), src/config/sections/matching.py (add EmbeddingSearchConfig field)."
-        },
-        {
-            "id": "US-77-010",
-            "title": "Add confidence calibration using segment duration ratio",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "A new scoring adjustment apply_duration_ratio_calibration in src/matching/scoring.py adjusts confidence based on the ratio of video segment duration to voiceover segment duration",
-                "When video segment is >3x longer than voiceover segment, apply a -0.03 penalty (excessive content, likely poor fit)",
-                "When video segment is <0.3x the voiceover segment duration, apply a -0.05 penalty (too short, will need padding)",
-                "When ratio is between 0.5-2.0x, no adjustment (acceptable range)",
-                "The adjustment appears in confidence_breakdown as 'duration_ratio_calibration'",
-                "Tests verify: ratio 1.0 gives no penalty, ratio 5.0 gives -0.03, ratio 0.1 gives -0.05, missing duration data gives no penalty"
-            ],
-            "notes": "Tier: feature (small). apply_duration_penalty at src/matching/scoring.py:137 exists but uses speed_ratio (playback speed matching). This new adjustment is about content duration fit - a 2-second voiceover matched to a 30-second video segment is suspicious. Source files: src/matching/scoring.py (new function after ~line 560), src/matching/tiered_matcher.py (call in all 3 match paths), src/matching/scoring.py:3470 (add to apply_all_adjustments)."
-        },
-        {
-            "id": "US-77-011",
-            "title": "Add entity match boost propagation to confidence breakdown",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "apply_entity_match_boost at src/matching/scoring.py:802 records its graduated boost values in confidence_breakdown with detailed reason text",
-                "The breakdown entry includes: matched entity names, match type (exact/partial), and boost value applied",
-                "When no entities match, no breakdown entry is added (avoid noise)",
-                "The entity match information is included in the scoring audit summary (US-77-008)",
-                "Tests verify: exact entity match shows entity name in breakdown, partial match shows match type, zero-entity case adds no entry"
-            ],
-            "notes": "Tier: bugfix (small). apply_entity_match_boost at src/matching/scoring.py:802 already applies graduated boosts (+0.03/+0.06/+0.10) but may not record full details in confidence_breakdown including which entities matched and the match type. This makes debugging entity matching difficult. Need to check current breakdown output and enhance it. Source files: src/matching/scoring.py:802-930."
-        },
-        {
-            "id": "US-77-012",
-            "title": "Add low-confidence segment reporting with suggested remediation",
-            "priority": "low",
-            "passes": false,
-            "acceptanceCriteria": [
-                "After matching, segments with confidence below LOW_CONFIDENCE_WARNING_THRESHOLD (0.15) are collected and logged at WARNING level",
-                "Each low-confidence warning includes: segment index, voiceover text preview (first 50 chars), confidence value, top 3 negative adjustments from confidence_breakdown",
-                "When >20% of segments are low-confidence, a summary WARNING suggests enabling iterative matching or adjusting scoring weights",
-                "Tests verify: segment at 0.10 triggers warning, segment at 0.20 does not, >20% threshold triggers summary warning, empty match list produces no warnings"
-            ],
-            "notes": "Tier: feature (small). LOW_CONFIDENCE_WARNING_THRESHOLD exists at src/matching/scoring.py:2893 as 0.15 but is only used for individual debug-level logging. There's no aggregate low-confidence reporting that helps users understand match quality at a glance. Source files: src/matching/tiered_matcher.py (add reporting method after match loop), src/matching/scoring.py:2893 (threshold constant)."
-        }
-    ]
+﻿{
+    "sprintNumber":  77,
+    "focusArea":  "quality",
+    "branchName":  "ralph/sprint-77",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-77-001",
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027quality\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027quality\u0027",
+                                                       "Add stories US-77-002 through US-77-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-77-NNN to be unique across sprints",
+                                                       "Mark this story (US-77-001) as passes: true when done"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Generate sprint stories for quality focus area",
+                            "notes":  "Seed story. Generated 11 quality-focused stories (US-77-002 through US-77-012). Focused on wiring existing but unused scoring functions (semantic/temporal coherence), explanation validation integration, chapter-type query learning, adaptive confidence tuning, match diversity improvements, and scoring audit trail enhancements."
+                        },
+                        {
+                            "id":  "US-77-002",
+                            "title":  "Wire semantic coherence scoring into TieredMatcher",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "compute_semantic_coherence from src/matching/scoring.py is called in all 3 match paths (fast_path, with_llm, embedding_only) in src/matching/tiered_matcher.py",
+                                                       "Previous segment\u0027s embedding is stored and passed to compute_semantic_coherence for the current segment",
+                                                       "The semantic coherence adjustment appears in confidence_breakdown as \u0027semantic_coherence\u0027 entry",
+                                                       "When semantic_coherence_enabled=False in config, no adjustment is applied (backward compat)",
+                                                       "New tests verify: smooth transition boost, abrupt transition penalty, disabled returns 0.0, first segment (no previous) returns 0.0"
+                                                   ],
+                            "notes":  "DONE. Added _apply_semantic_coherence helper method, set_embedding_lookup, _get_segment_embedding to TieredMatcher. Wired into all 3 match paths (obvious, high-similarity, LLM). main.py calls set_embedding_lookup after embedding search creation. 7 new integration tests in test_semantic_coherence.py. All 41 tests pass."
+                        },
+                        {
+                            "id":  "US-77-003",
+                            "title":  "Wire temporal coherence scoring into TieredMatcher",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "compute_temporal_coherence from src/matching/scoring.py is called in all 3 match paths in src/matching/tiered_matcher.py",
+                                                       "Previous match\u0027s video source_file is tracked and passed for temporal continuity detection",
+                                                       "The temporal coherence adjustment appears in confidence_breakdown as \u0027temporal_coherence\u0027 entry",
+                                                       "Same-source boost (+0.05 default) is applied when consecutive segments match the same video",
+                                                       "Context-switch penalty is applied when consecutive segments switch to different video sources",
+                                                       "When temporal_coherence_enabled=False in config, no adjustment is applied"
+                                                   ],
+                            "notes":  "DONE. Implementation was already committed (previous attempt). Added 15 wiring tests in tests/test_temporal_coherence_wiring.py covering all 6 criteria: 3 match paths (obvious/high-sim/LLM), previous match tracking + carry-forward, breakdown entry format, +0.05 same-source boost, context-switch penalty with jarring topics, disabled config produces no entry. All 45 temporal coherence tests pass."
+                        },
+                        {
+                            "id":  "US-77-004",
+                            "title":  "Wire explanation validation into LLM match path",
+                            "priority":  "high",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "validate_explanation_confidence from src/matching/llm_providers.py is called after LLM matching in match_segment_with_llm",
+                                                       "When explanation validation fails (is_valid=False), confidence is penalized by the penalty_factor",
+                                                       "The validation result appears in confidence_breakdown as \u0027explanation_validation\u0027 entry",
+                                                       "When explanation_validation_enabled=False in config, validation is skipped",
+                                                       "Tests verify: valid explanation passes through unchanged, invalid explanation receives penalty, disabled config skips validation"
+                                                   ],
+                            "notes":  "Tier: feature (medium). validate_explanation_confidence exists at src/matching/llm_providers.py:242 with full implementation (keyword extraction, verification ratio, penalty calculation). It is NEVER called from tiered_matcher.py:match_segment_with_llm. The function returns ExplanationValidation with is_valid, confidence_penalty, and verified_keywords. Need to call it after LLM returns a match explanation, and apply penalty_factor if validation fails. Tests exist in tests/test_explanation_validation.py for the function itself. Source files: src/matching/llm_providers.py:242-330, src/matching/tiered_matcher.py:1050-1160."
+                        },
+                        {
+                            "id":  "US-77-005",
+                            "title":  "Add chapter-type aware query strategy ranking to iterative match",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "QueryLearning in src/iterative_match/query_learning.py tracks query success rates per chapter_type (intro, body, conclusion, listicle_item)",
+                                                       "When generating queries for a gap, the learner boosts strategies that historically perform well for that chapter type",
+                                                       "Gap segments annotated with chapter_type from gap_analyzer.py propagate their type to query learning",
+                                                       "Tests verify: strategy success is recorded per chapter_type, query ranking differs between intro and body chapters, missing chapter_type defaults to \u0027body\u0027"
+                                                   ],
+                            "notes":  "Tier: feature (medium). src/iterative_match/gap_analyzer.py:102-104 already annotates GapSegment with chapter_type (\u0027intro\u0027, \u0027body\u0027, \u0027conclusion\u0027, \u0027listicle_item\u0027). src/iterative_match/query_learning.py exists but has no chapter_type awareness. US-76-005 wired chapter-type strategy ranking into iterative match query generation, but query_learning.py doesn\u0027t track success rates per chapter_type for learning. Need to: (1) add chapter_type field to learning records, (2) weight historical performance by chapter_type when ranking strategies. Source files: src/iterative_match/query_learning.py, src/iterative_match/gap_analyzer.py:100-110, src/stages/iterative_match.py:878-920."
+                        },
+                        {
+                            "id":  "US-77-006",
+                            "title":  "Add adaptive confidence floor with chapter-type awareness",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Confidence floor in apply_all_adjustments can vary by chapter type (intro/conclusion segments get lower floor of 0.03, body gets default 0.05)",
+                                                       "The chapter_type is resolved from segment_chapter_map or defaults to \u0027body\u0027 when unknown",
+                                                       "Configuration option matching.scoring.adaptive_confidence_floor_enabled toggles this behavior (default: true)",
+                                                       "When disabled, the static confidence_floor (0.05) is used for all segments as before",
+                                                       "Tests verify: intro segment gets lower floor, body segment gets default floor, unknown chapter_type gets default floor, disabled config uses static floor"
+                                                   ],
+                            "notes":  "Tier: feature (small). Currently confidence_floor is a static 0.05 applied uniformly at src/matching/scoring.py:3676-3683. Intro/conclusion segments are more important and should be allowed to survive with lower confidence rather than being floored out. Need to: (1) accept chapter_type parameter in apply_all_adjustments, (2) look up per-type floor, (3) add config toggle. Source files: src/matching/scoring.py:3676-3683, src/matching/scoring.py:2893-2898, src/config/sections/matching.py."
+                        },
+                        {
+                            "id":  "US-77-007",
+                            "title":  "Add match diversity enforcement across voiceover chapters",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "After initial matching completes, a post-processing pass checks if any voiceover chapter uses only a single video source for all segments",
+                                                       "When a chapter has \u003e4 segments all from the same source, mark lowest-confidence segments as candidates for re-matching with source exclusion",
+                                                       "The diversity pass is configurable via matching.chapter_grouping.min_source_diversity (default: 2, meaning at least 2 different sources per chapter)",
+                                                       "A confidence_breakdown entry \u0027diversity_recheck\u0027 is added to segments that were re-matched",
+                                                       "Tests verify: all-same-source chapter triggers re-match, chapter with adequate diversity is untouched, config min_source_diversity=1 disables the check"
+                                                   ],
+                            "notes":  "Tier: feature (medium). Currently chapter_source_consistency boosts same-source within chapters (good), but there\u0027s no guard against pathological cases where an entire chapter maps to a single video. This creates monotonous timelines. Need a post-processing pass in src/matching/tiered_matcher.py after the main match loop. Source files: src/matching/tiered_matcher.py (new method after match loop), src/matching/scoring.py (confidence_breakdown entry), src/config/sections/matching.py:186-192 (add min_source_diversity field)."
+                        },
+                        {
+                            "id":  "US-77-008",
+                            "title":  "Add scoring adjustment audit summary to match stage output",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "After match stage completes, a summary log line reports: total segments matched, average confidence, count of each scoring adjustment that fired (title_relevance, chapter_topic_match, etc.)",
+                                                       "Adjustments that never fired are reported as \u0027unused\u0027 to help identify dead config",
+                                                       "The summary is logged at INFO level and includes the top-3 most impactful adjustments by average magnitude",
+                                                       "Tests verify: summary includes all active adjustment names, unused adjustments are flagged, average magnitudes are computed correctly"
+                                                   ],
+                            "notes":  "Tier: feature (small). Currently confidence_breakdown is per-segment and only visible in debug logs. There\u0027s no aggregate view of which scoring adjustments are actually contributing across all segments. This makes tuning difficult. Need to: (1) collect all confidence_breakdown dicts after matching, (2) compute aggregate stats, (3) log summary. Source files: src/matching/tiered_matcher.py (add summary method called after match loop), src/stages/match.py (call summary after tiered_matcher returns)."
+                        },
+                        {
+                            "id":  "US-77-009",
+                            "title":  "Add embedding search result deduplication by video source",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "EmbeddingSearch._search_candidates in src/matching/embedding_search.py deduplicates results so the same video_id appears at most max_per_source times (default: 3) in the candidate pool",
+                                                       "After deduplication, additional candidates from other sources are pulled in to maintain the target candidate count",
+                                                       "Configuration option matching.embedding_search.max_candidates_per_source (default: 3) controls the cap",
+                                                       "Tests verify: 10 candidates from same source get capped to 3, remaining slots filled from other sources, max_candidates_per_source=0 disables dedup"
+                                                   ],
+                            "notes":  "Tier: feature (small). Currently embedding_search.py returns top-K candidates by similarity with no source diversity constraint. If a single popular video has many good segments, it dominates the candidate pool, reducing downstream diversity. The chapter_boost in _apply_chapter_boost (~line 130) helps but only when chapters exist. Need to add source-diversity filtering. Source files: src/matching/embedding_search.py:29-130 (EmbeddingSearch class), src/config/sections/matching.py (add EmbeddingSearchConfig field)."
+                        },
+                        {
+                            "id":  "US-77-010",
+                            "title":  "Add confidence calibration using segment duration ratio",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "A new scoring adjustment apply_duration_ratio_calibration in src/matching/scoring.py adjusts confidence based on the ratio of video segment duration to voiceover segment duration",
+                                                       "When video segment is \u003e3x longer than voiceover segment, apply a -0.03 penalty (excessive content, likely poor fit)",
+                                                       "When video segment is \u003c0.3x the voiceover segment duration, apply a -0.05 penalty (too short, will need padding)",
+                                                       "When ratio is between 0.5-2.0x, no adjustment (acceptable range)",
+                                                       "The adjustment appears in confidence_breakdown as \u0027duration_ratio_calibration\u0027",
+                                                       "Tests verify: ratio 1.0 gives no penalty, ratio 5.0 gives -0.03, ratio 0.1 gives -0.05, missing duration data gives no penalty"
+                                                   ],
+                            "notes":  "Tier: feature (small). apply_duration_penalty at src/matching/scoring.py:137 exists but uses speed_ratio (playback speed matching). This new adjustment is about content duration fit - a 2-second voiceover matched to a 30-second video segment is suspicious. Source files: src/matching/scoring.py (new function after ~line 560), src/matching/tiered_matcher.py (call in all 3 match paths), src/matching/scoring.py:3470 (add to apply_all_adjustments)."
+                        },
+                        {
+                            "id":  "US-77-011",
+                            "title":  "Add entity match boost propagation to confidence breakdown",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "apply_entity_match_boost at src/matching/scoring.py:802 records its graduated boost values in confidence_breakdown with detailed reason text",
+                                                       "The breakdown entry includes: matched entity names, match type (exact/partial), and boost value applied",
+                                                       "When no entities match, no breakdown entry is added (avoid noise)",
+                                                       "The entity match information is included in the scoring audit summary (US-77-008)",
+                                                       "Tests verify: exact entity match shows entity name in breakdown, partial match shows match type, zero-entity case adds no entry"
+                                                   ],
+                            "notes":  "Tier: bugfix (small). apply_entity_match_boost at src/matching/scoring.py:802 already applies graduated boosts (+0.03/+0.06/+0.10) but may not record full details in confidence_breakdown including which entities matched and the match type. This makes debugging entity matching difficult. Need to check current breakdown output and enhance it. Source files: src/matching/scoring.py:802-930."
+                        },
+                        {
+                            "id":  "US-77-012",
+                            "title":  "Add low-confidence segment reporting with suggested remediation",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "After matching, segments with confidence below LOW_CONFIDENCE_WARNING_THRESHOLD (0.15) are collected and logged at WARNING level",
+                                                       "Each low-confidence warning includes: segment index, voiceover text preview (first 50 chars), confidence value, top 3 negative adjustments from confidence_breakdown",
+                                                       "When \u003e20% of segments are low-confidence, a summary WARNING suggests enabling iterative matching or adjusting scoring weights",
+                                                       "Tests verify: segment at 0.10 triggers warning, segment at 0.20 does not, \u003e20% threshold triggers summary warning, empty match list produces no warnings"
+                                                   ],
+                            "notes":  "Tier: feature (small). LOW_CONFIDENCE_WARNING_THRESHOLD exists at src/matching/scoring.py:2893 as 0.15 but is only used for individual debug-level logging. There\u0027s no aggregate low-confidence reporting that helps users understand match quality at a glance. Source files: src/matching/tiered_matcher.py (add reporting method after match loop), src/matching/scoring.py:2893 (threshold constant)."
+                        }
+                    ]
 }
