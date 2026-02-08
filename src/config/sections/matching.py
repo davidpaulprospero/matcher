@@ -228,6 +228,8 @@ class ChapterGroupingConfig:
     coherence_penalty_threshold: int = 5  # Max unique sources per chapter before penalty
     relevance_boost_weight: float = 0.1  # Weight for cross-chapter relevance boost (US-71-005)
     min_source_diversity: int = 2  # Min unique sources per chapter (US-77-007); 1 = disabled
+    chapter_topic_match_boost: List[float] = field(default_factory=lambda: [0.05, 0.15])  # [min, max] boost range for topic match
+    chapter_topic_mismatch_penalty: float = -0.10  # Penalty when video topic doesn't match chapter (must be negative)
 
     def __post_init__(self):
         import logging
@@ -240,6 +242,34 @@ class ChapterGroupingConfig:
                 f"{self.coherence_penalty_threshold} must be >= 1. "
                 f"Check matching.chapter_grouping.coherence_penalty_threshold "
                 f"in config.yaml"
+            )
+
+        # chapter_topic_match_boost: must be list of exactly 2 floats with min <= max
+        if not isinstance(self.chapter_topic_match_boost, list) or len(self.chapter_topic_match_boost) != 2:
+            raise ValueError(
+                f"ChapterGroupingConfig.chapter_topic_match_boost must be a list of "
+                f"exactly 2 floats [min, max], got {self.chapter_topic_match_boost}"
+            )
+        try:
+            boost_min, boost_max = float(self.chapter_topic_match_boost[0]), float(self.chapter_topic_match_boost[1])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"ChapterGroupingConfig.chapter_topic_match_boost values must be numeric, "
+                f"got {self.chapter_topic_match_boost}"
+            )
+        if boost_min > boost_max:
+            raise ValueError(
+                f"ChapterGroupingConfig.chapter_topic_match_boost min ({boost_min}) "
+                f"must be <= max ({boost_max}). Check matching.chapter_grouping."
+                f"chapter_topic_match_boost in config.yaml"
+            )
+
+        # chapter_topic_mismatch_penalty: must be negative (it's a penalty)
+        if self.chapter_topic_mismatch_penalty >= 0:
+            raise ValueError(
+                f"ChapterGroupingConfig.chapter_topic_mismatch_penalty="
+                f"{self.chapter_topic_mismatch_penalty} must be negative (it's a penalty). "
+                f"Check matching.chapter_grouping.chapter_topic_mismatch_penalty in config.yaml"
             )
 
         # relevance_boost_weight: ValueError if negative, warn+clamp if > 1.0

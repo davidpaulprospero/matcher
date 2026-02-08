@@ -836,6 +836,60 @@ class Config:
                 f"output.time_scale_factor must be > 0, got {time_scale}"
             )
 
+        # Chapter grouping constraints
+        chapter_grouping = safe_get_config_value(self.matching, 'chapter_grouping')
+        if chapter_grouping:
+            # chapter_topic_match_boost: list of exactly 2 floats [min, max] with min <= max
+            boost = safe_get_config_value(chapter_grouping, 'chapter_topic_match_boost')
+            if boost is not None:
+                if not isinstance(boost, list) or len(boost) != 2:
+                    errors.append(
+                        f"matching.chapter_grouping.chapter_topic_match_boost must be a "
+                        f"list of exactly 2 floats [min, max], got {boost}"
+                    )
+                else:
+                    try:
+                        boost_min, boost_max = float(boost[0]), float(boost[1])
+                        if boost_min > boost_max:
+                            errors.append(
+                                f"matching.chapter_grouping.chapter_topic_match_boost: "
+                                f"min ({boost_min}) must be <= max ({boost_max})"
+                            )
+                    except (TypeError, ValueError):
+                        errors.append(
+                            f"matching.chapter_grouping.chapter_topic_match_boost values "
+                            f"must be numeric, got {boost}"
+                        )
+
+            # chapter_topic_mismatch_penalty: must be negative (it's a penalty)
+            mismatch_penalty = safe_get_config_value(chapter_grouping, 'chapter_topic_mismatch_penalty')
+            if mismatch_penalty is not None and mismatch_penalty >= 0:
+                errors.append(
+                    f"matching.chapter_grouping.chapter_topic_mismatch_penalty "
+                    f"({mismatch_penalty}) must be negative (it's a penalty)"
+                )
+
+        # Context enrichment constraints
+        context_enrichment = safe_get_config_value(self.matching, 'context_enrichment')
+        if context_enrichment:
+            # max_description_length must be positive
+            max_desc_len = safe_get_config_value(context_enrichment, 'max_description_length')
+            if max_desc_len is not None and max_desc_len <= 0:
+                errors.append(
+                    f"matching.context_enrichment.max_description_length "
+                    f"({max_desc_len}) must be positive"
+                )
+
+            # Cross-section: title_enriched_embeddings requires embedding provider
+            title_enriched = safe_get_config_value(context_enrichment, 'title_enriched_embeddings', False)
+            if title_enriched:
+                embedding_provider = safe_get_config_value(self.embedding, 'provider', '')
+                if not embedding_provider:
+                    errors.append(
+                        "matching.context_enrichment.title_enriched_embeddings=true "
+                        "requires embedding.provider to be configured"
+                    )
+
         # Duration tier min <= max for all configured tiers
         duration_tiers = safe_get_config_value(self, 'duration_tiers')
         if duration_tiers:

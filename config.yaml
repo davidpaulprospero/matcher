@@ -632,6 +632,8 @@ matching:
     source_consistency_boost: 0.03    # Boost when same source reused within chapter
     coherence_penalty_threshold: 5    # Max unique sources per chapter before penalty (-0.03 per excess, capped -0.10)
     min_source_diversity: 2           # Min unique sources per chapter (US-77-007); 1 = disabled
+    chapter_topic_match_boost: [0.05, 0.15]  # [min, max] boost range for topic match within chapter
+    chapter_topic_mismatch_penalty: -0.10     # Penalty when video topic doesn't match chapter (must be negative)
 
   # Negative matching rules are defined in the top-level 'negative_matching:' section below.
   # See NegativeMatchingConfig in src/config/sections/matching.py for the dataclass definition.
