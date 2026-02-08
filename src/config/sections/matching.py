@@ -314,7 +314,7 @@ class MatchingConfig:
     # Boosts confidence for: 1) silent/B-roll videos, 2) scenes without faces when topic matches
     broll_boost: float = 0.2  # Confidence boost for B-roll videos (0.0-0.3)
 
-    # Caption quality confidence adjustment (US-007, US-006)
+    # Caption quality confidence adjustment (US-007, US-006, US-73-006)
     # Adjusts confidence based on caption quality: high, medium, low
     # Two modes available:
     #   1. Additive (legacy): high_boost/low_penalty add/subtract from confidence
@@ -330,6 +330,13 @@ class MatchingConfig:
     # Example: {high: 1.0, medium: 0.9, low: 0.75}
     # adjusted = raw_confidence * weight
     caption_quality_weights: Optional[Dict[str, float]] = None  # None = use additive mode
+
+    # Tiered caption quality penalties (US-73-006)
+    # Graduated penalties for specific quality issues - stack up to max_caption_penalty
+    caption_penalty_auto_generated: float = -0.05  # Penalty for auto-generated captions
+    caption_penalty_low_quality: float = -0.08     # Penalty for low quality captions
+    caption_penalty_missing_timing: float = -0.03  # Penalty for missing/poor timing data
+    max_caption_penalty: float = -0.12             # Maximum combined caption penalty (cap)
 
     # Caption timing penalty (US-008 Sprint 7)
     # Penalizes matches when caption timing is poor (low coverage, exceeds video duration)

@@ -374,6 +374,95 @@ def apply_caption_quality_adjustment(
     return confidence, ""
 
 
+def apply_tiered_caption_penalties(
+    confidence: float,
+    video_segment: SRTSegment,
+    config
+) -> Tuple[float, List[dict]]:
+    """
+    Apply graduated caption quality penalties based on specific quality issues (US-73-006).
+
+    Checks for individual quality issues on the segment (auto_generated, low_quality,
+    missing_timing) and applies separate penalties that stack up to a configurable cap.
+
+    Each penalty appears as a separate entry in the confidence breakdown for transparency.
+
+    Args:
+        confidence: Current confidence score (after other adjustments)
+        video_segment: Video segment with potential caption_quality_issues metadata
+        config: Config with tiered penalty settings
+
+    Returns:
+        Tuple of (adjusted_confidence, list of breakdown entries)
+    """
+    mc = config.matching
+
+    if not getattr(mc, 'caption_quality_adjustment_enabled', True):
+        return confidence, []
+
+    # Get caption quality issues list from segment metadata
+    caption_quality_issues = getattr(video_segment, 'caption_quality_issues', None)
+    if not caption_quality_issues:
+        return confidence, []
+
+    # Penalty values from config
+    penalty_map = {
+        'auto_generated': (
+            getattr(mc, 'caption_penalty_auto_generated', -0.05),
+            'caption_quality_auto',
+        ),
+        'low_quality': (
+            getattr(mc, 'caption_penalty_low_quality', -0.08),
+            'caption_quality_low',
+        ),
+        'missing_timing': (
+            getattr(mc, 'caption_penalty_missing_timing', -0.03),
+            'caption_timing_gap',
+        ),
+    }
+
+    max_penalty = getattr(mc, 'max_caption_penalty', -0.12)
+
+    total_penalty = 0.0
+    breakdown_entries = []
+
+    for issue in caption_quality_issues:
+        if issue in penalty_map:
+            penalty_value, component_name = penalty_map[issue]
+            total_penalty += penalty_value
+
+    # Clamp total penalty to max (both are negative, so use max() to limit)
+    if total_penalty < max_penalty:
+        total_penalty = max_penalty
+
+    if total_penalty == 0.0:
+        return confidence, []
+
+    # Build breakdown entries for each contributing penalty (proportionally scaled if capped)
+    raw_total = sum(
+        penalty_map[issue][0] for issue in caption_quality_issues if issue in penalty_map
+    )
+    scale = total_penalty / raw_total if raw_total != 0.0 else 1.0
+
+    for issue in caption_quality_issues:
+        if issue in penalty_map:
+            penalty_value, component_name = penalty_map[issue]
+            scaled_penalty = penalty_value * scale
+            breakdown_entries.append({
+                'component': component_name,
+                'adjustment': round(scaled_penalty, 4),
+                'reason': f"caption {issue}: {scaled_penalty:+.4f} (tiered)"
+            })
+
+    adjusted = max(0.0, min(1.0, confidence + total_penalty))
+    logger.debug(
+        f"Tiered caption penalties applied: {confidence:.2f} -> {adjusted:.2f} "
+        f"(total: {total_penalty:+.2f}, issues: {caption_quality_issues})"
+    )
+
+    return adjusted, breakdown_entries
+
+
 def apply_timing_penalty(
     confidence: float,
     video_segment: SRTSegment,
@@ -2729,6 +2818,16 @@ class MatchScoring:
         if caption_reason:
             reasons.append(caption_reason)
             breakdown.append({'component': 'caption_quality', 'adjustment': round(confidence - prev, 4), 'reason': caption_reason})
+
+        # 3b. Tiered caption quality penalties (US-73-006)
+        prev = confidence
+        confidence, tiered_entries = apply_tiered_caption_penalties(
+            confidence, video_segment, self.config
+        )
+        if tiered_entries:
+            for entry in tiered_entries:
+                reasons.append(entry['reason'])
+                breakdown.append(entry)
 
         # 4. Timing penalty
         prev = confidence

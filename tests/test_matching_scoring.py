@@ -2832,5 +2832,213 @@ class TestChapterTopicMatch:
         assert len(chapter_entries) == 0
 
 
+# ============================================================================
+# Test Tiered Caption Quality Penalties (US-73-006)
+# ============================================================================
+
+class TestTieredCaptionQualityPenalties:
+    """Test graduated caption quality penalties with stacking and cap."""
+
+    @pytest.fixture
+    def tiered_config(self):
+        """Config with tiered caption penalty settings."""
+        config = Mock()
+        matching = Mock()
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_weights = None
+        matching.caption_quality_high_boost = 0.0
+        matching.caption_quality_low_penalty = 0.0
+        matching.caption_penalty_auto_generated = -0.05
+        matching.caption_penalty_low_quality = -0.08
+        matching.caption_penalty_missing_timing = -0.03
+        matching.max_caption_penalty = -0.12
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def video_seg(self):
+        seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="v.mp4")
+        return seg
+
+    @pytest.mark.fast
+    def test_auto_generated_penalty_alone(self, tiered_config, video_seg):
+        """auto_generated issue applies -0.05 penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.75) < 0.001
+        assert len(entries) == 1
+        assert entries[0]['component'] == 'caption_quality_auto'
+        assert abs(entries[0]['adjustment'] - (-0.05)) < 0.001
+
+    @pytest.mark.fast
+    def test_low_quality_penalty_alone(self, tiered_config, video_seg):
+        """low_quality issue applies -0.08 penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['low_quality']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.72) < 0.001
+        assert len(entries) == 1
+        assert entries[0]['component'] == 'caption_quality_low'
+        assert abs(entries[0]['adjustment'] - (-0.08)) < 0.001
+
+    @pytest.mark.fast
+    def test_missing_timing_penalty_alone(self, tiered_config, video_seg):
+        """missing_timing issue applies -0.03 penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['missing_timing']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.77) < 0.001
+        assert len(entries) == 1
+        assert entries[0]['component'] == 'caption_timing_gap'
+        assert abs(entries[0]['adjustment'] - (-0.03)) < 0.001
+
+    @pytest.mark.fast
+    def test_stacking_within_cap(self, tiered_config, video_seg):
+        """auto_generated + missing_timing = -0.08 total (within -0.12 cap)."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated', 'missing_timing']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.72) < 0.001  # 0.80 - 0.08
+        assert len(entries) == 2
+        components = {e['component'] for e in entries}
+        assert 'caption_quality_auto' in components
+        assert 'caption_timing_gap' in components
+
+    @pytest.mark.fast
+    def test_stacking_hits_cap(self, tiered_config, video_seg):
+        """All three issues = -0.16 raw, capped to -0.12."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality', 'missing_timing']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        # Raw: -0.05 + -0.08 + -0.03 = -0.16, capped to -0.12
+        assert abs(adjusted - 0.68) < 0.001  # 0.80 - 0.12
+        assert len(entries) == 3
+        components = {e['component'] for e in entries}
+        assert components == {'caption_quality_auto', 'caption_quality_low', 'caption_timing_gap'}
+        # Total adjustment should sum to -0.12 (capped)
+        total_adj = sum(e['adjustment'] for e in entries)
+        assert abs(total_adj - (-0.12)) < 0.001
+
+    @pytest.mark.fast
+    def test_no_issues_no_penalty(self, tiered_config, video_seg):
+        """No caption_quality_issues means no penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert adjusted == 0.80
+        assert entries == []
+
+    @pytest.mark.fast
+    def test_empty_issues_list(self, tiered_config, video_seg):
+        """Empty caption_quality_issues list means no penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = []
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert adjusted == 0.80
+        assert entries == []
+
+    @pytest.mark.fast
+    def test_disabled_returns_unchanged(self, tiered_config, video_seg):
+        """When caption_quality_adjustment_enabled is False, no penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        tiered_config.matching.caption_quality_adjustment_enabled = False
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert adjusted == 0.80
+        assert entries == []
+
+    @pytest.mark.fast
+    def test_separate_breakdown_entries(self, tiered_config, video_seg):
+        """Each penalty type appears as separate entry in breakdown."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated', 'missing_timing']
+
+        _, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert len(entries) == 2
+        for entry in entries:
+            assert 'component' in entry
+            assert 'adjustment' in entry
+            assert 'reason' in entry
+            assert 'tiered' in entry['reason']
+
+    @pytest.mark.fast
+    def test_custom_max_penalty_from_config(self, tiered_config, video_seg):
+        """Custom max_caption_penalty is respected."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        tiered_config.matching.max_caption_penalty = -0.06
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality']
+        # Raw: -0.05 + -0.08 = -0.13, capped to -0.06
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.74) < 0.001  # 0.80 - 0.06
+        total_adj = sum(e['adjustment'] for e in entries)
+        assert abs(total_adj - (-0.06)) < 0.001
+
+    @pytest.mark.fast
+    def test_tiered_in_apply_all_adjustments(self, video_seg):
+        """Tiered penalties appear in apply_all_adjustments breakdown."""
+        config = Mock()
+        matching = Mock()
+        matching.multimodal_enabled = True
+        matching.multimodal_weights = None
+        matching.pool_normalization_enabled = True
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        matching.broll_boost = 0.0
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_weights = None
+        matching.caption_quality_high_boost = 0.0
+        matching.caption_quality_low_penalty = 0.0
+        matching.caption_penalty_auto_generated = -0.05
+        matching.caption_penalty_low_quality = -0.08
+        matching.caption_penalty_missing_timing = -0.03
+        matching.max_caption_penalty = -0.12
+        matching.apply_timing_penalty = False
+        matching.skip_llm_threshold = 0.85
+        matching.chapter_grouping = None
+        matching.scoring = None
+        config.matching = matching
+        global_cache = Mock()
+        global_cache.current_project_boost = 0.0
+        config.global_cache = global_cache
+
+        video_seg.caption_quality = None  # No legacy quality
+        video_seg.caption_quality_issues = ['auto_generated', 'missing_timing']
+
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test vo", source_file="vo.srt")
+        vo_seg.keywords = []
+        vo_seg.entities = []
+
+        scoring = MatchScoring(config)
+        adjusted, reason, breakdown = scoring.apply_all_adjustments(
+            confidence=0.80,
+            vo_segment=vo_seg,
+            video_segment=video_seg,
+        )
+
+        # Check tiered penalty components are in breakdown
+        components = [b['component'] for b in breakdown]
+        assert 'caption_quality_auto' in components
+        assert 'caption_timing_gap' in components
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
