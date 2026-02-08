@@ -135,7 +135,7 @@
       "id": "US-70-009",
       "title": "Map caption segments to YouTube chapters for chapter-aware scoring",
       "priority": "medium",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "New function map_segments_to_chapters(segments, chapters) returns a dict mapping segment index to chapter index/title",
         "Segments spanning chapter boundaries are assigned to the chapter with the most temporal overlap",
@@ -144,7 +144,7 @@
         "Adjustment recorded in confidence_breakdown as 'chapter_topic_match' entry",
         "Unit tests cover: exact boundary segments, spanning segments, segments outside chapters, empty chapters list"
       ],
-      "notes": "Tier: enhancement (Area 3). Files: src/matching/scoring.py (add apply_chapter_topic_match method to MatchScoring class), new utility function can go in src/chapter_detection/models.py or src/chapter_detection/. Depends on US-70-002/003 for chapter data availability. Chapter topic matching uses keyword overlap between chapter titles and voiceover segment keywords."
+      "notes": "Implemented map_segments_to_chapters() in src/chapter_detector/mapping.py and apply_chapter_topic_match() in MatchScoring class. Added chapter_title param to apply_all_adjustments. 21 tests pass."
     },
     {
       "id": "US-70-010",

@@ -2046,6 +2046,11 @@ class MatchScoring:
     TITLE_BOOST_2_KEYWORDS = 0.05  # 2 keyword matches
     TITLE_BOOST_3_PLUS_KEYWORDS = 0.08  # 3+ keyword matches
 
+    # Chapter topic match thresholds (US-70-009)
+    CHAPTER_TOPIC_BOOST = 0.05      # Base boost for 1 keyword match
+    CHAPTER_TOPIC_BOOST_STRONG = 0.10  # Strong boost for 2+ keyword matches
+    CHAPTER_TOPIC_MISMATCH_PENALTY = -0.05  # Penalty when chapter topic doesn't match
+
     # Stopwords for title keyword extraction
     _TITLE_STOPWORDS = frozenset({
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
@@ -2114,6 +2119,52 @@ class MatchScoring:
         reason = f"title relevance boost +{boost} ({match_count} keyword{'s' if match_count != 1 else ''}: {matched_words})"
         return confidence + boost, reason
 
+    def apply_chapter_topic_match(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        chapter_title: Optional[str] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply chapter topic match adjustment to confidence score.
+
+        Compares voiceover segment keywords against chapter title keywords.
+        Boosts confidence when topics match, applies small penalty on mismatch.
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Voiceover segment with text
+            chapter_title: Chapter title for the matched video segment
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if not chapter_title:
+            return confidence, ""
+
+        vo_keywords = self._extract_keywords(vo_segment.text)
+        chapter_keywords = self._extract_keywords(chapter_title)
+
+        if not vo_keywords or not chapter_keywords:
+            return confidence, ""
+
+        overlap = vo_keywords & chapter_keywords
+        match_count = len(overlap)
+
+        if match_count >= 2:
+            adjustment = self.CHAPTER_TOPIC_BOOST_STRONG
+            matched_words = ', '.join(sorted(overlap)[:5])
+            reason = f"chapter topic boost +{adjustment} ({match_count} keywords: {matched_words})"
+        elif match_count == 1:
+            adjustment = self.CHAPTER_TOPIC_BOOST
+            matched_words = ', '.join(sorted(overlap))
+            reason = f"chapter topic boost +{adjustment} (1 keyword: {matched_words})"
+        else:
+            adjustment = self.CHAPTER_TOPIC_MISMATCH_PENALTY
+            reason = f"chapter topic mismatch {adjustment}"
+
+        return confidence + adjustment, reason
+
     def apply_all_adjustments(
         self,
         confidence: float,
@@ -2123,11 +2174,13 @@ class MatchScoring:
         chapter_matching_enabled: bool = False,
         topic_mismatch_penalty: float = 0.15,
         video_title: Optional[str] = None,
+        chapter_title: Optional[str] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
 
-        Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty -> project_boost -> title_relevance
+        Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty
+               -> project_boost -> title_relevance -> chapter_topic_match
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2138,6 +2191,8 @@ class MatchScoring:
             video_topics: Optional dict of video topics
             chapter_matching_enabled: Whether chapter matching is enabled
             topic_mismatch_penalty: Maximum topic mismatch penalty
+            video_title: Optional video title for title relevance scoring
+            chapter_title: Optional chapter title for chapter topic matching
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -2205,7 +2260,17 @@ class MatchScoring:
                 reasons.append(title_reason)
                 breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
 
-        # 7. Enforce minimum confidence floor (US-46-004)
+        # 7. Chapter topic match (US-70-009)
+        if chapter_title:
+            prev = confidence
+            confidence, chapter_reason = self.apply_chapter_topic_match(
+                confidence, vo_segment, chapter_title
+            )
+            if chapter_reason:
+                reasons.append(chapter_reason)
+                breakdown.append({'component': 'chapter_topic_match', 'adjustment': round(confidence - prev, 4), 'reason': chapter_reason})
+
+        # 8. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2213,7 +2278,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 8. Log warning for over-penalized matches (US-46-004)
+        # 9. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2224,7 +2289,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 9. Log confidence breakdown at DEBUG level (US-53-003)
+        # 10. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(
