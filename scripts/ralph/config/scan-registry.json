@@ -128,6 +128,25 @@
       ],
       "outputs": ["error categories", "frequency", "affected modules"],
       "focusAreas": ["healing", "quality", "agents"]
+    },
+    "matching_infrastructure": {
+      "id": "matching_infrastructure",
+      "name": "Matching & Scoring System",
+      "description": "Analyze matching pipeline, confidence scoring, chapter detection, and context usage",
+      "relevantFor": [
+        "matching",
+        "scoring",
+        "confidence",
+        "chapter",
+        "listicle",
+        "context",
+        "video title",
+        "video description",
+        "coherence",
+        "grouping"
+      ],
+      "outputs": ["matching files", "scoring components", "chapter detection modules", "context usage patterns"],
+      "focusAreas": ["context-matching", "listicle-matching", "quality"]
     }
   },
   "defaultScans": ["large_files", "test_coverage"],
