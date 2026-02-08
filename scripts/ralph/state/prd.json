@@ -101,7 +101,7 @@
                                                        "No adjustment applied when video title is empty or None (graceful no-op)",
                                                        "Unit tests verify graduated boost values and confidence_breakdown entry format"
                                                    ],
-                            "notes":  "All 6/6 criteria verified. apply_title_relevance_adjustment() at line 2071 with graduated boosts (0.03/0.05/0.08), _extract_keywords helper, breakdown entry as title_relevance component, called from apply_all_adjustments when video_title present, graceful no-op for empty/None. 10 unit tests pass covering all boost levels, breakdown format, stopwords, case-insensitivity."
+                            "notes":  "All 6/6 criteria verified. 10 unit tests passing. Implementation at scoring.py:2044-2115, tests at test_matching_scoring.py:1615-1747."
                         },
                         {
                             "id":  "US-70-007",
