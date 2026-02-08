@@ -114,7 +114,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Added annotate_gaps_with_chapters() to gap_analyzer.py with configurable intro_boost/conclusion_boost. GapSegment now has chapter_id and priority_boost fields. 9 unit tests verify all acceptance criteria including priority sorting."
+                            "notes":  "All 5/5 criteria verified: (1) chapter annotation in analyze_gaps, (2) intro +0.2 boost, (3) conclusion +0.15 boost, (4) priority sorting for gap-filling order, (5) 9 unit tests passing."
                         },
                         {
                             "id":  "US-71-008",
@@ -126,9 +126,9 @@
                                                        "Both numeric (\u00275 reasons\u0027) and word-form (\u0027five reasons\u0027) counts are recognized",
                                                        "Unit test verifies detection of at least 4 different header patterns with correct expected_count extraction"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier 3 (Polish). The listicle_detector.py at src/chapter_detection/listicle_detector.py currently detects ordinal markers (first, second), numbered markers (#1, step 1), and transition markers (next up, moving on to). It does NOT detect list headers like \u0027top 10\u0027 or \u00275 reasons\u0027. This was explicitly listed in Area 4 of the design doc. Needs new regex patterns and a header_count field on the detection result or a separate ListicleHeader dataclass."
+                            "notes":  "All 5/5 criteria met. Added HEADER_PATTERNS with 6 regex patterns for 'top N', 'N <noun>', 'N <noun>' word-form, 'the N best'. detect_list_header() function + _parse_header_count() helper. expected_count field on ListicleGroup model. Warning logged when |detected - expected| > 1. 14 new tests (8 unit + 6 integration) all pass. 52 total tests pass."
                         },
                         {
                             "id":  "US-71-009",
