@@ -85,7 +85,7 @@
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "notes":  "All 5 criteria verified. compute_relevance_matrix() at scoring.py:1858 uses Jaccard similarity (0-1 normalized). Config relevance_boost_weight=0.1 in matching.py:194. apply_cross_chapter_relevance_boost() applies proportional boost. 16 tests pass in test_cross_chapter_relevance.py."
+                            "notes":  "All 5 criteria met. compute_relevance_matrix() at scoring.py:1858 uses Jaccard (intersection/union) for 0-1 normalized scores. Config relevance_boost_weight=0.1 at matching.py:194. apply_cross_chapter_relevance_boost() at scoring.py:2394 applies boost = relevance * weight. 16 unit tests pass covering matrix computation, boost proportionality, edge cases."
                         },
                         {
                             "id":  "US-71-006",
