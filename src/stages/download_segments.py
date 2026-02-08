@@ -85,6 +85,8 @@ class SegmentDownloadStats:
         'segments_finished': 0,
     })
     download_speeds: List[float] = field(default_factory=list)
+    # US-81-002: Per-item error tracking for batch error isolation
+    failed_items: List[Dict[str, Any]] = field(default_factory=list)
 
     # -- convenience mutators --------------------------------------------------
 
@@ -99,14 +101,29 @@ class SegmentDownloadStats:
         if duration > 0 and file_bytes > 0:
             self.download_speeds.append(file_bytes / duration)
 
-    def increment_failure(self, category: str | None = None, error_msg: str | None = None) -> None:
-        """Record a failed segment download, optionally categorised."""
+    def increment_failure(
+        self,
+        category: str | None = None,
+        error_msg: str | None = None,
+        video_id: str | None = None,
+    ) -> None:
+        """Record a failed segment download, optionally categorised.
+
+        US-81-002: Also appends structured error info to failed_items list.
+        """
         self.failed += 1
         self.attempted += 1
         if category:
             self.error_categories[category] = self.error_categories.get(category, 0) + 1
         if error_msg and category:
             self.error_aggregator.record(error_msg, category)
+        # US-81-002: Track per-item failure details
+        if video_id:
+            self.failed_items.append({
+                'video_id': video_id,
+                'error_type': category or 'unknown',
+                'message': error_msg or 'unknown error',
+            })
 
     def increment_cached(self, file_bytes: int = 0) -> None:
         """Record a segment served from cache."""
@@ -423,6 +440,8 @@ class DownloadVideoSegmentsStage(Stage):
                 'segment_count': len(downloaded_segments),
                 'total_matches': len(state.matches),
                 'retry_count': download_stats.retry_count,
+                # US-81-002: Per-item error details for batch error isolation
+                'failed_items': download_stats.failed_items,
             }
 
             # US-50-008: Include circuit breaker metrics in checkpoint
@@ -661,7 +680,11 @@ class DownloadVideoSegmentsStage(Stage):
             # Check preconditions (circuit breaker, etc.)
             skip_reason = self._check_preconditions(ctx, video_id, start, end, output_file)
             if skip_reason:
-                stats.increment_failure()
+                stats.increment_failure(
+                    category='precondition',
+                    error_msg=skip_reason,
+                    video_id=video_id,
+                )
                 self._print_progress(idx, total, stats)
                 continue
 
@@ -920,6 +943,12 @@ class DownloadVideoSegmentsStage(Stage):
             stats.failed += 1
             stats.attempted += 1
             stats.segment_durations.append(result.get('duration', 0))
+            # US-81-002: Track as failed item
+            stats.failed_items.append({
+                'video_id': video_id,
+                'error_type': 'file_missing',
+                'message': f'Download succeeded but file not found: {output_file}',
+            })
             logger.warning(f"Download succeeded but file not found: {output_file}")
             return False
 
@@ -950,7 +979,7 @@ class DownloadVideoSegmentsStage(Stage):
         """
         stats = ctx.stats
         _err_cat = classify_error_category(error_msg)
-        stats.increment_failure(category=_err_cat, error_msg=error_msg)
+        stats.increment_failure(category=_err_cat, error_msg=error_msg, video_id=video_id)
         logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
         is_bot_error = _is_escalation_error(error_msg)

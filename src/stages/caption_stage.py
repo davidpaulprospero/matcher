@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from . import Stage, StageResult, register_stage, validate_required_state_attrs
+from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -1338,6 +1338,22 @@ class CaptionStage(Stage):
                     f"US-60-006: {len(self.needs_transcription)} videos need transcription fallback"
                 )
 
+            # US-81-002: Build per-item failed_items list with structured error info
+            failed_items = []
+            for vid, r in caption_results.items():
+                if r.get('error'):
+                    failed_items.append({
+                        'video_id': vid,
+                        'error_type': r.get('reason', 'fetch_error'),
+                        'message': str(r.get('error', 'unknown error')),
+                    })
+                elif r.get('unavailable') and r.get('reason') != 'no_captions_available':
+                    failed_items.append({
+                        'video_id': vid,
+                        'error_type': r.get('reason', 'unavailable'),
+                        'message': r.get('reason', 'unavailable'),
+                    })
+
             # Prepare checkpoint data (US-007: include quality stats, US-011: include metrics)
             checkpoint_data = {
                 'caption_results': caption_results,
@@ -1364,13 +1380,22 @@ class CaptionStage(Stage):
                 'needs_transcription': self.needs_transcription,
                 # US-73-008: Structured metrics for post-run analysis
                 'caption_stage_metrics': caption_stage_metrics,
+                # US-81-002: Per-item error details for batch error isolation
+                'failed_items': failed_items,
             }
 
             # US-37-007: Save retry budget state for resume support
             if retry_budget:
                 checkpoint_data['retry_budget'] = retry_budget.to_dict()
 
-            return StageResult.ok(checkpoint_data, warnings)
+            # US-81-002: Stage metrics for pipeline observability
+            items_processed = success_count + skip_count
+            stage_metrics = StageMetrics(
+                items_processed=items_processed,
+                items_failed=fetch_failed_count,
+            )
+
+            return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 
         except ImportError as e:
             logger.error(f"Could not import caption_fetcher: {e}")
