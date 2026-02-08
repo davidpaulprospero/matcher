@@ -152,9 +152,9 @@
                                                        "When coverage_ratio \u003c 0.7, a WARNING log is emitted with the video_id and gap details",
                                                        "Unit test verifies coverage computation with full coverage, partial coverage, and large gaps"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
-                            "notes":  "Tier: Data quality / diagnostics. Files: src/caption/models.py (CaptionResult class). Low caption coverage means the video has significant uncaptioned periods (music, silence, non-speech audio). This metric helps downstream matching understand that some video segments simply have no text to match against, rather than assuming they\u0027re low-quality matches."
+                            "notes":  "Added analyze_caption_coverage() function and CoverageAnalysis dataclass. CaptionResult.coverage_analysis property lazily computes and caches gap analysis. WARNING logged at <70% coverage. 14 unit tests pass."
                         },
                         {
                             "id":  "US-73-011",
