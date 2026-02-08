@@ -124,9 +124,9 @@
                                                        "Existing CaptionRetryBudget logging is preserved; new logging supplements (does not replace) it",
                                                        "Unit test verifies structured log entries are produced for success and failure cases"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier: Diagnostics. Files: src/caption_fetcher.py (fetch methods), src/stages/caption_stage.py (stage execution), src/caption/retry_budget.py. Currently retry budget tracks aggregate stats but individual attempt outcomes aren\u0027t structured-logged for post-hoc analysis. When caption budgets exhaust, diagnosing WHY requires manual log parsing."
+                            "notes":  "All 5/5 criteria verified. Added per-attempt structured dict logging in fetch_captions_batch across 4 code paths (success, unavailable, fetch error, unexpected error) with keys: video_id, attempt_number, success, error_type, duration_ms, method. Added caption_stage_summary log at end of caption stage with total_attempts, success_count, failure_count, error_type_distribution, avg_duration_ms. Summary written to checkpoint data under caption_stage_metrics for post-run analysis. Existing CaptionRetryBudget logging preserved. 3 unit tests in tests/test_caption_stage.py verify structured log entries for success and failure cases."
                         },
                         {
                             "id":  "US-73-009",
