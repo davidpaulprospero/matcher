@@ -191,6 +191,7 @@ class ChapterGroupingConfig:
     enabled: bool = True  # Enable chapter-level source grouping
     source_consistency_boost: float = 0.03  # Boost when same source within chapter
     coherence_penalty_threshold: int = 5  # Max unique sources per chapter before penalty
+    relevance_boost_weight: float = 0.1  # Weight for cross-chapter relevance boost (US-71-005)
 
 
 @dataclass

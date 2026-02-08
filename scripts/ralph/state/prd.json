@@ -83,9 +83,9 @@
                                                        "Candidates from high-relevance video chapters get a soft boost proportional to relevance score * weight",
                                                        "Unit test verifies matrix computation with known keyword sets produces expected overlap scores"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Matching Enhancement). This is the cross-chapter grouping feature from Area 5 of the design doc. Neither relevance_matrix nor relevance_boost_weight exist in the codebase yet. The ChapterGroupingConfig in src/config/sections/matching.py needs the new field. The matrix computation should use topic_keywords from both VideoChapter (src/chapter_detection/models.py) and voiceover chapter detection results. Keyword extraction uses _extract_topic_keywords() pattern already in src/chapter_detection/listicle_detector.py."
+                            "notes":  "Implemented compute_relevance_matrix() (Jaccard similarity) in scoring.py, apply_cross_chapter_relevance_boost() method on MatchScoring, config option relevance_boost_weight=0.1 on ChapterGroupingConfig, integrated as step 11 in apply_all_adjustments(). 16 unit tests pass covering matrix computation, proportional boost, edge cases."
                         },
                         {
                             "id":  "US-71-006",

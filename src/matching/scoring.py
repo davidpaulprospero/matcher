@@ -1855,6 +1855,42 @@ def compute_semantic_coherence(
     return adjustment, reason
 
 
+def compute_relevance_matrix(
+    voiceover_chapter_keywords: List[List[str]],
+    video_chapter_keywords: List[List[str]],
+) -> List[List[float]]:
+    """
+    Compute a cross-chapter relevance matrix based on topic keyword overlap (US-71-005).
+
+    Each cell [i][j] is the Jaccard similarity (intersection over union) between
+    voiceover chapter i's keywords and video chapter j's keywords, normalized to 0-1.
+
+    Args:
+        voiceover_chapter_keywords: List of keyword lists, one per voiceover chapter
+        video_chapter_keywords: List of keyword lists, one per video chapter
+
+    Returns:
+        2D list of floats (vo_chapters x video_chapters), each in [0.0, 1.0]
+    """
+    if not voiceover_chapter_keywords or not video_chapter_keywords:
+        return []
+
+    matrix = []
+    for vo_kw in voiceover_chapter_keywords:
+        vo_set = {k.lower() for k in vo_kw} if vo_kw else set()
+        row = []
+        for vid_kw in video_chapter_keywords:
+            vid_set = {k.lower() for k in vid_kw} if vid_kw else set()
+            union = vo_set | vid_set
+            if not union:
+                row.append(0.0)
+            else:
+                row.append(len(vo_set & vid_set) / len(union))
+        matrix.append(row)
+
+    return matrix
+
+
 # Pool normalization constants
 POOL_NORMALIZATION_REFERENCE_SIZE = 50  # Reference pool size for normalization
 POOL_NORMALIZATION_MIN_FACTOR = 0.8  # Minimum normalization factor (caps boost)
@@ -2062,6 +2098,9 @@ class MatchScoring:
     # Chapter coherence penalty (US-71-004)
     CHAPTER_COHERENCE_PENALTY_PER_SOURCE = -0.03  # Penalty per excess source
     CHAPTER_COHERENCE_PENALTY_CAP = -0.10  # Maximum penalty cap
+
+    # Cross-chapter relevance boost default (US-71-005)
+    DEFAULT_RELEVANCE_BOOST_WEIGHT = 0.1
 
     # Stopwords for title keyword extraction
     _TITLE_STOPWORDS = frozenset({
@@ -2352,6 +2391,69 @@ class MatchScoring:
 
         return confidence + penalty, reason
 
+    def apply_cross_chapter_relevance_boost(
+        self,
+        confidence: float,
+        current_chapter_index: int,
+        video_chapter_index: int,
+        relevance_matrix: Optional[List[List[float]]] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply a soft boost for candidates from high-relevance video chapters (US-71-005).
+
+        When a relevance matrix is available (computed from voiceover x video chapter
+        keyword overlap), candidates from video chapters with high topic relevance
+        to the current voiceover chapter get a proportional boost.
+
+        Boost = relevance_score * relevance_boost_weight
+
+        Args:
+            confidence: Current confidence score
+            current_chapter_index: Voiceover chapter index (-1 = none)
+            video_chapter_index: Video chapter index (-1 = none)
+            relevance_matrix: 2D list [vo_chapter][vid_chapter] of relevance scores (0-1)
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if current_chapter_index < 0 or video_chapter_index < 0:
+            return confidence, ""
+
+        if not relevance_matrix:
+            return confidence, ""
+
+        cg = getattr(self._mc, 'chapter_grouping', None) if self._mc else None
+        if cg is None or not getattr(cg, 'enabled', True):
+            return confidence, ""
+
+        # Bounds check
+        if current_chapter_index >= len(relevance_matrix):
+            return confidence, ""
+        row = relevance_matrix[current_chapter_index]
+        if video_chapter_index >= len(row):
+            return confidence, ""
+
+        relevance_score = row[video_chapter_index]
+        if relevance_score <= 0.0:
+            return confidence, ""
+
+        weight = getattr(cg, 'relevance_boost_weight', self.DEFAULT_RELEVANCE_BOOST_WEIGHT)
+        boost = relevance_score * weight
+
+        reason = (
+            f"cross_chapter_relevance: +{boost:.3f} "
+            f"(vo_ch={current_chapter_index}, vid_ch={video_chapter_index}, "
+            f"relevance={relevance_score:.2f}, weight={weight})"
+        )
+
+        logger.debug(
+            "US-71-005 cross-chapter relevance boost: vo_ch=%d, vid_ch=%d, "
+            "relevance=%.2f, weight=%.2f, boost=%.3f",
+            current_chapter_index, video_chapter_index, relevance_score, weight, boost,
+        )
+
+        return confidence + boost, reason
+
     def is_within_chapter(
         self,
         current_chapter_index: int,
@@ -2407,6 +2509,8 @@ class MatchScoring:
         segment_chapter_map: Optional[dict] = None,
         video_tags: Optional[List[str]] = None,
         chapter_source_counts: Optional[dict] = None,
+        relevance_matrix: Optional[List[List[float]]] = None,
+        video_chapter_index: int = -1,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
@@ -2414,7 +2518,7 @@ class MatchScoring:
         Order: topic_penalty -> broll_boost -> caption_quality -> timing_penalty
                -> project_boost -> title_relevance -> chapter_topic_match
                -> chapter_source_consistency -> tag_keyword_boost
-               -> chapter_coherence_penalty
+               -> chapter_coherence_penalty -> cross_chapter_relevance
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2432,6 +2536,8 @@ class MatchScoring:
             segment_chapter_map: Optional dict mapping segment index to chapter index
             video_tags: Optional list of video tags for tag keyword boosting
             chapter_source_counts: Optional dict mapping chapter_index -> set of unique source IDs
+            relevance_matrix: Optional cross-chapter relevance matrix (US-71-005)
+            video_chapter_index: Video chapter index for relevance lookup (-1 = none)
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -2540,7 +2646,17 @@ class MatchScoring:
                 reasons.append(coherence_reason)
                 breakdown.append({'component': 'chapter_coherence', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
 
-        # 11. Enforce minimum confidence floor (US-46-004)
+        # 11. Cross-chapter relevance boost (US-71-005)
+        if relevance_matrix and current_chapter_index >= 0 and video_chapter_index >= 0:
+            prev = confidence
+            confidence, relevance_reason = self.apply_cross_chapter_relevance_boost(
+                confidence, current_chapter_index, video_chapter_index, relevance_matrix
+            )
+            if relevance_reason:
+                reasons.append(relevance_reason)
+                breakdown.append({'component': 'cross_chapter_relevance', 'adjustment': round(confidence - prev, 4), 'reason': relevance_reason})
+
+        # 12. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2548,7 +2664,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 12. Log warning for over-penalized matches (US-46-004)
+        # 13. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2559,7 +2675,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 13. Log confidence breakdown at DEBUG level (US-53-003)
+        # 14. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(
