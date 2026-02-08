@@ -48,7 +48,7 @@
             "id": "US-78-003",
             "title": "Add video tag overlap boost to confidence scoring",
             "priority": "high",
-            "passes": false,
+            "passes": true,
             "acceptanceCriteria": [
                 "New function apply_tag_overlap_boost in src/matching/scoring.py computes keyword overlap between voiceover segment keywords and video tags",
                 "Graduated boost applied: 1 tag match gives +0.02, 2 matches gives +0.04, 3+ matches gives +0.06",
@@ -56,7 +56,7 @@
                 "Boost is gated by config flag matching.context_enrichment.extract_video_tags (already exists, default true)",
                 "Unit test verifies graduated boost values and that zero-overlap produces no adjustment"
             ],
-            "notes": "Tier: Quality improvement. video_tags are extracted and stored (CaptionResult line 572, VideoSearchResult line 268) but NEVER used in scoring. The existing keyword_boost mechanism in scoring.py could be extended, but a separate tag_overlap adjustment is cleaner for audit trail. Files: src/matching/scoring.py (apply_all_adjustments around line 100), src/config/sections/matching.py, tests/test_scoring*.py"
+            "notes": "Implemented. Added apply_tag_overlap_boost standalone function + MatchScoring method with graduated step function (1->+0.02, 2->+0.04, 3+->+0.06). Integrated as step 9b in apply_all_adjustments with 'tag_overlap' breakdown component. Gated by context_enrichment.extract_video_tags with dict/object config handling. 12 tests pass in test_tag_overlap_boost_us78003.py. No regressions in existing tag_keyword_boost tests."
         },
         {
             "id": "US-78-004",
