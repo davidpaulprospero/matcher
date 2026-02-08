@@ -71,9 +71,9 @@
                                                        "Call the method from apply_all_adjustments() with video title passed from match candidates",
                                                        "Unit test: verify graduated boost values for 0, 1, 2, and 3+ keyword matches"
                                                    ],
-                            "passes":  true,
+                            "passes":  false,
                             "priority":  "high",
-                            "notes":  "Pre-implemented in US-70-006. All 6 criteria verified: apply_title_relevance_adjustment() at line 2130, graduated boost constants (0.03/0.05/0.08) at lines 2081-2083, confidence_breakdown entry at line 2698, empty/None title handled at line 2150, called from apply_all_adjustments() at line 2693, 10 unit tests all passing."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-72-005",
@@ -86,9 +86,9 @@
                                                        "Call from apply_all_adjustments() passing video_tags from candidate metadata",
                                                        "Unit test: verify tag overlap scoring with 0, 1, 2, 3, and 5 (cap) matching tags"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Context-Enriched Matching). Source files: src/matching/scoring.py. Video tags come from state (US-72-002 propagates them). The tag_keyword_boost method may already exist as a stub. This is lower impact than title_relevance but still useful — tags like \u0027cooking\u0027, \u0027recipe\u0027, \u0027kitchen\u0027 directly signal topic relevance."
+                            "notes":  "Pre-implemented in US-71-003. apply_tag_keyword_boost() exists with graduated boost (+0.02/+0.04/+0.06), lowercase normalization, confidence_breakdown integration, called from apply_all_adjustments(). 10 unit tests all passing."
                         },
                         {
                             "id":  "US-72-006",
