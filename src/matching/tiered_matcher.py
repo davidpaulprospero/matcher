@@ -46,6 +46,7 @@ from .scoring import (
     apply_chapter_coherence_penalty,  # US-75-006
     apply_cross_chapter_relevance_boost,  # US-75-006
     apply_listicle_consistency,  # US-75-007
+    apply_entity_match_boost,  # US-77-011
     compute_semantic_coherence,  # US-77-002
     compute_temporal_coherence,  # US-77-003
     check_consecutive_source_hard_cap,  # US-63-009
@@ -148,7 +149,7 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
         'chapter_source_consistency', 'chapter_coherence_penalty',
         'cross_chapter_relevance', 'listicle_consistency',
         'semantic_coherence', 'temporal_coherence', 'explanation_validation',
-        'diversity_recheck',
+        'entity_match_boost', 'diversity_recheck',
     }
 
     confidences: List[float] = []
@@ -1142,6 +1143,13 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
 
+            # US-77-011: Apply entity match boost
+            prev = adjusted_confidence
+            adjusted_confidence, entity_boost_reason, _entity_matched = apply_entity_match_boost(
+                adjusted_confidence, vo_segment, best_seg, self.config
+            )
+            _record_breakdown(confidence_breakdown, 'entity_match_boost', prev, adjusted_confidence, entity_boost_reason)
+
             # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
             adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
                 adjusted_confidence, best_seg, confidence_breakdown
@@ -1184,6 +1192,8 @@ class TieredMatcher:
                 final_reasoning += f" [{chapter_source_reason}]"
             if listicle_reason:
                 final_reasoning += f" [{listicle_reason}]"
+            if entity_boost_reason:
+                final_reasoning += f" [{entity_boost_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1354,6 +1364,13 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
 
+            # US-77-011: Apply entity match boost
+            prev = adjusted_confidence
+            adjusted_confidence, entity_boost_reason, _entity_matched = apply_entity_match_boost(
+                adjusted_confidence, vo_segment, best_seg, self.config
+            )
+            _record_breakdown(confidence_breakdown, 'entity_match_boost', prev, adjusted_confidence, entity_boost_reason)
+
             # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
             adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
                 adjusted_confidence, best_seg, confidence_breakdown
@@ -1392,6 +1409,8 @@ class TieredMatcher:
                 reasoning += f" [{chapter_source_reason}]"
             if listicle_reason:
                 reasoning += f" [{listicle_reason}]"
+            if entity_boost_reason:
+                reasoning += f" [{entity_boost_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1619,6 +1638,13 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'listicle_consistency', prev, adjusted_confidence, listicle_reason)
 
+        # US-77-011: Apply entity match boost
+        prev = adjusted_confidence
+        adjusted_confidence, entity_boost_reason, _entity_matched = apply_entity_match_boost(
+            adjusted_confidence, vo_segment, best_seg, self.config
+        )
+        _record_breakdown(confidence_breakdown, 'entity_match_boost', prev, adjusted_confidence, entity_boost_reason)
+
         # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
         adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
             adjusted_confidence, best_seg, confidence_breakdown
@@ -1678,6 +1704,8 @@ class TieredMatcher:
             final_reasoning += f" [{chapter_source_reason}]"
         if listicle_reason:
             final_reasoning += f" [{listicle_reason}]"
+        if entity_boost_reason:
+            final_reasoning += f" [{entity_boost_reason}]"
         if explanation_validation_reason:
             final_reasoning += f" [{explanation_validation_reason}]"
 

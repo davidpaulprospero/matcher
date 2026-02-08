@@ -894,18 +894,28 @@ def apply_entity_match_boost(
     logger.debug(f"Voiceover entities extracted: {vo_entities}")
     logger.debug(f"Video entities extracted: {video_entities}")
 
-    # Find matching entities (case-insensitive)
+    # Find matching entities (case-insensitive) — exact and partial
     vo_lower = {e.lower() for e in vo_entities}
     video_lower = {e.lower() for e in video_entities}
-    matching = vo_lower & video_lower
+    exact_matching = vo_lower & video_lower
 
-    if not matching:
+    # Partial matching: check if any vo entity is a substring of a video entity or vice versa
+    partial_matching: set = set()
+    if not exact_matching:
+        for ve in vo_lower:
+            for vide in video_lower:
+                if ve != vide and (ve in vide or vide in ve):
+                    partial_matching.add(ve)
+
+    all_matching = exact_matching | partial_matching
+    if not all_matching:
         logger.debug(f"No entity matches found between voiceover and video")
         return confidence, "", []
 
     # Get original-case matched entity names for return
-    matched_entities = [e for e in vo_entities if e.lower() in matching]
-    match_count = len(matching)
+    matched_entities = [e for e in vo_entities if e.lower() in all_matching]
+    match_count = len(all_matching)
+    match_type = "exact" if exact_matching else "partial"
 
     # Log entity matches at DEBUG level (US-63-011)
     logger.debug(
@@ -947,7 +957,10 @@ def apply_entity_match_boost(
     # Apply boost (cap at 1.0)
     boosted = min(1.0, confidence + boost)
 
-    reason = f"entity match: +{boost:.2f} ({match_count} entities: {', '.join(matched_entities[:3])})"
+    reason = (
+        f"entity match ({match_type}): +{boost:.2f} "
+        f"({match_count} entities: {', '.join(matched_entities[:3])})"
+    )
 
     logger.debug(f"Entity match boost applied: {confidence:.2f} -> {boosted:.2f} ({matched_entities})")
 

@@ -473,3 +473,117 @@ class TestEntityMatchIntegration:
         assert hasattr(config, 'entity_match_boost')
         # Default should be 0.1
         assert config.entity_match_boost == 0.1
+
+
+# ============================================================================
+# US-77-011: Test entity match boost propagation to confidence breakdown
+# ============================================================================
+
+class TestEntityMatchBoostBreakdownPropagation:
+    """Tests that apply_entity_match_boost provides detailed breakdown info."""
+
+    @pytest.mark.fast
+    def test_exact_match_shows_entity_name_in_reason(
+        self, new_york_voiceover, nyc_video, mock_config_with_entity_boost
+    ):
+        """Exact entity match includes entity name and match type in reason."""
+        boosted, reason, matched = apply_entity_match_boost(
+            0.7, new_york_voiceover, nyc_video, mock_config_with_entity_boost
+        )
+
+        assert "entity match (exact)" in reason
+        assert "New York" in reason
+        assert boosted > 0.7
+
+    @pytest.mark.fast
+    def test_partial_match_shows_match_type(self, mock_config_with_entity_boost):
+        """Partial entity match (substring) includes 'partial' match type."""
+        vo_seg = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="The city of York is historic.",
+            source_file="voiceover.srt"
+        )
+        video_seg = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Aerial view of New York City skyline.",
+            source_file="/videos/nyc.mp4"
+        )
+        boosted, reason, matched = apply_entity_match_boost(
+            0.7, vo_seg, video_seg, mock_config_with_entity_boost
+        )
+
+        # York is a substring of New York, should be partial match
+        if boosted > 0.7:
+            assert "partial" in reason
+
+    @pytest.mark.fast
+    def test_zero_entity_case_adds_no_entry(self, mock_config_with_entity_boost):
+        """When no entities match, reason is empty (no breakdown noise)."""
+        vo_seg = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="The city of Paris is beautiful.",
+            source_file="voiceover.srt"
+        )
+        video_seg = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Aerial view of Tokyo at sunset.",
+            source_file="/videos/tokyo.mp4"
+        )
+        boosted, reason, matched = apply_entity_match_boost(
+            0.7, vo_seg, video_seg, mock_config_with_entity_boost
+        )
+
+        assert boosted == 0.7
+        assert reason == ""
+        assert matched == []
+
+    @pytest.mark.fast
+    def test_reason_includes_boost_value(
+        self, new_york_voiceover, nyc_video, mock_config_with_entity_boost
+    ):
+        """Reason string includes the boost value applied."""
+        boosted, reason, matched = apply_entity_match_boost(
+            0.7, new_york_voiceover, nyc_video, mock_config_with_entity_boost
+        )
+
+        # Should contain the boost value (e.g., "+0.10")
+        assert "+0." in reason
+
+    @pytest.mark.fast
+    def test_entity_match_boost_in_audit_known_adjustments(self):
+        """entity_match_boost is included in ALL_KNOWN_ADJUSTMENTS for audit summary."""
+        from src.matching.tiered_matcher import compute_scoring_audit_summary
+
+        # Empty results should list entity_match_boost as unused
+        summary = compute_scoring_audit_summary([])
+        assert 'entity_match_boost' in summary['unused_adjustments']
+
+    @pytest.mark.fast
+    def test_entity_match_boost_counted_in_audit_summary(self):
+        """entity_match_boost entries in breakdown are counted by audit summary."""
+        from src.matching.tiered_matcher import compute_scoring_audit_summary
+        from dataclasses import dataclass, field
+        from typing import List, Dict, Any, Optional
+
+        @dataclass
+        class StubMatch:
+            confidence: float = 0.8
+
+        @dataclass
+        class StubMatchResult:
+            primary_match: Optional[StubMatch] = None
+            confidence_breakdown: List[Dict[str, Any]] = field(default_factory=list)
+
+        results = [
+            StubMatchResult(
+                primary_match=StubMatch(confidence=0.85),
+                confidence_breakdown=[
+                    {'component': 'entity_match_boost', 'adjustment': 0.10,
+                     'reason': 'entity match (exact): +0.10 (1 entities: New York)'},
+                ],
+            ),
+        ]
+
+        summary = compute_scoring_audit_summary(results)
+        assert summary['adjustment_counts']['entity_match_boost'] == 1
+        assert 'entity_match_boost' not in summary['unused_adjustments']
