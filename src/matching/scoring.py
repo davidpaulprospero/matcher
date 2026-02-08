@@ -2102,6 +2102,9 @@ class MatchScoring:
     # Cross-chapter relevance boost default (US-71-005)
     DEFAULT_RELEVANCE_BOOST_WEIGHT = 0.1
 
+    # Listicle consistency boost (US-71-006)
+    LISTICLE_CONSISTENCY_BOOST = 0.04
+
     # Stopwords for title keyword extraction
     _TITLE_STOPWORDS = frozenset({
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all',
@@ -2454,6 +2457,92 @@ class MatchScoring:
 
         return confidence + boost, reason
 
+    def apply_listicle_consistency_boost(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment,
+        listicle_groups: List[Any],
+        recent_matches: Optional[List['Match']] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply consistency boost for segments within the same listicle group (US-71-006).
+
+        When consecutive segments within the same listicle group match from the same
+        video source, apply a small boost to encourage source consistency within
+        list items. Segments at group boundaries (first segment of a new group)
+        get no boost.
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Current voiceover segment
+            video_segment: Candidate video segment
+            listicle_groups: List of ListicleGroup objects from listicle detection
+            recent_matches: Optional list of recent Match objects (most recent first)
+
+        Returns:
+            Tuple of (adjusted_confidence, reason)
+        """
+        if not listicle_groups or not recent_matches:
+            return confidence, ""
+
+        # Find which listicle group this voiceover segment belongs to
+        seg_idx = getattr(vo_segment, 'index', -1)
+        if seg_idx < 0:
+            return confidence, ""
+
+        current_group = None
+        for group in listicle_groups:
+            start = group.start_segment_idx if not isinstance(group, dict) else group.get('start_segment_idx', -1)
+            end = group.end_segment_idx if not isinstance(group, dict) else group.get('end_segment_idx', -1)
+            if start <= seg_idx <= end:
+                current_group = group
+                break
+
+        if current_group is None:
+            return confidence, ""
+
+        # Check if this is a boundary segment (first segment of the group)
+        group_start = current_group.start_segment_idx if not isinstance(current_group, dict) else current_group.get('start_segment_idx', -1)
+        if seg_idx == group_start:
+            return confidence, ""
+
+        # Check if previous match is in the same group and from the same source
+        prev_match = recent_matches[0]
+        if prev_match is None or prev_match.video_segment is None:
+            return confidence, ""
+
+        prev_seg_idx = getattr(prev_match.voiceover_segment, 'index', -1) if prev_match.voiceover_segment else -1
+        if prev_seg_idx < 0:
+            return confidence, ""
+
+        # Previous segment must also be in the same listicle group
+        prev_in_group = group_start <= prev_seg_idx <= (current_group.end_segment_idx if not isinstance(current_group, dict) else current_group.get('end_segment_idx', -1))
+        if not prev_in_group:
+            return confidence, ""
+
+        # Check source match
+        prev_source = getattr(prev_match.video_segment, 'source_file', None)
+        current_source = getattr(video_segment, 'source_file', None)
+
+        if not prev_source or not current_source or prev_source != current_source:
+            return confidence, ""
+
+        boost = self.LISTICLE_CONSISTENCY_BOOST
+        group_id = current_group.group_id if not isinstance(current_group, dict) else current_group.get('group_id', '?')
+
+        reason = (
+            f"listicle_consistency: +{boost:.2f} "
+            f"(same source in listicle group {group_id})"
+        )
+
+        logger.debug(
+            "US-71-006 listicle consistency boost: seg=%d, group=%s, source=%s, boost=%.2f",
+            seg_idx, group_id, current_source, boost,
+        )
+
+        return confidence + boost, reason
+
     def is_within_chapter(
         self,
         current_chapter_index: int,
@@ -2511,6 +2600,7 @@ class MatchScoring:
         chapter_source_counts: Optional[dict] = None,
         relevance_matrix: Optional[List[List[float]]] = None,
         video_chapter_index: int = -1,
+        listicle_groups: Optional[List[Any]] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
@@ -2519,6 +2609,7 @@ class MatchScoring:
                -> project_boost -> title_relevance -> chapter_topic_match
                -> chapter_source_consistency -> tag_keyword_boost
                -> chapter_coherence_penalty -> cross_chapter_relevance
+               -> listicle_consistency
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -2538,6 +2629,7 @@ class MatchScoring:
             chapter_source_counts: Optional dict mapping chapter_index -> set of unique source IDs
             relevance_matrix: Optional cross-chapter relevance matrix (US-71-005)
             video_chapter_index: Video chapter index for relevance lookup (-1 = none)
+            listicle_groups: Optional list of ListicleGroup objects for within-group consistency (US-71-006)
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -2656,7 +2748,17 @@ class MatchScoring:
                 reasons.append(relevance_reason)
                 breakdown.append({'component': 'cross_chapter_relevance', 'adjustment': round(confidence - prev, 4), 'reason': relevance_reason})
 
-        # 12. Enforce minimum confidence floor (US-46-004)
+        # 12. Listicle consistency boost (US-71-006)
+        if listicle_groups:
+            prev = confidence
+            confidence, listicle_reason = self.apply_listicle_consistency_boost(
+                confidence, vo_segment, video_segment, listicle_groups, recent_matches
+            )
+            if listicle_reason:
+                reasons.append(listicle_reason)
+                breakdown.append({'component': 'listicle_consistency', 'adjustment': round(confidence - prev, 4), 'reason': listicle_reason})
+
+        # 13. Enforce minimum confidence floor (US-46-004)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
         floor = self.confidence_floor
         if confidence < floor and original_confidence > floor:
@@ -2664,7 +2766,7 @@ class MatchScoring:
             confidence = floor
             reasons.append(f"confidence floor applied: {floor}")
 
-        # 13. Log warning for over-penalized matches (US-46-004)
+        # 14. Log warning for over-penalized matches (US-46-004)
         warning_threshold = self.low_confidence_warning_threshold
         if confidence < warning_threshold and original_confidence >= warning_threshold:
             logger.warning(
@@ -2675,7 +2777,7 @@ class MatchScoring:
 
         combined_reason = " | ".join(reasons) if reasons else ""
 
-        # 14. Log confidence breakdown at DEBUG level (US-53-003)
+        # 15. Log confidence breakdown at DEBUG level (US-53-003)
         if breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in breakdown]
             logger.debug(

@@ -2319,5 +2319,173 @@ class TestChapterCoherencePenalty:
         assert len(coherence_entries) == 0
 
 
+class TestListicleConsistencyBoost:
+    """Tests for apply_listicle_consistency_boost (US-71-006)."""
+
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock()
+        matching = Mock()
+        matching.multimodal_enabled = True
+        matching.multimodal_weights = None
+        matching.pool_normalization_enabled = True
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        matching.broll_boost = 0.1
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_high_boost = 0.05
+        matching.caption_quality_low_penalty = 0.1
+        matching.apply_timing_penalty = True
+        matching.skip_llm_threshold = 0.85
+        matching.chapter_grouping = None
+        matching.scoring = None
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def listicle_groups(self):
+        """Two listicle groups: group 0 covers segments 0-3, group 1 covers segments 4-7."""
+        group0 = Mock()
+        group0.group_id = 0
+        group0.start_segment_idx = 0
+        group0.end_segment_idx = 3
+        group1 = Mock()
+        group1.group_id = 1
+        group1.start_segment_idx = 4
+        group1.end_segment_idx = 7
+        return [group0, group1]
+
+    def _make_segment(self, index, source_file="vid_A"):
+        seg = SRTSegment(index=index, start_time=float(index * 10),
+                         end_time=float(index * 10 + 10),
+                         text=f"Segment {index} text content here")
+        seg.source_file = source_file
+        return seg
+
+    def _make_match(self, vo_index, source_file="vid_A"):
+        m = Mock()
+        m.voiceover_segment = self._make_segment(vo_index, source_file="vo.srt")
+        m.voiceover_segment.index = vo_index
+        m.video_segment = self._make_segment(vo_index, source_file=source_file)
+        m.video_segment.source_file = source_file
+        return m
+
+    @pytest.mark.fast
+    def test_boost_within_same_group_same_source(self, mock_config, listicle_groups):
+        """Segments within same listicle group from same source get +0.04 boost."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2, source_file="vo.srt")
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(1, source_file="vid_A")]
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+        assert "listicle_consistency" in reason
+        assert "group 0" in reason
+
+    @pytest.mark.fast
+    def test_no_boost_at_group_boundary(self, mock_config, listicle_groups):
+        """First segment of a listicle group gets no boost."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(0, source_file="vo.srt")  # First segment of group 0
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(3, source_file="vid_A")]  # Previous in different group context
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_across_group_boundaries(self, mock_config, listicle_groups):
+        """No boost when previous match is in a different listicle group."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(5, source_file="vo.srt")  # In group 1
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(3, source_file="vid_A")]  # In group 0
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_different_source(self, mock_config, listicle_groups):
+        """No boost when same group but different video sources."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2, source_file="vo.srt")
+        vid_seg = self._make_segment(10, source_file="vid_B")  # Different source
+        recent = [self._make_match(1, source_file="vid_A")]
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_groups(self, mock_config):
+        """No boost when listicle_groups is empty."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2)
+        vid_seg = self._make_segment(10)
+        recent = [self._make_match(1)]
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, [], recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_recent_matches(self, mock_config, listicle_groups):
+        """No boost when no recent matches."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2)
+        vid_seg = self._make_segment(10)
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+
+    @pytest.mark.fast
+    def test_breakdown_entry_in_apply_all(self, mock_config, listicle_groups):
+        """apply_all_adjustments includes listicle_consistency in breakdown."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2, source_file="vo.srt")
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(1, source_file="vid_A")]
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=vo_seg,
+            video_segment=vid_seg,
+            listicle_groups=listicle_groups,
+            recent_matches=recent,
+        )
+        listicle_entries = [b for b in breakdown if b['component'] == 'listicle_consistency']
+        assert len(listicle_entries) == 1
+        assert listicle_entries[0]['adjustment'] == pytest.approx(0.04, abs=0.001)
+
+    @pytest.mark.fast
+    def test_no_breakdown_without_groups(self, mock_config):
+        """apply_all_adjustments with no listicle_groups produces no listicle_consistency entry."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2)
+        vid_seg = self._make_segment(10)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=vo_seg,
+            video_segment=vid_seg,
+        )
+        listicle_entries = [b for b in breakdown if b['component'] == 'listicle_consistency']
+        assert len(listicle_entries) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

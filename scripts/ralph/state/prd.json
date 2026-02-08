@@ -83,9 +83,9 @@
                                                        "Candidates from high-relevance video chapters get a soft boost proportional to relevance score * weight",
                                                        "Unit test verifies matrix computation with known keyword sets produces expected overlap scores"
                                                    ],
-                            "passes":  true,
+                            "passes":  false,
                             "priority":  "medium",
-                            "notes":  "All 5 criteria met. compute_relevance_matrix() at scoring.py:1858 uses Jaccard (intersection/union) for 0-1 normalized scores. Config relevance_boost_weight=0.1 at matching.py:194. apply_cross_chapter_relevance_boost() at scoring.py:2394 applies boost = relevance * weight. 16 unit tests pass covering matrix computation, boost proportionality, edge cases."
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
                             "id":  "US-71-006",
@@ -98,9 +98,9 @@
                                                        "apply_all_adjustments() calls apply_listicle_consistency_boost() when listicle_groups are available",
                                                        "Unit test verifies boost applied within groups and not across group boundaries"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
-                            "notes":  "Tier 2 (Scoring Enhancement). Depends on US-71-002 which makes listicle_groups available in the scoring pipeline. This is the listicle-specific scoring that was identified as missing -- the detector exists but doesn\u0027t influence match confidence. Pattern follows apply_chapter_source_consistency() at src/matching/scoring.py ~line 2171. The listicle_groups list from state needs to be passed through to the scorer context."
+                            "notes":  "Implemented apply_listicle_consistency_boost() in scoring.py with LISTICLE_CONSISTENCY_BOOST=0.04. Wired into apply_all_adjustments as step 12. 8 unit tests covering: within-group same-source boost, boundary no-boost, cross-group no-boost, different-source no-boost, empty groups/matches, and breakdown integration."
                         },
                         {
                             "id":  "US-71-007",
