@@ -81,7 +81,7 @@ class TestDownloadCBSetCaptionCB:
         caption_cb = CaptionCircuitBreaker()
         download_cb = CircuitBreaker()
 
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         assert download_cb._caption_circuit_breaker is caption_cb
 
@@ -143,7 +143,7 @@ class TestDownloadCBCascadeFailure:
         """Download CB failure should increment caption CB failure counter."""
         caption_cb = CaptionCircuitBreaker(CaptionCircuitBreakerConfig(threshold=5))
         download_cb = CircuitBreaker(CircuitBreakerConfig(consecutive_failures_threshold=5))
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         assert caption_cb.state.consecutive_failures == 0
 
@@ -161,7 +161,7 @@ class TestDownloadCBCascadeFailure:
             consecutive_failures_threshold=5,
             circuit_breaker_cascade=False
         ))
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         download_cb.record_failure()
 
@@ -225,7 +225,7 @@ class TestDownloadCBCascadeTrip:
         """When download CB trips, caption CB should also trip."""
         caption_cb = CaptionCircuitBreaker(CaptionCircuitBreakerConfig(threshold=10))
         download_cb = CircuitBreaker(CircuitBreakerConfig(consecutive_failures_threshold=2))
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         # Record enough failures to trip download CB
         download_cb.record_failure()  # 1
@@ -244,7 +244,7 @@ class TestDownloadCBCascadeTrip:
             consecutive_failures_threshold=2,
             circuit_breaker_cascade=False
         ))
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         download_cb.record_failure()
         download_cb.record_failure()  # Trips
@@ -264,7 +264,7 @@ class TestBidirectionalCascade:
 
         # Link both ways
         caption_cb.set_download_circuit_breaker(download_cb)
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         # Caption failure affects both
         caption_cb.record_failure()
@@ -283,7 +283,7 @@ class TestBidirectionalCascade:
         download_cb = CircuitBreaker(CircuitBreakerConfig(consecutive_failures_threshold=5))
 
         caption_cb.set_download_circuit_breaker(download_cb)
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         caption_cb.record_failure()
         caption_cb.record_failure()  # Trips caption CB
@@ -298,7 +298,7 @@ class TestBidirectionalCascade:
         download_cb = CircuitBreaker(CircuitBreakerConfig(consecutive_failures_threshold=2))
 
         caption_cb.set_download_circuit_breaker(download_cb)
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         download_cb.record_failure()
         download_cb.record_failure()  # Trips download CB
@@ -328,7 +328,7 @@ class TestCascadeWithDisabledCB:
         """Cascade to disabled caption CB should be skipped."""
         caption_cb = CaptionCircuitBreaker(CaptionCircuitBreakerConfig(enabled=False))
         download_cb = CircuitBreaker(CircuitBreakerConfig(consecutive_failures_threshold=2))
-        download_cb.set_caption_circuit_breaker(caption_cb)
+        download_cb._caption_circuit_breaker = caption_cb
 
         download_cb.record_failure()
         download_cb.record_failure()  # Trips

@@ -61,7 +61,7 @@ def retry_queue():
 @pytest.fixture
 def linked_components(budget, circuit_breaker, retry_queue):
     """Create and link all rate limit components."""
-    circuit_breaker.set_budget(budget)
+    circuit_breaker._budget = budget
     retry_queue.set_circuit_breaker(circuit_breaker)
     return {
         "budget": budget,
@@ -267,7 +267,7 @@ class TestCircuitBreakerPauseScaling:
         self, budget, circuit_breaker
     ):
         """Pause should be 1.5x when budget is nearly exhausted."""
-        circuit_breaker.set_budget(budget)
+        circuit_breaker._budget = budget
 
         # Normal pause
         base_pause = circuit_breaker.config.pause_seconds
@@ -283,7 +283,7 @@ class TestCircuitBreakerPauseScaling:
 
     def test_pause_extended_when_budget_exhausted(self, budget, circuit_breaker):
         """Pause should be 2.5x when budget is fully exhausted."""
-        circuit_breaker.set_budget(budget)
+        circuit_breaker._budget = budget
 
         # Exhaust all resources
         for _ in range(3):
@@ -306,7 +306,7 @@ class TestCircuitBreakerPauseScaling:
             max_pause_seconds=300.0,  # But capped
         )
         cb = CircuitBreaker(config)
-        cb.set_budget(budget)
+        cb._budget = budget
 
         # Exhaust budget (2.5x multiplier = 500s, but capped at 300)
         for _ in range(3):

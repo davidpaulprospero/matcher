@@ -82,6 +82,70 @@ class CircuitBreakerState(CircuitBreakerStateBase):
     pass
 
 
+class CircuitBreakerBuilder:
+    """Fluent builder for CircuitBreaker with validated dependency wiring.
+
+    Ensures all desired dependencies are set before constructing the CircuitBreaker,
+    preventing half-wired instances. Config is required; other dependencies are optional.
+
+    Usage:
+        breaker = (CircuitBreakerBuilder()
+            .with_config(config)
+            .with_escalation_manager(manager)
+            .with_budget(budget)
+            .with_caption_circuit_breaker(caption_cb)
+            .build())
+    """
+
+    def __init__(self) -> None:
+        self._config: Optional[CircuitBreakerConfig] = None
+        self._escalation_manager: Optional['EscalationManager'] = None
+        self._budget: Optional['RateLimitBudget'] = None
+        self._caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None
+
+    def with_config(self, config: CircuitBreakerConfig) -> 'CircuitBreakerBuilder':
+        """Set the circuit breaker configuration (required)."""
+        self._config = config
+        return self
+
+    def with_escalation_manager(self, manager: 'EscalationManager') -> 'CircuitBreakerBuilder':
+        """Link an EscalationManager for coordinated rate-limiting."""
+        self._escalation_manager = manager
+        return self
+
+    def with_budget(self, budget: 'RateLimitBudget') -> 'CircuitBreakerBuilder':
+        """Link a RateLimitBudget for budget-aware pause scaling."""
+        self._budget = budget
+        return self
+
+    def with_caption_circuit_breaker(self, caption_cb: 'CaptionCircuitBreaker') -> 'CircuitBreakerBuilder':
+        """Link the caption circuit breaker for cascade coordination."""
+        self._caption_circuit_breaker = caption_cb
+        return self
+
+    def build(self) -> 'CircuitBreaker':
+        """Build the CircuitBreaker with all configured dependencies.
+
+        Raises:
+            ValueError: If no config has been set via with_config().
+
+        Returns:
+            A fully-wired CircuitBreaker instance.
+        """
+        if self._config is None:
+            raise ValueError(
+                "CircuitBreakerBuilder.build() requires a config. "
+                "Call .with_config(CircuitBreakerConfig(...)) before .build()"
+            )
+
+        return CircuitBreaker(
+            config=self._config,
+            escalation_manager=self._escalation_manager,
+            budget=self._budget,
+            caption_circuit_breaker=self._caption_circuit_breaker,
+        )
+
+
 class CircuitBreaker(CircuitBreakerBase):
     """Circuit breaker for YouTube search failures.
 
@@ -110,19 +174,31 @@ class CircuitBreaker(CircuitBreakerBase):
         state: Current state (failure count, open/closed, timing)
     """
 
-    def __init__(self, config: Optional[CircuitBreakerConfig] = None):
-        """Initialize circuit breaker with configuration.
+    def __init__(
+        self,
+        config: Optional[CircuitBreakerConfig] = None,
+        escalation_manager: Optional['EscalationManager'] = None,
+        budget: Optional['RateLimitBudget'] = None,
+        caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None,
+    ):
+        """Initialize circuit breaker with configuration and optional dependencies.
+
+        Prefer using CircuitBreakerBuilder for constructing instances with
+        dependencies, which validates required fields before construction.
 
         Args:
             config: CircuitBreakerConfig. If None, uses defaults.
+            escalation_manager: Optional EscalationManager for coordinated rate-limiting.
+            budget: Optional RateLimitBudget for budget-aware pause scaling.
+            caption_circuit_breaker: Optional CaptionCircuitBreaker for cascade coordination.
         """
         self._config = config or CircuitBreakerConfig()
         self.state = self._create_state()
-        self._escalation_manager: Optional[EscalationManager] = None
-        self._budget: Optional[RateLimitBudget] = None
+        self._escalation_manager = escalation_manager
+        self._budget = budget
         self._consecutive_successes: int = 0
         self._last_jitter_applied: float = 0.0  # Track for debugging/metrics
-        self._caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None
+        self._caption_circuit_breaker = caption_circuit_breaker
 
     @property
     def config(self) -> CircuitBreakerConfig:
@@ -136,49 +212,6 @@ class CircuitBreaker(CircuitBreakerBase):
 
     def _get_domain_label(self) -> str:
         return "search"
-
-    # --- Escalation / Budget / Cascade linking ---
-
-    def set_escalation_manager(self, manager: EscalationManager) -> None:
-        """Link an EscalationManager for coordinated rate-limiting.
-
-        When linked, the circuit breaker:
-        - Extends pause duration by 2x when >50% of keywords are at Tier 3
-        - Requires 3 consecutive successes to close when escalation is at Tier 3
-
-        Args:
-            manager: The EscalationManager to consult for tier state.
-        """
-        self._escalation_manager = manager
-
-    def set_budget(self, budget: RateLimitBudget) -> None:
-        """Link a RateLimitBudget for budget-aware pause scaling.
-
-        When linked, the circuit breaker extends pause duration based on
-        budget state:
-        - Nearly exhausted (>80% of any resource): pause * 1.5x
-        - Fully exhausted: pause * 2.5x
-        - Healthy: no extension (1.0x)
-
-        The resulting pause is capped at max_pause_seconds.
-
-        Args:
-            budget: The RateLimitBudget to consult for resource state.
-        """
-        self._budget = budget
-
-    def set_caption_circuit_breaker(self, caption_cb: 'CaptionCircuitBreaker') -> None:
-        """Link the caption circuit breaker for cascade coordination (US-61-003).
-
-        When linked and circuit_breaker_cascade is enabled:
-        - Download CB failures increment the caption CB's shared failure counter
-        - When download CB trips on 403/429, it propagates the open state to caption CB
-
-        Args:
-            caption_cb: The CaptionCircuitBreaker instance to coordinate with.
-        """
-        self._caption_circuit_breaker = caption_cb
-        logger.debug("Download circuit breaker linked to caption circuit breaker for cascade")
 
     # --- Cascade logic ---
 

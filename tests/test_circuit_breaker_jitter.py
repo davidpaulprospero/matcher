@@ -459,7 +459,7 @@ class TestJitterIntegration:
         mock_manager = MagicMock()
         mock_manager.get_active_keyword_count.return_value = 10
         mock_manager.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6']
-        breaker.set_escalation_manager(mock_manager)
+        breaker._escalation_manager = mock_manager
 
         # Get effective pause (should be 60 * 2 = 120 due to escalation, then jittered)
         # Mock the EscalationTier import inside _get_effective_pause_seconds
@@ -483,7 +483,7 @@ class TestJitterIntegration:
         mock_budget = MagicMock()
         mock_budget.is_exhausted.return_value = False
         mock_budget.is_nearly_exhausted.return_value = True
-        breaker.set_budget(mock_budget)
+        breaker._budget = mock_budget
 
         # Get effective pause (should be 60 * 1.5 = 90, then jittered)
         with patch.object(random, 'uniform', return_value=-0.1):

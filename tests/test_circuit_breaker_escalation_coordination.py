@@ -78,7 +78,7 @@ def circuit_breaker():
 @pytest.fixture
 def linked_pair(circuit_breaker, escalation_manager):
     """Create a linked circuit breaker + escalation manager pair."""
-    circuit_breaker.set_escalation_manager(escalation_manager)
+    circuit_breaker._escalation_manager = escalation_manager
     escalation_manager.set_circuit_breaker(circuit_breaker)
     return circuit_breaker, escalation_manager
 
@@ -509,7 +509,7 @@ class TestBidirectionalLink:
         cb = CircuitBreaker(CircuitBreakerConfig(
             enabled=True, consecutive_failures_threshold=2, pause_seconds=30.0
         ))
-        # No set_escalation_manager() call
+        # No _escalation_manager set
 
         cb.record_failure()
         cb.record_failure()
@@ -525,13 +525,13 @@ class TestBidirectionalLink:
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
 
     @pytest.mark.fast
-    def test_set_escalation_manager_method(self, circuit_breaker, escalation_manager):
-        """set_escalation_manager() stores the reference."""
-        circuit_breaker.set_escalation_manager(escalation_manager)
+    def test_set_escalation_manager_attribute(self, circuit_breaker, escalation_manager):
+        """Direct _escalation_manager assignment stores the reference."""
+        circuit_breaker._escalation_manager = escalation_manager
         assert circuit_breaker._escalation_manager is escalation_manager
 
     @pytest.mark.fast
     def test_set_circuit_breaker_method(self, escalation_manager, circuit_breaker):
-        """set_circuit_breaker() stores the reference."""
+        """set_circuit_breaker stores the reference."""
         escalation_manager.set_circuit_breaker(circuit_breaker)
         assert escalation_manager._circuit_breaker is circuit_breaker

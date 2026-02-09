@@ -78,7 +78,7 @@ from .error_classification import (
 from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
-from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerBuilder
 from .retry_queue import RetryQueue, BatchRetryConfig, RetryItem
 from .retry_stats import RetryQueueStats
 from .rate_limit_metrics import RateLimitMetrics, RateLimitMetricsAggregator
@@ -140,6 +140,7 @@ __all__ = [
     'RateLimitSignal',
     'CircuitBreaker',
     'CircuitBreakerConfig',
+    'CircuitBreakerBuilder',
     'RetryQueue',
     'BatchRetryConfig',
     'RetryItem',
