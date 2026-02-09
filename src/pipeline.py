@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
+from .pipeline_history import append_stage_timing, estimate_duration
 from .pipeline_progress import ProgressReporter
 from .state import PipelineState
 from .stages import Stage, StageResult, StageMetrics, DependencyError
@@ -444,6 +445,56 @@ class PipelineOrchestrator:
 
         return ", ".join(parts) if parts else "empty state"
 
+    def _log_stage_estimate(self, stage_name: str) -> None:
+        """Log a predicted duration for the upcoming stage based on history.
+
+        Uses the current item count (from state) and historical throughput.
+        Silently does nothing when no history exists (graceful degradation).
+        """
+        try:
+            # Determine items_count from state heuristics
+            items_count = self._guess_items_count(stage_name)
+            est = estimate_duration(self.project_dir, stage_name, items_count)
+            if est is not None:
+                if est >= 60:
+                    est_str = f"{est / 60:.1f} min"
+                else:
+                    est_str = f"{est:.0f}s"
+                logger.info(
+                    f"  Estimated duration for {stage_name}: ~{est_str}"
+                    f" (based on {items_count} items, historical throughput)"
+                )
+        except Exception as exc:
+            logger.debug(f"Could not estimate duration for {stage_name}: {exc}")
+
+    def _save_stage_timing(self, stage_name: str, elapsed: float) -> None:
+        """Persist stage timing to history file after successful completion."""
+        try:
+            metrics = self.stage_metrics.get(stage_name)
+            items = metrics.items_processed if metrics else 0
+            throughput = (items / elapsed) if (elapsed > 0 and items > 0) else 0.0
+            append_stage_timing(
+                self.project_dir, stage_name, elapsed, items, throughput
+            )
+        except Exception as exc:
+            logger.debug(f"Could not save stage timing for {stage_name}: {exc}")
+
+    def _guess_items_count(self, stage_name: str) -> int:
+        """Heuristic to determine expected item count for a stage.
+
+        Returns 0 when unknown (estimation falls back to average duration).
+        """
+        if stage_name in ('MATCH', 'ITERATIVE_MATCH'):
+            segments = getattr(self.state, 'voiceover_segments', None)
+            return len(segments) if segments else 0
+        if stage_name in ('CAPTION', 'VIDEO_SEARCH'):
+            video_ids = getattr(self.state, 'video_ids', None)
+            return len(video_ids) if video_ids else 0
+        if stage_name == 'DOWNLOAD_SEGMENTS':
+            matches = getattr(self.state, 'matches', None)
+            return len(matches) if matches else 0
+        return 0
+
     def _print_timing_summary(
         self,
         total_duration: float,
@@ -734,6 +785,10 @@ class PipelineOrchestrator:
             self.state._progress_reporter = self.progress_reporter
 
             logger.info(f"Running stage: {stage_name}")
+
+            # Log estimated duration from historical data (US-81-010)
+            self._log_stage_estimate(stage_name)
+
             result = stage.run(self.state, self.config, self.checkpoint)
 
             elapsed = time.time() - start_time
@@ -791,6 +846,9 @@ class PipelineOrchestrator:
             self.progress_reporter.finish_stage()
             completed_stages.add(stage_name)
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
+
+            # Save timing to history for future predictions (US-81-010)
+            self._save_stage_timing(stage_name, elapsed)
 
             # Run quality gate after matching stages (US-81-005)
             if stage_name in ('MATCH', 'ITERATIVE_MATCH'):

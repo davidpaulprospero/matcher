@@ -146,7 +146,7 @@
                             "id":  "US-81-010",
                             "title":  "Add pipeline stage timing predictions based on historical data",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "After each pipeline run, per-stage timing data (duration, items_processed, throughput) is appended to a pipeline_history.json file in the project directory",
                                                        "Before running a stage, pipeline logs an estimated duration based on average of last 3 runs for that stage with similar item counts",
@@ -154,7 +154,7 @@
                                                        "If no history exists, no estimate is logged (graceful degradation)",
                                                        "A test verifies that with 3 historical runs averaging 10 items in 30 seconds, a new run with 20 items estimates ~60 seconds"
                                                    ],
-                            "notes":  "Tier: observability. Currently timing is only reported after completion. Predicting duration helps users plan. Source files: new src/pipeline_history.py (load/save history, compute estimates), src/pipeline.py (log estimates before stage, save timing after stage). Keep the history file small - only last 10 runs per stage. Use project dir so each project has its own history."
+                            "notes":  "Added src/pipeline_history.py for per-stage timing persistence (pipeline_history.json in project dir, max 10 runs). Integrated into PipelineOrchestrator: logs estimated duration before each stage (based on last 3 runs throughput), saves timing after completion. 11 tests pass."
                         },
                         {
                             "id":  "US-81-011",
