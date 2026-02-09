@@ -177,6 +177,11 @@ class MatchingScoringConfig:
     # This creates a jarring visual ping-pong effect (e.g., videoA -> videoB -> videoA)
     source_stutter_penalty: float = 0.04  # Magnitude of penalty for A-B-A pattern
 
+    # Duration ratio reward curve (US-84-007) — smooth curve replacing step-function
+    # Near-perfect duration matches (ratio within reward_threshold of 1.0) get a boost
+    duration_ratio_reward_threshold: float = 0.1  # Ratio deviation from 1.0 to qualify for reward (0.9-1.1)
+    duration_ratio_reward_boost: float = 0.02  # Confidence boost for near-perfect duration match
+
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):

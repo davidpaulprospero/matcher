@@ -600,6 +600,8 @@ matching:
     max_cumulative_negative_adjustment: -0.30  # Dampen remaining negatives past this threshold (US-84-002)
     compounding_dampening_factor: 0.50         # Multiply remaining negatives by this when threshold exceeded
     source_stutter_penalty: 0.04               # Penalty for A-B-A video alternation pattern (US-84-004)
+    duration_ratio_reward_threshold: 0.1       # Ratio deviation from 1.0 for reward (0.9-1.1x) (US-84-007)
+    duration_ratio_reward_boost: 0.02          # Boost for near-perfect duration match (US-84-007)
 
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching

@@ -136,28 +136,49 @@ def calculate_adaptive_threshold(
 
 def apply_duration_penalty(confidence: float, speed_ratio: float, config) -> float:
     """
-    Apply duration-based penalty from config.
+    Apply duration-based penalty/reward using smooth curve (US-84-007).
 
-    Migrated from TieredMatcher._apply_duration_penalty (lines 548-560).
+    Replaces the old 3-band step function with a smooth logarithmic curve.
+    Near-perfect ratios (0.9-1.1) get a small boost. Ratios outside the
+    soft range get graduated logarithmic penalties. Hard thresholds at
+    ratio < 0.3 and ratio > 3.0 remain as floor/ceiling penalties.
 
     Args:
         confidence: Original confidence score
         speed_ratio: Ratio of video duration to voiceover duration
-        config: Matching config with ideal_speed_range, soft_speed_range, duration_penalty_factor
+        config: Matching config with duration scoring fields
 
     Returns:
         Adjusted confidence score
     """
-    mc = config.matching
-    ideal_min, ideal_max = mc.ideal_speed_range
-    soft_min, soft_max = mc.soft_speed_range
+    import math
 
-    if ideal_min <= speed_ratio <= ideal_max:
-        return confidence  # No penalty
-    elif soft_min <= speed_ratio <= soft_max:
-        return confidence - mc.duration_penalty_factor
-    else:
-        return confidence - (mc.duration_penalty_factor * 2)
+    mc = config.matching
+    scoring = getattr(mc, 'scoring', None)
+    reward_threshold = getattr(scoring, 'duration_ratio_reward_threshold', 0.1) if scoring else 0.1
+    reward_boost = getattr(scoring, 'duration_ratio_reward_boost', 0.02) if scoring else 0.02
+    penalty_factor = mc.duration_penalty_factor
+
+    # Clamp speed_ratio to avoid math errors with zero/negative
+    if speed_ratio <= 0:
+        return confidence - (penalty_factor * 2)
+
+    # Hard floor/ceiling penalties for extreme ratios (unchanged from original)
+    if speed_ratio < 0.3:
+        return confidence - (penalty_factor * 2)
+    if speed_ratio > 3.0:
+        return confidence - (penalty_factor * 2)
+
+    # Near-perfect ratio reward: ratio within [1-threshold, 1+threshold]
+    # Use small epsilon for floating point boundary comparison
+    if abs(speed_ratio - 1.0) <= reward_threshold + 1e-9:
+        return confidence + reward_boost
+
+    # Logarithmic graduated penalty for ratios outside ideal but within soft range
+    # penalty = min(penalty_factor, 0.02 * abs(log2(ratio)))
+    # This gives smooth graduation: ratio 0.9 -> ~0.003, ratio 0.5 -> ~0.02, ratio 0.4 -> ~0.026
+    log_penalty = min(penalty_factor, 0.02 * abs(math.log2(speed_ratio)))
+    return confidence - log_penalty
 
 
 def apply_topic_penalty(

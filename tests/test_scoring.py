@@ -44,6 +44,11 @@ def mock_config():
     matching.duration_scoring_enabled = True
     matching.soft_penalty_range = (0.7, 1.3)
     matching.broll_boost = 0.1
+    # Scoring sub-config for duration ratio reward (US-84-007)
+    scoring_mock = Mock()
+    scoring_mock.duration_ratio_reward_threshold = 0.1
+    scoring_mock.duration_ratio_reward_boost = 0.02
+    matching.scoring = scoring_mock
 
     config.matching = matching
 
@@ -87,57 +92,62 @@ class TestApplyDurationPenalty:
     """Test duration-based confidence penalties"""
 
     @pytest.mark.fast
-    def test_ideal_speed_no_penalty(self, mock_config):
-        """Test no penalty for ideal speed ratio"""
+    def test_ideal_speed_reward(self, mock_config):
+        """Test reward boost for near-perfect speed ratio (US-84-007)"""
         confidence = 0.8
-        speed_ratio = 1.0  # Perfect match (within 0.9-1.1)
+        speed_ratio = 1.0  # Perfect match (within reward threshold)
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        assert result == 0.8  # No change
+        assert result == pytest.approx(0.82, abs=1e-6)  # +0.02 reward boost
 
     @pytest.mark.fast
-    def test_ideal_speed_boundary_no_penalty(self, mock_config):
-        """Test boundaries of ideal range"""
-        # Lower boundary
+    def test_ideal_speed_boundary_reward(self, mock_config):
+        """Test boundaries of reward range get boost (US-84-007)"""
+        # Lower boundary (0.9 = 1.0 - 0.1 threshold)
         result1 = scoring.apply_duration_penalty(0.8, 0.9, mock_config)
-        assert result1 == 0.8
+        assert result1 == pytest.approx(0.82, abs=1e-6)  # +0.02 reward
 
-        # Upper boundary
+        # Upper boundary (1.1 = 1.0 + 0.1 threshold)
         result2 = scoring.apply_duration_penalty(0.8, 1.1, mock_config)
-        assert result2 == 0.8
+        assert result2 == pytest.approx(0.82, abs=1e-6)  # +0.02 reward
 
     @pytest.mark.fast
-    def test_soft_speed_small_penalty(self, mock_config):
-        """Test small penalty for soft speed range"""
+    def test_soft_speed_graduated_penalty(self, mock_config):
+        """Test graduated log penalty for soft speed range (US-84-007)"""
+        import math
         confidence = 0.8
-        speed_ratio = 0.8  # In soft range (0.7-1.3) but outside ideal (0.9-1.1)
+        speed_ratio = 0.8  # Outside reward range but not extreme
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        # penalty_factor = 0.1
-        assert abs(result - 0.7) < 0.001  # 0.8 - 0.1 (allow floating point imprecision)
+        # log penalty = min(0.1, 0.02 * |log2(0.8)|) = 0.02 * 0.3219 ≈ 0.00644
+        expected_penalty = 0.02 * abs(math.log2(0.8))
+        assert result == pytest.approx(confidence - expected_penalty, abs=1e-4)
 
     @pytest.mark.fast
-    def test_outside_both_ranges_large_penalty(self, mock_config):
-        """Test large penalty for speed outside both ranges"""
+    def test_outside_both_ranges_hard_penalty(self, mock_config):
+        """Test hard penalty for extreme speed ratio (US-84-007)"""
         confidence = 0.9
-        speed_ratio = 0.5  # Outside soft range (< 0.7)
+        speed_ratio = 0.2  # Below hard threshold (< 0.3)
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        # penalty_factor * 2 = 0.2
-        assert result == 0.7  # 0.9 - 0.2
+        # Hard penalty: penalty_factor * 2 = 0.2
+        assert result == pytest.approx(0.7, abs=1e-6)  # 0.9 - 0.2
 
     @pytest.mark.fast
-    def test_very_fast_speed_large_penalty(self, mock_config):
-        """Test penalty for very fast speeds"""
+    def test_very_fast_speed_graduated_penalty(self, mock_config):
+        """Test graduated penalty for moderately fast speed (US-84-007)"""
+        import math
         confidence = 0.9
-        speed_ratio = 1.5  # Much faster than ideal
+        speed_ratio = 1.5  # Moderate deviation
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        assert result == 0.7  # 0.9 - 0.2
+        # log penalty = min(0.1, 0.02 * |log2(1.5)|) = 0.02 * 0.585 ≈ 0.0117
+        expected_penalty = min(0.1, 0.02 * abs(math.log2(1.5)))
+        assert result == pytest.approx(confidence - expected_penalty, abs=1e-4)
 
 
 # ============================================================================
@@ -682,9 +692,9 @@ class TestScoringEdgeCases:
         # Start with base confidence
         confidence = 0.7
 
-        # Apply duration penalty (ideal speed = no penalty)
+        # Apply duration penalty (ideal speed = reward boost, US-84-007)
         confidence = scoring.apply_duration_penalty(confidence, 1.0, mock_config)
-        assert confidence == 0.7
+        assert abs(confidence - 0.72) < 0.001  # +0.02 reward for perfect ratio
 
         # Apply topic penalty (good match = minimal penalty)
         with patch('src.matching.scoring.compute_topic_penalty', return_value=0.05):
@@ -692,15 +702,15 @@ class TestScoringEdgeCases:
                 confidence, sample_vo_segment, video_seg, video_topics,
                 True, 0.3
             )
-        assert abs(confidence - 0.65) < 0.001
+        assert abs(confidence - 0.67) < 0.001
 
         # Apply B-roll boost
         confidence, _ = scoring.apply_broll_boost(confidence, video_seg, mock_config)
-        assert abs(confidence - 0.75) < 0.001  # +0.1
+        assert abs(confidence - 0.77) < 0.001  # +0.1
 
         # Apply global cache penalty
         confidence, _ = scoring.apply_current_project_boost(confidence, video_seg, mock_config)
-        assert abs(confidence - 0.65) < 0.001  # -0.1
+        assert abs(confidence - 0.67) < 0.001  # -0.1
 
         # Final score balances all factors
         assert 0.6 <= confidence <= 0.7
