@@ -8,7 +8,7 @@ Provides the public match_all_segments() API for voiceover-to-video matching.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Dict, Any
+from typing import TYPE_CHECKING, Callable, List, Optional, Dict, Any
 from collections import defaultdict
 from pathlib import Path
 import logging
@@ -43,7 +43,10 @@ def match_all_segments(
     location_chapters: Optional[List['LocationChapter']] = None,
     video_locations: Optional[Dict[str, 'GeoLocation']] = None,
     video_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
-    listicle_groups: Optional[List] = None
+    listicle_groups: Optional[List] = None,
+    progress_callback: Optional[Callable[[int, List[MatchResult]], None]] = None,
+    start_index: int = 0,
+    prior_results: Optional[List[MatchResult]] = None,
 ) -> List[MatchResult]:
     """
     Match all voiceover segments to video segments.
@@ -82,6 +85,9 @@ def match_all_segments(
         video_topics: Dict of video_path -> VideoTopics for chapter-based matching
         location_chapters: List of LocationChapter for location-aware matching
         video_locations: Dict of video_path -> GeoLocation for location matching
+        progress_callback: Optional callback(index, results) called every N segments
+        start_index: Index to resume from (skip segments before this)
+        prior_results: Pre-populated results list for resumed matching
 
     Returns:
         List of MatchResult objects, one per voiceover segment
@@ -177,7 +183,12 @@ def match_all_segments(
 
     progress = ProgressBar(len(voiceover_segments), "Matching")
 
-    results = []
+    # US-85-005: Support within-stage resumption
+    results: List[MatchResult] = list(prior_results) if prior_results else []
+    if start_index > 0:
+        logger.info(f"Resuming matching from segment {start_index} (skipping {start_index} already-matched segments)")
+        # Fast-forward progress bar for already-matched segments
+        progress.update(start_index, "resumed")
 
     # Calculate timeline start (first segment start time)
     timeline_start = voiceover_segments[0].start_time if voiceover_segments else 0.0
@@ -288,9 +299,13 @@ def match_all_segments(
         matcher.set_embedding_lookup(video_segments, video_embeddings)
 
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
+        # US-85-005: Skip segments already matched during previous partial run
+        if i < start_index:
+            continue
+
         # Log first segment to confirm loop started
-        if i == 0:
-            logger.info(f"Processing first segment: \"{vo_seg.text[:50]}...\"")
+        if i == start_index:
+            logger.info(f"Processing segment {i}: \"{vo_seg.text[:50]}...\"")
 
         # Calculate current timeline position (relative to start)
         current_timeline_pos = vo_seg.start_time - timeline_start
@@ -456,6 +471,10 @@ def match_all_segments(
                     # NOTE: Intentionally NOT recording V4-V6 in global_clip_tracker
 
         results.append(result)
+
+        # US-85-005: Invoke progress callback for intermediate checkpointing
+        if progress_callback is not None:
+            progress_callback(i, results)
 
         # Progress with strategy count
         strat_count = len(result.strategy_matches) if result.strategy_matches else 0

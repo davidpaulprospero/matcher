@@ -129,7 +129,8 @@ class MatchStage(Stage):
             match_start_time = time.monotonic()
             matches = self._run_matching(
                 vo_segments, video_segments, all_video_paths,
-                state, config, delta_enabled, force_rematch
+                state, config, delta_enabled, force_rematch,
+                checkpoint=checkpoint
             )
             match_duration = time.monotonic() - match_start_time
 
@@ -688,9 +689,14 @@ class MatchStage(Stage):
         state: 'PipelineState',
         config: 'Config',
         delta_enabled: bool,
-        force_rematch: bool
+        force_rematch: bool,
+        checkpoint: 'CheckpointManager' = None
     ) -> List[Any]:
-        """Run the actual matching algorithm"""
+        """Run the actual matching algorithm.
+
+        US-85-005: Supports within-stage resumption via intermediate checkpointing.
+        If partial match results exist in checkpoint, resumes from last checkpointed segment.
+        """
         from ..matching import match_all_segments
         from ..utils import CacheManager
         from ..embeddings import compute_embeddings, get_embedding_provider, EmbeddingCache
@@ -759,6 +765,22 @@ class MatchStage(Stage):
         # US-75-010: Pass listicle_groups from state to match_all_segments
         listicle_groups = getattr(state, 'listicle_groups', None)
 
+        # US-85-005: Restore partial matches from checkpoint for within-stage resumption
+        start_index = 0
+        prior_results = None
+        if checkpoint is not None:
+            start_index, prior_results = self._restore_partial_matches(checkpoint)
+
+        # US-85-005: Build progress callback for intermediate checkpointing
+        checkpoint_interval = getattr(
+            config.matching, 'intermediate_checkpoint_interval', 25
+        )
+        progress_callback = None
+        if checkpoint is not None and checkpoint_interval > 0:
+            progress_callback = self._make_checkpoint_callback(
+                checkpoint, checkpoint_interval
+            )
+
         matches = match_all_segments(
             voiceover_segments=vo_segments,
             video_segments=video_segments,
@@ -773,7 +795,118 @@ class MatchStage(Stage):
             location_chapters=getattr(state, 'location_chapters', None),
             video_locations=None,
             video_metadata=video_metadata,
-            listicle_groups=listicle_groups
+            listicle_groups=listicle_groups,
+            progress_callback=progress_callback,
+            start_index=start_index,
+            prior_results=prior_results,
         )
 
+        # US-85-005: Clear partial_matches from checkpoint on successful completion
+        if checkpoint is not None:
+            self._clear_partial_matches(checkpoint)
+
         return matches
+
+    def _restore_partial_matches(
+        self,
+        checkpoint: 'CheckpointManager'
+    ) -> tuple:
+        """Restore partial match results from checkpoint for within-stage resumption.
+
+        US-85-005: If the MATCH stage was interrupted mid-way, partial results
+        are stored under a 'partial_matches' key. On resume, already-matched
+        segments are skipped.
+
+        Returns:
+            (start_index, prior_results): Index to resume from and pre-populated results list.
+            Returns (0, None) if no partial matches found.
+        """
+        from ..state import restore_matches_from_dicts
+
+        try:
+            data = checkpoint.get_stage_data(self.name)
+            if not data or not isinstance(data, dict):
+                return 0, None
+
+            partial = data.get('partial_matches')
+            if not partial or not isinstance(partial, dict):
+                return 0, None
+
+            serialized = partial.get('matches', [])
+            last_index = partial.get('last_completed_index', -1)
+
+            if not serialized or last_index < 0:
+                return 0, None
+
+            restored = restore_matches_from_dicts(
+                serialized, default_strategy='partial_resume', logger_instance=logger
+            )
+            if restored is None:
+                logger.warning("Failed to deserialize partial matches — starting fresh")
+                return 0, None
+
+            start_index = last_index + 1
+            logger.info(
+                f"US-85-005: Restored {len(restored)} partial matches from checkpoint, "
+                f"resuming from segment {start_index}"
+            )
+            return start_index, restored
+
+        except Exception as e:
+            logger.warning(f"Failed to restore partial matches: {e}")
+            return 0, None
+
+    def _make_checkpoint_callback(
+        self,
+        checkpoint: 'CheckpointManager',
+        interval: int
+    ):
+        """Create a progress callback that saves intermediate match checkpoints.
+
+        US-85-005: Returns a callable(index, results) that saves every `interval` segments.
+        """
+        from ..matching.serialization import serialize_match_for_match_stage
+
+        def _callback(index: int, results: List[Any]) -> None:
+            # Only checkpoint every N segments
+            if (index + 1) % interval != 0:
+                return
+
+            try:
+                serialized = []
+                for i, m in enumerate(results):
+                    try:
+                        serialized.append(serialize_match_for_match_stage(m, i))
+                    except Exception:
+                        pass  # Skip unserializable matches
+
+                partial_data = {
+                    'partial_matches': {
+                        'last_completed_index': index,
+                        'match_count': len(serialized),
+                        'matches': serialized,
+                    }
+                }
+                checkpoint.save_intermediate(self.name, partial_data)
+                logger.debug(
+                    f"US-85-005: Saved intermediate checkpoint at segment {index} "
+                    f"({len(serialized)} matches)"
+                )
+            except Exception as e:
+                logger.debug(f"Intermediate match checkpoint failed: {e}")
+
+        return _callback
+
+    def _clear_partial_matches(self, checkpoint: 'CheckpointManager') -> None:
+        """Remove partial_matches from checkpoint data after successful completion.
+
+        US-85-005: Prevents stale partial data from being picked up on future runs.
+        """
+        try:
+            data = checkpoint.get_stage_data(self.name)
+            if data and isinstance(data, dict) and 'partial_matches' in data:
+                del data['partial_matches']
+                checkpoint.save_intermediate(self.name, data)
+                logger.debug("US-85-005: Cleared partial_matches from checkpoint")
+        except Exception as e:
+            logger.debug(f"Failed to clear partial matches: {e}")
