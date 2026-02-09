@@ -52,6 +52,15 @@ from .escalation_manager import (
     classify_trigger, _TRIGGER_CATEGORIES,
 )
 from .escalation_strategy import EscalationStrategy, EscalationDecision
+from .errors import (
+    ClassifiedDownloadError,
+    NetworkError,
+    BotDetectionError,
+    RateLimitError,
+    FormatError,
+    AuthenticationError,
+    TimeoutError_,
+)
 from .error_classification import (
     classify_error_category,
     classify_error_severity,
@@ -137,6 +146,15 @@ __all__ = [
     'RetryQueueStats',
     'RateLimitMetrics',
     'RateLimitMetricsAggregator',
+
+    # Typed error hierarchy (US-82-002)
+    'ClassifiedDownloadError',
+    'NetworkError',
+    'BotDetectionError',
+    'RateLimitError',
+    'FormatError',
+    'AuthenticationError',
+    'TimeoutError_',
 
     # Error classification (shared module)
     'classify_error_category',

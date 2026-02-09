@@ -9,9 +9,14 @@ with sub-categories: dns, tcp, tls, http, ffmpeg. Enables diagnostic reporting
 like 'DNS errors: 3, HTTP errors: 12'. Flat tuple NETWORK_FAILURE_PATTERNS
 derived for backward compatibility.
 
+US-82-002: classify_error_category() now returns a typed DownloadError instance
+instead of a plain string. The .category attribute preserves the string value
+for backward compatibility. is_network_failure() and is_escalation_error() use
+isinstance() checks when given a DownloadError, avoiding redundant regex re-parsing.
+
 This module provides:
-- classify_error_category(): Classify errors into 'network', 'bot_detection',
-  'timeout', or 'video_specific' categories.
+- classify_error_category(): Returns a DownloadError subclass instance with
+  .category, .severity, .retryable, .original_message fields.
 - is_network_failure(): Check if an error indicates systemic network failure.
 - classify_network_subcategory(): Get the error sub-category (dns/tcp/tls/http/ffmpeg).
 - is_escalation_error(): Check if an error warrants bypass tier escalation.
@@ -31,6 +36,14 @@ from ..common.error_patterns import (
     AUTH_PATTERNS,
     BOT_DETECTION_PATTERNS,
     RATE_LIMIT_PATTERNS,
+)
+from .errors import (
+    AuthenticationError,
+    BotDetectionError,
+    ClassifiedDownloadError,
+    FormatError,
+    NetworkError,
+    TimeoutError_,
 )
 
 logger = logging.getLogger(__name__)
@@ -164,19 +177,24 @@ def classify_network_subcategory(error_msg: str) -> str | None:
     return None
 
 
-def is_network_failure(error_msg: str) -> bool:
+def is_network_failure(error_msg: str | ClassifiedDownloadError) -> bool:
     """Check if an error message indicates a systemic network failure.
 
     These are failures that affect ALL downloads (DNS down, no internet),
     as opposed to video-specific errors (403, removed, age-gated).
     Only dns, tcp, tls, ffmpeg, and URLError patterns qualify as network failures.
 
+    US-82-002: When passed a DownloadError instance, uses isinstance()
+    instead of re-parsing patterns — O(1) vs O(n) pattern matching.
+
     Args:
-        error_msg: The exception message string.
+        error_msg: The exception message string or a DownloadError instance.
 
     Returns:
         True if the error indicates a systemic network issue.
     """
+    if isinstance(error_msg, ClassifiedDownloadError):
+        return isinstance(error_msg, NetworkError)
     error_lower = error_msg.lower()
     for pattern in NETWORK_FAILURE_PATTERNS:
         if pattern.lower() in error_lower:
@@ -188,18 +206,23 @@ def is_network_failure(error_msg: str) -> bool:
     return False
 
 
-def is_escalation_error(error_msg: str) -> bool:
+def is_escalation_error(error_msg: str | ClassifiedDownloadError) -> bool:
     """Check if an error message indicates a 403/bot-detection/auth error.
 
     These errors warrant escalation to a higher bypass tier via the
     EscalationManager (Tier 2 extractor_args, Tier 3 cookies).
 
+    US-82-002: When passed a DownloadError instance, uses isinstance()
+    instead of re-parsing patterns.
+
     Args:
-        error_msg: The exception message string.
+        error_msg: The exception message string or a DownloadError instance.
 
     Returns:
         True if the error matches 403/bot/auth patterns.
     """
+    if isinstance(error_msg, ClassifiedDownloadError):
+        return isinstance(error_msg, (BotDetectionError, AuthenticationError))
     try:
         from .escalation_manager import is_escalation_trigger
         return is_escalation_trigger(error_msg)
@@ -209,29 +232,35 @@ def is_escalation_error(error_msg: str) -> bool:
         return any(p in lower for p in ('403', 'forbidden', 'sign in', 'bot', 'captcha'))
 
 
-def classify_error_category(error_msg: str) -> str:
-    """Classify a download error into a diagnostic category.
+def classify_error_category(error_msg: str) -> ClassifiedDownloadError:
+    """Classify a download error into a typed DownloadError subclass.
+
+    US-82-002: Returns a DownloadError instance instead of a plain string.
+    The .category attribute preserves the string value for backward
+    compatibility (e.g. 'network', 'bot_detection', 'timeout', 'video_specific').
 
     Categories (most specific first):
-        'network'       - DNS failure, no connectivity (systemic)
-        'bot_detection' - 403/bot/captcha/sign-in errors
-        'timeout'       - stall timeouts, socket timeouts
-        'video_specific'- removed, age-gated, unavailable, etc.
+        NetworkError      ('network')       - DNS failure, no connectivity
+        BotDetectionError ('bot_detection') - 403/bot/captcha/sign-in errors
+        TimeoutError_     ('timeout')       - stall timeouts, socket timeouts
+        FormatError       ('video_specific')- removed, age-gated, unavailable
 
     Args:
         error_msg: The exception message string.
 
     Returns:
-        One of 'network', 'bot_detection', 'timeout', 'video_specific'.
+        A DownloadError subclass instance with .category, .severity,
+        .retryable, and .original_message attributes.
     """
+    severity = classify_error_severity(error_msg)
     if is_network_failure(error_msg):
-        return 'network'
+        return NetworkError(error_msg, severity=severity)
     if is_escalation_error(error_msg):
-        return 'bot_detection'
+        return BotDetectionError(error_msg, severity=severity)
     lower = error_msg.lower()
     if any(p in lower for p in ('timeout', 'timed out', 'stalled')):
-        return 'timeout'
-    return 'video_specific'
+        return TimeoutError_(error_msg, severity=severity)
+    return FormatError(error_msg, severity=severity)
 
 
 def classify_error_severity(error_message: str) -> str:

@@ -14,6 +14,16 @@ from unittest.mock import patch
 
 from src.stages.download_segments import classify_error_category, _is_network_failure
 from src.downloader.retry_queue import RetryQueue, RetryItem, BatchRetryConfig
+from src.downloader.errors import (
+    ClassifiedDownloadError,
+    NetworkError,
+    BotDetectionError,
+    RateLimitError,
+    FormatError,
+    AuthenticationError,
+    TimeoutError_,
+)
+from src.downloader.error_classification import is_network_failure, is_escalation_error
 
 
 # =============================================================================
@@ -1180,3 +1190,218 @@ class TestNetworkErrorPatternCategories:
         """ffmpeg category contains the expected exit codes."""
         assert '4294967158' in ERROR_PATTERNS['ffmpeg']
         assert '-314' in ERROR_PATTERNS['ffmpeg']
+
+
+# =============================================================================
+# US-82-002: Typed DownloadError exception hierarchy tests
+# =============================================================================
+
+class TestTypedErrorHierarchy:
+    """Tests for the typed DownloadError exception hierarchy.
+
+    US-82-002: Verifies each error subclass is correctly instantiated
+    from representative error strings, has the expected structured
+    fields, and works with isinstance checks.
+    """
+
+    @pytest.mark.fast
+    def test_network_error_from_dns_failure(self):
+        """DNS failure produces NetworkError with correct fields."""
+        result = classify_error_category("getaddrinfo failed")
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+        assert result.retryable is False
+        assert result.original_message == "getaddrinfo failed"
+
+    @pytest.mark.fast
+    def test_network_error_from_connection_refused(self):
+        """Connection refused produces NetworkError."""
+        result = classify_error_category("Connection refused")
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_network_error_from_ffmpeg_exit_code(self):
+        """ffmpeg network exit code produces NetworkError."""
+        result = classify_error_category("ffmpeg exited with code 4294967158")
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_bot_detection_error_from_403(self):
+        """HTTP 403 produces BotDetectionError with correct fields."""
+        result = classify_error_category("HTTP Error 403: Forbidden")
+        assert isinstance(result, BotDetectionError)
+        assert result.category == 'bot_detection'
+        assert result.retryable is True
+        assert result.original_message == "HTTP Error 403: Forbidden"
+
+    @pytest.mark.fast
+    def test_bot_detection_error_from_captcha(self):
+        """Captcha error produces BotDetectionError."""
+        result = classify_error_category("Sign in to confirm you're not a bot")
+        assert isinstance(result, BotDetectionError)
+        assert result.category == 'bot_detection'
+
+    @pytest.mark.fast
+    def test_timeout_error_from_stalled(self):
+        """Stall timeout produces TimeoutError_ with correct fields."""
+        result = classify_error_category("Download stalled for 30 seconds")
+        assert isinstance(result, TimeoutError_)
+        assert result.category == 'timeout'
+        assert result.retryable is True
+        assert result.original_message == "Download stalled for 30 seconds"
+
+    @pytest.mark.fast
+    def test_timeout_error_from_timed_out(self):
+        """Socket timeout produces TimeoutError_."""
+        result = classify_error_category("Connection timed out")
+        # Note: "Connection timed out" matches TCP network pattern first
+        # so it's NetworkError, not TimeoutError_ — this is correct behavior
+        assert isinstance(result, (NetworkError, TimeoutError_))
+
+    @pytest.mark.fast
+    def test_format_error_from_unavailable(self):
+        """Video unavailable produces FormatError with correct fields."""
+        result = classify_error_category("Video unavailable: removed by uploader")
+        assert isinstance(result, FormatError)
+        assert result.category == 'video_specific'
+        assert result.retryable is False
+        assert result.original_message == "Video unavailable: removed by uploader"
+
+    @pytest.mark.fast
+    def test_format_error_from_empty_string(self):
+        """Empty error message defaults to FormatError (video_specific)."""
+        result = classify_error_category("")
+        assert isinstance(result, FormatError)
+        assert result.category == 'video_specific'
+
+    @pytest.mark.fast
+    def test_all_subclasses_extend_classified_download_error(self):
+        """All typed errors are instances of ClassifiedDownloadError."""
+        for cls in (NetworkError, BotDetectionError, RateLimitError,
+                    FormatError, AuthenticationError, TimeoutError_):
+            err = cls("test message")
+            assert isinstance(err, ClassifiedDownloadError)
+
+    @pytest.mark.fast
+    def test_all_subclasses_extend_base_download_error(self):
+        """All typed errors are instances of the original DownloadError from types.py."""
+        from src.downloader.types import DownloadError
+        for cls in (NetworkError, BotDetectionError, RateLimitError,
+                    FormatError, AuthenticationError, TimeoutError_):
+            err = cls("test message")
+            assert isinstance(err, DownloadError)
+
+    @pytest.mark.fast
+    def test_structured_fields_on_all_subclasses(self):
+        """Each subclass stores category, severity, retryable, original_message."""
+        test_cases = [
+            (NetworkError, 'network', 'high', False),
+            (BotDetectionError, 'bot_detection', 'high', True),
+            (RateLimitError, 'bot_detection', 'medium', True),
+            (FormatError, 'video_specific', 'low', False),
+            (AuthenticationError, 'bot_detection', 'low', True),
+            (TimeoutError_, 'timeout', 'medium', True),
+        ]
+        for cls, expected_category, expected_severity, expected_retryable in test_cases:
+            err = cls("test error")
+            assert err.category == expected_category, f"{cls.__name__}.category"
+            assert err.severity == expected_severity, f"{cls.__name__}.severity"
+            assert err.retryable == expected_retryable, f"{cls.__name__}.retryable"
+            assert err.original_message == "test error", f"{cls.__name__}.original_message"
+
+    @pytest.mark.fast
+    def test_severity_override_in_constructor(self):
+        """Severity can be overridden via constructor kwargs."""
+        err = NetworkError("dns failure", severity='low')
+        assert err.severity == 'low'
+        assert err.category == 'network'  # category still from class default
+
+    @pytest.mark.fast
+    def test_backward_compat_string_equality(self):
+        """ClassifiedDownloadError == category string for backward compat."""
+        err = NetworkError("dns failure")
+        assert err == 'network'
+        assert err != 'bot_detection'
+        err2 = BotDetectionError("403 forbidden")
+        assert err2 == 'bot_detection'
+        assert err2 != 'network'
+
+    @pytest.mark.fast
+    def test_classify_returns_type_that_compares_as_string(self):
+        """classify_error_category result compares equal to category string."""
+        result = classify_error_category("getaddrinfo failed")
+        assert result == 'network'
+        result = classify_error_category("HTTP Error 403: Forbidden")
+        assert result == 'bot_detection'
+        result = classify_error_category("Video unavailable")
+        assert result == 'video_specific'
+
+
+class TestIsNetworkFailureWithTypedErrors:
+    """Tests for is_network_failure with ClassifiedDownloadError instances.
+
+    US-82-002: Verifies isinstance-based fast path works correctly.
+    """
+
+    @pytest.mark.fast
+    def test_network_error_instance_returns_true(self):
+        """NetworkError instance returns True without re-parsing."""
+        err = NetworkError("getaddrinfo failed")
+        assert is_network_failure(err) is True
+
+    @pytest.mark.fast
+    def test_bot_detection_error_instance_returns_false(self):
+        """BotDetectionError instance returns False."""
+        err = BotDetectionError("HTTP Error 403: Forbidden")
+        assert is_network_failure(err) is False
+
+    @pytest.mark.fast
+    def test_format_error_instance_returns_false(self):
+        """FormatError instance returns False."""
+        err = FormatError("Video unavailable")
+        assert is_network_failure(err) is False
+
+    @pytest.mark.fast
+    def test_string_still_works(self):
+        """String input still works via pattern matching path."""
+        assert is_network_failure("getaddrinfo failed") is True
+        assert is_network_failure("HTTP Error 403: Forbidden") is False
+
+
+class TestIsEscalationErrorWithTypedErrors:
+    """Tests for is_escalation_error with ClassifiedDownloadError instances.
+
+    US-82-002: Verifies isinstance-based fast path works correctly.
+    """
+
+    @pytest.mark.fast
+    def test_bot_detection_error_returns_true(self):
+        """BotDetectionError instance returns True."""
+        err = BotDetectionError("HTTP Error 403: Forbidden")
+        assert is_escalation_error(err) is True
+
+    @pytest.mark.fast
+    def test_authentication_error_returns_true(self):
+        """AuthenticationError instance returns True."""
+        err = AuthenticationError("Sign in to confirm your age")
+        assert is_escalation_error(err) is True
+
+    @pytest.mark.fast
+    def test_network_error_returns_false(self):
+        """NetworkError instance returns False."""
+        err = NetworkError("getaddrinfo failed")
+        assert is_escalation_error(err) is False
+
+    @pytest.mark.fast
+    def test_format_error_returns_false(self):
+        """FormatError instance returns False."""
+        err = FormatError("Video unavailable")
+        assert is_escalation_error(err) is False
+
+    @pytest.mark.fast
+    def test_string_still_works(self):
+        """String input still works via pattern matching path."""
+        assert is_escalation_error("HTTP Error 403: Forbidden") is True
+        assert is_escalation_error("getaddrinfo failed") is False

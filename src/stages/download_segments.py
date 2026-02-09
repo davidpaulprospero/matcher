@@ -1092,11 +1092,11 @@ class DownloadVideoSegmentsStage(Stage):
             ``True`` if the loop should abort.
         """
         stats = ctx.stats
-        _err_cat = classify_error_category(error_msg)
-        stats.increment_failure(category=_err_cat, error_msg=error_msg, video_id=video_id)
+        _err_obj = classify_error_category(error_msg)
+        stats.increment_failure(category=_err_obj.category, error_msg=error_msg, video_id=video_id)
         logger.warning(f"Failed to download segment {video_id}: {error_msg}")
 
-        is_bot_error = _is_escalation_error(error_msg)
+        is_bot_error = _is_escalation_error(_err_obj)
         if ctx.escalation_mgr and is_bot_error:
             ctx.escalation_mgr.record_failure(video_id, error_msg)
             if ctx.cookie_rotator and getattr(ctx.cookie_rotator, 'should_rotate', None):
@@ -1122,7 +1122,7 @@ class DownloadVideoSegmentsStage(Stage):
                 return True
 
         # Network failure tracking and abort
-        if _is_network_failure(error_msg):
+        if _is_network_failure(_err_obj):
             ctx.consecutive_network_failures += 1
             logger.warning(
                 f"Network failure detected ({ctx.consecutive_network_failures}/"
@@ -1218,7 +1218,7 @@ class DownloadVideoSegmentsStage(Stage):
         """
         if not self.downloader or not self.downloader.retry_queue:
             return
-        category = classify_error_category(error_msg)
+        _err_obj = classify_error_category(error_msg)
         _esc_tier = 1
         if ctx.escalation_mgr:
             try:
@@ -1231,12 +1231,12 @@ class DownloadVideoSegmentsStage(Stage):
             keyword='segment',
             tier='segment',
             error_message=error_msg,
-            error_category=category,
+            error_category=_err_obj.category,
             escalation_tier=_esc_tier,
         )
         logger.debug(
             f"Added {video_id} to retry queue "
-            f"(category={category}, escalation_tier={_esc_tier})"
+            f"(category={_err_obj.category}, escalation_tier={_esc_tier})"
         )
 
     @staticmethod
