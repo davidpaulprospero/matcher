@@ -84,8 +84,8 @@
                 "Backward-compatible re-export from src/checkpoint.py via __all__ or direct import (for any external/test references)",
                 "Unit tests for keyword save/load/list operations pass from the new module location"
             ],
-            "passes": false,
-            "notes": "Tier: separation of concerns. Files: src/checkpoint.py (1,340 lines - KeywordManager class ~lines 900-1100, SavedKeywords dataclass ~line 880), src/keywords/__init__.py (new), src/keywords/manager.py (new). The checkpoint module mixes checkpoint persistence with keyword preset management - two completely independent concerns. Splitting reduces checkpoint.py by ~200 lines and makes keyword management independently testable."
+            "passes": true,
+            "notes": "Tier: separation of concerns. Created src/keywords/manager.py with KeywordManager class, SavedKeywords dataclass, and format_keyword_prompt function extracted from src/checkpoint.py. src/keywords/__init__.py re-exports all three. src/checkpoint.py retains backward-compatible re-exports via direct import. main.py updated to import from src.keywords. checkpoint.py reduced by ~180 lines. All 138 checkpoint tests pass (28 keyword-specific tests pass). Files: src/keywords/__init__.py (new), src/keywords/manager.py (new), src/checkpoint.py (modified), main.py (modified)."
         },
         {
             "id": "US-82-006",

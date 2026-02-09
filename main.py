@@ -74,7 +74,7 @@ from src.config import (
     Config, load_config, get_config, set_config,
     ensure_dirs,
 )
-from src.checkpoint import KeywordManager
+from src.keywords import KeywordManager
 
 # Global config instance - loaded at startup
 _config: Optional[Config] = None
