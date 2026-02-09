@@ -182,6 +182,10 @@ class MatchingScoringConfig:
     duration_ratio_reward_threshold: float = 0.1  # Ratio deviation from 1.0 to qualify for reward (0.9-1.1)
     duration_ratio_reward_boost: float = 0.02  # Confidence boost for near-perfect duration match
 
+    # Ambiguous pool detection (US-84-008) — flag when top candidates score nearly identically
+    # When top-10 candidate similarity variance < this threshold, the match is flagged as ambiguous
+    variance_warning_threshold: float = 0.02  # Variance below this triggers ambiguous_pool flag
+
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):

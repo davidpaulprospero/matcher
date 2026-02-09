@@ -573,6 +573,7 @@ class MatchResult:
     confidence_variance: float = 0.0  # Std dev of top-N candidate similarities (high variance = uncertain match)
     matched_keywords: List[str] = field(default_factory=list)  # Common keywords between voiceover and video transcript
     confidence_breakdown: List[Dict[str, Any]] = field(default_factory=list)  # Audit trail: [{component, adjustment, reason}]
+    ambiguous_pool: bool = False  # US-84-008: True when top-10 candidate variance < threshold (selection may be arbitrary)
 
     def to_dict(self) -> dict:
         return {
@@ -584,7 +585,8 @@ class MatchResult:
             'gap_reason': self.gap_reason,
             'confidence_variance': float(self.confidence_variance),
             'matched_keywords': list(self.matched_keywords),
-            'confidence_breakdown': list(self.confidence_breakdown)
+            'confidence_breakdown': list(self.confidence_breakdown),
+            'ambiguous_pool': self.ambiguous_pool,
         }
 
     @classmethod

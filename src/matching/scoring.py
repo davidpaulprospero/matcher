@@ -62,6 +62,10 @@ def calculate_adaptive_threshold(
     - Short voiceover (<20 chars): +0.05 threshold (harder to match, need higher confidence)
     - Low candidate variance (<0.05): -0.05 threshold (clear winner, can accept lower)
 
+    Also detects ambiguous pools (US-84-008): when top-10 candidate variance is below
+    the configured variance_warning_threshold, the match is flagged as ambiguous_pool
+    in the returned reason string (caller should set match metadata accordingly).
+
     Args:
         base_threshold: The base skip_llm_threshold from config
         voiceover_text: The voiceover segment text
@@ -73,6 +77,10 @@ def calculate_adaptive_threshold(
     """
     adjustment = 0.0
     reasons = []
+
+    # Get variance warning threshold from config (US-84-008)
+    scoring = _get_scoring_config(config)
+    variance_warning_threshold = getattr(scoring, 'variance_warning_threshold', 0.02) if scoring else 0.02
 
     # Adjustment 1: Voiceover length
     # Short voiceover segments are harder to match accurately
@@ -101,10 +109,9 @@ def calculate_adaptive_threshold(
             logger.debug(f"Variance computation returned {variance}, treating as 0.0")
             variance = 0.0
 
-        # Variance floor: treat very low variance as 'uncertain' (false certainty)
+        # Variance floor / ambiguous pool detection (US-84-008)
         # When top candidates all score nearly the same, it's NOT a clear winner
-        VARIANCE_FLOOR = 0.02
-        variance_below_floor = variance < VARIANCE_FLOOR
+        variance_below_floor = variance < variance_warning_threshold
 
         logger.debug(
             f"Variance computation: candidate_count={len(candidates)}, "
@@ -113,13 +120,18 @@ def calculate_adaptive_threshold(
             f"below_floor={variance_below_floor}"
         )
 
-        if variance < 0.05 and not variance_below_floor:
+        if variance_below_floor:
+            # US-84-008: Ambiguous pool - log warning and flag
+            score_range = max(top_scores) - min(top_scores) if top_scores else 0.0
+            logger.warning(
+                "Top %d candidates within %.4f range - match selection may be arbitrary",
+                len(top_scores), score_range,
+            )
+            reasons.append(f"ambiguous_pool(var={variance:.4f}):no_adjust")
+        elif variance < 0.05:
             # Low variance but above floor: genuine clear winner
             adjustment -= 0.05
             reasons.append(f"low_var({variance:.3f}):-0.05")
-        elif variance_below_floor:
-            # Below floor: false certainty, do NOT reduce threshold
-            reasons.append(f"var_floor({variance:.3f}):no_adjust")
 
     # Calculate final threshold, clamped to valid range [0.5, 0.99]
     adjusted_threshold = max(0.5, min(0.99, base_threshold + adjustment))

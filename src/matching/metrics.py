@@ -38,6 +38,7 @@ class MatchQualityMetrics:
     match_rate: float = 0.0
     total_segments: int = 0
     matched_segments: int = 0
+    uncertain_matches_count: int = 0  # US-84-008: segments with ambiguous candidate pools
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metrics to dictionary for checkpoint storage."""
@@ -52,6 +53,7 @@ class MatchQualityMetrics:
             'match_rate': float(self.match_rate),
             'total_segments': self.total_segments,
             'matched_segments': self.matched_segments,
+            'uncertain_matches_count': self.uncertain_matches_count,
         }
 
     @classmethod
@@ -66,6 +68,7 @@ class MatchQualityMetrics:
             match_rate=data.get('match_rate', 0.0),
             total_segments=data.get('total_segments', 0),
             matched_segments=data.get('matched_segments', 0),
+            uncertain_matches_count=data.get('uncertain_matches_count', 0),
         )
 
 
@@ -92,6 +95,7 @@ def calculate_match_quality_metrics(
     # Extract confidence scores from matches
     confidences = []
     gap_count = 0
+    uncertain_count = 0
 
     for m in matches:
         # Handle MatchResult structure (has primary_match)
@@ -101,6 +105,9 @@ def calculate_match_quality_metrics(
             # Check for gap
             if getattr(m, 'has_gap', False):
                 gap_count += 1
+            # US-84-008: Count ambiguous pool matches
+            if getattr(m, 'ambiguous_pool', False):
+                uncertain_count += 1
         # Handle direct Match structure
         elif hasattr(m, 'confidence'):
             conf = m.confidence
@@ -121,6 +128,7 @@ def calculate_match_quality_metrics(
             gap_count=gap_count,
             match_rate=0.0,
             matched_segments=0,
+            uncertain_matches_count=uncertain_count,
         )
 
     # Convert all confidence values to Python float to avoid numpy.float32 issues
@@ -146,6 +154,7 @@ def calculate_match_quality_metrics(
         match_rate=match_rate,
         total_segments=total_segments,
         matched_segments=matched_segments,
+        uncertain_matches_count=uncertain_count,
     )
 
 
@@ -167,6 +176,8 @@ def log_quality_summary(metrics: MatchQualityMetrics) -> None:
     logger.info(f"  Min confidence: {metrics.min_confidence:.3f}")
     logger.info(f"  Max confidence: {metrics.max_confidence:.3f}")
     logger.info(f"  Confidence std: {metrics.confidence_std:.3f}")
+    if metrics.uncertain_matches_count > 0:
+        logger.info(f"  Uncertain matches (ambiguous pool): {metrics.uncertain_matches_count}")
     logger.info("=============================")
 
 

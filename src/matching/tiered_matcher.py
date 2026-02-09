@@ -1120,9 +1120,12 @@ class TieredMatcher:
                 candidates=valid_candidates,
                 config=self.config
             )
+            # US-84-008: Detect ambiguous pool from threshold reason
+            is_ambiguous_pool = 'ambiguous_pool' in threshold_reason
             logger.info(f"  match_segment: top_sim={top_similarity:.3f}, adaptive_threshold={skip_threshold:.3f} ({threshold_reason})")
         else:
             skip_threshold = mc.skip_llm_threshold
+            is_ambiguous_pool = False
             logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={skip_threshold}")
 
         # Check for obvious match (early termination before LLM)
@@ -1357,6 +1360,7 @@ class TieredMatcher:
                 confidence_variance=confidence_variance,
                 matched_keywords=matched_keywords_for_check,
                 confidence_breakdown=confidence_breakdown,
+                ambiguous_pool=is_ambiguous_pool,
             )
 
         if top_similarity >= skip_threshold:
@@ -1583,6 +1587,7 @@ class TieredMatcher:
                 confidence_variance=confidence_variance,
                 matched_keywords=matched_keywords,
                 confidence_breakdown=confidence_breakdown,
+                ambiguous_pool=is_ambiguous_pool,
             )
 
         # Build context and call LLMReranker (handles caching internally)
@@ -1951,6 +1956,7 @@ class TieredMatcher:
             confidence_variance=confidence_variance,
             matched_keywords=matched_keywords,
             confidence_breakdown=confidence_breakdown,
+            ambiguous_pool=is_ambiguous_pool,
         )
 
     def review_with_local_llm(self, matches: List[MatchResult]) -> List[MatchResult]:
