@@ -469,6 +469,14 @@ class Config:
             _config_metrics['validation_errors'] += 1
             return cls()
 
+        # Fail-fast schema validation on raw YAML data (US-85-006)
+        from .schema_validation import validate_config_schema, ConfigValidationError
+        try:
+            validate_config_schema(data, raise_on_error=True)
+        except ConfigValidationError:
+            _config_metrics['validation_errors'] += 1
+            raise
+
         # Compute hash for change detection
         config_hash = hashlib.md5(
             yaml.dump(data, sort_keys=True).encode()
@@ -1206,6 +1214,8 @@ __all__ = [
     'Config', 'ConfigError', 'FrozenConfigError',
     'load_config', 'get_config', 'set_config', 'reload_config',
     'ensure_dirs', 'get_api_key', 'get_config_metrics', 'log_hardcoded_warning',
+    # Schema validation
+    'validate_config_schema', 'ConfigValidationError',
     # Section configs (for backward compatibility)
     'TranscriptionConfig', 'EmbeddingConfig', 'MatchingConfig', 'OutputConfig',
     'KeywordConfig', 'DownloadingConfig', 'LoggingConfig', 'CacheConfig',
