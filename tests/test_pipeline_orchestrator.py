@@ -2256,7 +2256,7 @@ class TestConfigValidation:
         mock_config.cache.cache_dir = non_writable
 
         # Mock os.access to simulate non-writable dir (works on all platforms)
-        with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
+        with patch('src.pipeline_validator.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
             with pytest.raises(ValueError, match="not writable"):
                 PipelineOrchestrator(mock_config, temp_project_dir)
 
@@ -2265,7 +2265,7 @@ class TestConfigValidation:
         """Test that a cache dir whose parent is not writable raises ValueError at construction (US-45-010)."""
         mock_config.cache.cache_dir = str(temp_project_dir / "new_cache")
 
-        with patch('src.pipeline.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
+        with patch('src.pipeline_validator.os.access', side_effect=lambda p, m: False if m == os.W_OK else True):
             with pytest.raises(ValueError, match="Cannot create cache directory"):
                 PipelineOrchestrator(mock_config, temp_project_dir)
 

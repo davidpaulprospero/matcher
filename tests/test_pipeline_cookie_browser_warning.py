@@ -52,7 +52,7 @@ class TestCookiesBrowserNotOnPath:
         config = _make_config(cookies_from_browser='firefox')
         pipeline = _create_pipeline(config, tmp_path)
 
-        with patch('src.pipeline.shutil.which', return_value=None):
+        with patch('src.pipeline_validator.shutil.which', return_value=None):
             with caplog.at_level(logging.WARNING):
                 pipeline._warn_cookies_from_browser()
 
@@ -70,7 +70,7 @@ class TestCookiesBrowserNotOnPath:
         config = _make_config(cookies_from_browser='chrome')
         pipeline = _create_pipeline(config, tmp_path)
 
-        with patch('src.pipeline.shutil.which', return_value=None):
+        with patch('src.pipeline_validator.shutil.which', return_value=None):
             with caplog.at_level(logging.WARNING):
                 pipeline._warn_cookies_from_browser()
 
@@ -88,7 +88,7 @@ class TestCookiesBrowserNotOnPath:
             which_calls.append(name)
             return None
 
-        with patch('src.pipeline.shutil.which', side_effect=mock_which):
+        with patch('src.pipeline_validator.shutil.which', side_effect=mock_which):
             with caplog.at_level(logging.WARNING):
                 pipeline._warn_cookies_from_browser()
 
@@ -112,7 +112,7 @@ class TestCookiesBrowserOnPath:
         config = _make_config(cookies_from_browser='firefox')
         pipeline = _create_pipeline(config, tmp_path)
 
-        with patch('src.pipeline.shutil.which', return_value='/usr/bin/firefox'):
+        with patch('src.pipeline_validator.shutil.which', return_value='/usr/bin/firefox'):
             with caplog.at_level(logging.WARNING):
                 pipeline._warn_cookies_from_browser()
 
@@ -153,11 +153,11 @@ class TestValidationIntegration:
     """_warn_cookies_from_browser is called from _validate_config."""
 
     def test_validate_config_calls_browser_warning(self, tmp_path):
-        """_validate_config invokes _warn_cookies_from_browser."""
+        """_validate_config invokes _warn_cookies_from_browser (via PipelineValidator)."""
         config = _make_config(cookies_from_browser='firefox')
         pipeline = _create_pipeline(config, tmp_path)
 
-        with patch.object(pipeline, '_warn_cookies_from_browser') as mock_warn:
+        with patch.object(pipeline._validator, '_warn_cookies_from_browser') as mock_warn:
             pipeline._validate_config()
 
         mock_warn.assert_called_once()
@@ -167,7 +167,7 @@ class TestValidationIntegration:
         config = _make_config(cookies_from_browser='firefox')
         pipeline = _create_pipeline(config, tmp_path)
 
-        with patch('src.pipeline.shutil.which', return_value=None):
+        with patch('src.pipeline_validator.shutil.which', return_value=None):
             with caplog.at_level(logging.WARNING):
                 errors = pipeline._validate_config()
 

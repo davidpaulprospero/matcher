@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 from .checkpoint import CheckpointManager, STAGE_ORDER
 from .pipeline_history import append_stage_timing, estimate_duration
 from .pipeline_progress import ProgressReporter
+from .pipeline_validator import PipelineValidator, StageValidationResult
 from .state import PipelineState
 from .stages import Stage, StageResult, StageMetrics, DependencyError
 
@@ -67,19 +68,6 @@ class PipelineEvent:
     data: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
 
-
-@dataclass
-class StageValidationResult:
-    """Structured validation result for a single pipeline stage.
-
-    Attributes:
-        stage_name: Name of the stage
-        status: One of 'run', 'skip', 'checkpoint', 'error'
-        message: Human-readable detail about the validation outcome
-    """
-    stage_name: str
-    status: str  # 'run' | 'skip' | 'checkpoint' | 'error'
-    message: str
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +114,9 @@ class PipelineOrchestrator:
         self.project_dir = Path(project_dir)
         self.state = PipelineState()
         self.stages = stages or []
+
+        # Create validator for pre-run checks (US-82-006)
+        self._validator = PipelineValidator(config, self.stages)
 
         # Validate config before any I/O (US-45-010: fail-fast on invalid config)
         config_errors = self._validate_config()
@@ -225,85 +216,44 @@ class PipelineOrchestrator:
         """
         Validate pipeline configuration before running stages.
 
-        Combines schema validation (pure config checks) with runtime environment
-        checks (filesystem/PATH). See _validate_config_schema() and
-        _validate_runtime_environment() for details.
+        Delegates to PipelineValidator (US-82-006).
 
         Returns:
             List of validation error strings. Empty list means config is valid.
         """
-        errors = self._validate_config_schema()
-        errors.extend(self._validate_runtime_environment())
-        return errors
+        validator = getattr(self, '_validator', None)
+        if validator is not None:
+            return validator.validate_config()
+        # Fallback for tests that bypass __init__
+        return PipelineValidator(self.config, self.stages).validate_config()
 
     def _validate_config_schema(self) -> List[str]:
         """
         Pure config schema validation — no I/O, no filesystem access.
 
-        Checks required fields, type constraints, and value ranges that can be
-        validated from config values alone. Safe to call in CI without a real
-        filesystem.
+        Delegates to PipelineValidator (US-82-006).
 
         Returns:
             List of validation error strings. Empty list means config is valid.
         """
-        errors: List[str] = []
-
-        # Check cache_dir is configured
-        cache_dir = getattr(getattr(self.config, 'cache', None), 'cache_dir', None)
-        if not cache_dir:
-            errors.append("No cache directory configured (config.cache.cache_dir)")
-
-        # Check embedding provider when matching stages are enabled
-        matching_stage_names = {'MATCH', 'ITERATIVE_MATCH'}
-        has_matching_stages = any(
-            getattr(stage, 'name', '') in matching_stage_names
-            for stage in self.stages
-        )
-        if has_matching_stages:
-            embedding_config = getattr(self.config, 'embedding', None)
-            provider = getattr(embedding_config, 'provider', None) if embedding_config else None
-            if not provider:
-                errors.append(
-                    "Embedding provider not configured (config.embedding.provider) "
-                    "but matching stages require embeddings"
-                )
-
-        return errors
+        validator = getattr(self, '_validator', None)
+        if validator is not None:
+            return validator._validate_config_schema()
+        return PipelineValidator(self.config, self.stages)._validate_config_schema()
 
     def _validate_runtime_environment(self) -> List[str]:
         """
         Runtime environment checks — requires filesystem/PATH access.
 
-        Checks cache_dir writability, browser availability, and other
-        I/O-dependent preconditions.
+        Delegates to PipelineValidator (US-82-006).
 
         Returns:
             List of validation error strings. Empty list means config is valid.
         """
-        errors: List[str] = []
-
-        # Check cache_dir is writable or can be created
-        cache_dir = getattr(getattr(self.config, 'cache', None), 'cache_dir', None)
-        if cache_dir and isinstance(cache_dir, str):
-            cache_path = Path(cache_dir)
-            if cache_path.exists():
-                if not os.access(str(cache_path), os.W_OK):
-                    errors.append(
-                        f"Cache directory is not writable: {cache_dir}"
-                    )
-            else:
-                # Check if parent is writable so we can create it
-                parent = cache_path.parent
-                if parent.exists() and not os.access(str(parent), os.W_OK):
-                    errors.append(
-                        f"Cannot create cache directory (parent not writable): {cache_dir}"
-                    )
-
-        # US-57-004: Warn if cookies_from_browser is set but browser not on PATH
-        self._warn_cookies_from_browser()
-
-        return errors
+        validator = getattr(self, '_validator', None)
+        if validator is not None:
+            return validator._validate_runtime_environment()
+        return PipelineValidator(self.config, self.stages)._validate_runtime_environment()
 
     def validate_all(
         self,
@@ -401,33 +351,13 @@ class PipelineOrchestrator:
     def _warn_cookies_from_browser(self) -> None:
         """Check if cookies_from_browser browser is findable on PATH.
 
-        Emits a WARNING if the configured browser cannot be found.
-        Does NOT block pipeline startup — Tier 3 cookie extraction will
-        simply fail at download time.
+        Delegates to PipelineValidator (US-82-006).
         """
-        download_config = getattr(self.config, 'download', None)
-        if download_config is None:
-            return
-        browser = getattr(download_config, 'cookies_from_browser', '')
-        if not browser:
-            return
-
-        # Map browser config names to common executable names
-        _exe_map = {
-            'firefox': 'firefox',
-            'chrome': 'chrome',
-            'edge': 'msedge',
-            'safari': 'safari',
-            'opera': 'opera',
-            'brave': 'brave',
-        }
-        exe_name = _exe_map.get(browser.lower(), browser)
-        if not shutil.which(exe_name) and not shutil.which(browser):
-            logger.warning(
-                f'cookies_from_browser is set to "{browser}" but it is not '
-                f'found on PATH. Tier 3 cookie extraction will fail. '
-                f'Set download.cookies_path instead or install {browser}.'
-            )
+        validator = getattr(self, '_validator', None)
+        if validator is not None:
+            validator._warn_cookies_from_browser()
+        else:
+            PipelineValidator(self.config, self.stages)._warn_cookies_from_browser()
 
     def _validate_stage_dependencies(
         self,

@@ -113,8 +113,8 @@ class TestValidateConfigSchema:
 
         orch = _make_orchestrator_no_io(config)
 
-        with patch("src.pipeline.os.access") as mock_access, \
-             patch("src.pipeline.Path.exists") as mock_exists:
+        with patch("src.pipeline_validator.os.access") as mock_access, \
+             patch("src.pipeline_validator.Path.exists") as mock_exists:
             errors = orch._validate_config_schema()
 
             mock_access.assert_not_called()
@@ -155,7 +155,7 @@ class TestValidateRuntimeEnvironment:
 
         orch = _make_orchestrator_no_io(config)
 
-        with patch("src.pipeline.os.access", return_value=False):
+        with patch("src.pipeline_validator.os.access", return_value=False):
             errors = orch._validate_runtime_environment()
 
         assert any("not writable" in e for e in errors)

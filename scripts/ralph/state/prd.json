@@ -1,189 +1,189 @@
 ﻿{
-    "sprintNumber":  82,
-    "focusArea":  "architecture",
-    "branchName":  "ralph/sprint-82",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-82-001",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027architecture\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027architecture\u0027",
-                                                       "Add stories US-82-002 through US-82-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-82-NNN to be unique across sprints",
-                                                       "Mark this story (US-82-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Generate sprint stories for architecture focus area",
-                            "notes":  "Seed story completed. Generated 11 architecture stories (US-82-002 through US-82-012) covering: error classification typed hierarchy, circuit breaker builder pattern, escalation metrics extraction, checkpoint keyword manager split, pipeline validator extraction, download orchestrator abstraction, pause calculator composition, checkpoint migration extraction, stage dependency injection, pipeline event bus extraction, and error pattern deduplication."
-                        },
-                        {
-                            "id":  "US-82-002",
-                            "title":  "Introduce typed DownloadError exception hierarchy replacing string-based error classification",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "Create DownloadError base exception with subclasses: NetworkError, BotDetectionError, RateLimitError, FormatError, AuthenticationError in src/downloader/errors.py",
-                                                       "Each exception class stores structured fields: category (str), severity (str), retryable (bool), original_message (str)",
-                                                       "classify_error_category() in src/downloader/error_classification.py returns a DownloadError instance instead of a plain string category",
-                                                       "is_network_failure() and is_escalation_error() use isinstance checks on the typed exception rather than re-matching regex patterns",
-                                                       "All existing callers of classify_error_category() in download_segments.py and core.py handle the new return type without behavior change",
-                                                       "Unit tests verify each error subclass is correctly instantiated from representative error strings"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Tier: foundational refactor. Implemented ClassifiedDownloadError hierarchy (extends existing DownloadError from types.py) with 6 subclasses: NetworkError, BotDetectionError, RateLimitError, FormatError, AuthenticationError, TimeoutError_. classify_error_category() returns typed instances with __eq__ supporting string comparison for backward compat. is_network_failure()/is_escalation_error() use isinstance fast-path when given typed errors. 24 new tests, all 188 pass. Files: src/downloader/errors.py (new), src/downloader/error_classification.py, src/stages/download_segments.py, src/downloader/__init__.py, tests/test_error_classification.py."
-                        },
-                        {
-                            "id":  "US-82-003",
-                            "title":  "Extract CircuitBreakerBuilder for fluent dependency wiring replacing set_X() methods",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "Create CircuitBreakerBuilder class in src/downloader/circuit_breaker.py with fluent .with_escalation_manager(), .with_budget(), .with_caption_circuit_breaker() methods",
-                                                       "Builder validates all required dependencies are set before .build() returns a CircuitBreaker instance",
-                                                       "Remove set_escalation_manager(), set_budget(), and set_caption_circuit_breaker() methods from CircuitBreaker class",
-                                                       "Update all call sites that construct and wire CircuitBreaker (in download_segments.py and core.py) to use the builder",
-                                                       "Builder raises ValueError with descriptive message if .build() is called without required dependencies"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Tier: structural refactor. Created CircuitBreakerBuilder with fluent .with_config(), .with_escalation_manager(), .with_budget(), .with_caption_circuit_breaker() methods and .build() that validates config is set (raises ValueError if not). Removed 3 set_* methods from CircuitBreaker; constructor now accepts optional dependency params directly. Updated 5 test files to use direct attribute assignment. No production call sites needed changes (set_* were only used in tests). All 62 cascade+budget tests pass; pre-existing jitter/escalation test failures unchanged."
-                        },
-                        {
-                            "id":  "US-82-004",
-                            "title":  "Extract EscalationMetrics from EscalationManager to separate metrics tracking from escalation decisions",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Create EscalationMetrics class in src/downloader/escalation_metrics.py with methods: record_attempt(), record_success(), record_failure(), get_timeline(), get_summary()",
-                                                       "EscalationManager delegates all metrics recording and retrieval to the new EscalationMetrics instance",
-                                                       "EscalationManager constructor accepts EscalationMetrics via parameter (default creates new instance)",
-                                                       "Timeline tracking (attempt timestamps, outcome history, tier transition log) lives entirely in EscalationMetrics",
-                                                       "Unit tests verify EscalationMetrics independently records and reports metrics without needing full EscalationManager"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Tier: decomposition refactor. Created EscalationMetrics class (348 lines) in src/downloader/escalation_metrics.py with record_attempt(), record_success(), record_failure(), record_escalation(), record_outcome(), get_timeline(), get_hot_keywords(), get_summary(), get_tier_effectiveness(), get_tier_recommendations(), to_dict()/from_dict(), reset(). EscalationManager now delegates all metrics tracking to _metrics instance via constructor injection (default creates new). Removed 7 metrics fields from EscalationManager, all methods delegate. 17 new standalone tests. 527 existing escalation tests pass (2 pre-existing de-escalation failures). Files: src/downloader/escalation_metrics.py (new), src/downloader/escalation_manager.py, src/downloader/__init__.py, tests/test_escalation_metrics.py (new), tests/test_escalation_timeline.py, tests/test_escalation_checkpoint_persistence.py, tests/test_speech_screening_escalation.py."
-                        },
-                        {
-                            "id":  "US-82-005",
-                            "title":  "Split KeywordManager out of checkpoint.py into dedicated src/keywords/manager.py",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Create src/keywords/manager.py containing KeywordManager class and SavedKeywords dataclass moved from src/checkpoint.py",
-                                                       "src/checkpoint.py no longer contains any keyword-related classes or functions",
-                                                       "All imports of KeywordManager and SavedKeywords across the codebase updated to new location",
-                                                       "Backward-compatible re-export from src/checkpoint.py via __all__ or direct import (for any external/test references)",
-                                                       "Unit tests for keyword save/load/list operations pass from the new module location"
-                                                   ],
-                            "passes":  true,
-                            "notes":  "Extracted KeywordManager, SavedKeywords, format_keyword_prompt to src/keywords/manager.py (209 lines). src/keywords/__init__.py re-exports all 3. checkpoint.py has backward-compatible re-export (line 50). main.py imports from src.keywords. 22 new tests in tests/test_keywords_manager.py verify imports, save/load/list/delete/persistence/old-format from new location. All 132 existing checkpoint tests + 22 new tests pass."
-                        },
-                        {
-                            "id":  "US-82-006",
-                            "title":  "Extract PipelineValidator from PipelineOrchestrator for pre-run validation logic",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Create PipelineValidator class in src/pipeline_validator.py with methods: validate_config(), validate_stages(), validate_checkpoint_compatibility(), validate_all()",
-                                                       "PipelineValidator.validate_all() returns a list of StageValidationResult objects (reuse existing dataclass)",
-                                                       "PipelineOrchestrator.run() delegates to PipelineValidator for all pre-run checks instead of inline validation",
-                                                       "PipelineValidator is independently constructable with just config and stage list (no orchestrator dependency)",
-                                                       "Unit tests verify validation catches: missing config fields, invalid stage order, incompatible checkpoint versions"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: decomposition refactor. Files: src/pipeline.py (1,612 lines - validation logic scattered in run() method ~lines 200-350, StageValidationResult at ~line 45), src/pipeline_validator.py (new file). The PipelineOrchestrator.run() method is 273 lines mixing validation, execution, metrics, and progress reporting. Extracting validation makes the orchestrator\u0027s run() focused on execution flow."
-                        },
-                        {
-                            "id":  "US-82-007",
-                            "title":  "Create DownloadOrchestrator abstraction to decouple download_segments stage from VideoDownloader internals",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "Create DownloadOrchestrator class in src/downloader/orchestrator.py with methods: download_segment(video_id, start, end) -\u003e DownloadResult, get_stats() -\u003e SegmentDownloadStats",
-                                                       "DownloadOrchestrator encapsulates VideoDownloader instantiation, escalation arg application, and retry logic",
-                                                       "DownloadVideoSegmentsStage receives DownloadOrchestrator via constructor parameter instead of creating VideoDownloader directly",
-                                                       "The stage\u0027s _execute_download_loop() calls orchestrator.download_segment() instead of managing yt-dlp opts directly",
-                                                       "Unit tests verify DownloadOrchestrator with a mock VideoDownloader handles success, retry, and escalation scenarios"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: abstraction layer. Files: src/stages/download_segments.py (1,803 lines - VideoDownloader instantiation at ~line 368, _apply_escalation_to_ydl_opts at ~line 962-989, download loop at ~lines 500-800), src/downloader/orchestrator.py (new file), src/downloader/core.py (VideoDownloader class). Currently the stage directly constructs and configures VideoDownloader, applies escalation args to yt-dlp opts, and manages retry loops - all implementation details that should be behind an abstraction."
-                        },
-                        {
-                            "id":  "US-82-008",
-                            "title":  "Extract composable PauseCalculator from CircuitBreaker replacing 5-step pause pipeline",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Create PauseCalculator class in src/downloader/pause_calculator.py with composable steps: base_pause(), escalation_adjusted(), budget_adjusted(), apply_jitter(), cap_duration()",
-                                                       "Each step is a standalone method that takes a PauseContext (dataclass with current_pause, escalation_tier, budget_remaining, config) and returns updated pause value",
-                                                       "CircuitBreaker delegates pause computation to PauseCalculator instance instead of internal _base_pause()/_escalation_adjusted_pause()/etc chain",
-                                                       "PauseCalculator steps can be unit tested individually without constructing a full CircuitBreaker",
-                                                       "Existing pause behavior (values and jitter ranges) is preserved exactly - verified by existing circuit breaker tests"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: structural refactor. Files: src/downloader/circuit_breaker.py (633 lines - pause pipeline at ~lines 300-500: _base_pause(), _escalation_adjusted_pause(), _budget_adjusted_pause(), _apply_jitter(), _cap_pause_duration()), src/downloader/pause_calculator.py (new file). The 5-step pause calculation pipeline is tightly coupled to CircuitBreaker state. Extracting it makes pause logic independently testable and reusable."
-                        },
-                        {
-                            "id":  "US-82-009",
-                            "title":  "Extract CheckpointMigrator from CheckpointManager for versioned checkpoint upgrades",
-                            "priority":  "medium",
-                            "acceptanceCriteria":  [
-                                                       "Create CheckpointMigrator class in src/checkpoint_migrator.py with method: migrate(data: dict, from_version: str, to_version: str) -\u003e dict",
-                                                       "Migration logic for v0.9-\u003ev1.0 and v1.0-\u003ev2.0 moved from CheckpointManager into CheckpointMigrator as separate migration functions",
-                                                       "CheckpointManager.load() delegates to CheckpointMigrator when checkpoint version differs from current version",
-                                                       "CheckpointMigrator can be unit tested with raw dict fixtures without needing file I/O or CheckpointManager",
-                                                       "Adding a future v2.0-\u003ev3.0 migration requires only adding one function to CheckpointMigrator (documented in docstring)"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: separation of concerns. Files: src/checkpoint.py (1,340 lines - migration logic at ~lines 478-571, version checking in load() at ~lines 300-350), src/checkpoint_migrator.py (new file). Migration logic is currently embedded in CheckpointManager.load(), making it hard to test individual version upgrades. The Strategy pattern (one function per version transition) makes future migrations trivial to add."
-                        },
-                        {
-                            "id":  "US-82-010",
-                            "title":  "Replace stage direct instantiation with constructor dependency injection for downloader components",
-                            "priority":  "high",
-                            "acceptanceCriteria":  [
-                                                       "DownloadVideoSegmentsStage constructor accepts optional circuit_breaker, escalation_manager, and rate_limit_budget parameters",
-                                                       "When parameters are None, stage creates default instances (preserving current behavior for production)",
-                                                       "Tests can inject mock/stub versions of circuit_breaker, escalation_manager, and rate_limit_budget",
-                                                       "At least 3 existing tests are simplified by injecting pre-configured mocks instead of monkeypatching internal construction",
-                                                       "Factory function create_download_stage() in src/stages/download_segments.py wires production defaults"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: testability improvement. Files: src/stages/download_segments.py (1,803 lines - constructor at ~lines 80-120, internal instantiation of CircuitBreaker/EscalationManager/RateLimitBudget at ~lines 350-400), tests/test_download_segment*.py (test files that currently monkeypatch). Currently the stage creates all its dependencies internally, forcing tests to use monkeypatching for isolation. Constructor injection with defaults preserves backward compatibility while enabling clean test setup."
-                        },
-                        {
-                            "id":  "US-82-011",
-                            "title":  "Extract PipelineEventBus from PipelineOrchestrator for decoupled stage lifecycle notifications",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "Create PipelineEventBus class in src/pipeline_events.py with methods: subscribe(event_type, handler), emit(event), get_handlers(event_type)",
-                                                       "PipelineEvent dataclass (already exists) is used as the event payload with type field for routing",
-                                                       "PipelineOrchestrator uses PipelineEventBus for all stage start/complete/error notifications instead of direct callback calls",
-                                                       "Event handlers registered via subscribe() are called in order of registration",
-                                                       "Unit tests verify event subscription, emission, ordering, and handler error isolation (one failing handler doesn\u0027t block others)"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: decoupling refactor. Files: src/pipeline.py (1,612 lines - PipelineEvent at ~line 45, event emission scattered in run() at ~lines 200-470, hook calls in _emit_event() method), src/pipeline_events.py (new file). The orchestrator currently manages event emission inline during execution. A dedicated event bus enables external subscribers (logging, metrics, monitoring) without modifying the orchestrator."
-                        },
-                        {
-                            "id":  "US-82-012",
-                            "title":  "Deduplicate error severity patterns between error_classification.py and common/error_patterns.py",
-                            "priority":  "low",
-                            "acceptanceCriteria":  [
-                                                       "Identify all duplicated error pattern definitions between src/downloader/error_classification.py and src/common/error_patterns.py",
-                                                       "Create single source of truth for shared patterns in src/common/error_patterns.py",
-                                                       "src/downloader/error_classification.py imports shared patterns from src/common/error_patterns.py instead of redefining them",
-                                                       "classify_error_severity() in error_classification.py uses the shared patterns without behavioral change",
-                                                       "Unit tests verify error severity classification produces identical results before and after deduplication"
-                                                   ],
-                            "passes":  false,
-                            "notes":  "Tier: code hygiene. Files: src/downloader/error_classification.py (275 lines - ERROR_SEVERITY_PATTERNS at ~lines 117-131), src/common/error_patterns.py (shared patterns module). The ERROR_SEVERITY_PATTERNS dict in error_classification.py duplicates patterns already defined in common/error_patterns.py. This creates a maintenance burden where pattern updates must be made in two places and can drift."
-                        }
-                    ]
+    "sprintNumber": 82,
+    "focusArea": "architecture",
+    "branchName": "ralph/sprint-82",
+    "projectContext": {
+        "sourceDir": "src/",
+        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+        "testsDir": "tests/",
+        "testFramework": "pytest",
+        "testCommand": "pytest tests/ -v --tb=short"
+    },
+    "userStories": [
+        {
+            "id": "US-82-001",
+            "acceptanceCriteria": [
+                "Read scripts/ralph/config/ralph-config.json to understand the 'architecture' focus area",
+                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                "Read CLAUDE.md for project conventions and known issues",
+                "Analyze the codebase to find 8-12 specific improvements for 'architecture'",
+                "Add stories US-82-002 through US-82-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                "Each story MUST have 4-6 testable acceptance criteria",
+                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                "IMPORTANT: Story IDs MUST follow format US-82-NNN to be unique across sprints",
+                "Mark this story (US-82-001) as passes: true when done"
+            ],
+            "passes": true,
+            "priority": "high",
+            "title": "Generate sprint stories for architecture focus area",
+            "notes": "Seed story completed. Generated 11 architecture stories (US-82-002 through US-82-012) covering: error classification typed hierarchy, circuit breaker builder pattern, escalation metrics extraction, checkpoint keyword manager split, pipeline validator extraction, download orchestrator abstraction, pause calculator composition, checkpoint migration extraction, stage dependency injection, pipeline event bus extraction, and error pattern deduplication."
+        },
+        {
+            "id": "US-82-002",
+            "title": "Introduce typed DownloadError exception hierarchy replacing string-based error classification",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "Create DownloadError base exception with subclasses: NetworkError, BotDetectionError, RateLimitError, FormatError, AuthenticationError in src/downloader/errors.py",
+                "Each exception class stores structured fields: category (str), severity (str), retryable (bool), original_message (str)",
+                "classify_error_category() in src/downloader/error_classification.py returns a DownloadError instance instead of a plain string category",
+                "is_network_failure() and is_escalation_error() use isinstance checks on the typed exception rather than re-matching regex patterns",
+                "All existing callers of classify_error_category() in download_segments.py and core.py handle the new return type without behavior change",
+                "Unit tests verify each error subclass is correctly instantiated from representative error strings"
+            ],
+            "passes": true,
+            "notes": "Tier: foundational refactor. Implemented ClassifiedDownloadError hierarchy (extends existing DownloadError from types.py) with 6 subclasses: NetworkError, BotDetectionError, RateLimitError, FormatError, AuthenticationError, TimeoutError_. classify_error_category() returns typed instances with __eq__ supporting string comparison for backward compat. is_network_failure()/is_escalation_error() use isinstance fast-path when given typed errors. 24 new tests, all 188 pass. Files: src/downloader/errors.py (new), src/downloader/error_classification.py, src/stages/download_segments.py, src/downloader/__init__.py, tests/test_error_classification.py."
+        },
+        {
+            "id": "US-82-003",
+            "title": "Extract CircuitBreakerBuilder for fluent dependency wiring replacing set_X() methods",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "Create CircuitBreakerBuilder class in src/downloader/circuit_breaker.py with fluent .with_escalation_manager(), .with_budget(), .with_caption_circuit_breaker() methods",
+                "Builder validates all required dependencies are set before .build() returns a CircuitBreaker instance",
+                "Remove set_escalation_manager(), set_budget(), and set_caption_circuit_breaker() methods from CircuitBreaker class",
+                "Update all call sites that construct and wire CircuitBreaker (in download_segments.py and core.py) to use the builder",
+                "Builder raises ValueError with descriptive message if .build() is called without required dependencies"
+            ],
+            "passes": true,
+            "notes": "Tier: structural refactor. Created CircuitBreakerBuilder with fluent .with_config(), .with_escalation_manager(), .with_budget(), .with_caption_circuit_breaker() methods and .build() that validates config is set (raises ValueError if not). Removed 3 set_* methods from CircuitBreaker; constructor now accepts optional dependency params directly. Updated 5 test files to use direct attribute assignment. No production call sites needed changes (set_* were only used in tests). All 62 cascade+budget tests pass; pre-existing jitter/escalation test failures unchanged."
+        },
+        {
+            "id": "US-82-004",
+            "title": "Extract EscalationMetrics from EscalationManager to separate metrics tracking from escalation decisions",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Create EscalationMetrics class in src/downloader/escalation_metrics.py with methods: record_attempt(), record_success(), record_failure(), get_timeline(), get_summary()",
+                "EscalationManager delegates all metrics recording and retrieval to the new EscalationMetrics instance",
+                "EscalationManager constructor accepts EscalationMetrics via parameter (default creates new instance)",
+                "Timeline tracking (attempt timestamps, outcome history, tier transition log) lives entirely in EscalationMetrics",
+                "Unit tests verify EscalationMetrics independently records and reports metrics without needing full EscalationManager"
+            ],
+            "passes": true,
+            "notes": "Tier: decomposition refactor. Created EscalationMetrics class (348 lines) in src/downloader/escalation_metrics.py with record_attempt(), record_success(), record_failure(), record_escalation(), record_outcome(), get_timeline(), get_hot_keywords(), get_summary(), get_tier_effectiveness(), get_tier_recommendations(), to_dict()/from_dict(), reset(). EscalationManager now delegates all metrics tracking to _metrics instance via constructor injection (default creates new). Removed 7 metrics fields from EscalationManager, all methods delegate. 17 new standalone tests. 527 existing escalation tests pass (2 pre-existing de-escalation failures). Files: src/downloader/escalation_metrics.py (new), src/downloader/escalation_manager.py, src/downloader/__init__.py, tests/test_escalation_metrics.py (new), tests/test_escalation_timeline.py, tests/test_escalation_checkpoint_persistence.py, tests/test_speech_screening_escalation.py."
+        },
+        {
+            "id": "US-82-005",
+            "title": "Split KeywordManager out of checkpoint.py into dedicated src/keywords/manager.py",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Create src/keywords/manager.py containing KeywordManager class and SavedKeywords dataclass moved from src/checkpoint.py",
+                "src/checkpoint.py no longer contains any keyword-related classes or functions",
+                "All imports of KeywordManager and SavedKeywords across the codebase updated to new location",
+                "Backward-compatible re-export from src/checkpoint.py via __all__ or direct import (for any external/test references)",
+                "Unit tests for keyword save/load/list operations pass from the new module location"
+            ],
+            "passes": true,
+            "notes": "All 5 criteria verified: KeywordManager/SavedKeywords in src/keywords/manager.py, no keyword classes in checkpoint.py, imports updated (main.py uses src.keywords), backward-compatible re-exports in checkpoint.py line 50, 22/22 unit tests pass."
+        },
+        {
+            "id": "US-82-006",
+            "title": "Extract PipelineValidator from PipelineOrchestrator for pre-run validation logic",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Create PipelineValidator class in src/pipeline_validator.py with methods: validate_config(), validate_stages(), validate_checkpoint_compatibility(), validate_all()",
+                "PipelineValidator.validate_all() returns a list of StageValidationResult objects (reuse existing dataclass)",
+                "PipelineOrchestrator.run() delegates to PipelineValidator for all pre-run checks instead of inline validation",
+                "PipelineValidator is independently constructable with just config and stage list (no orchestrator dependency)",
+                "Unit tests verify validation catches: missing config fields, invalid stage order, incompatible checkpoint versions"
+            ],
+            "passes": true,
+            "notes": "Extracted PipelineValidator to src/pipeline_validator.py with validate_config(), validate_stages(), validate_checkpoint_compatibility(), validate_all(). PipelineOrchestrator delegates validation via _validator. StageValidationResult moved to pipeline_validator.py. 24 new tests, 199 existing pipeline tests pass."
+        },
+        {
+            "id": "US-82-007",
+            "title": "Create DownloadOrchestrator abstraction to decouple download_segments stage from VideoDownloader internals",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "Create DownloadOrchestrator class in src/downloader/orchestrator.py with methods: download_segment(video_id, start, end) -> DownloadResult, get_stats() -> SegmentDownloadStats",
+                "DownloadOrchestrator encapsulates VideoDownloader instantiation, escalation arg application, and retry logic",
+                "DownloadVideoSegmentsStage receives DownloadOrchestrator via constructor parameter instead of creating VideoDownloader directly",
+                "The stage's _execute_download_loop() calls orchestrator.download_segment() instead of managing yt-dlp opts directly",
+                "Unit tests verify DownloadOrchestrator with a mock VideoDownloader handles success, retry, and escalation scenarios"
+            ],
+            "passes": false,
+            "notes": "Tier: abstraction layer. Files: src/stages/download_segments.py (1,803 lines - VideoDownloader instantiation at ~line 368, _apply_escalation_to_ydl_opts at ~line 962-989, download loop at ~lines 500-800), src/downloader/orchestrator.py (new file), src/downloader/core.py (VideoDownloader class). Currently the stage directly constructs and configures VideoDownloader, applies escalation args to yt-dlp opts, and manages retry loops - all implementation details that should be behind an abstraction."
+        },
+        {
+            "id": "US-82-008",
+            "title": "Extract composable PauseCalculator from CircuitBreaker replacing 5-step pause pipeline",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Create PauseCalculator class in src/downloader/pause_calculator.py with composable steps: base_pause(), escalation_adjusted(), budget_adjusted(), apply_jitter(), cap_duration()",
+                "Each step is a standalone method that takes a PauseContext (dataclass with current_pause, escalation_tier, budget_remaining, config) and returns updated pause value",
+                "CircuitBreaker delegates pause computation to PauseCalculator instance instead of internal _base_pause()/_escalation_adjusted_pause()/etc chain",
+                "PauseCalculator steps can be unit tested individually without constructing a full CircuitBreaker",
+                "Existing pause behavior (values and jitter ranges) is preserved exactly - verified by existing circuit breaker tests"
+            ],
+            "passes": false,
+            "notes": "Tier: structural refactor. Files: src/downloader/circuit_breaker.py (633 lines - pause pipeline at ~lines 300-500: _base_pause(), _escalation_adjusted_pause(), _budget_adjusted_pause(), _apply_jitter(), _cap_pause_duration()), src/downloader/pause_calculator.py (new file). The 5-step pause calculation pipeline is tightly coupled to CircuitBreaker state. Extracting it makes pause logic independently testable and reusable."
+        },
+        {
+            "id": "US-82-009",
+            "title": "Extract CheckpointMigrator from CheckpointManager for versioned checkpoint upgrades",
+            "priority": "medium",
+            "acceptanceCriteria": [
+                "Create CheckpointMigrator class in src/checkpoint_migrator.py with method: migrate(data: dict, from_version: str, to_version: str) -> dict",
+                "Migration logic for v0.9->v1.0 and v1.0->v2.0 moved from CheckpointManager into CheckpointMigrator as separate migration functions",
+                "CheckpointManager.load() delegates to CheckpointMigrator when checkpoint version differs from current version",
+                "CheckpointMigrator can be unit tested with raw dict fixtures without needing file I/O or CheckpointManager",
+                "Adding a future v2.0->v3.0 migration requires only adding one function to CheckpointMigrator (documented in docstring)"
+            ],
+            "passes": false,
+            "notes": "Tier: separation of concerns. Files: src/checkpoint.py (1,340 lines - migration logic at ~lines 478-571, version checking in load() at ~lines 300-350), src/checkpoint_migrator.py (new file). Migration logic is currently embedded in CheckpointManager.load(), making it hard to test individual version upgrades. The Strategy pattern (one function per version transition) makes future migrations trivial to add."
+        },
+        {
+            "id": "US-82-010",
+            "title": "Replace stage direct instantiation with constructor dependency injection for downloader components",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "DownloadVideoSegmentsStage constructor accepts optional circuit_breaker, escalation_manager, and rate_limit_budget parameters",
+                "When parameters are None, stage creates default instances (preserving current behavior for production)",
+                "Tests can inject mock/stub versions of circuit_breaker, escalation_manager, and rate_limit_budget",
+                "At least 3 existing tests are simplified by injecting pre-configured mocks instead of monkeypatching internal construction",
+                "Factory function create_download_stage() in src/stages/download_segments.py wires production defaults"
+            ],
+            "passes": false,
+            "notes": "Tier: testability improvement. Files: src/stages/download_segments.py (1,803 lines - constructor at ~lines 80-120, internal instantiation of CircuitBreaker/EscalationManager/RateLimitBudget at ~lines 350-400), tests/test_download_segment*.py (test files that currently monkeypatch). Currently the stage creates all its dependencies internally, forcing tests to use monkeypatching for isolation. Constructor injection with defaults preserves backward compatibility while enabling clean test setup."
+        },
+        {
+            "id": "US-82-011",
+            "title": "Extract PipelineEventBus from PipelineOrchestrator for decoupled stage lifecycle notifications",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Create PipelineEventBus class in src/pipeline_events.py with methods: subscribe(event_type, handler), emit(event), get_handlers(event_type)",
+                "PipelineEvent dataclass (already exists) is used as the event payload with type field for routing",
+                "PipelineOrchestrator uses PipelineEventBus for all stage start/complete/error notifications instead of direct callback calls",
+                "Event handlers registered via subscribe() are called in order of registration",
+                "Unit tests verify event subscription, emission, ordering, and handler error isolation (one failing handler doesn't block others)"
+            ],
+            "passes": false,
+            "notes": "Tier: decoupling refactor. Files: src/pipeline.py (1,612 lines - PipelineEvent at ~line 45, event emission scattered in run() at ~lines 200-470, hook calls in _emit_event() method), src/pipeline_events.py (new file). The orchestrator currently manages event emission inline during execution. A dedicated event bus enables external subscribers (logging, metrics, monitoring) without modifying the orchestrator."
+        },
+        {
+            "id": "US-82-012",
+            "title": "Deduplicate error severity patterns between error_classification.py and common/error_patterns.py",
+            "priority": "low",
+            "acceptanceCriteria": [
+                "Identify all duplicated error pattern definitions between src/downloader/error_classification.py and src/common/error_patterns.py",
+                "Create single source of truth for shared patterns in src/common/error_patterns.py",
+                "src/downloader/error_classification.py imports shared patterns from src/common/error_patterns.py instead of redefining them",
+                "classify_error_severity() in error_classification.py uses the shared patterns without behavioral change",
+                "Unit tests verify error severity classification produces identical results before and after deduplication"
+            ],
+            "passes": false,
+            "notes": "Tier: code hygiene. Files: src/downloader/error_classification.py (275 lines - ERROR_SEVERITY_PATTERNS at ~lines 117-131), src/common/error_patterns.py (shared patterns module). The ERROR_SEVERITY_PATTERNS dict in error_classification.py duplicates patterns already defined in common/error_patterns.py. This creates a maintenance burden where pattern updates must be made in two places and can drift."
+        }
+    ]
 }
