@@ -174,7 +174,7 @@
       "id": "US-81-012",
       "title": "Add pipeline event hooks for extensible stage lifecycle callbacks",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "PipelineOrchestrator supports registering multiple callbacks for events: before_stage, after_stage, on_stage_error, on_pipeline_complete",
         "Callbacks receive a PipelineEvent dataclass with fields: event_type, stage_name, timestamp, data (dict), error (optional)",
@@ -182,7 +182,7 @@
         "Multiple callbacks can be registered per event type and are called in registration order",
         "A test verifies that registering 2 callbacks for after_stage results in both being called with correct PipelineEvent data"
       ],
-      "notes": "Tier: architecture. Currently pipeline has on_stage_start/on_stage_complete as single callbacks. A proper event system enables plugins (progress reporter, metrics exporter, logging hooks) without modifying pipeline code. Source files: src/pipeline.py (add PipelineEvent dataclass, event registry, register_hook/emit_event methods). Keep backward compatible - existing callback params still work."
+      "notes": "Added PipelineEvent dataclass and EventCallback type alias. PipelineOrchestrator gains _event_hooks registry (defaultdict of lists), register_hook() and emit_event() methods. Pipeline.run() emits before_stage, after_stage, on_stage_error, and on_pipeline_complete events at appropriate lifecycle points. Legacy on_stage_start/on_stage_complete params preserved for backward compat. 16 tests in tests/test_pipeline_event_hooks.py cover: dataclass fields/defaults, single/multiple hooks, registration order, exception isolation, all 4 event types during run(), legacy callback compat, and pipeline-complete-on-failure guard."
     }
   ]
 }

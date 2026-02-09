@@ -25,8 +25,9 @@ import logging
 import os
 import shutil
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
@@ -44,6 +45,27 @@ if TYPE_CHECKING:
 # Type aliases for callbacks
 StageStartCallback = Callable[[str], None]  # (stage_name) -> None
 StageCompleteCallback = Callable[[str, StageResult, float], None]  # (stage_name, result, elapsed_seconds) -> None
+
+# Event hook callback type: receives a PipelineEvent
+EventCallback = Callable[['PipelineEvent'], None]
+
+
+@dataclass
+class PipelineEvent:
+    """Structured event emitted during pipeline lifecycle.
+
+    Attributes:
+        event_type: One of 'before_stage', 'after_stage', 'on_stage_error', 'on_pipeline_complete'
+        stage_name: Name of the stage (empty string for pipeline-level events)
+        timestamp: Unix timestamp when the event was created
+        data: Arbitrary data dict (e.g., elapsed time, metrics)
+        error: Optional error string if the event relates to a failure
+    """
+    event_type: str
+    stage_name: str
+    timestamp: float
+    data: Dict[str, Any] = field(default_factory=dict)
+    error: Optional[str] = None
 
 
 @dataclass
@@ -124,10 +146,42 @@ class PipelineOrchestrator:
         # Progress reporter for real-time progress.json updates
         self.progress_reporter = ProgressReporter(project_dir)
 
+        # Event hook registry: event_type -> list of callbacks (US-81-012)
+        self._event_hooks: Dict[str, List[EventCallback]] = defaultdict(list)
+
     def add_stage(self, stage: Stage) -> 'PipelineOrchestrator':
         """Add a stage to the pipeline (fluent interface)"""
         self.stages.append(stage)
         return self
+
+    def register_hook(self, event_type: str, callback: EventCallback) -> None:
+        """Register a callback for a pipeline event type.
+
+        Multiple callbacks can be registered per event type. They are called
+        in registration order when the event is emitted.
+
+        Args:
+            event_type: One of 'before_stage', 'after_stage', 'on_stage_error',
+                        'on_pipeline_complete'
+            callback: Function that receives a PipelineEvent
+        """
+        self._event_hooks[event_type].append(callback)
+
+    def emit_event(self, event: PipelineEvent) -> None:
+        """Emit a pipeline event, calling all registered hooks in order.
+
+        Callback exceptions are logged but do not interrupt pipeline execution.
+
+        Args:
+            event: The PipelineEvent to emit
+        """
+        for callback in self._event_hooks.get(event.event_type, []):
+            try:
+                callback(event)
+            except Exception as e:
+                logger.warning(
+                    f"Event hook failed for {event.event_type}/{event.stage_name}: {e}"
+                )
 
     def load_checkpoint(self) -> bool:
         """
@@ -818,12 +872,19 @@ class PipelineOrchestrator:
             # Snapshot critical state fields before execution for rollback on failure
             state_snapshot = self._snapshot_state()
 
-            # Invoke on_stage_start callback
+            # Invoke on_stage_start callback (legacy)
             if on_stage_start:
                 try:
                     on_stage_start(stage_name)
                 except Exception as e:
                     logger.warning(f"on_stage_start callback failed for {stage_name}: {e}")
+
+            # Emit before_stage event (US-81-012)
+            self.emit_event(PipelineEvent(
+                event_type='before_stage',
+                stage_name=stage_name,
+                timestamp=time.time(),
+            ))
 
             # Start progress tracking for this stage
             self.progress_reporter.start_stage(stage_name)
@@ -850,7 +911,7 @@ class PipelineOrchestrator:
                 # Create default metrics with just duration
                 self.stage_metrics[stage_name] = StageMetrics(duration_seconds=elapsed)
 
-            # Invoke on_stage_complete callback
+            # Invoke on_stage_complete callback (legacy)
             if on_stage_complete:
                 try:
                     on_stage_complete(stage_name, result, elapsed)
@@ -859,6 +920,15 @@ class PipelineOrchestrator:
 
             # Handle result
             if not result.success:
+                # Emit on_stage_error event (US-81-012)
+                self.emit_event(PipelineEvent(
+                    event_type='on_stage_error',
+                    stage_name=stage_name,
+                    timestamp=time.time(),
+                    data={'elapsed': elapsed},
+                    error=result.error,
+                ))
+
                 # Rollback state to pre-stage snapshot
                 self._rollback_state(state_snapshot, stage_name)
 
@@ -891,6 +961,15 @@ class PipelineOrchestrator:
 
             self.progress_reporter.finish_stage()
             completed_stages.add(stage_name)
+
+            # Emit after_stage event (US-81-012)
+            self.emit_event(PipelineEvent(
+                event_type='after_stage',
+                stage_name=stage_name,
+                timestamp=time.time(),
+                data={'elapsed': elapsed, 'success': True},
+            ))
+
             logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
 
             # Save timing to history for future predictions (US-81-010)
@@ -910,6 +989,14 @@ class PipelineOrchestrator:
         self._print_timing_summary(total_duration, skipped_stages)
 
         self.progress_reporter.finish_pipeline()
+
+        # Emit on_pipeline_complete event (US-81-012)
+        self.emit_event(PipelineEvent(
+            event_type='on_pipeline_complete',
+            stage_name='',
+            timestamp=time.time(),
+            data={'total_duration': total_duration, 'stages_run': list(self.stage_timings.keys())},
+        ))
 
         return True
 
