@@ -199,3 +199,126 @@ class TestPopulateTextMetadataPropagation:
         # Should NOT be overwritten since caption was unavailable
         assert state.video_search_results[0].video_chapters == SAMPLE_CHAPTERS
         assert state.video_search_results[0].video_tags == SAMPLE_TAGS
+
+
+@pytest.mark.fast
+class TestVSRToDownloadedVideoPropagation:
+    """US-84-011: Test video_chapters/video_tags propagate from VSR to DownloadedVideo."""
+
+    def test_propagates_chapters_and_tags(self):
+        """Chapters and tags from VSR are copied to DownloadedVideo after download."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        state = PipelineState()
+        state.video_search_results = [
+            VideoSearchResult(
+                video_id='abc123',
+                title='Test Video',
+                video_chapters=SAMPLE_CHAPTERS,
+                video_tags=SAMPLE_TAGS,
+            ),
+        ]
+
+        downloaded = [
+            DownloadedVideo(file='/tmp/abc123_0_60.mp4', source='segment_download'),
+        ]
+
+        DownloadVideoSegmentsStage._propagate_vsr_metadata(state, downloaded)
+
+        assert downloaded[0].video_chapters == SAMPLE_CHAPTERS
+        assert downloaded[0].video_tags == SAMPLE_TAGS
+
+    def test_no_propagation_when_vsr_empty(self):
+        """No crash when VSR has no chapters/tags."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        state = PipelineState()
+        state.video_search_results = [
+            VideoSearchResult(video_id='abc123', title='No Metadata'),
+        ]
+
+        downloaded = [
+            DownloadedVideo(file='/tmp/abc123_0_60.mp4', source='segment_download'),
+        ]
+
+        DownloadVideoSegmentsStage._propagate_vsr_metadata(state, downloaded)
+
+        assert downloaded[0].video_chapters == []
+        assert downloaded[0].video_tags == []
+
+    def test_no_crash_empty_inputs(self):
+        """No crash with empty state or empty download list."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        state = PipelineState()
+        DownloadVideoSegmentsStage._propagate_vsr_metadata(state, [])
+
+        state.video_search_results = [VideoSearchResult(video_id='x')]
+        DownloadVideoSegmentsStage._propagate_vsr_metadata(state, [])
+
+    def test_video_id_with_underscores(self):
+        """Video IDs containing underscores are correctly extracted from filename."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        state = PipelineState()
+        state.video_search_results = [
+            VideoSearchResult(
+                video_id='abc_def',
+                video_chapters=[{'title': 'Ch1', 'start_time': 0, 'end_time': 30}],
+                video_tags=['tag1'],
+            ),
+        ]
+
+        downloaded = [
+            DownloadedVideo(file='/tmp/abc_def_0_30.mp4', source='segment_download'),
+        ]
+
+        DownloadVideoSegmentsStage._propagate_vsr_metadata(state, downloaded)
+
+        assert downloaded[0].video_chapters == [{'title': 'Ch1', 'start_time': 0, 'end_time': 30}]
+        assert downloaded[0].video_tags == ['tag1']
+
+    def test_dict_vsr_support(self):
+        """VSR stored as dict (from checkpoint) is handled correctly."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        state = PipelineState()
+        state.video_search_results = [
+            {
+                'video_id': 'abc123',
+                'video_chapters': SAMPLE_CHAPTERS,
+                'video_tags': SAMPLE_TAGS,
+            },
+        ]
+
+        downloaded = [
+            DownloadedVideo(file='/tmp/abc123_0_60.mp4', source='segment_download'),
+        ]
+
+        DownloadVideoSegmentsStage._propagate_vsr_metadata(state, downloaded)
+
+        assert downloaded[0].video_chapters == SAMPLE_CHAPTERS
+        assert downloaded[0].video_tags == SAMPLE_TAGS
+
+    def test_checkpoint_roundtrip_with_propagated_fields(self):
+        """DownloadedVideo with propagated fields survives JSON serialization."""
+        dv = DownloadedVideo(
+            file='test.mp4',
+            video_chapters=SAMPLE_CHAPTERS,
+            video_tags=SAMPLE_TAGS,
+        )
+        d = asdict(dv)
+        json_str = json.dumps(d)
+        restored = json.loads(json_str)
+
+        assert restored['video_chapters'] == SAMPLE_CHAPTERS
+        assert restored['video_tags'] == SAMPLE_TAGS
+
+        # Reconstruct DownloadedVideo from restored data
+        dv2 = DownloadedVideo(
+            file=restored['file'],
+            video_chapters=restored.get('video_chapters', []),
+            video_tags=restored.get('video_tags', []),
+        )
+        assert dv2.video_chapters == SAMPLE_CHAPTERS
+        assert dv2.video_tags == SAMPLE_TAGS

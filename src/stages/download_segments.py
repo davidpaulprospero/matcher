@@ -520,6 +520,9 @@ class DownloadVideoSegmentsStage(Stage):
             # Update matches to reference local files
             self._update_matches_with_local_paths(state, downloaded_segments)
 
+            # US-84-011: Propagate video_chapters/video_tags from VSR to DownloadedVideo
+            self._propagate_vsr_metadata(state, downloaded_segments)
+
             # Store downloaded segments in state
             state.downloaded_segments = downloaded_segments
 
@@ -1687,6 +1690,56 @@ class DownloadVideoSegmentsStage(Stage):
                     updated_count += 1
 
         logger.info(f"Updated {updated_count} matches with local file paths")
+
+    @staticmethod
+    def _propagate_vsr_metadata(
+        state: 'PipelineState',
+        downloaded_segments: List['DownloadedVideo'],
+    ) -> None:
+        """US-84-011: Copy video_chapters/video_tags from VideoSearchResult to DownloadedVideo.
+
+        After download, DownloadedVideo instances lack metadata from their
+        source VideoSearchResult.  This method builds a video_id lookup from
+        state.video_search_results and copies the two fields over.
+        """
+        if not state.video_search_results or not downloaded_segments:
+            return
+
+        # Build video_id -> VSR lookup
+        vsr_lookup: Dict[str, Any] = {}
+        for vsr in state.video_search_results:
+            if isinstance(vsr, dict):
+                vid = vsr.get('video_id', '')
+            else:
+                vid = getattr(vsr, 'video_id', '')
+            if vid:
+                vsr_lookup[vid] = vsr
+
+        propagated = 0
+        for dv in downloaded_segments:
+            filename = Path(dv.file).stem
+            parts = filename.rsplit('_', 2)
+            video_id = parts[0] if parts else ''
+            if video_id and video_id in vsr_lookup:
+                vsr = vsr_lookup[video_id]
+                if isinstance(vsr, dict):
+                    chapters = vsr.get('video_chapters', [])
+                    tags = vsr.get('video_tags', [])
+                else:
+                    chapters = getattr(vsr, 'video_chapters', [])
+                    tags = getattr(vsr, 'video_tags', [])
+                if chapters:
+                    dv.video_chapters = chapters
+                if tags:
+                    dv.video_tags = tags
+                if chapters or tags:
+                    propagated += 1
+
+        if propagated:
+            logger.info(
+                f"US-84-011: Propagated video_chapters/video_tags to "
+                f"{propagated}/{len(downloaded_segments)} downloaded segments"
+            )
 
     def can_skip(
         self,
