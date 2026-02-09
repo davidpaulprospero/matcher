@@ -500,7 +500,7 @@ class TestRetryQueueIntegration:
             mock_ydl_class.return_value.__exit__.return_value = False
 
             # Call download (will fail and add to retry queue)
-            result, _stats = stage._download_segments(
+            result, _stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -568,7 +568,7 @@ class TestRetryQueueIntegration:
             mock_ydl_class.return_value.__exit__.return_value = False
 
             # Should not raise even without retry queue
-            result, _stats = stage._download_segments(
+            result, _stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -856,7 +856,7 @@ class TestNetworkFailureCircuitBreaker:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            result, _stats = stage._download_segments(
+            result, _stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -900,7 +900,7 @@ class TestNetworkFailureCircuitBreaker:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            result, _stats = stage._download_segments(
+            result, _stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -929,7 +929,7 @@ class TestNetworkFailureCircuitBreaker:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            result, _stats = stage._download_segments(
+            result, _stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -1611,7 +1611,7 @@ class TestDownloadProgressReporting:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            _downloaded, stats = stage._download_segments(
+            _downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -1677,7 +1677,7 @@ class TestDownloadProgressReporting:
         ]
 
         with patch.object(stage, '_process_retry_queue'):
-            _downloaded, stats = stage._download_segments(
+            _downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2176,7 +2176,7 @@ class TestStageMetricsCollection:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            _downloaded, stats = stage._download_segments(
+            _downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2211,7 +2211,7 @@ class TestStageMetricsCollection:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            _downloaded, stats = stage._download_segments(
+            _downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2241,7 +2241,7 @@ class TestStageMetricsCollection:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            _downloaded, stats = stage._download_segments(
+            _downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2261,7 +2261,7 @@ class TestStageMetricsCollection:
         ]
 
         with patch.object(stage, '_process_retry_queue'):
-            _downloaded, stats = stage._download_segments(
+            _downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2801,7 +2801,7 @@ class TestSegmentStallTimeout:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2850,7 +2850,7 @@ class TestSegmentStallTimeout:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2895,7 +2895,7 @@ class TestSegmentStallTimeout:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2936,7 +2936,7 @@ class TestSegmentStallTimeout:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -2987,7 +2987,7 @@ class TestSegmentStallTimeout:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3050,7 +3050,7 @@ class TestSegmentStallTimeout:
             mock_cm.__exit__ = MagicMock(return_value=False)
             mock_ydl_class.return_value = mock_cm
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3237,7 +3237,7 @@ class TestBotDetectionTierFloor:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            result, stats = stage._download_segments(
+            result, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3276,7 +3276,7 @@ class TestBotDetectionTierFloor:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            result, stats = stage._download_segments(
+            result, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3349,7 +3349,7 @@ class TestBotDetectionAbortCounter:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            _, stats = stage._download_segments(
+            _, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3378,7 +3378,7 @@ class TestBotDetectionAbortCounter:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            _, stats = stage._download_segments(
+            _, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3447,7 +3447,7 @@ class TestBotDetectionAbortCounter:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            _, stats = stage._download_segments(
+            _, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3488,7 +3488,7 @@ class TestBotDetectionAbortCounter:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            _, stats = stage._download_segments(
+            _, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3534,7 +3534,7 @@ class TestBotDetectionAbortCounter:
             mock_ydl_class.return_value.__enter__.return_value = mock_ydl_instance
             mock_ydl_class.return_value.__exit__.return_value = False
 
-            _, stats = stage._download_segments(
+            _, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3604,7 +3604,7 @@ class TestDownloadStallDetection:
             mock_cls.return_value.__enter__.return_value = mock_ydl
             mock_cls.return_value.__exit__.return_value = False
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3665,7 +3665,7 @@ class TestDownloadStallDetection:
             mock_cls.return_value.__enter__.return_value = mock_ydl
             mock_cls.return_value.__exit__.return_value = False
 
-            _, stats = stage._download_segments(
+            _, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3759,7 +3759,7 @@ class TestDownloadStallDetection:
             mock_cls.return_value.__enter__.return_value = mock_ydl
             mock_cls.return_value.__exit__.return_value = False
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -3789,7 +3789,7 @@ class TestDownloadStallDetection:
             mock_cls.return_value.__enter__.return_value = mock_ydl
             mock_cls.return_value.__exit__.return_value = False
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments, tmp_path, buffer_seconds=5.0, progress_callback=None
             )
 
@@ -4282,7 +4282,7 @@ class TestPartialStageResume:
             progress_calls.append((current, total, len(downloaded)))
 
         partial_progress = {'completed_ids': [], 'failed_ids': [], 'total_count': 20}
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments, output_dir, buffer_seconds, mock_progress,
             partial_progress=partial_progress,
         )
@@ -4345,7 +4345,7 @@ class TestPartialStageResume:
 
         partial_progress = {'completed_ids': [], 'failed_ids': [], 'total_count': 2}
 
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments, output_dir, buffer_seconds, None,
             partial_progress=partial_progress,
         )
@@ -4400,7 +4400,7 @@ class TestPartialStageResume:
 
         # Track what gets saved via partial_progress
         partial_progress = {'completed_ids': [], 'failed_ids': [], 'total_count': 3}
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments, output_dir, buffer_seconds, None,
             partial_progress=partial_progress,
         )

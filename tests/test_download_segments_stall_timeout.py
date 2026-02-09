@@ -109,7 +109,7 @@ class TestStallTimeoutTriggers:
         with patch('yt_dlp.YoutubeDL') as mock_cls:
             _setup_ydl_mock(mock_cls, _download)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_stall_timeout"),
                 buffer_seconds=5.0,
@@ -174,7 +174,7 @@ class TestStallTimeoutTriggers:
             _setup_ydl_mock(mock_cls, _download)
 
             start_time = time.time()
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_stall_config"),
                 buffer_seconds=5.0,
@@ -218,7 +218,7 @@ class TestSuccessfulDownloadNotInterrupted:
         with patch('yt_dlp.YoutubeDL') as mock_cls:
             _setup_ydl_mock(mock_cls, _fast_download)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -252,7 +252,7 @@ class TestSuccessfulDownloadNotInterrupted:
         with patch('yt_dlp.YoutubeDL') as mock_cls:
             _setup_ydl_mock(mock_cls, _moderate_download)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -369,7 +369,7 @@ class TestStallTimeoutRetryIntegration:
         with patch('yt_dlp.YoutubeDL') as mock_cls:
             _setup_ydl_mock(mock_cls, _blocking_download)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_stall_no_network_abort"),
                 buffer_seconds=5.0,
@@ -396,7 +396,7 @@ class TestStallTimeoutRetryIntegration:
         with patch('yt_dlp.YoutubeDL') as mock_cls:
             _setup_ydl_mock(mock_cls, _download)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_stall_categories"),
                 buffer_seconds=5.0,
@@ -440,7 +440,7 @@ class TestStallTimeoutDisabled:
              patch('concurrent.futures.ThreadPoolExecutor') as mock_executor:
             _setup_ydl_mock(mock_cls, _fast_download)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,

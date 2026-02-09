@@ -86,34 +86,23 @@ class TestSetCircuitBreakerWiring:
         set_circuit_breaker() should be called to wire them together."""
         from src.stages.download_segments import DownloadVideoSegmentsStage
 
-        stage = DownloadVideoSegmentsStage()
-
-        # Create a mock downloader with both components
+        # US-82-010: Inject deps directly — no mock downloader needed for wiring test
+        stage = DownloadVideoSegmentsStage(
+            circuit_breaker=circuit_breaker,
+            escalation_manager=escalation_manager,
+        )
+        # Still need a minimal downloader for _prepare_download_context's config reads
         mock_downloader = MagicMock()
-        mock_downloader.escalation_manager = escalation_manager
-        mock_downloader.circuit_breaker = circuit_breaker
-        mock_downloader.cookie_rotator = None
-        mock_downloader.retry_queue = MagicMock()
-        mock_downloader.retry_queue.has_pending.return_value = False
         mock_downloader.download_config = MagicMock()
         mock_downloader.download_config.bot_detection_tier_floor_threshold = 5
-        mock_downloader.download_config.segment_socket_timeout = 30
-        mock_downloader.download_config.segment_max_resolution = 1080
-        mock_downloader.download_config.segment_format = 'best[height<={segment_max_resolution}]'
-        mock_downloader.download_config.segment_stall_timeout = 120
-        mock_downloader.download_config.cookies_from_browser = ''
-        mock_downloader.download_config.cookies_path = ''
-        mock_downloader.download_config.cookie_rotation = None
-        mock_downloader.impersonation_manager = None
-
+        mock_downloader.cookie_rotator = None
         stage.downloader = mock_downloader
 
         # Verify circuit_breaker is None before wiring
         assert escalation_manager._circuit_breaker is None
 
         # Call _download_segments with empty segments to trigger the wiring
-        # but avoid actual downloads
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments=[],
             output_dir=Path("/tmp/test"),
             buffer_seconds=5.0,
@@ -131,20 +120,16 @@ class TestSetCircuitBreakerWiring:
         set_circuit_breaker() should not be called."""
         from src.stages.download_segments import DownloadVideoSegmentsStage
 
-        stage = DownloadVideoSegmentsStage()
-
+        # US-82-010: Inject only escalation_manager, no circuit_breaker
+        stage = DownloadVideoSegmentsStage(escalation_manager=escalation_manager)
         mock_downloader = MagicMock()
-        mock_downloader.escalation_manager = escalation_manager
-        mock_downloader.circuit_breaker = None
-        mock_downloader.cookie_rotator = None
-        mock_downloader.retry_queue = MagicMock()
-        mock_downloader.retry_queue.has_pending.return_value = False
         mock_downloader.download_config = MagicMock()
         mock_downloader.download_config.bot_detection_tier_floor_threshold = 5
-
+        mock_downloader.cookie_rotator = None
+        mock_downloader.circuit_breaker = None  # Explicit: no fallback CB
         stage.downloader = mock_downloader
 
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments=[],
             output_dir=Path("/tmp/test"),
             buffer_seconds=5.0,
@@ -162,21 +147,17 @@ class TestSetCircuitBreakerWiring:
         set_circuit_breaker() should not be called (no crash)."""
         from src.stages.download_segments import DownloadVideoSegmentsStage
 
-        stage = DownloadVideoSegmentsStage()
-
+        # US-82-010: Inject only circuit_breaker, no escalation_manager
+        stage = DownloadVideoSegmentsStage(circuit_breaker=circuit_breaker)
         mock_downloader = MagicMock()
-        mock_downloader.escalation_manager = None
-        mock_downloader.circuit_breaker = circuit_breaker
-        mock_downloader.cookie_rotator = None
-        mock_downloader.retry_queue = MagicMock()
-        mock_downloader.retry_queue.has_pending.return_value = False
         mock_downloader.download_config = MagicMock()
         mock_downloader.download_config.bot_detection_tier_floor_threshold = 5
-
+        mock_downloader.cookie_rotator = None
+        mock_downloader.escalation_manager = None  # Explicit: no fallback EM
         stage.downloader = mock_downloader
 
         # Should not crash
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments=[],
             output_dir=Path("/tmp/test"),
             buffer_seconds=5.0,
@@ -303,7 +284,7 @@ class TestCircuitBreakerSkipToRetryQueue:
         }]
 
         # yt_dlp should never be imported since the video should be skipped
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments=segments,
             output_dir=Path("/tmp/test_skip"),
             buffer_seconds=5.0,
@@ -371,7 +352,7 @@ class TestCircuitBreakerSkipToRetryQueue:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_normal"),
                 buffer_seconds=5.0,
@@ -445,7 +426,7 @@ class TestCheckAndWaitCalledWhenOpen:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_wait"),
                 buffer_seconds=5.0,
@@ -505,7 +486,7 @@ class TestCheckAndWaitCalledWhenOpen:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_nowait"),
                 buffer_seconds=5.0,
@@ -662,7 +643,7 @@ class TestCircuitBreakerCheckpointMetrics:
         stage.downloader = mock_downloader
 
         # Run with empty segments to get checkpoint_data quickly
-        downloaded, stats = stage._download_segments(
+        downloaded, stats, _ = stage._download_segments(
             segments=[],
             output_dir=Path("/tmp/test_metrics"),
             buffer_seconds=5.0,

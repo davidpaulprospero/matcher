@@ -172,7 +172,7 @@ class TestEndToEndFlow:
 
         ctx, _ = _yt_dlp_mock_context(_success)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -232,7 +232,7 @@ class TestEndToEndFlow:
 
         ctx, _ = _yt_dlp_mock_context(_success)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=0.0,
@@ -292,7 +292,7 @@ class TestBotDetectionEscalationThenSuccess:
 
         ctx, _ = _yt_dlp_mock_context(_download_fn)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -343,7 +343,7 @@ class TestNetworkFailureAbort:
 
         ctx, _ = _yt_dlp_mock_context(_dns_fail)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -390,7 +390,7 @@ class TestNetworkFailureAbort:
 
         ctx, _ = _yt_dlp_mock_context(_mixed_errors)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -491,7 +491,7 @@ class TestCheckpointSaveWithSegmentPaths:
 
         ctx, _ = _yt_dlp_mock_context(_success)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,
@@ -543,7 +543,7 @@ class TestCheckpointSaveWithSegmentPaths:
 
         ctx, _ = _yt_dlp_mock_context(_partial_success)
         with ctx:
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=output_dir,
                 buffer_seconds=5.0,

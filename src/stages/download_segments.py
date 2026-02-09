@@ -257,9 +257,20 @@ class DownloadVideoSegmentsStage(Stage):
     # Browsers that yt-dlp supports for cookie extraction
     _KNOWN_BROWSERS = ('firefox', 'chrome', 'edge', 'safari', 'opera', 'brave')
 
-    def __init__(self, orchestrator=None):
+    def __init__(
+        self,
+        orchestrator=None,
+        circuit_breaker=None,
+        escalation_manager=None,
+        rate_limit_budget=None,
+    ):
         self.downloader = None
         self._orchestrator = orchestrator
+        # US-82-010: Constructor-injected dependencies for testability.
+        # When None, defaults are created from self.downloader at runtime.
+        self._injected_circuit_breaker = circuit_breaker
+        self._injected_escalation_manager = escalation_manager
+        self._injected_rate_limit_budget = rate_limit_budget
 
     def _get_orchestrator(self):
         """Return the orchestrator, creating a lightweight wrapper if needed.
@@ -864,17 +875,20 @@ class DownloadVideoSegmentsStage(Stage):
         Returns:
             A populated _DownloadLoopContext.
         """
-        escalation_mgr = None
+        # US-82-010: Prefer constructor-injected deps, fall back to downloader attrs
+        escalation_mgr = self._injected_escalation_manager
+        circuit_breaker = self._injected_circuit_breaker
         cookie_rotator = None
-        circuit_breaker = None
         if self.downloader:
-            escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
+            if escalation_mgr is None:
+                escalation_mgr = getattr(self.downloader, 'escalation_manager', None)
             cookie_rotator = getattr(self.downloader, 'cookie_rotator', None)
-            circuit_breaker = getattr(self.downloader, 'circuit_breaker', None)
+            if circuit_breaker is None:
+                circuit_breaker = getattr(self.downloader, 'circuit_breaker', None)
 
-            # US-49-007: Wire circuit breaker into escalation manager
-            if escalation_mgr and circuit_breaker:
-                escalation_mgr.set_circuit_breaker(circuit_breaker)
+        # US-49-007: Wire circuit breaker into escalation manager
+        if escalation_mgr and circuit_breaker:
+            escalation_mgr.set_circuit_breaker(circuit_breaker)
 
         dl_cfg = getattr(self.downloader, 'download_config', None) if self.downloader else None
 
@@ -1769,3 +1783,38 @@ class DownloadVideoSegmentsStage(Stage):
         if not state.matches:
             return "No matches available for segment download"
         return None
+
+
+def create_download_stage(
+    *,
+    config: 'Config' = None,
+    circuit_breaker=None,
+    escalation_manager=None,
+    rate_limit_budget=None,
+) -> DownloadVideoSegmentsStage:
+    """Factory function that wires production defaults for DownloadVideoSegmentsStage.
+
+    US-82-010: Provides a single entry-point for creating a fully-wired stage.
+    When parameters are None the stage will create defaults at runtime via the
+    SegmentDownloadOrchestrator (preserving current production behavior).
+
+    Args:
+        config: Optional Config used to pre-build the SegmentDownloadOrchestrator.
+        circuit_breaker: Optional CircuitBreaker instance (default: created by VideoDownloader).
+        escalation_manager: Optional EscalationManager instance (default: created by VideoDownloader).
+        rate_limit_budget: Optional RateLimitBudget instance (default: created by VideoDownloader).
+
+    Returns:
+        A configured DownloadVideoSegmentsStage.
+    """
+    orchestrator = None
+    if config is not None:
+        from ..downloader.orchestrator import SegmentDownloadOrchestrator
+        orchestrator = SegmentDownloadOrchestrator(config=config)
+
+    return DownloadVideoSegmentsStage(
+        orchestrator=orchestrator,
+        circuit_breaker=circuit_breaker,
+        escalation_manager=escalation_manager,
+        rate_limit_budget=rate_limit_budget,
+    )

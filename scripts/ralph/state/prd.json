@@ -1,4 +1,4 @@
-﻿{
+{
     "sprintNumber": 82,
     "focusArea": "architecture",
     "branchName": "ralph/sprint-82",
@@ -154,8 +154,8 @@
                 "At least 3 existing tests are simplified by injecting pre-configured mocks instead of monkeypatching internal construction",
                 "Factory function create_download_stage() in src/stages/download_segments.py wires production defaults"
             ],
-            "passes": false,
-            "notes": "Tier: testability improvement. Files: src/stages/download_segments.py (1,803 lines - constructor at ~lines 80-120, internal instantiation of CircuitBreaker/EscalationManager/RateLimitBudget at ~lines 350-400), tests/test_download_segment*.py (test files that currently monkeypatch). Currently the stage creates all its dependencies internally, forcing tests to use monkeypatching for isolation. Constructor injection with defaults preserves backward compatibility while enabling clean test setup."
+            "passes": true,
+            "notes": "US-82-010: Added circuit_breaker, escalation_manager, rate_limit_budget constructor params to DownloadVideoSegmentsStage. Added create_download_stage() factory. Simplified 3 circuit breaker wiring tests using injection. Also fixed pre-existing 2-tuple unpacking bug across multiple test files (_download_segments returns 3 values)."
         },
         {
             "id": "US-82-011",
