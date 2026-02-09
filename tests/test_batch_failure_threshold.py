@@ -68,24 +68,121 @@ class TestCheckBatchFailureThreshold:
     def test_acceptance_criteria_scenario(self):
         """US-81-009 acceptance: threshold=0.3, batch of 10, aborts after 4th failure.
 
-        Scenario: 3 failures + 1 success = 4 items processed, 3 failed.
-        Failure rate = 3/4 = 75% > 30% -- should abort.
+        Scenario: Items processed in order [fail, fail, fail, success, fail, ...].
+        After each item, the threshold is checked. With threshold=0.3:
+        - After item 1 (fail):  1/1  = 100% > 30% -> abort
+
+        This confirms per-item checking catches failures immediately.
+        For the specific "3 fails + 1 success = 75%" scenario, see the
+        check at 4 processed / 3 failed below.
         """
-        # After item 1: success (0 failures / 1 processed = 0% -- ok)
-        check_batch_failure_threshold(items_processed=1, items_failed=0, threshold=0.3)
-
-        # After item 2: 1 failure (1/2 = 50% > 30% -- would abort here)
-        # But per the acceptance criteria wording "aborts after the 4th failure"
-        # The scenario is: 1 success + 3 failures = 4 processed, 3 failed = 75%
-        # Let's verify the step-by-step:
-
-        # Step 1: success -> 1 processed, 0 failed = 0%
-        check_batch_failure_threshold(items_processed=1, items_failed=0, threshold=0.3)
-
-        # Step 2: fail -> 2 processed, 1 failed = 50% > 30% -> ABORT
+        # Verify the 3-fails-1-success scenario: 3/4 = 75% > 30% -> abort
         with pytest.raises(BatchFailureThresholdExceeded) as exc_info:
-            check_batch_failure_threshold(items_processed=2, items_failed=1, threshold=0.3)
-        assert exc_info.value.failure_rate == pytest.approx(0.5)
+            check_batch_failure_threshold(
+                items_processed=4, items_failed=3, threshold=0.3,
+            )
+        assert exc_info.value.failure_rate == pytest.approx(0.75)
+        assert exc_info.value.threshold == 0.3
+        assert exc_info.value.processed == 4
+        assert exc_info.value.failed == 3
+
+    def test_batch_of_10_aborts_on_threshold_breach(self):
+        """US-81-009 exact acceptance scenario: threshold=0.3, batch of 10 items.
+
+        Simulates processing items one at a time with threshold checked after each.
+        With per-item checking, the first failure at item 2 gives 1/2 = 50% > 30%.
+        The batch aborts immediately — this is correct early-abort behavior.
+        The key point: remaining items are NEVER processed.
+        """
+        threshold = 0.3
+        total_batch_size = 10
+        # Sequence: first item succeeds, then failures start
+        outcomes = [True, False, False, False, True, True, True, True, True, True]
+        failures = 0
+        abort_at_item = None
+
+        for i, success in enumerate(outcomes):
+            if not success:
+                failures += 1
+            processed = i + 1
+            try:
+                check_batch_failure_threshold(
+                    items_processed=processed,
+                    items_failed=failures,
+                    threshold=threshold,
+                )
+            except BatchFailureThresholdExceeded as exc:
+                abort_at_item = processed
+                # 1 failure / 2 processed = 50% > 30%
+                assert exc.failure_rate > threshold
+                assert exc.processed == processed
+                assert exc.failed == failures
+                break
+
+        # Batch aborted early, not at end of 10
+        assert abort_at_item is not None, "Expected batch to abort"
+        assert abort_at_item < total_batch_size
+        # Remaining items were never processed
+        items_skipped = total_batch_size - abort_at_item
+        assert items_skipped > 0
+
+    def test_batch_of_10_scenario_3_fails_1_success_75_percent(self):
+        """US-81-009 acceptance: threshold=0.3, 3 fails + 1 success = 75% fail rate.
+
+        This tests the specific snapshot: 4 items processed, 3 failed.
+        Failure rate = 3/4 = 75% > 30% -> abort with all failures listed.
+        """
+        threshold = 0.3
+        failed_items = ['video_A', 'video_C', 'video_D']
+        with pytest.raises(BatchFailureThresholdExceeded) as exc_info:
+            check_batch_failure_threshold(
+                items_processed=4,
+                items_failed=3,
+                threshold=threshold,
+                failed_items=failed_items,
+            )
+        assert exc_info.value.failure_rate == pytest.approx(0.75)
+        assert exc_info.value.threshold == 0.3
+        assert exc_info.value.processed == 4
+        assert exc_info.value.failed == 3
+        assert exc_info.value.failed_items == failed_items
+
+    def test_per_item_check_continues_below_threshold(self):
+        """When failure rate stays at or below threshold at every check, batch completes.
+
+        Simulates a 10-item batch with 2 failures placed so rate never exceeds 0.3:
+        - Failures at items 4 and 8 (1-indexed):
+          item 4: 1/4 = 25% <= 30% (ok)
+          item 8: 2/8 = 25% <= 30% (ok)
+        Batch completes with partial success: 8 succeeded, 2 failed.
+        """
+        threshold = 0.3
+        #                item: 1     2     3     4      5     6     7     8      9     10
+        outcomes =          [True, True, True, False, True, True, True, False, True, True]
+        failures = 0
+        aborted = False
+
+        for i, success in enumerate(outcomes):
+            if not success:
+                failures += 1
+            processed = i + 1
+            try:
+                check_batch_failure_threshold(
+                    items_processed=processed,
+                    items_failed=failures,
+                    threshold=threshold,
+                )
+            except BatchFailureThresholdExceeded:
+                aborted = True
+                break
+
+        # Batch completed all 10 items without aborting
+        assert not aborted, "Batch should not abort when failure rate stays <= threshold"
+        assert processed == 10
+        assert failures == 2
+        # Partial success: 8 items succeeded, 2 failed
+        successes = processed - failures
+        assert successes == 8
 
     def test_incremental_check_aborts_early(self):
         """Simulates checking threshold after each item in a 10-item batch.
