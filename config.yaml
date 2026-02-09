@@ -596,6 +596,8 @@ matching:
     pool_small_threshold: 10                   # Pool "small" below this
     pool_large_threshold: 100                  # Pool "large" above this
     pool_tight_margin_threshold: 0.05          # Top-2 score diff for "tight margin"
+    max_cumulative_negative_adjustment: -0.30  # Dampen remaining negatives past this threshold (US-84-002)
+    compounding_dampening_factor: 0.50         # Multiply remaining negatives by this when threshold exceeded
 
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching

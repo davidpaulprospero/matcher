@@ -168,6 +168,10 @@ class MatchingScoringConfig:
     pool_large_threshold: int = 100               # Pool "large" above this
     pool_tight_margin_threshold: float = 0.05     # Top-2 score diff for "tight margin"
 
+    # Compounding guard (US-84-002) — dampen cascading negative adjustments
+    max_cumulative_negative_adjustment: float = -0.30  # Threshold for dampening remaining negatives
+    compounding_dampening_factor: float = 0.50  # Multiply remaining negatives by this when threshold exceeded
+
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):

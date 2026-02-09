@@ -3757,6 +3757,32 @@ class MatchScoring:
         reasons = []
         breakdown = []
 
+        # Compounding guard state (US-84-002): track cumulative negative adjustments
+        # When cumulative negatives exceed threshold, dampen remaining negatives by factor
+        _max_neg = getattr(self._sc, 'max_cumulative_negative_adjustment', -0.30) if self._sc else -0.30
+        _damp_factor = getattr(self._sc, 'compounding_dampening_factor', 0.50) if self._sc else 0.50
+        _cumulative_negative = 0.0
+        _dampening_active = False
+        _dampening_applied_count = 0
+
+        def _apply_compounding_guard(conf: float, prev_conf: float) -> float:
+            """Apply compounding guard dampening to the current adjustment if needed."""
+            nonlocal _cumulative_negative, _dampening_active, _dampening_applied_count
+            delta = conf - prev_conf
+            if delta < 0:
+                if _dampening_active:
+                    # Dampen this negative adjustment
+                    dampened_delta = delta * _damp_factor
+                    conf = prev_conf + dampened_delta
+                    _cumulative_negative += dampened_delta
+                    _dampening_applied_count += 1
+                else:
+                    _cumulative_negative += delta
+                    # Check if we just crossed the threshold
+                    if _cumulative_negative < _max_neg:
+                        _dampening_active = True
+            return conf
+
         # 1. Topic penalty
         prev = confidence
         confidence, topic_reason = apply_topic_penalty(
@@ -3765,6 +3791,7 @@ class MatchScoring:
             chapter_matching_enabled,
             topic_mismatch_penalty
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if topic_reason:
             reasons.append(topic_reason)
             breakdown.append({'component': 'topic_penalty', 'adjustment': round(confidence - prev, 4), 'reason': topic_reason})
@@ -3774,6 +3801,7 @@ class MatchScoring:
         confidence, broll_reason = apply_broll_boost(
             confidence, video_segment, self.config
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if broll_reason:
             reasons.append(broll_reason)
             breakdown.append({'component': 'broll_boost', 'adjustment': round(confidence - prev, 4), 'reason': broll_reason})
@@ -3783,6 +3811,7 @@ class MatchScoring:
         confidence, caption_reason = apply_caption_quality_adjustment(
             confidence, video_segment, self.config
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if caption_reason:
             reasons.append(caption_reason)
             breakdown.append({'component': 'caption_quality', 'adjustment': round(confidence - prev, 4), 'reason': caption_reason})
@@ -3792,6 +3821,7 @@ class MatchScoring:
         confidence, tiered_entries = apply_tiered_caption_penalties(
             confidence, video_segment, self.config
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if tiered_entries:
             for entry in tiered_entries:
                 reasons.append(entry['reason'])
@@ -3802,6 +3832,7 @@ class MatchScoring:
         confidence, lang_conf_reason = apply_language_confidence_penalty(
             confidence, video_segment, self.config
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if lang_conf_reason:
             reasons.append(lang_conf_reason)
             breakdown.append({'component': 'language_confidence', 'adjustment': round(confidence - prev, 4), 'reason': lang_conf_reason})
@@ -3811,6 +3842,7 @@ class MatchScoring:
         confidence, timing_reason = apply_timing_penalty(
             confidence, video_segment, self.config
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if timing_reason:
             reasons.append(timing_reason)
             breakdown.append({'component': 'timing_penalty', 'adjustment': round(confidence - prev, 4), 'reason': timing_reason})
@@ -3820,6 +3852,7 @@ class MatchScoring:
         confidence, project_reason = apply_current_project_boost(
             confidence, video_segment, self.config
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if project_reason:
             reasons.append(project_reason)
             breakdown.append({'component': 'project_boost', 'adjustment': round(confidence - prev, 4), 'reason': project_reason})
@@ -3830,6 +3863,7 @@ class MatchScoring:
             confidence, title_reason = self.apply_title_relevance_adjustment(
                 confidence, vo_segment, video_title
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if title_reason:
                 reasons.append(title_reason)
                 breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
@@ -3840,6 +3874,7 @@ class MatchScoring:
             confidence, desc_reason = apply_description_relevance_adjustment(
                 confidence, vo_segment, video_description
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if desc_reason:
                 reasons.append(desc_reason)
                 breakdown.append({'component': 'description_relevance', 'adjustment': round(confidence - prev, 4), 'reason': desc_reason})
@@ -3851,6 +3886,7 @@ class MatchScoring:
             confidence, chapter_reason = self.apply_chapter_topic_match(
                 confidence, vo_segment, chapter_title, vo_chapter_index=vo_ch_idx
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if chapter_reason:
                 reasons.append(chapter_reason)
                 breakdown.append({'component': 'chapter_topic_match', 'adjustment': round(confidence - prev, 4), 'reason': chapter_reason})
@@ -3862,6 +3898,7 @@ class MatchScoring:
                 confidence, video_segment, recent_matches,
                 current_chapter_index, segment_chapter_map
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if consistency_reason:
                 reasons.append(consistency_reason)
                 breakdown.append({'component': 'chapter_source_consistency', 'adjustment': round(confidence - prev, 4), 'reason': consistency_reason})
@@ -3872,6 +3909,7 @@ class MatchScoring:
             confidence, tag_reason = self.apply_tag_keyword_boost(
                 confidence, vo_segment, video_tags
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if tag_reason:
                 reasons.append(tag_reason)
                 breakdown.append({'component': 'tag_keyword_boost', 'adjustment': round(confidence - prev, 4), 'reason': tag_reason})
@@ -3888,6 +3926,7 @@ class MatchScoring:
             confidence, overlap_reason = self.apply_tag_overlap_boost(
                 confidence, vo_segment, video_tags
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if overlap_reason:
                 reasons.append(overlap_reason)
                 breakdown.append({'component': 'tag_overlap', 'adjustment': round(confidence - prev, 4), 'reason': overlap_reason})
@@ -3898,6 +3937,7 @@ class MatchScoring:
             confidence, coherence_reason = self.apply_chapter_coherence_penalty(
                 confidence, current_chapter_index, chapter_source_counts
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if coherence_reason:
                 reasons.append(coherence_reason)
                 breakdown.append({'component': 'chapter_coherence_penalty', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
@@ -3908,6 +3948,7 @@ class MatchScoring:
             confidence, relevance_reason = self.apply_cross_chapter_relevance_boost(
                 confidence, current_chapter_index, video_chapter_index, relevance_matrix
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if relevance_reason:
                 reasons.append(relevance_reason)
                 breakdown.append({'component': 'cross_chapter_relevance', 'adjustment': round(confidence - prev, 4), 'reason': relevance_reason})
@@ -3918,6 +3959,7 @@ class MatchScoring:
             confidence, listicle_reason = self.apply_listicle_consistency_boost(
                 confidence, vo_segment, video_segment, listicle_groups, recent_matches
             )
+            confidence = _apply_compounding_guard(confidence, prev)
             if listicle_reason:
                 reasons.append(listicle_reason)
                 breakdown.append({'component': 'listicle_consistency', 'adjustment': round(confidence - prev, 4), 'reason': listicle_reason})
@@ -3927,9 +3969,17 @@ class MatchScoring:
         confidence, duration_ratio_reason = apply_duration_ratio_calibration(
             confidence, vo_segment, video_segment
         )
+        confidence = _apply_compounding_guard(confidence, prev)
         if duration_ratio_reason:
             reasons.append(duration_ratio_reason)
             breakdown.append({'component': 'duration_ratio_calibration', 'adjustment': round(confidence - prev, 4), 'reason': duration_ratio_reason})
+
+        # 12c. Adjustment compounding summary (US-84-002)
+        breakdown.append({
+            'component': 'adjustment_compounding',
+            'adjustment': round(_cumulative_negative, 4),
+            'reason': f'cumulative_negative={_cumulative_negative:.4f}, threshold={_max_neg}, dampening_applied={_dampening_active}, dampened_count={_dampening_applied_count}'
+        })
 
         # 13. Enforce minimum confidence floor (US-46-004, US-77-006)
         # Prevents cascading multiplicative penalties from reducing confidence to near-zero
