@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
+from src.downloader.pause_calculator import PauseCalculator, PauseContext
 
 if TYPE_CHECKING:
     from .escalation_manager import EscalationManager
@@ -197,12 +198,17 @@ class CircuitBreaker(CircuitBreakerBase):
         self._escalation_manager = escalation_manager
         self._budget = budget
         self._consecutive_successes: int = 0
-        self._last_jitter_applied: float = 0.0  # Track for debugging/metrics
+        self._pause_calculator: PauseCalculator = PauseCalculator()
         self._caption_circuit_breaker = caption_circuit_breaker
 
     @property
     def config(self) -> CircuitBreakerConfig:
         return self._config
+
+    @property
+    def _last_jitter_applied(self) -> float:
+        """Delegate jitter tracking to PauseCalculator."""
+        return self._pause_calculator.last_jitter_applied
 
     def _create_state(self) -> CircuitBreakerState:
         return CircuitBreakerState()
@@ -267,120 +273,54 @@ class CircuitBreaker(CircuitBreakerBase):
         )
         self._cascade_trip_to_caption()
 
-    # --- Pause calculation pipeline ---
+    # --- Pause calculation pipeline (delegated to PauseCalculator) ---
+
+    def _build_pause_context(self) -> PauseContext:
+        """Build a PauseContext from current circuit breaker state."""
+        return PauseContext(
+            base_pause_seconds=self.config.pause_seconds,
+            max_pause_seconds=getattr(self.config, 'max_pause_seconds', 300.0),
+            jitter_factor=getattr(self.config, 'jitter_factor', 0.2),
+            escalation_manager=self._escalation_manager,
+            budget=self._budget,
+        )
 
     def _base_pause(self) -> float:
         """Get the base pause duration from config."""
-        return self.config.pause_seconds
+        return self._pause_calculator.base_pause(self._build_pause_context())
 
     def _escalation_adjusted_pause(self, pause: float) -> float:
-        """Apply escalation-based extension to a pause duration.
-
-        Doubles the pause when >50% of active keywords are at Tier 3.
-        """
-        if self._escalation_manager is None:
-            return pause
-
-        try:
-            from .types import EscalationTier
-
-            total_keywords = self._escalation_manager.get_active_keyword_count()
-            if total_keywords > 0:
-                tier3_keywords = self._escalation_manager.get_keywords_at_tier(
-                    EscalationTier.FULL_BYPASS
-                )
-                tier3_pct = len(tier3_keywords) / total_keywords
-
-                if tier3_pct > 0.5:
-                    adjusted = pause * 2.0
-                    logger.info(
-                        f"Circuit breaker extended: {tier3_pct:.0%} keywords at Tier 3 "
-                        f"(pause {self._base_pause():.0f}s -> {adjusted:.0f}s)"
-                    )
-                    return adjusted
-        except ImportError:
-            pass
-
-        return pause
+        """Apply escalation-based extension to a pause duration."""
+        return self._pause_calculator.escalation_adjusted(pause, self._build_pause_context())
 
     def _budget_adjusted_pause(self, pause: float) -> float:
         """Apply budget-aware extension to a pause duration."""
-        if self._budget is None:
-            return pause
-
-        original_pause = pause
-        if self._budget.is_exhausted():
-            pause = pause * 2.5
-            budget_status = "exhausted"
-        elif self._budget.is_nearly_exhausted():
-            pause = pause * 1.5
-            budget_status = "nearly exhausted"
-        else:
-            budget_status = None
-
-        if budget_status is not None:
-            logger.info(
-                f"Circuit breaker pause extended {original_pause:.0f}s -> "
-                f"{pause:.0f}s (budget {budget_status})"
-            )
-
-        return pause
+        return self._pause_calculator.budget_adjusted(pause, self._build_pause_context())
 
     def _cap_pause_duration(self, pause: float) -> float:
         """Cap a pause duration at max_pause_seconds."""
-        max_pause = getattr(self.config, 'max_pause_seconds', 300.0)
-        if pause > max_pause:
-            logger.debug(
-                f"Circuit breaker pause capped: {pause:.1f}s -> {max_pause:.0f}s "
-                f"(max_pause_seconds={max_pause:.0f})"
-            )
-            pause = max_pause
-        return pause
+        return self._pause_calculator.cap_duration(pause, self._build_pause_context())
 
     def _get_effective_pause_seconds(self) -> float:
         """Get the effective pause duration, possibly extended by escalation and budget state.
 
-        Composes _base_pause, _escalation_adjusted_pause, _budget_adjusted_pause,
-        _apply_jitter, and _cap_pause_duration into a single pause calculation pipeline.
+        Delegates to PauseCalculator.calculate() for the full 5-step pipeline.
         """
-        pause = self._base_pause()
-        pause = self._escalation_adjusted_pause(pause)
-        pause = self._budget_adjusted_pause(pause)
-        pause = self._apply_jitter_raw(pause)
-        pause = self._cap_pause_duration(pause)
-        return pause
+        ctx = self._build_pause_context()
+        result = self._pause_calculator.calculate(ctx)
+        return result
 
     # --- Jitter ---
 
     def _apply_jitter_raw(self, delay: float) -> float:
-        """Apply random jitter to a delay value without capping.
-
-        Jitter helps prevent thundering herd when multiple downloads
-        resume simultaneously after circuit breaker recovery.
-
-        The jitter formula is: delay * (1 + random.uniform(-jitter, +jitter))
-        """
-        jitter_factor = getattr(self.config, 'jitter_factor', 0.2)
-
-        if jitter_factor < 0.0:
-            jitter_factor = 0.0
-        elif jitter_factor > 1.0:
-            jitter_factor = 1.0
-
-        if jitter_factor > 0.0:
-            jitter_multiplier = 1 + random.uniform(-jitter_factor, jitter_factor)
-            jittered_delay = delay * jitter_multiplier
-            self._last_jitter_applied = jitter_multiplier - 1.0
-        else:
-            jittered_delay = delay
-            self._last_jitter_applied = 0.0
-
-        return jittered_delay
+        """Apply random jitter to a delay value without capping."""
+        return self._pause_calculator.apply_jitter(delay, self._build_pause_context())
 
     def _apply_jitter(self, delay: float) -> float:
         """Apply random jitter to a delay value, capped at max_pause_seconds."""
-        jittered_delay = self._apply_jitter_raw(delay)
-        jittered_delay = self._cap_pause_duration(jittered_delay)
+        ctx = self._build_pause_context()
+        jittered_delay = self._pause_calculator.apply_jitter(delay, ctx)
+        jittered_delay = self._pause_calculator.cap_duration(jittered_delay, ctx)
         return jittered_delay
 
     # --- Escalation tier checks ---

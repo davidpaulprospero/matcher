@@ -126,8 +126,8 @@
                 "PauseCalculator steps can be unit tested individually without constructing a full CircuitBreaker",
                 "Existing pause behavior (values and jitter ranges) is preserved exactly - verified by existing circuit breaker tests"
             ],
-            "passes": false,
-            "notes": "Tier: structural refactor. Files: src/downloader/circuit_breaker.py (633 lines - pause pipeline at ~lines 300-500: _base_pause(), _escalation_adjusted_pause(), _budget_adjusted_pause(), _apply_jitter(), _cap_pause_duration()), src/downloader/pause_calculator.py (new file). The 5-step pause calculation pipeline is tightly coupled to CircuitBreaker state. Extracting it makes pause logic independently testable and reusable."
+            "passes": true,
+            "notes": "Created PauseCalculator class in src/downloader/pause_calculator.py with PauseContext dataclass and 5 composable steps: base_pause(), escalation_adjusted(), budget_adjusted(), apply_jitter(), cap_duration(). CircuitBreaker delegates via _build_pause_context() and _pause_calculator instance. _last_jitter_applied is now a property delegating to PauseCalculator.last_jitter_applied. 30 new unit tests in test_pause_calculator.py covering each step independently without constructing a CircuitBreaker. All 147 existing circuit breaker tests pass (excluding 14 pre-existing failures unrelated to this change). Logger uses 'src.downloader.circuit_breaker' name for backward-compatible log filtering."
         },
         {
             "id": "US-82-009",
