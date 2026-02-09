@@ -71,7 +71,20 @@ class PipelineOrchestrator:
     - Supports resume from checkpoint
     - Tracks stage timing
     - Handles stage failures gracefully
+    - Cross-stage data drift detection (non-blocking warnings)
     """
+
+    # Cross-stage data drift rules: (source_field, target_field, min_ratio)
+    # After a stage completes, check that target_field count >= min_ratio * source_field count.
+    # Rules are keyed by the stage whose completion triggers the check.
+    DRIFT_RULES: List[Tuple[str, str, str, float]] = [
+        # After CAPTION: caption_results should have >= 80% of video_ids
+        ('CAPTION', 'video_ids', 'caption_results', 0.8),
+        # After MATCH: text_metadata should have >= 80% of video_ids
+        ('MATCH', 'video_ids', 'text_metadata', 0.8),
+        # After OUTPUT: matches should have >= 50% of voiceover_segments
+        ('OUTPUT', 'voiceover_segments', 'matches', 0.5),
+    ]
 
     def __init__(
         self,
@@ -626,6 +639,39 @@ class PipelineOrchestrator:
                 f"segments matched ({coverage:.0%}) — above {threshold:.0%} threshold."
             )
 
+    def _check_data_drift(self, stage_name: str) -> None:
+        """
+        Check for cross-stage data drift after a stage completes.
+
+        Compares output field counts against source field counts using
+        DRIFT_RULES. Emits a warning when the ratio falls below the
+        configured threshold. Non-blocking — the pipeline always continues.
+
+        Args:
+            stage_name: Name of the stage that just completed.
+        """
+        for trigger_stage, source_field, target_field, min_ratio in self.DRIFT_RULES:
+            if trigger_stage != stage_name:
+                continue
+
+            source_value = getattr(self.state, source_field, None)
+            target_value = getattr(self.state, target_field, None)
+
+            # Get counts (handle both list and dict)
+            expected = len(source_value) if source_value else 0
+            actual = len(target_value) if target_value else 0
+
+            if expected == 0:
+                continue  # Can't compute ratio with zero source
+
+            ratio = actual / expected
+            if ratio < min_ratio:
+                logger.warning(
+                    f"Data drift: {target_field} has {actual} items but "
+                    f"{source_field} has {expected} "
+                    f"(ratio: {ratio:.1%}, threshold: {min_ratio:.0%})"
+                )
+
     def run(
         self,
         resume: bool = True,
@@ -853,6 +899,9 @@ class PipelineOrchestrator:
             # Run quality gate after matching stages (US-81-005)
             if stage_name in ('MATCH', 'ITERATIVE_MATCH'):
                 self._check_match_coverage_gate(stage_name)
+
+            # Run cross-stage data drift detection (US-81-011)
+            self._check_data_drift(stage_name)
 
         self.current_stage = None
 

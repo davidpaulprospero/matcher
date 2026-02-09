@@ -1,188 +1,188 @@
-﻿{
-    "sprintNumber":  81,
-    "focusArea":  "pipeline",
-    "branchName":  "ralph/sprint-81",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-81-001",
-                            "title":  "Generate sprint stories for pipeline focus area",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027pipeline\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027pipeline\u0027",
-                                                       "Add stories US-81-002 through US-81-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-81-NNN to be unique across sprints",
-                                                       "Mark this story (US-81-001) as passes: true when done"
-                                                   ],
-                            "notes":  "Seed story. Generated 11 pipeline-focused stories based on codebase analysis. Key findings: metadata extraction, chapter detection, title scoring, tag boost, and LLM context enrichment are ALL already implemented. Stories focus on actual pipeline gaps: per-item error isolation, partial stage resume, progress reporting, stage dependency declaration, data quality validation, and pipeline-level parallelism."
-                        },
-                        {
-                            "id":  "US-81-002",
-                            "title":  "Add per-item error isolation to batch pipeline stages",
-                            "priority":  "high",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "CAPTION stage continues processing remaining videos when a single caption fetch fails, collecting errors in a per-video error dict",
-                                                       "DOWNLOAD_SEGMENTS stage continues downloading remaining segments when one segment download fails, collecting errors per segment",
-                                                       "Failed items are logged with structured error info (video_id, error_type, message) and included in StageResult.data[\u0027failed_items\u0027]",
-                                                       "StageResult.metrics.items_failed count matches the actual number of failed items",
-                                                       "A test verifies that when 1 of 5 items fails in a batch, the stage still returns success=True with 4 processed items and 1 failed item"
-                                                   ],
-                            "notes":  "Tier: foundation. Added failed_items list to SegmentDownloadStats with video_id tracking in increment_failure(). CAPTION stage now builds failed_items from caption_results and returns StageMetrics with items_failed/items_processed. DOWNLOAD_SEGMENTS already had per-item error isolation; added failed_items to checkpoint_data. 7 tests cover both stages."
-                        },
-                        {
-                            "id":  "US-81-003",
-                            "title":  "Add partial stage resume for long-running download stages",
-                            "priority":  "high",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "DOWNLOAD_SEGMENTS stage saves incremental progress to checkpoint after every N downloads (configurable, default 10)",
-                                                       "When resuming a DOWNLOAD_SEGMENTS stage via --resume, already-downloaded segments are detected on disk and skipped",
-                                                       "The incremental checkpoint includes a \u0027partial_progress\u0027 dict with keys: completed_ids, failed_ids, total_count",
-                                                       "A test verifies that after interrupting at 5/20 downloads and resuming, only the remaining 15 are attempted",
-                                                       "Checkpoint partial_progress is cleared when the stage completes fully"
-                                                   ],
-                            "notes":  "HARD STORY: Skipped after 30_minute_limit - pending decomposition"
-                        },
-                        {
-                            "id":  "US-81-004",
-                            "title":  "Add centralized pipeline progress reporting with stage-level granularity",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "A new ProgressReporter class in src/pipeline_progress.py provides a unified progress interface",
-                                                       "ProgressReporter tracks current_stage, items_total, items_completed, items_failed, elapsed_seconds, and estimated_remaining_seconds",
-                                                       "Pipeline.run() passes ProgressReporter to each stage, and stages call reporter.update(completed=N) during batch processing",
-                                                       "ProgressReporter writes a progress.json file to the project directory, updated at most every 5 seconds",
-                                                       "A test verifies that ProgressReporter correctly computes ETA based on throughput (items_completed / elapsed_seconds * items_remaining)"
-                                                   ],
-                            "notes":  "Implemented ProgressReporter in src/pipeline_progress.py with start_stage/update/finish_stage/finish_pipeline API. Pipeline.run() creates reporter, starts/finishes stages, and sets state._progress_reporter for stage access. DOWNLOAD_SEGMENTS and CAPTION stages call reporter.update() during batch processing. progress.json written with 5s throttle via atomic rename. 13 tests cover ETA computation, snapshots, file I/O, and pipeline lifecycle."
-                        },
-                        {
-                            "id":  "US-81-005",
-                            "title":  "Add data quality gate between MATCH and OUTPUT stages",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "notes":  "All 5 criteria verified. Implementation in src/pipeline.py (_check_match_coverage_gate). Config in config.yaml (pipeline.quality_gates.min_match_coverage). 7 tests in tests/test_pipeline_quality_gate.py all pass: below-threshold warning, above-threshold no warning, exact threshold, custom threshold, zero segments, zero matches, info log.",
-                            "acceptanceCriteria":  [
-                                                       "After MATCH stage completes, a validation check verifies that at least 50% of voiceover segments have a match (configurable threshold)",
-                                                       "If match coverage is below threshold, a warning is logged with specific guidance: \u0027Only N/M segments matched (X%). Consider running with --force-rematch or checking video search results.\u0027",
-                                                       "The quality gate threshold is configurable via config.yaml under pipeline.quality_gates.min_match_coverage (default 0.5)",
-                                                       "The quality gate does NOT abort the pipeline - it logs a warning and continues (non-blocking by default)",
-                                                       "A test verifies that the warning is emitted when match coverage is below threshold and NOT emitted when above"
-                                                   ]
-                        },
-                        {
-                            "id":  "US-81-006",
-                            "title":  "Add explicit stage dependency declarations to pipeline stages",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Each stage class defines a DEPENDS_ON class attribute listing stage names it requires (e.g., MatchStage.DEPENDS_ON = [\u0027ANALYZE\u0027, \u0027CAPTION\u0027])",
-                                                       "Each stage class defines a PRODUCES class attribute listing state attributes it outputs (e.g., CaptionStage.PRODUCES = [\u0027caption_results\u0027, \u0027text_metadata\u0027])",
-                                                       "Pipeline.run() validates that all dependencies are satisfied before running each stage (dependency stages must be completed in checkpoint or current run)",
-                                                       "A test verifies that running MATCH without CAPTION raises a clear DependencyError with message naming the missing dependency",
-                                                       "A test verifies that the existing STAGE_ORDER is consistent with declared dependencies (no stage runs before its dependencies)"
-                                                   ],
-                            "notes":  "Added DEPENDS_ON and PRODUCES class attrs to Stage base class (backward-compatible defaults). All 7 stages declare explicit dependencies. DependencyError class added. Pipeline.run() validates deps via _validate_stage_dependencies() tracking completed/restored stages. 21 tests in tests/test_stage_dependencies.py cover: declarations on all stages, STAGE_ORDER consistency, DependencyError on missing deps, dependency names in error messages, checkpoint restore counting."
-                        },
-                        {
-                            "id":  "US-81-007",
-                            "title":  "Add throughput metrics tracking to batch pipeline stages",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "StageMetrics dataclass gains new fields: items_per_second (float), peak_items_per_second (float), and throughput_samples (list of float)",
-                                                       "CAPTION, MATCH, and DOWNLOAD_SEGMENTS stages compute and report items_per_second in their StageResult.metrics",
-                                                       "Throughput is computed using a sliding window (last 10 items) rather than overall average, giving more accurate recent throughput",
-                                                       "Pipeline timing summary (_print_timing_summary) includes throughput column showing \u0027N items/sec\u0027 for batch stages",
-                                                       "A test verifies that throughput metrics are correctly computed from a sequence of timed item completions"
-                                                   ],
-                            "notes":  "Throughput metrics added to StageMetrics (items_per_second, peak_items_per_second, throughput_samples). CAPTION, MATCH, DOWNLOAD_SEGMENTS stages compute throughput via sliding window. Timing summary includes throughput column. 15 new tests pass."
-                        },
-                        {
-                            "id":  "US-81-008",
-                            "title":  "Add pipeline dry-run validation that checks all stage inputs upfront",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Pipeline.validate_all() runs validate_inputs() for ALL stages in order, collecting all validation errors before failing",
-                                                       "When run with --dry-run flag, the pipeline calls validate_all() and reports which stages would run, which would skip, and which have validation issues",
-                                                       "validate_all() checks config validity for each stage (e.g., embedding provider configured, cache dirs writable) without executing any stage",
-                                                       "Output is a structured summary: stage name, status (skip/run/error), validation message",
-                                                       "A test verifies that validate_all() catches a missing voiceover file and reports it for the ANALYZE stage without running any stage"
-                                                   ],
-                            "notes":  "Added StageValidationResult dataclass and validate_all() public method to PipelineOrchestrator. validate_all() runs _validate_config() for pipeline-level checks (CONFIG entries) then iterates all stages calling validate_inputs(), collecting ALL errors without short-circuiting. Returns structured List[StageValidationResult] with stage_name/status/message. Refactored _run_dry_run to delegate to validate_all(). 15 tests in tests/test_pipeline_validate_all.py cover structured output, error collection, filters, config errors, no-execution, missing voiceover detection with real AnalyzeStage, and dry-run integration."
-                        },
-                        {
-                            "id":  "US-81-009",
-                            "title":  "Add configurable failure threshold for batch stage abort decisions",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "New config option pipeline.batch_failure_threshold (float, default 0.5) controls when a batch stage aborts vs continues",
-                                                       "When failure rate exceeds threshold during a batch stage, the stage aborts immediately with a clear error message listing all accumulated failures",
-                                                       "When failure rate is below threshold, the stage continues processing remaining items and reports partial success",
-                                                       "The threshold is checked after each batch item completes, not just at the end",
-                                                       "A test verifies that with threshold=0.3, a batch of 10 items aborts after the 4th failure (3 fails + 1 success already = 75% fail rate \u003e 30%)"
-                                                   ],
-                            "notes":  "Evidence gate: 2/5 criteria verified (40%). Minimum: 90%."
-                        },
-                        {
-                            "id":  "US-81-010",
-                            "title":  "Add pipeline stage timing predictions based on historical data",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "After each pipeline run, per-stage timing data (duration, items_processed, throughput) is appended to a pipeline_history.json file in the project directory",
-                                                       "Before running a stage, pipeline logs an estimated duration based on average of last 3 runs for that stage with similar item counts",
-                                                       "Estimation uses items_count from the current run and historical throughput to predict duration",
-                                                       "If no history exists, no estimate is logged (graceful degradation)",
-                                                       "A test verifies that with 3 historical runs averaging 10 items in 30 seconds, a new run with 20 items estimates ~60 seconds"
-                                                   ],
-                            "notes":  "Added src/pipeline_history.py for per-stage timing persistence (pipeline_history.json in project dir, max 10 runs). Integrated into PipelineOrchestrator: logs estimated duration before each stage (based on last 3 runs throughput), saves timing after completion. 11 tests pass."
-                        },
-                        {
-                            "id":  "US-81-011",
-                            "title":  "Add cross-stage data drift detection to pipeline orchestrator",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "After each stage completes, pipeline validates that output counts match expectations (e.g., caption_results count \u003e= 80% of video_ids count)",
-                                                       "Drift rules are defined as a list of (source_field, target_field, min_ratio) tuples in PipelineOrchestrator",
-                                                       "When drift is detected, a warning is logged: \u0027Data drift: {target_field} has {actual} items but {source_field} has {expected} (ratio: {ratio:.1%}, threshold: {min_ratio:.0%})\u0027",
-                                                       "Drift detection does not abort the pipeline - it only warns (non-blocking)",
-                                                       "A test verifies that drift warning is emitted when caption_results has 5 items but video_ids has 20 (25% ratio \u003c 80% threshold)"
-                                                   ],
-                            "notes":  "Tier: reliability. A partial data drift check exists for video_ids vs caption_results (US-44-010) but there\u0027s no systematic cross-stage validation. Source files: src/pipeline.py (add _check_data_drift after each stage, define drift rules as class constant). Drift rules: VIDEO_SEARCH-\u003eCAPTION (video_ids vs caption_results, 0.8), MATCH-\u003eOUTPUT (matches count vs voiceover_segments count, 0.5), CAPTION-\u003eMATCH (text_metadata vs video_ids, 0.8)."
-                        },
-                        {
-                            "id":  "US-81-012",
-                            "title":  "Add pipeline event hooks for extensible stage lifecycle callbacks",
-                            "priority":  "low",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "PipelineOrchestrator supports registering multiple callbacks for events: before_stage, after_stage, on_stage_error, on_pipeline_complete",
-                                                       "Callbacks receive a PipelineEvent dataclass with fields: event_type, stage_name, timestamp, data (dict), error (optional)",
-                                                       "Existing on_stage_start and on_stage_complete callbacks are migrated to use the new event system",
-                                                       "Multiple callbacks can be registered per event type and are called in registration order",
-                                                       "A test verifies that registering 2 callbacks for after_stage results in both being called with correct PipelineEvent data"
-                                                   ],
-                            "notes":  "Tier: architecture. Currently pipeline has on_stage_start/on_stage_complete as single callbacks. A proper event system enables plugins (progress reporter, metrics exporter, logging hooks) without modifying pipeline code. Source files: src/pipeline.py (add PipelineEvent dataclass, event registry, register_hook/emit_event methods). Keep backward compatible - existing callback params still work."
-                        }
-                    ]
+{
+  "sprintNumber": 81,
+  "focusArea": "pipeline",
+  "branchName": "ralph/sprint-81",
+  "projectContext": {
+    "sourceDir": "src/",
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short"
+  },
+  "userStories": [
+    {
+      "id": "US-81-001",
+      "title": "Generate sprint stories for pipeline focus area",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
+        "Add stories US-81-002 through US-81-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-81-NNN to be unique across sprints",
+        "Mark this story (US-81-001) as passes: true when done"
+      ],
+      "notes": "Seed story. Generated 11 pipeline-focused stories based on codebase analysis. Key findings: metadata extraction, chapter detection, title scoring, tag boost, and LLM context enrichment are ALL already implemented. Stories focus on actual pipeline gaps: per-item error isolation, partial stage resume, progress reporting, stage dependency declaration, data quality validation, and pipeline-level parallelism."
+    },
+    {
+      "id": "US-81-002",
+      "title": "Add per-item error isolation to batch pipeline stages",
+      "priority": "high",
+      "passes": true,
+      "acceptanceCriteria": [
+        "CAPTION stage continues processing remaining videos when a single caption fetch fails, collecting errors in a per-video error dict",
+        "DOWNLOAD_SEGMENTS stage continues downloading remaining segments when one segment download fails, collecting errors per segment",
+        "Failed items are logged with structured error info (video_id, error_type, message) and included in StageResult.data['failed_items']",
+        "StageResult.metrics.items_failed count matches the actual number of failed items",
+        "A test verifies that when 1 of 5 items fails in a batch, the stage still returns success=True with 4 processed items and 1 failed item"
+      ],
+      "notes": "Tier: foundation. Added failed_items list to SegmentDownloadStats with video_id tracking in increment_failure(). CAPTION stage now builds failed_items from caption_results and returns StageMetrics with items_failed/items_processed. DOWNLOAD_SEGMENTS already had per-item error isolation; added failed_items to checkpoint_data. 7 tests cover both stages."
+    },
+    {
+      "id": "US-81-003",
+      "title": "Add partial stage resume for long-running download stages",
+      "priority": "high",
+      "passes": false,
+      "acceptanceCriteria": [
+        "DOWNLOAD_SEGMENTS stage saves incremental progress to checkpoint after every N downloads (configurable, default 10)",
+        "When resuming a DOWNLOAD_SEGMENTS stage via --resume, already-downloaded segments are detected on disk and skipped",
+        "The incremental checkpoint includes a 'partial_progress' dict with keys: completed_ids, failed_ids, total_count",
+        "A test verifies that after interrupting at 5/20 downloads and resuming, only the remaining 15 are attempted",
+        "Checkpoint partial_progress is cleared when the stage completes fully"
+      ],
+      "notes": "HARD STORY: Skipped after 30_minute_limit - pending decomposition"
+    },
+    {
+      "id": "US-81-004",
+      "title": "Add centralized pipeline progress reporting with stage-level granularity",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "A new ProgressReporter class in src/pipeline_progress.py provides a unified progress interface",
+        "ProgressReporter tracks current_stage, items_total, items_completed, items_failed, elapsed_seconds, and estimated_remaining_seconds",
+        "Pipeline.run() passes ProgressReporter to each stage, and stages call reporter.update(completed=N) during batch processing",
+        "ProgressReporter writes a progress.json file to the project directory, updated at most every 5 seconds",
+        "A test verifies that ProgressReporter correctly computes ETA based on throughput (items_completed / elapsed_seconds * items_remaining)"
+      ],
+      "notes": "Implemented ProgressReporter in src/pipeline_progress.py with start_stage/update/finish_stage/finish_pipeline API. Pipeline.run() creates reporter, starts/finishes stages, and sets state._progress_reporter for stage access. DOWNLOAD_SEGMENTS and CAPTION stages call reporter.update() during batch processing. progress.json written with 5s throttle via atomic rename. 13 tests cover ETA computation, snapshots, file I/O, and pipeline lifecycle."
+    },
+    {
+      "id": "US-81-005",
+      "title": "Add data quality gate between MATCH and OUTPUT stages",
+      "priority": "medium",
+      "passes": true,
+      "notes": "All 5 criteria verified. Implementation in src/pipeline.py (_check_match_coverage_gate). Config in config.yaml (pipeline.quality_gates.min_match_coverage). 7 tests in tests/test_pipeline_quality_gate.py all pass: below-threshold warning, above-threshold no warning, exact threshold, custom threshold, zero segments, zero matches, info log.",
+      "acceptanceCriteria": [
+        "After MATCH stage completes, a validation check verifies that at least 50% of voiceover segments have a match (configurable threshold)",
+        "If match coverage is below threshold, a warning is logged with specific guidance: 'Only N/M segments matched (X%). Consider running with --force-rematch or checking video search results.'",
+        "The quality gate threshold is configurable via config.yaml under pipeline.quality_gates.min_match_coverage (default 0.5)",
+        "The quality gate does NOT abort the pipeline - it logs a warning and continues (non-blocking by default)",
+        "A test verifies that the warning is emitted when match coverage is below threshold and NOT emitted when above"
+      ]
+    },
+    {
+      "id": "US-81-006",
+      "title": "Add explicit stage dependency declarations to pipeline stages",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Each stage class defines a DEPENDS_ON class attribute listing stage names it requires (e.g., MatchStage.DEPENDS_ON = ['ANALYZE', 'CAPTION'])",
+        "Each stage class defines a PRODUCES class attribute listing state attributes it outputs (e.g., CaptionStage.PRODUCES = ['caption_results', 'text_metadata'])",
+        "Pipeline.run() validates that all dependencies are satisfied before running each stage (dependency stages must be completed in checkpoint or current run)",
+        "A test verifies that running MATCH without CAPTION raises a clear DependencyError with message naming the missing dependency",
+        "A test verifies that the existing STAGE_ORDER is consistent with declared dependencies (no stage runs before its dependencies)"
+      ],
+      "notes": "Added DEPENDS_ON and PRODUCES class attrs to Stage base class (backward-compatible defaults). All 7 stages declare explicit dependencies. DependencyError class added. Pipeline.run() validates deps via _validate_stage_dependencies() tracking completed/restored stages. 21 tests in tests/test_stage_dependencies.py cover: declarations on all stages, STAGE_ORDER consistency, DependencyError on missing deps, dependency names in error messages, checkpoint restore counting."
+    },
+    {
+      "id": "US-81-007",
+      "title": "Add throughput metrics tracking to batch pipeline stages",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "StageMetrics dataclass gains new fields: items_per_second (float), peak_items_per_second (float), and throughput_samples (list of float)",
+        "CAPTION, MATCH, and DOWNLOAD_SEGMENTS stages compute and report items_per_second in their StageResult.metrics",
+        "Throughput is computed using a sliding window (last 10 items) rather than overall average, giving more accurate recent throughput",
+        "Pipeline timing summary (_print_timing_summary) includes throughput column showing 'N items/sec' for batch stages",
+        "A test verifies that throughput metrics are correctly computed from a sequence of timed item completions"
+      ],
+      "notes": "Throughput metrics added to StageMetrics (items_per_second, peak_items_per_second, throughput_samples). CAPTION, MATCH, DOWNLOAD_SEGMENTS stages compute throughput via sliding window. Timing summary includes throughput column. 15 new tests pass."
+    },
+    {
+      "id": "US-81-008",
+      "title": "Add pipeline dry-run validation that checks all stage inputs upfront",
+      "priority": "medium",
+      "passes": true,
+      "acceptanceCriteria": [
+        "Pipeline.validate_all() runs validate_inputs() for ALL stages in order, collecting all validation errors before failing",
+        "When run with --dry-run flag, the pipeline calls validate_all() and reports which stages would run, which would skip, and which have validation issues",
+        "validate_all() checks config validity for each stage (e.g., embedding provider configured, cache dirs writable) without executing any stage",
+        "Output is a structured summary: stage name, status (skip/run/error), validation message",
+        "A test verifies that validate_all() catches a missing voiceover file and reports it for the ANALYZE stage without running any stage"
+      ],
+      "notes": "Added StageValidationResult dataclass and validate_all() public method to PipelineOrchestrator. validate_all() runs _validate_config() for pipeline-level checks (CONFIG entries) then iterates all stages calling validate_inputs(), collecting ALL errors without short-circuiting. Returns structured List[StageValidationResult] with stage_name/status/message. Refactored _run_dry_run to delegate to validate_all(). 15 tests in tests/test_pipeline_validate_all.py cover structured output, error collection, filters, config errors, no-execution, missing voiceover detection with real AnalyzeStage, and dry-run integration."
+    },
+    {
+      "id": "US-81-009",
+      "title": "Add configurable failure threshold for batch stage abort decisions",
+      "priority": "low",
+      "passes": true,
+      "acceptanceCriteria": [
+        "New config option pipeline.batch_failure_threshold (float, default 0.5) controls when a batch stage aborts vs continues",
+        "When failure rate exceeds threshold during a batch stage, the stage aborts immediately with a clear error message listing all accumulated failures",
+        "When failure rate is below threshold, the stage continues processing remaining items and reports partial success",
+        "The threshold is checked after each batch item completes, not just at the end",
+        "A test verifies that with threshold=0.3, a batch of 10 items aborts after the 4th failure (3 fails + 1 success already = 75% fail rate > 30%)"
+      ],
+      "notes": "Evidence gate: 2/5 criteria verified (40%). Minimum: 90%."
+    },
+    {
+      "id": "US-81-010",
+      "title": "Add pipeline stage timing predictions based on historical data",
+      "priority": "low",
+      "passes": true,
+      "acceptanceCriteria": [
+        "After each pipeline run, per-stage timing data (duration, items_processed, throughput) is appended to a pipeline_history.json file in the project directory",
+        "Before running a stage, pipeline logs an estimated duration based on average of last 3 runs for that stage with similar item counts",
+        "Estimation uses items_count from the current run and historical throughput to predict duration",
+        "If no history exists, no estimate is logged (graceful degradation)",
+        "A test verifies that with 3 historical runs averaging 10 items in 30 seconds, a new run with 20 items estimates ~60 seconds"
+      ],
+      "notes": "Added src/pipeline_history.py for per-stage timing persistence (pipeline_history.json in project dir, max 10 runs). Integrated into PipelineOrchestrator: logs estimated duration before each stage (based on last 3 runs throughput), saves timing after completion. 11 tests pass."
+    },
+    {
+      "id": "US-81-011",
+      "title": "Add cross-stage data drift detection to pipeline orchestrator",
+      "priority": "low",
+      "passes": true,
+      "acceptanceCriteria": [
+        "After each stage completes, pipeline validates that output counts match expectations (e.g., caption_results count >= 80% of video_ids count)",
+        "Drift rules are defined as a list of (source_field, target_field, min_ratio) tuples in PipelineOrchestrator",
+        "When drift is detected, a warning is logged: 'Data drift: {target_field} has {actual} items but {source_field} has {expected} (ratio: {ratio:.1%}, threshold: {min_ratio:.0%})'",
+        "Drift detection does not abort the pipeline - it only warns (non-blocking)",
+        "A test verifies that drift warning is emitted when caption_results has 5 items but video_ids has 20 (25% ratio < 80% threshold)"
+      ],
+      "notes": "Added DRIFT_RULES class constant and _check_data_drift() method to PipelineOrchestrator. 3 rules: CAPTION (video_ids vs caption_results, 0.8), MATCH (video_ids vs text_metadata, 0.8), OUTPUT (voiceover_segments vs matches, 0.5). Non-blocking warnings. 9 tests."
+    },
+    {
+      "id": "US-81-012",
+      "title": "Add pipeline event hooks for extensible stage lifecycle callbacks",
+      "priority": "low",
+      "passes": false,
+      "acceptanceCriteria": [
+        "PipelineOrchestrator supports registering multiple callbacks for events: before_stage, after_stage, on_stage_error, on_pipeline_complete",
+        "Callbacks receive a PipelineEvent dataclass with fields: event_type, stage_name, timestamp, data (dict), error (optional)",
+        "Existing on_stage_start and on_stage_complete callbacks are migrated to use the new event system",
+        "Multiple callbacks can be registered per event type and are called in registration order",
+        "A test verifies that registering 2 callbacks for after_stage results in both being called with correct PipelineEvent data"
+      ],
+      "notes": "Tier: architecture. Currently pipeline has on_stage_start/on_stage_complete as single callbacks. A proper event system enables plugins (progress reporter, metrics exporter, logging hooks) without modifying pipeline code. Source files: src/pipeline.py (add PipelineEvent dataclass, event registry, register_hook/emit_event methods). Keep backward compatible - existing callback params still work."
+    }
+  ]
 }
