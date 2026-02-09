@@ -1,175 +1,175 @@
-{
-    "sprintNumber": 84,
-    "focusArea": "quality",
-    "branchName": "ralph/sprint-84",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
-    },
-    "userStories": [
-        {
-            "id": "US-84-001",
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'quality' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'quality'",
-                "Add stories US-84-002 through US-84-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-84-NNN to be unique across sprints",
-                "Mark this story (US-84-001) as passes: true when done"
-            ],
-            "passes": true,
-            "priority": "high",
-            "title": "Generate sprint stories for quality focus area",
-            "notes": "Seed story - generates quality improvement stories based on codebase analysis and user interview notes."
-        },
-        {
-            "id": "US-84-002",
-            "title": "Add confidence adjustment compounding guard to prevent cascading false negatives",
-            "acceptanceCriteria": [
-                "apply_all_adjustments() in scoring.py tracks cumulative negative adjustment magnitude across all 15+ adjustments",
-                "When cumulative negative adjustments exceed configurable threshold (default -0.30), remaining negative adjustments are dampened by 50%",
-                "New 'adjustment_compounding' entry added to confidence_breakdown showing total negative sum and whether dampening was applied",
-                "Config field matching.scoring.max_cumulative_negative_adjustment (float, default -0.30) added to MatchingScoringConfig",
-                "Unit test verifies dampening activates when 5+ negative adjustments compound past threshold",
-                "Unit test verifies dampening does NOT activate when total negative adjustment is within threshold"
-            ],
-            "passes": true,
-            "priority": "high",
-            "notes": "Tier: unit-testable scoring logic. Files: src/matching/scoring.py (apply_all_adjustments ~line 3702, add tracking after each adjustment call), src/config/sections/matching.py (MatchingScoringConfig ~line 105, add max_cumulative_negative_adjustment field), config.yaml (matching.scoring section). Implemented: compounding guard tracks cumulative negative adjustments via _apply_compounding_guard() closure, dampens by 50% past -0.30 threshold, adds adjustment_compounding breakdown entry. 6 unit tests all pass."
-        },
-        {
-            "id": "US-84-003",
-            "title": "Add adaptive candidate pool sizing based on voiceover segment complexity",
-            "acceptanceCriteria": [
-                "EmbeddingSearch.search() calculates complexity_score from segment word count, entity presence, and location words",
-                "Candidate pool size (k) scales: base_k * (1.0 + 0.5 * complexity_score) with configurable min_k=15 and max_k=100",
-                "Simple segments (<=5 words, no entities) get expanded pool; complex specific segments get standard pool",
-                "Config fields min_candidates, max_candidates, and complexity_scaling_factor added to EmbeddingSearchConfig",
-                "Unit test verifies pool expansion for short generic segment ('the city') vs specific segment ('historic architecture of Dubrovnik')"
-            ],
-            "passes": false,
-            "priority": "high",
-            "notes": "Tier: unit-testable search logic. Files: src/matching/embedding_search.py (search() ~line 93, add complexity calculation before FAISS query; _compute_complexity_score() new method), src/config/sections/matching.py (EmbeddingSearchConfig ~line 23, add min_candidates/max_candidates/complexity_scaling_factor). Currently embedding_candidates is static at 20. Short generic voiceover needs broader search (50+) while specific voiceover with entities needs fewer but more precise candidates."
-        },
-        {
-            "id": "US-84-004",
-            "title": "Add source stutter penalty to prevent A-B-A video alternation pattern",
-            "acceptanceCriteria": [
-                "apply_temporal_coherence_penalty() detects A-B-A pattern where current source matches 2-segments-ago but differs from previous",
-                "Stutter penalty of configurable magnitude (default -0.04) applied when pattern detected",
-                "Penalty added to confidence_breakdown as 'source_stutter_penalty' entry with reason showing the A-B-A source IDs",
-                "Config field matching.scoring.source_stutter_penalty (float, default 0.04) added to MatchingScoringConfig",
-                "Unit test verifies penalty applied for A-B-A pattern but NOT for A-A-A (continuation) or A-B-C (progression)"
-            ],
-            "passes": false,
-            "priority": "medium",
-            "notes": "Tier: unit-testable scoring logic. Files: src/matching/scoring.py (apply_temporal_coherence_penalty ~line 727, add prev_prev_source tracking; need access to match history 2 segments back), src/config/sections/matching.py (MatchingScoringConfig, add source_stutter_penalty field). Problem: segment 10=videoA, 11=videoB, 12=videoA creates jarring visual stutter. Temporal coherence currently only checks previous segment, missing the A-B-A ping-pong pattern."
-        },
-        {
-            "id": "US-84-005",
-            "title": "Add pre-fetch diversity filter to FAISS candidate retrieval",
-            "acceptanceCriteria": [
-                "EmbeddingSearch._compute_similarity() fetches k*2 candidates from FAISS, then applies source diversity filter to return k diverse results",
-                "Source concentration ratio (unique_sources / total_candidates) logged for each search",
-                "When concentration ratio < 0.3 (less than 30% unique sources in raw results), a warning is logged",
-                "Config field pre_fetch_multiplier (int, default 2) added to EmbeddingSearchConfig",
-                "Unit test verifies diverse results when top-20 FAISS results are dominated by 2 sources (10 each)"
-            ],
-            "passes": false,
-            "priority": "medium",
-            "notes": "Tier: unit-testable search logic. Files: src/matching/embedding_search.py (_compute_similarity ~line 223, change k to k*multiplier; _deduplicate_by_source ~line 188 already exists but runs after retrieval — move earlier or add pre-filter), src/config/sections/matching.py (EmbeddingSearchConfig, add pre_fetch_multiplier). Problem: max_candidates_per_source=3 is applied AFTER FAISS retrieval. If top 20 are from 2 videos (10 each), we fetch 20 then truncate to 6, wasting computation and missing diverse candidates ranked 21-40."
-        },
-        {
-            "id": "US-84-006",
-            "title": "Apply confidence penalty when LLM reranker produces low-quality reasoning",
-            "acceptanceCriteria": [
-                "When is_low_quality_reasoning() returns True in llm_providers.py, a -0.05 confidence penalty is applied to the match",
-                "Match metadata includes 'llm_reasoning_quality' field (0=low, 1=normal) for downstream analysis",
-                "When secondary LLM fallback is triggered (confidence < ambiguous_threshold), an additional 0.9x multiplier is applied",
-                "Both penalties appear in confidence_breakdown as 'llm_reasoning_penalty' and 'secondary_llm_decay' entries",
-                "Unit test verifies penalty applied for generic reasoning ('this matches because it is relevant') vs specific reasoning"
-            ],
-            "passes": false,
-            "priority": "medium",
-            "notes": "Tier: unit-testable scoring/reranking logic. Files: src/matching/llm_reranker.py (lines 133-156, add penalty after primary/secondary LLM calls), src/matching/llm_providers.py (is_low_quality_reasoning ~line 165, already detects but doesn't act), src/matching/scoring.py (apply_all_adjustments, add llm_reasoning_penalty step). Problem: is_low_quality_reasoning() logs warnings but takes no corrective action. If LLM says 'this video matches because it shows relevant content', the confidence score is unreliable and should be discounted."
-        },
-        {
-            "id": "US-84-007",
-            "title": "Add smooth duration ratio reward curve replacing step-function penalties",
-            "acceptanceCriteria": [
-                "Duration ratio scoring uses smooth curve: near-perfect ratio (0.9-1.1x) gets +0.02 boost instead of zero adjustment",
-                "Penalty curve uses logarithmic scaling: penalty = min(0.10, 0.02 * abs(log2(ratio))) for ratios outside 0.5-2.0 range",
-                "Existing step thresholds (ratio<0.3 and ratio>3.0) remain as hard floor/ceiling penalties",
-                "Config fields duration_ratio_reward_threshold (default 0.1) and duration_ratio_reward_boost (default 0.02) added",
-                "Unit test verifies graduated penalties: ratio 0.4 gets less penalty than ratio 0.2; ratio 0.95 gets boost"
-            ],
-            "passes": false,
-            "priority": "low",
-            "notes": "Tier: unit-testable scoring math. Files: src/matching/scoring.py (apply_duration_penalty ~line 136, replace step-function with smooth curve while keeping existing hard thresholds as boundaries), src/config/sections/matching.py (MatchingScoringConfig, add duration_ratio_reward_threshold and duration_ratio_reward_boost). Problem: current 3-band system treats 0.4x same as 0.9x (both get zero adjustment). Misses opportunity to boost near-perfect duration matches and penalize proportionally."
-        },
-        {
-            "id": "US-84-008",
-            "title": "Add ambiguous pool detection and flagging when candidate variance is below threshold",
-            "acceptanceCriteria": [
-                "When top-10 candidate similarity scores have variance < 0.02, match is flagged as 'ambiguous_pool' in match metadata",
-                "Warning logged: 'Top N candidates within X range — match selection may be arbitrary'",
-                "Quality report includes 'uncertain_matches_count' tracking how many segments had ambiguous pools",
-                "Config field variance_warning_threshold (float, default 0.02) added to MatchingScoringConfig",
-                "Unit test verifies flag set when 10 candidates all score 0.87-0.89 and NOT set when clear winner exists (0.95 vs 0.70s)"
-            ],
-            "passes": false,
-            "priority": "medium",
-            "notes": "Tier: unit-testable search/scoring logic. Files: src/matching/scoring.py (calculate_adaptive_threshold ~line 51, variance floor already at 0.02 but doesn't flag), src/matching/embedding_search.py (search() ~line 93, add variance check after similarity computation), src/matching/metrics.py (add uncertain_matches_count to quality report). Problem: variance floor (0.02) silently prevents threshold reduction when all candidates score nearly identically. Low variance from 20 candidates scoring 0.87-0.89 suggests weak embedding signal, not a clear winner — this should be surfaced to the user."
-        },
-        {
-            "id": "US-84-009",
-            "title": "Add inter-track embedding distance metric for alternative selection diversity",
-            "acceptanceCriteria": [
-                "After alternative selection, compute pairwise embedding cosine distance between V1, V2, V3 for each segment",
-                "Track-level diversity score calculated as mean pairwise distance across all segments",
-                "Warning logged when avg_embedding_distance(V1, V2, V3) < configurable threshold (default 0.15)",
-                "Quality report includes 'track_diversity_score' and 'low_diversity_segments_count'",
-                "Unit test verifies low diversity detected when V1-V3 are all cityscape variants vs high diversity with different scene types"
-            ],
-            "passes": false,
-            "priority": "low",
-            "notes": "Tier: unit-testable selection/metrics logic. Files: src/matching/alternative_selection.py (after select_alternatives, add diversity computation), src/matching/metrics.py (add track_diversity_score and low_diversity_segments_count to quality report), src/config/sections/matching.py (add min_track_diversity_distance to config). Problem: V2-V3 alternatives prefer different sources, but no metric tracks HOW different. V1='cityscape day', V2='cityscape sunset', V3='cityscape aerial' are different sources but provide low real editorial diversity."
-        },
-        {
-            "id": "US-84-010",
-            "title": "Add actionable diagnostics to match quality trend degradation detection",
-            "acceptanceCriteria": [
-                "MatchQualityTrend adds per-chunk diagnostics: avg_confidence, avg_candidates_considered, dominant_negative_adjustment for each chunk",
-                "When trend is DEGRADING, a cause summary string is generated identifying the top adjustment causing decline",
-                "Cause summary format: 'Degradation in chunks 8-10 due to: 60% of negative adjustments were chapter_coherence_penalty'",
-                "Quality report includes 'trend_diagnostics' array with chunk-level detail when trend is DEGRADING",
-                "Unit test verifies correct cause identification when degradation is driven by a single dominant penalty type"
-            ],
-            "passes": false,
-            "priority": "low",
-            "notes": "Tier: unit-testable metrics/reporting logic. Files: src/matching/metrics.py (MatchQualityTrend class ~line 501, add chunk_diagnostics dict to each trend chunk; add cause identification logic ~line 737), src/config/sections/matching.py (no config needed — purely reporting). Problem: current trend detection logs 'DEGRADING' or 'IMPROVING' but provides no actionable insight. Knowing quality degraded in the last 30% is useless without WHY — was it fewer candidates? worse embeddings? chapter mismatch?"
-        },
-        {
-            "id": "US-84-011",
-            "title": "Propagate video_chapters and video_tags fields to DownloadedVideo dataclass",
-            "acceptanceCriteria": [
-                "DownloadedVideo in state.py has video_chapters: List[dict] and video_tags: List[str] fields with default empty list",
-                "VideoSearchResult-to-DownloadedVideo conversion preserves video_chapters and video_tags",
-                "Checkpoint serialization/deserialization round-trips video_chapters and video_tags on DownloadedVideo",
-                "Existing DownloadedVideo instances without these fields deserialize cleanly (backward compat via field defaults)",
-                "Unit test verifies field propagation from VideoSearchResult through to DownloadedVideo"
-            ],
-            "passes": false,
-            "priority": "high",
-            "notes": "Tier: unit-testable data model fix. Files: src/state.py (DownloadedVideo ~line 67, add video_chapters and video_tags fields matching VideoSearchResult's fields at lines 268-269). This is the ONE remaining gap from the metadata extraction feature — VideoSearchResult has these fields but DownloadedVideo does not, meaning chapter/tag metadata is lost when videos are downloaded. Also check src/stages/download_segments_stage.py for the conversion point where VideoSearchResult becomes DownloadedVideo."
-        }
-    ]
+﻿{
+    "sprintNumber":  84,
+    "focusArea":  "quality",
+    "branchName":  "ralph/sprint-84",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-84-001",
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027quality\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027quality\u0027",
+                                                       "Add stories US-84-002 through US-84-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-84-NNN to be unique across sprints",
+                                                       "Mark this story (US-84-001) as passes: true when done"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Generate sprint stories for quality focus area",
+                            "notes":  "Seed story - generates quality improvement stories based on codebase analysis and user interview notes."
+                        },
+                        {
+                            "id":  "US-84-002",
+                            "title":  "Add confidence adjustment compounding guard to prevent cascading false negatives",
+                            "acceptanceCriteria":  [
+                                                       "apply_all_adjustments() in scoring.py tracks cumulative negative adjustment magnitude across all 15+ adjustments",
+                                                       "When cumulative negative adjustments exceed configurable threshold (default -0.30), remaining negative adjustments are dampened by 50%",
+                                                       "New \u0027adjustment_compounding\u0027 entry added to confidence_breakdown showing total negative sum and whether dampening was applied",
+                                                       "Config field matching.scoring.max_cumulative_negative_adjustment (float, default -0.30) added to MatchingScoringConfig",
+                                                       "Unit test verifies dampening activates when 5+ negative adjustments compound past threshold",
+                                                       "Unit test verifies dampening does NOT activate when total negative adjustment is within threshold"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "notes":  "All 6 criteria verified. Implementation in scoring.py, config in matching.py, 6 unit tests passing in test_compounding_guard.py."
+                        },
+                        {
+                            "id":  "US-84-003",
+                            "title":  "Add adaptive candidate pool sizing based on voiceover segment complexity",
+                            "acceptanceCriteria":  [
+                                                       "EmbeddingSearch.search() calculates complexity_score from segment word count, entity presence, and location words",
+                                                       "Candidate pool size (k) scales: base_k * (1.0 + 0.5 * complexity_score) with configurable min_k=15 and max_k=100",
+                                                       "Simple segments (\u003c=5 words, no entities) get expanded pool; complex specific segments get standard pool",
+                                                       "Config fields min_candidates, max_candidates, and complexity_scaling_factor added to EmbeddingSearchConfig",
+                                                       "Unit test verifies pool expansion for short generic segment (\u0027the city\u0027) vs specific segment (\u0027historic architecture of Dubrovnik\u0027)"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "notes":  "Implemented _compute_complexity_score() and adaptive pool sizing in EmbeddingSearch.search(). Added min_candidates, max_candidates, complexity_scaling_factor to EmbeddingSearchConfig. 14 tests pass."
+                        },
+                        {
+                            "id":  "US-84-004",
+                            "title":  "Add source stutter penalty to prevent A-B-A video alternation pattern",
+                            "acceptanceCriteria":  [
+                                                       "apply_temporal_coherence_penalty() detects A-B-A pattern where current source matches 2-segments-ago but differs from previous",
+                                                       "Stutter penalty of configurable magnitude (default -0.04) applied when pattern detected",
+                                                       "Penalty added to confidence_breakdown as \u0027source_stutter_penalty\u0027 entry with reason showing the A-B-A source IDs",
+                                                       "Config field matching.scoring.source_stutter_penalty (float, default 0.04) added to MatchingScoringConfig",
+                                                       "Unit test verifies penalty applied for A-B-A pattern but NOT for A-A-A (continuation) or A-B-C (progression)"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "notes":  "Implemented apply_source_stutter_penalty() in scoring.py with A-B-A detection. Wired in tiered_matcher.py with _prev_prev_match_segment tracking, called before temporal coherence in all 3 matching paths. Added source_stutter_penalty config field (default 0.04) to MatchingScoringConfig and config.yaml. 12 new tests pass, 66 total temporal+stutter tests pass."
+                        },
+                        {
+                            "id":  "US-84-005",
+                            "title":  "Add pre-fetch diversity filter to FAISS candidate retrieval",
+                            "acceptanceCriteria":  [
+                                                       "EmbeddingSearch._compute_similarity() fetches k*2 candidates from FAISS, then applies source diversity filter to return k diverse results",
+                                                       "Source concentration ratio (unique_sources / total_candidates) logged for each search",
+                                                       "When concentration ratio \u003c 0.3 (less than 30% unique sources in raw results), a warning is logged",
+                                                       "Config field pre_fetch_multiplier (int, default 2) added to EmbeddingSearchConfig",
+                                                       "Unit test verifies diverse results when top-20 FAISS results are dominated by 2 sources (10 each)"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "notes":  "Added pre_fetch_multiplier config (default 2) to EmbeddingSearchConfig. search() now fetches k*multiplier from FAISS before diversity filtering. Source concentration ratio logged at DEBUG, warning at <0.3. 11 new tests + 53 existing tests pass (64 total)."
+                        },
+                        {
+                            "id":  "US-84-006",
+                            "title":  "Apply confidence penalty when LLM reranker produces low-quality reasoning",
+                            "acceptanceCriteria":  [
+                                                       "When is_low_quality_reasoning() returns True in llm_providers.py, a -0.05 confidence penalty is applied to the match",
+                                                       "Match metadata includes \u0027llm_reasoning_quality\u0027 field (0=low, 1=normal) for downstream analysis",
+                                                       "When secondary LLM fallback is triggered (confidence \u003c ambiguous_threshold), an additional 0.9x multiplier is applied",
+                                                       "Both penalties appear in confidence_breakdown as \u0027llm_reasoning_penalty\u0027 and \u0027secondary_llm_decay\u0027 entries",
+                                                       "Unit test verifies penalty applied for generic reasoning (\u0027this matches because it is relevant\u0027) vs specific reasoning"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "notes":  "Added validate_llm_reasoning() call in LLMReranker.rerank() to detect low-quality reasoning. -0.05 penalty applied when reasoning is generic. 0.9x decay multiplier on secondary LLM fallback. RerankResult.llm_reasoning_quality field (0=low, 1=normal). Both penalties recorded in confidence_breakdown as llm_reasoning_penalty and secondary_llm_decay entries in tiered_matcher.py. 9 new tests pass."
+                        },
+                        {
+                            "id":  "US-84-007",
+                            "title":  "Add smooth duration ratio reward curve replacing step-function penalties",
+                            "acceptanceCriteria":  [
+                                                       "Duration ratio scoring uses smooth curve: near-perfect ratio (0.9-1.1x) gets +0.02 boost instead of zero adjustment",
+                                                       "Penalty curve uses logarithmic scaling: penalty = min(0.10, 0.02 * abs(log2(ratio))) for ratios outside 0.5-2.0 range",
+                                                       "Existing step thresholds (ratio\u003c0.3 and ratio\u003e3.0) remain as hard floor/ceiling penalties",
+                                                       "Config fields duration_ratio_reward_threshold (default 0.1) and duration_ratio_reward_boost (default 0.02) added",
+                                                       "Unit test verifies graduated penalties: ratio 0.4 gets less penalty than ratio 0.2; ratio 0.95 gets boost"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "notes":  "Tier: unit-testable scoring math. Files: src/matching/scoring.py (apply_duration_penalty ~line 136, replace step-function with smooth curve while keeping existing hard thresholds as boundaries), src/config/sections/matching.py (MatchingScoringConfig, add duration_ratio_reward_threshold and duration_ratio_reward_boost). Problem: current 3-band system treats 0.4x same as 0.9x (both get zero adjustment). Misses opportunity to boost near-perfect duration matches and penalize proportionally."
+                        },
+                        {
+                            "id":  "US-84-008",
+                            "title":  "Add ambiguous pool detection and flagging when candidate variance is below threshold",
+                            "acceptanceCriteria":  [
+                                                       "When top-10 candidate similarity scores have variance \u003c 0.02, match is flagged as \u0027ambiguous_pool\u0027 in match metadata",
+                                                       "Warning logged: \u0027Top N candidates within X range — match selection may be arbitrary\u0027",
+                                                       "Quality report includes \u0027uncertain_matches_count\u0027 tracking how many segments had ambiguous pools",
+                                                       "Config field variance_warning_threshold (float, default 0.02) added to MatchingScoringConfig",
+                                                       "Unit test verifies flag set when 10 candidates all score 0.87-0.89 and NOT set when clear winner exists (0.95 vs 0.70s)"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "notes":  "Tier: unit-testable search/scoring logic. Files: src/matching/scoring.py (calculate_adaptive_threshold ~line 51, variance floor already at 0.02 but doesn\u0027t flag), src/matching/embedding_search.py (search() ~line 93, add variance check after similarity computation), src/matching/metrics.py (add uncertain_matches_count to quality report). Problem: variance floor (0.02) silently prevents threshold reduction when all candidates score nearly identically. Low variance from 20 candidates scoring 0.87-0.89 suggests weak embedding signal, not a clear winner — this should be surfaced to the user."
+                        },
+                        {
+                            "id":  "US-84-009",
+                            "title":  "Add inter-track embedding distance metric for alternative selection diversity",
+                            "acceptanceCriteria":  [
+                                                       "After alternative selection, compute pairwise embedding cosine distance between V1, V2, V3 for each segment",
+                                                       "Track-level diversity score calculated as mean pairwise distance across all segments",
+                                                       "Warning logged when avg_embedding_distance(V1, V2, V3) \u003c configurable threshold (default 0.15)",
+                                                       "Quality report includes \u0027track_diversity_score\u0027 and \u0027low_diversity_segments_count\u0027",
+                                                       "Unit test verifies low diversity detected when V1-V3 are all cityscape variants vs high diversity with different scene types"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "notes":  "Tier: unit-testable selection/metrics logic. Files: src/matching/alternative_selection.py (after select_alternatives, add diversity computation), src/matching/metrics.py (add track_diversity_score and low_diversity_segments_count to quality report), src/config/sections/matching.py (add min_track_diversity_distance to config). Problem: V2-V3 alternatives prefer different sources, but no metric tracks HOW different. V1=\u0027cityscape day\u0027, V2=\u0027cityscape sunset\u0027, V3=\u0027cityscape aerial\u0027 are different sources but provide low real editorial diversity."
+                        },
+                        {
+                            "id":  "US-84-010",
+                            "title":  "Add actionable diagnostics to match quality trend degradation detection",
+                            "acceptanceCriteria":  [
+                                                       "MatchQualityTrend adds per-chunk diagnostics: avg_confidence, avg_candidates_considered, dominant_negative_adjustment for each chunk",
+                                                       "When trend is DEGRADING, a cause summary string is generated identifying the top adjustment causing decline",
+                                                       "Cause summary format: \u0027Degradation in chunks 8-10 due to: 60% of negative adjustments were chapter_coherence_penalty\u0027",
+                                                       "Quality report includes \u0027trend_diagnostics\u0027 array with chunk-level detail when trend is DEGRADING",
+                                                       "Unit test verifies correct cause identification when degradation is driven by a single dominant penalty type"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "notes":  "Tier: unit-testable metrics/reporting logic. Files: src/matching/metrics.py (MatchQualityTrend class ~line 501, add chunk_diagnostics dict to each trend chunk; add cause identification logic ~line 737), src/config/sections/matching.py (no config needed — purely reporting). Problem: current trend detection logs \u0027DEGRADING\u0027 or \u0027IMPROVING\u0027 but provides no actionable insight. Knowing quality degraded in the last 30% is useless without WHY — was it fewer candidates? worse embeddings? chapter mismatch?"
+                        },
+                        {
+                            "id":  "US-84-011",
+                            "title":  "Propagate video_chapters and video_tags fields to DownloadedVideo dataclass",
+                            "acceptanceCriteria":  [
+                                                       "DownloadedVideo in state.py has video_chapters: List[dict] and video_tags: List[str] fields with default empty list",
+                                                       "VideoSearchResult-to-DownloadedVideo conversion preserves video_chapters and video_tags",
+                                                       "Checkpoint serialization/deserialization round-trips video_chapters and video_tags on DownloadedVideo",
+                                                       "Existing DownloadedVideo instances without these fields deserialize cleanly (backward compat via field defaults)",
+                                                       "Unit test verifies field propagation from VideoSearchResult through to DownloadedVideo"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "high",
+                            "notes":  "Tier: unit-testable data model fix. Files: src/state.py (DownloadedVideo ~line 67, add video_chapters and video_tags fields matching VideoSearchResult\u0027s fields at lines 268-269). This is the ONE remaining gap from the metadata extraction feature — VideoSearchResult has these fields but DownloadedVideo does not, meaning chapter/tag metadata is lost when videos are downloaded. Also check src/stages/download_segments_stage.py for the conversion point where VideoSearchResult becomes DownloadedVideo."
+                        }
+                    ]
 }

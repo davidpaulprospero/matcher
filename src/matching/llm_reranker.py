@@ -13,6 +13,8 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Dict, List, Tuple, Optional, Any
 
+from .llm_providers import validate_llm_reasoning
+
 if TYPE_CHECKING:
     from ..utils import SRTSegment
     from .llm_providers import LLMProvider
@@ -32,6 +34,10 @@ class LLMRerankerConfig:
     close_spread_factor: float = 0.9  # Multiply confidence by this when close spread
     clear_winner_factor: float = 1.1  # Multiply confidence by this when clear winner
 
+    # US-84-006: LLM reasoning quality penalty
+    low_quality_reasoning_penalty: float = 0.05  # Penalty when reasoning is generic
+    secondary_llm_decay: float = 0.9  # Multiplier when secondary fallback triggered
+
 
 @dataclass
 class RerankResult:
@@ -40,6 +46,7 @@ class RerankResult:
     confidence: float  # Confidence score (0.0-1.0)
     reasoning: str  # Explanation for the selection
     used_secondary: bool = False  # Whether secondary provider was used
+    llm_reasoning_quality: int = 1  # 0=low quality reasoning, 1=normal
 
 
 class LLMReranker:
@@ -161,6 +168,29 @@ class LLMReranker:
             if spread_adjustment != 0.0:
                 reasoning = f"{reasoning} [spread_adj={spread_adjustment:+.2f}]"
 
+            # US-84-006: Validate LLM reasoning quality
+            reasoning_validation = validate_llm_reasoning(
+                reasoning=reasoning,
+                voiceover_text=voiceover_text,
+            )
+            llm_reasoning_quality = 1 if reasoning_validation.is_valid else 0
+
+            if not reasoning_validation.is_valid:
+                penalty = self.config.low_quality_reasoning_penalty
+                confidence = max(0.0, confidence - penalty)
+                logger.debug(
+                    f"US-84-006: Low-quality LLM reasoning penalty -{penalty} applied "
+                    f"(refs={reasoning_validation.specific_references})"
+                )
+
+            # US-84-006: Apply secondary LLM decay multiplier
+            if used_secondary:
+                decay = self.config.secondary_llm_decay
+                confidence = confidence * decay
+                logger.debug(
+                    f"US-84-006: Secondary LLM decay {decay}x applied"
+                )
+
             # Cache the result
             self._cache_response(cache_key, selected_idx, confidence, reasoning)
 
@@ -168,7 +198,8 @@ class LLMReranker:
                 selected_idx=selected_idx,
                 confidence=confidence,
                 reasoning=reasoning,
-                used_secondary=used_secondary
+                used_secondary=used_secondary,
+                llm_reasoning_quality=llm_reasoning_quality,
             )
 
         except Exception as e:

@@ -1646,6 +1646,28 @@ class TieredMatcher:
 
         # Apply remaining scoring adjustments (penalties/boosts not captured by multimodal)
         confidence_breakdown = []
+
+        # US-84-006: Record LLM reasoning quality penalty in breakdown
+        if rerank_result.llm_reasoning_quality == 0:
+            penalty = getattr(self.llm_reranker.config, 'low_quality_reasoning_penalty', 0.05)
+            _record_breakdown(
+                confidence_breakdown, 'llm_reasoning_penalty',
+                base_confidence + penalty, base_confidence,
+                f"Low-quality LLM reasoning: -{penalty}"
+            )
+
+        # US-84-006: Record secondary LLM decay in breakdown
+        if rerank_result.used_secondary:
+            decay = getattr(self.llm_reranker.config, 'secondary_llm_decay', 0.9)
+            # The decay was applied as confidence * decay inside reranker
+            # Record the effective adjustment: conf_before_decay - conf_after_decay
+            undecayed = base_confidence / decay if decay > 0 else base_confidence
+            _record_breakdown(
+                confidence_breakdown, 'secondary_llm_decay',
+                undecayed, base_confidence,
+                f"Secondary LLM fallback decay: {decay}x"
+            )
+
         prev = base_confidence
         adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
             base_confidence, vo_segment, best_seg,
@@ -1835,6 +1857,10 @@ class TieredMatcher:
             final_reasoning += f" [{entity_boost_reason}]"
         if explanation_validation_reason:
             final_reasoning += f" [{explanation_validation_reason}]"
+        if rerank_result.llm_reasoning_quality == 0:
+            final_reasoning += f" [llm_reasoning_quality=low]"
+        if rerank_result.used_secondary:
+            final_reasoning += f" [secondary_llm_decay]"
 
         # US-63-007: Store confidence breakdown on Match object
         match = Match(
