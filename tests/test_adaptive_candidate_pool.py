@@ -102,10 +102,10 @@ class TestAdaptivePoolSizing:
             voiceover_text="the city",
         )
 
-        # _compute_similarity is called with fetch_k which is k*3 (due to dedup)
+        # _compute_similarity is called with fetch_k which is k*pre_fetch_multiplier (due to dedup)
         call_k = mock_sim.call_args[0][1]
         # "the city" is low complexity -> inverse_complexity high -> k should be > base 20
-        effective_k = call_k // 3  # undo the *3 dedup multiplier
+        effective_k = call_k // 2  # undo the *3 dedup multiplier
         assert effective_k > 20, f"Short generic should expand pool beyond 20, got {effective_k}"
 
     @patch.object(EmbeddingSearch, '_compute_similarity')
@@ -120,7 +120,7 @@ class TestAdaptivePoolSizing:
         )
 
         call_k = mock_sim.call_args[0][1]
-        effective_k = call_k // 3
+        effective_k = call_k // 2
 
         # Also get short generic k for comparison
         searcher.search(
@@ -128,7 +128,7 @@ class TestAdaptivePoolSizing:
             voiceover_text="the city",
         )
         generic_call_k = mock_sim.call_args[0][1]
-        generic_effective_k = generic_call_k // 3
+        generic_effective_k = generic_call_k // 2
 
         assert effective_k < generic_effective_k, (
             f"Specific segment should get fewer candidates ({effective_k}) "
@@ -148,8 +148,8 @@ class TestAdaptivePoolSizing:
         )
 
         call_k = mock_sim.call_args[0][1]
-        # The k passed should be at least 20 (the max(k, 20) floor) * 3
-        assert call_k >= 20 * 3
+        # The k passed should be at least 20 (the max(k, 20) floor) * pre_fetch_multiplier (default 2)
+        assert call_k >= 20 * 2
 
     @patch.object(EmbeddingSearch, '_compute_similarity')
     def test_pool_respects_max_candidates(self, mock_sim):
@@ -163,7 +163,7 @@ class TestAdaptivePoolSizing:
         )
 
         call_k = mock_sim.call_args[0][1]
-        effective_k = call_k // 3
+        effective_k = call_k // 2
         assert effective_k <= 50, f"Should not exceed max_candidates=50, got {effective_k}"
 
     @patch.object(EmbeddingSearch, '_compute_similarity')
@@ -179,7 +179,7 @@ class TestAdaptivePoolSizing:
         )
 
         call_k = mock_sim.call_args[0][1]
-        effective_k = call_k // 3
+        effective_k = call_k // 2
         assert effective_k == 42, f"num_candidates override should be 42, got {effective_k}"
 
 

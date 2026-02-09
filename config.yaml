@@ -393,6 +393,7 @@ matching:
   # Note: Need 75+ candidates for V1-V6 (6 unique video files)
   embedding_candidates: 75  # Retrieve from FAISS
   llm_rerank_candidates: 8  # Send to LLM
+  pre_fetch_multiplier: 2  # Fetch k*multiplier from FAISS before diversity filter (US-84-005)
   
   # Duration scoring
   # Chain-of-thought: Extreme speed changes look unnatural

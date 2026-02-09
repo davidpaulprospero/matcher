@@ -28,6 +28,7 @@ class EmbeddingSearchConfig:
     min_candidates: int = 15  # Minimum adaptive candidate pool size
     max_candidates: int = 100  # Maximum adaptive candidate pool size
     complexity_scaling_factor: float = 0.5  # How much complexity affects pool size
+    pre_fetch_multiplier: int = 2  # Fetch k*multiplier from FAISS, then diversity-filter to k (US-84-005)
 
 
 class EmbeddingSearch:
@@ -91,12 +92,15 @@ class EmbeddingSearch:
         min_candidates = getattr(matching_config, 'min_candidates', 15)
         max_candidates = getattr(matching_config, 'max_candidates', 100)
         complexity_scaling_factor = getattr(matching_config, 'complexity_scaling_factor', 0.5)
+        pre_fetch_raw = getattr(matching_config, 'pre_fetch_multiplier', 2)
+        pre_fetch_multiplier = max(1, int(pre_fetch_raw)) if isinstance(pre_fetch_raw, (int, float)) else 2
         config = EmbeddingSearchConfig(
             embedding_candidates=embedding_candidates,
             max_candidates_per_source=max_per_source,
             min_candidates=min_candidates,
             max_candidates=max_candidates,
             complexity_scaling_factor=complexity_scaling_factor,
+            pre_fetch_multiplier=pre_fetch_multiplier,
         )
         return cls(config, video_embeddings, video_segments, embedding_index)
 
@@ -141,9 +145,11 @@ class EmbeddingSearch:
         k = max(k, 20)  # Ensure minimum candidates for variety
 
         max_per_source = self.config.max_candidates_per_source
+        pre_fetch_multiplier = self.config.pre_fetch_multiplier
 
-        # Request extra candidates when dedup is active so we can backfill
-        fetch_k = k * 3 if max_per_source > 0 else k
+        # Pre-fetch k*multiplier candidates from FAISS for diversity filtering (US-84-005)
+        # When dedup is active, we need extra candidates to backfill after source capping
+        fetch_k = k * pre_fetch_multiplier if max_per_source > 0 else k
 
         distances, indices = self._compute_similarity(query_embedding, fetch_k)
 
@@ -153,6 +159,9 @@ class EmbeddingSearch:
             for j, idx in enumerate(indices)
             if 0 <= idx < len(self.video_segments)
         ]
+
+        # Log source concentration ratio (US-84-005)
+        self._log_source_concentration(candidates)
 
         # Apply chapter-constrained relevance boost (US-71-011)
         candidates = self._apply_chapter_boost(
@@ -219,6 +228,37 @@ class EmbeddingSearch:
         # Weighted combination
         score = 0.4 * word_factor + 0.35 * entity_factor + 0.25 * location_factor
         return min(max(score, 0.0), 1.0)
+
+    def _log_source_concentration(
+        self,
+        candidates: List[Tuple['SRTSegment', float]],
+    ) -> None:
+        """
+        Log source concentration ratio for pre-fetch FAISS results (US-84-005).
+
+        Concentration ratio = unique_sources / total_candidates.
+        When ratio < 0.3, logs a warning indicating dominated results.
+        """
+        if not candidates:
+            return
+
+        total = len(candidates)
+        unique_sources = set()
+        for segment, _ in candidates:
+            source = getattr(segment, 'source_file', '') or getattr(segment, 'video_id', '') or ''
+            unique_sources.add(source)
+
+        ratio = len(unique_sources) / total
+        logger.debug(
+            "Source concentration: %d unique sources / %d candidates = %.2f",
+            len(unique_sources), total, ratio,
+        )
+        if ratio < 0.3:
+            logger.warning(
+                "Low source diversity in FAISS results: %.1f%% unique sources "
+                "(%d/%d). Consider increasing pre_fetch_multiplier.",
+                ratio * 100, len(unique_sources), total,
+            )
 
     def _apply_chapter_boost(
         self,

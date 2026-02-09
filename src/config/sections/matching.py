@@ -366,6 +366,11 @@ class MatchingConfig:
     # Source diversity in embedding search (US-77-009)
     max_candidates_per_source: int = 3  # Max candidates from same video_id (0 = disabled)
 
+    # Pre-fetch diversity multiplier (US-84-005)
+    # Fetch k*multiplier from FAISS before diversity filtering to avoid missing
+    # diverse candidates ranked beyond the initial k when top results are dominated
+    pre_fetch_multiplier: int = 2  # Multiplier for FAISS pre-fetch (1 = disabled)
+
     # Context window
     context_window: int = 2  # Consider N segments before/after
 
