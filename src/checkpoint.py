@@ -464,80 +464,19 @@ class CheckpointManager:
         """
         Migrate old checkpoint format to new format.
 
-        Handles version upgrades transparently, including:
+        Delegates to CheckpointMigrator for versioned upgrades:
         - Version 0.9 -> 1.0: Uppercase stage keys to lowercase
         - Version 1.0 -> 2.0: 13-stage to 7-stage simplified pipeline
         """
+        from .checkpoint_migrator import CheckpointMigrator
+
+        migrator = CheckpointMigrator()
         version = data.get('version', '0.9')
 
-        # Map old stages to new (for v0.9/v1.0 -> v2.0 migration)
-        # DOWNLOAD stage data becomes video_search (search results can be preserved)
-        # Other removed stages are dropped
-        legacy_stage_mapping = {
-            'DOWNLOAD': 'video_search',  # Closest equivalent
-            'download': 'video_search',
-        }
+        if migrator.needs_migration(data, CURRENT_CHECKPOINT_VERSION):
+            logger.info(f"Migrating checkpoint from v{version} to v{CURRENT_CHECKPOINT_VERSION}")
 
-        # Map for last_completed_stage migration
-        stage_remap = {
-            'DOWNLOAD': 'VIDEO_SEARCH',
-            'STOCK': 'VIDEO_SEARCH',
-            'BROLL_DOWNLOAD': 'VIDEO_SEARCH',
-            'REMIX': 'CAPTION',
-            'TRANSCRIBE': 'CAPTION',
-            'SCENE_DETECTION': 'MATCH',
-            'BROLL_MATCH': 'MATCH',
-        }
-
-        if version in ('0.9', '1.0'):
-            logger.info(f"Migrating checkpoint from v{version} to v{CURRENT_CHECKPOINT_VERSION} (simplified pipeline)")
-
-            # Build new CheckpointData
-            migrated_data = {
-                'version': CURRENT_CHECKPOINT_VERSION,
-                'created_at': data.get('created_at', datetime.now().isoformat()),
-                'updated_at': data.get('updated_at', datetime.now().isoformat()),
-                'config_hash': data.get('config_hash', ''),
-                'voiceover_path': data.get('voiceover_path', ''),
-                'voiceover_hash': data.get('voiceover_hash', '')
-            }
-
-            # Migrate last_completed_stage
-            old_stage = data.get('last_completed_stage', '')
-            if old_stage in stage_remap:
-                migrated_data['last_completed_stage'] = stage_remap[old_stage]
-                logger.info(f"Remapped stage {old_stage} -> {stage_remap[old_stage]}")
-            elif old_stage in STAGE_ORDER:
-                migrated_data['last_completed_stage'] = old_stage
-            else:
-                # Unknown stage, reset to beginning
-                migrated_data['last_completed_stage'] = ''
-                if old_stage:
-                    logger.warning(f"Unknown stage '{old_stage}' in old checkpoint, resetting")
-
-            # Copy existing stage data for stages that still exist
-            for stage_key in ['analyze', 'caption', 'match', 'iterative_match', 'download_segments']:
-                stage_data = data.get(stage_key.upper()) or data.get(stage_key) or {}
-                migrated_data[stage_key] = stage_data
-
-            # Migrate DOWNLOAD -> video_search (extract video IDs from downloaded_videos)
-            download_data = data.get('DOWNLOAD') or data.get('download') or {}
-            if download_data:
-                video_ids = []
-                # Extract video IDs from old downloaded_videos list
-                for vid in download_data.get('downloaded_videos', []):
-                    if isinstance(vid, dict):
-                        # Try to extract video ID from URL
-                        url = vid.get('url', '')
-                        if 'youtube.com' in url or 'youtu.be' in url:
-                            import re
-                            match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
-                            if match:
-                                video_ids.append(match.group(1))
-                migrated_data['video_search'] = {
-                    'video_ids': video_ids,
-                    'migrated_from_download': True,
-                }
+            migrated_data = migrator.migrate(data, version, CURRENT_CHECKPOINT_VERSION)
 
             # Convert to CheckpointData
             migrated = CheckpointData.from_dict(migrated_data)
@@ -552,7 +491,7 @@ class CheckpointManager:
 
             return migrated
 
-        # Already v2.0 - just convert to CheckpointData
+        # Already current version - just convert to CheckpointData
         return CheckpointData.from_dict(data)
 
     def _validate_checkpoint_data(self, data: CheckpointData) -> bool:

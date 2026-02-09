@@ -140,8 +140,8 @@
                 "CheckpointMigrator can be unit tested with raw dict fixtures without needing file I/O or CheckpointManager",
                 "Adding a future v2.0->v3.0 migration requires only adding one function to CheckpointMigrator (documented in docstring)"
             ],
-            "passes": false,
-            "notes": "Tier: separation of concerns. Files: src/checkpoint.py (1,340 lines - migration logic at ~lines 478-571, version checking in load() at ~lines 300-350), src/checkpoint_migrator.py (new file). Migration logic is currently embedded in CheckpointManager.load(), making it hard to test individual version upgrades. The Strategy pattern (one function per version transition) makes future migrations trivial to add."
+            "passes": true,
+            "notes": "Created CheckpointMigrator class in src/checkpoint_migrator.py with migrate(data, from_version, to_version) method using Strategy pattern. Two migration functions: _migrate_0_9_to_1_0 (uppercase->lowercase keys) and _migrate_1_0_to_2_0 (13-stage to 7-stage pipeline). CheckpointManager._migrate_checkpoint_if_needed() now delegates to CheckpointMigrator via needs_migration()/migrate(). Module docstring documents how to add future v2.0->v3.0 migration (one function + one registry entry). 19 new tests with raw dict fixtures (no file I/O), 233 existing checkpoint tests pass."
         },
         {
             "id": "US-82-010",
