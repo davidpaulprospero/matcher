@@ -70,8 +70,8 @@
                 "Timeline tracking (attempt timestamps, outcome history, tier transition log) lives entirely in EscalationMetrics",
                 "Unit tests verify EscalationMetrics independently records and reports metrics without needing full EscalationManager"
             ],
-            "passes": false,
-            "notes": "Tier: decomposition refactor. Files: src/downloader/escalation_manager.py (1,120 lines - god class, metrics methods scattered throughout ~lines 400-600 for timeline, ~lines 700-850 for outcome tracking), src/downloader/escalation_metrics.py (new file). The EscalationManager is a 1,120-line god class mixing escalation decisions, metrics collection, VPN coordination, and state persistence. Extracting metrics is the lowest-risk first step toward decomposition."
+            "passes": true,
+            "notes": "Tier: decomposition refactor. Created EscalationMetrics class (348 lines) in src/downloader/escalation_metrics.py with record_attempt(), record_success(), record_failure(), record_escalation(), record_outcome(), get_timeline(), get_hot_keywords(), get_summary(), get_tier_effectiveness(), get_tier_recommendations(), to_dict()/from_dict(), reset(). EscalationManager now delegates all metrics tracking to _metrics instance via constructor injection (default creates new). Removed 7 metrics fields from EscalationManager, all methods delegate. 17 new standalone tests. 527 existing escalation tests pass (2 pre-existing de-escalation failures). Files: src/downloader/escalation_metrics.py (new), src/downloader/escalation_manager.py, src/downloader/__init__.py, tests/test_escalation_metrics.py (new), tests/test_escalation_timeline.py, tests/test_escalation_checkpoint_persistence.py, tests/test_speech_screening_escalation.py."
         },
         {
             "id": "US-82-005",

@@ -51,6 +51,7 @@ from .escalation_manager import (
     EscalationManager, EscalationResult, is_escalation_trigger,
     classify_trigger, _TRIGGER_CATEGORIES,
 )
+from .escalation_metrics import EscalationMetrics
 from .escalation_strategy import EscalationStrategy, EscalationDecision
 from .errors import (
     ClassifiedDownloadError,
@@ -130,6 +131,7 @@ __all__ = [
     'is_escalation_trigger',
     'classify_trigger',
     '_TRIGGER_CATEGORIES',
+    'EscalationMetrics',
     'EscalationStrategy',
     'EscalationDecision',
     'CookieMethodFallback',

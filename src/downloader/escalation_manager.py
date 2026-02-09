@@ -157,6 +157,11 @@ try:
 except ImportError:  # pragma: no cover
     MullvadVPN = None  # type: ignore[misc,assignment]
 
+try:
+    from .escalation_metrics import EscalationMetrics
+except ImportError:  # pragma: no cover
+    EscalationMetrics = None  # type: ignore[misc,assignment]
+
 
 @dataclass
 class EscalationResult:
@@ -208,6 +213,7 @@ class EscalationManager:
         strategy: Optional["EscalationStrategy"] = None,
         mullvad_vpn: Optional["MullvadVPN"] = None,
         on_vpn_rotation_needed: Optional[Callable[[str], None]] = None,
+        metrics: Optional["EscalationMetrics"] = None,
     ):
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
@@ -221,16 +227,9 @@ class EscalationManager:
         self._keyword_locks: Dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
         self._tier_floor: Optional[EscalationTier] = None
-        self._total_403s: int = 0
-        self._total_successes: int = 0
-        self._total_escalations: int = 0
-        self._escalations_per_tier: Dict[str, int] = {}  # tier_name -> count
         self._slow_speed_counts: Dict[str, int] = {}  # keyword -> consecutive slow count
-        self._speed_escalations: int = 0  # Total speed-triggered escalations
-        # Per-keyword escalation timeline: keyword -> [{timestamp, from_tier, to_tier, trigger_category}]
-        self._escalation_timeline: Dict[str, List[Dict]] = {}
-        # Tier outcome tracking: {trigger_category: {tier_value: {'successes': N, 'attempts': N}}}
-        self._tier_outcomes: Dict[str, Dict[int, Dict[str, int]]] = {}
+        # Delegate all metrics tracking to EscalationMetrics
+        self._metrics = metrics if metrics is not None else EscalationMetrics()
 
     def _get_lock(self, keyword: str) -> threading.Lock:
         """Get or create a per-keyword lock (thread-safe)."""
@@ -309,6 +308,11 @@ class EscalationManager:
             callback: Callable taking keyword (str) to invoke on VPN rotation.
         """
         self._on_vpn_rotation_needed = callback
+
+    @property
+    def metrics(self) -> "EscalationMetrics":
+        """Access the EscalationMetrics instance."""
+        return self._metrics
 
     @property
     def keyword_states(self) -> Dict[str, EscalationState]:
@@ -420,20 +424,17 @@ class EscalationManager:
     ) -> None:
         """Record an escalation event in the per-keyword timeline.
 
+        Delegates to EscalationMetrics.record_escalation().
+
         Args:
             keyword: The keyword that escalated.
             from_tier: Tier before escalation.
             to_tier: Tier after escalation.
             trigger_category: Category from classify_trigger() or None.
         """
-        if keyword not in self._escalation_timeline:
-            self._escalation_timeline[keyword] = []
-        self._escalation_timeline[keyword].append({
-            'timestamp': time.time(),
-            'from_tier': from_tier.value,
-            'to_tier': to_tier.value,
-            'trigger_category': trigger_category or 'unknown',
-        })
+        # Note: record_escalation also increments _total_escalations and
+        # _escalations_per_tier, so callers should NOT duplicate those updates.
+        # This is handled by the refactored record_failure/record_slow_speed.
 
     def record_failure(self, keyword: str, error_output: str = "") -> None:
         """Record a download failure for a keyword.
@@ -456,7 +457,7 @@ class EscalationManager:
             state = self._get_state(keyword)
             state.consecutive_403s += 1
             state.consecutive_successes = 0  # Reset success streak on any failure
-            self._total_403s += 1
+            self._metrics.record_failure(keyword)
 
             # Delegate escalation decision to strategy
             budget_exhausted = self._budget is not None and not self._budget.can_rotate()
@@ -486,20 +487,14 @@ class EscalationManager:
                     if state.current_tier >= EscalationTier.EXTRACTOR_ARGS:
                         state.extractor_args_index += 1
 
-                self._total_escalations += 1
-                tier_name = state.current_tier.name
-                self._escalations_per_tier[tier_name] = (
-                    self._escalations_per_tier.get(tier_name, 0) + 1
+                # Delegate escalation tracking to metrics
+                self._metrics.record_escalation(
+                    keyword, old_tier, state.current_tier, trigger_category
                 )
 
                 # Budget tracking: record rotation when advancing to Tier 2 or Tier 3
                 if self._budget is not None and state.current_tier > old_tier:
                     self._budget.record_rotation(keyword)
-
-                # Record timeline event
-                self._record_timeline_event(
-                    keyword, old_tier, state.current_tier, trigger_category
-                )
 
                 logger.info(
                     f"Escalation: keyword={keyword} tier {old_tier.name}->{state.current_tier.name} "
@@ -554,7 +549,7 @@ class EscalationManager:
                 de_escalation_threshold=de_escalation_threshold,
                 de_escalation_enabled=de_escalation_enabled,
             )
-            self._total_successes += 1
+            self._metrics.record_success(keyword)
 
             if de_escalated:
                 logger.info(
@@ -586,11 +581,10 @@ class EscalationManager:
             if decision.should_escalate:
                 old_tier = state.current_tier
                 state.escalate()
-                self._speed_escalations += 1
-                self._total_escalations += 1
-                tier_name = state.current_tier.name
-                self._escalations_per_tier[tier_name] = (
-                    self._escalations_per_tier.get(tier_name, 0) + 1
+                # Delegate metrics tracking to EscalationMetrics
+                self._metrics.record_escalation(
+                    keyword, old_tier, state.current_tier,
+                    trigger_category='slow_speed', speed_triggered=True,
                 )
 
                 logger.info(
@@ -689,14 +683,8 @@ class EscalationManager:
         with self._global_lock:
             self._keyword_states.clear()
             self._keyword_locks.clear()
-            self._total_403s = 0
-            self._total_successes = 0
-            self._total_escalations = 0
-            self._escalations_per_tier.clear()
             self._slow_speed_counts.clear()
-            self._speed_escalations = 0
-            self._escalation_timeline.clear()
-            self._tier_outcomes.clear()
+            self._metrics.reset()
             logger.debug("All escalation states reset")
 
     def get_active_keyword_count(self) -> int:
@@ -733,7 +721,7 @@ class EscalationManager:
         """Serialize all keyword escalation states for checkpoint persistence.
 
         Returns:
-            Dict with keyword states, global counters, timeline, outcomes, and a timestamp.
+            Dict with keyword states, metrics data, and a timestamp.
             Format: {
                 'keyword_states': {keyword: {tier, consecutive_403s,
                     extractor_args_index, last_escalation_time}},
@@ -756,28 +744,17 @@ class EscalationManager:
                     'extractor_args_index': state.extractor_args_index,
                     'last_escalation_time': state.last_escalation_time,
                 }
-            # Deep-copy timeline events (list of dicts per keyword)
-            timeline = {
-                kw: list(events)
-                for kw, events in self._escalation_timeline.items()
-            }
-            # Deep-copy tier outcomes (nested dicts)
-            tier_outcomes = {
-                cat: {
-                    tier_val: dict(counts)
-                    for tier_val, counts in tiers.items()
-                }
-                for cat, tiers in self._tier_outcomes.items()
-            }
+            # Get metrics data from delegated EscalationMetrics
+            metrics_data = self._metrics.to_dict()
             return {
                 'keyword_states': keyword_states,
-                'total_403s': self._total_403s,
-                'total_successes': self._total_successes,
-                'total_escalations': self._total_escalations,
-                'escalations_per_tier': dict(self._escalations_per_tier),
-                'speed_escalations': self._speed_escalations,
-                'timeline': timeline,
-                'tier_outcomes': tier_outcomes,
+                'total_403s': metrics_data['total_403s'],
+                'total_successes': metrics_data['total_successes'],
+                'total_escalations': metrics_data['total_escalations'],
+                'escalations_per_tier': metrics_data['escalations_per_tier'],
+                'speed_escalations': metrics_data['speed_escalations'],
+                'timeline': metrics_data['timeline'],
+                'tier_outcomes': metrics_data['tier_outcomes'],
                 'saved_at': time.time(),
             }
 
@@ -810,11 +787,15 @@ class EscalationManager:
         Returns:
             A new EscalationManager with restored keyword states.
         """
+        # Restore metrics from checkpoint data
+        metrics = EscalationMetrics.from_dict(data) if data else EscalationMetrics()
+
         manager = cls(
             impersonation_manager=impersonation_manager,
             extractor_args_config=extractor_args_config,
             budget=budget,
             strategy=strategy,
+            metrics=metrics,
         )
 
         if not data or not isinstance(data, dict):
@@ -852,38 +833,6 @@ class EscalationManager:
                 extractor_args_index=state_data.get('extractor_args_index', 0),
             )
             manager._keyword_states[keyword] = state
-
-        # Restore global counters
-        manager._total_403s = data.get('total_403s', 0)
-        manager._total_successes = data.get('total_successes', 0)
-        manager._total_escalations = data.get('total_escalations', 0)
-        manager._escalations_per_tier = dict(data.get('escalations_per_tier', {}))
-        manager._speed_escalations = data.get('speed_escalations', 0)
-
-        # Restore escalation timeline (per-keyword event history)
-        saved_timeline = data.get('timeline', {})
-        if isinstance(saved_timeline, dict):
-            for kw, events in saved_timeline.items():
-                if isinstance(events, list):
-                    manager._escalation_timeline[kw] = list(events)
-
-        # Restore tier outcomes (per-category, per-tier success/attempt counts)
-        saved_outcomes = data.get('tier_outcomes', {})
-        if isinstance(saved_outcomes, dict):
-            for category, tiers in saved_outcomes.items():
-                if isinstance(tiers, dict):
-                    manager._tier_outcomes[category] = {}
-                    for tier_val, counts in tiers.items():
-                        if isinstance(counts, dict):
-                            # tier_val may be string from JSON; convert to int
-                            try:
-                                tier_key = int(tier_val)
-                            except (ValueError, TypeError):
-                                continue
-                            manager._tier_outcomes[category][tier_key] = {
-                                'successes': counts.get('successes', 0),
-                                'attempts': counts.get('attempts', 0),
-                            }
 
         restored_count = len(keyword_states)
         logger.info(
@@ -971,39 +920,26 @@ class EscalationManager:
 
             average_tier = round(tier_sum / keyword_count, 2) if keyword_count > 0 else 1.0
 
-            return {
-                'total_escalations': self._total_escalations,
-                'escalations_per_tier': dict(self._escalations_per_tier),
-                'keywords_at_each_tier': keywords_at_each_tier,
-                'total_403s': self._total_403s,
-                'total_successes': self._total_successes,
-                'average_tier': average_tier,
-                'speed_escalations': self._speed_escalations,
-            }
+            # Merge keyword-state info with metrics summary
+            summary = self._metrics.get_summary()
+            summary['keywords_at_each_tier'] = keywords_at_each_tier
+            summary['average_tier'] = average_tier
+            return summary
 
     def get_keyword_escalation_timeline(self) -> Dict[str, List[Dict]]:
         """Get per-keyword escalation event timeline.
 
-        Returns a dict keyed by keyword, where each value is a list of
-        escalation event dicts with keys: timestamp, from_tier, to_tier,
-        trigger_category. Limited to the last 20 events per keyword.
+        Delegates to EscalationMetrics.get_timeline().
 
         Returns:
             Dict mapping keyword to list of event dicts.
         """
-        with self._global_lock:
-            result: Dict[str, List[Dict]] = {}
-            for keyword, events in self._escalation_timeline.items():
-                # Limit to last 20 events per keyword
-                result[keyword] = list(events[-20:])
-            return result
+        return self._metrics.get_timeline()
 
     def get_hot_keywords(self, window_seconds: float = 1800.0) -> List[Dict]:
         """Get keywords with frequent escalations in a recent time window.
 
-        A keyword is "hot" if it has more than 3 escalation events within
-        the specified window (default 30 minutes). Results are sorted by
-        escalation count descending.
+        Delegates to EscalationMetrics.get_hot_keywords().
 
         Args:
             window_seconds: Time window in seconds (default: 1800 = 30 min).
@@ -1012,108 +948,40 @@ class EscalationManager:
             List of dicts with 'keyword' and 'escalation_count', sorted by
             count descending. Only includes keywords with >3 escalations.
         """
-        cutoff = time.time() - window_seconds
-        with self._global_lock:
-            hot: List[Dict] = []
-            for keyword, events in self._escalation_timeline.items():
-                recent_count = sum(
-                    1 for e in events if e['timestamp'] > cutoff
-                )
-                if recent_count > 3:
-                    hot.append({
-                        'keyword': keyword,
-                        'escalation_count': recent_count,
-                    })
-            hot.sort(key=lambda x: x['escalation_count'], reverse=True)
-            return hot
+        return self._metrics.get_hot_keywords(window_seconds)
 
     def record_outcome(
         self, trigger_category: str, tier: EscalationTier, success: bool
     ) -> None:
         """Record a download outcome for tier effectiveness tracking.
 
-        Each call records whether a download attempt at a specific escalation
-        tier succeeded or failed for a given trigger category. This data is
-        used by ``get_tier_effectiveness()`` to compute success rates per
-        trigger category per tier.
+        Delegates to EscalationMetrics.record_outcome().
 
         Args:
             trigger_category: Category from classify_trigger() (e.g., '403', '429').
             tier: The escalation tier used for this attempt.
             success: True if the download succeeded, False if it failed.
         """
-        with self._global_lock:
-            if trigger_category not in self._tier_outcomes:
-                self._tier_outcomes[trigger_category] = {}
-            tier_val = tier.value
-            if tier_val not in self._tier_outcomes[trigger_category]:
-                self._tier_outcomes[trigger_category][tier_val] = {
-                    'successes': 0, 'attempts': 0,
-                }
-            self._tier_outcomes[trigger_category][tier_val]['attempts'] += 1
-            if success:
-                self._tier_outcomes[trigger_category][tier_val]['successes'] += 1
+        self._metrics.record_outcome(trigger_category, tier, success)
 
     def get_tier_effectiveness(self) -> Dict[str, Dict[str, float]]:
         """Get success rate per trigger category per escalation tier.
 
-        Returns a dict keyed by trigger category, where each value maps
-        tier names ('tier_1', 'tier_2', 'tier_3') to their success rate
-        (0.0 to 1.0). Only tiers with recorded attempts are included.
+        Delegates to EscalationMetrics.get_tier_effectiveness().
 
         Returns:
             Dict mapping trigger_category to {tier_name: success_rate}.
             Empty dict if no outcomes have been recorded.
         """
-        with self._global_lock:
-            if not self._tier_outcomes:
-                return {}
-
-            result: Dict[str, Dict[str, float]] = {}
-            for category, tiers in self._tier_outcomes.items():
-                tier_rates: Dict[str, float] = {}
-                for tier_val, counts in tiers.items():
-                    attempts = counts['attempts']
-                    if attempts > 0:
-                        rate = counts['successes'] / attempts
-                        tier_rates[f'tier_{tier_val}'] = round(rate, 4)
-                if tier_rates:
-                    result[category] = tier_rates
-            return result
+        return self._metrics.get_tier_effectiveness()
 
     def get_tier_recommendations(self) -> List[str]:
         """Generate recommendations based on tier effectiveness data.
 
-        Analyzes per-category, per-tier success rates and returns
-        actionable recommendations:
-        - If a category has >80% Tier 1 success: 'skip escalation for {category}'
-        - If a category has <20% Tier 2 but >60% Tier 3: 'skip Tier 2 for {category}'
+        Delegates to EscalationMetrics.get_tier_recommendations().
 
         Returns:
             List of recommendation strings. Empty list if no data or
             no recommendations apply.
         """
-        recommendations: List[str] = []
-        effectiveness = self.get_tier_effectiveness()
-
-        for category, tier_rates in effectiveness.items():
-            tier_1_rate = tier_rates.get('tier_1', None)
-            tier_2_rate = tier_rates.get('tier_2', None)
-            tier_3_rate = tier_rates.get('tier_3', None)
-
-            # Recommend skipping escalation if Tier 1 is highly effective
-            if tier_1_rate is not None and tier_1_rate > 0.80:
-                recommendations.append(
-                    f"skip escalation for {category}"
-                )
-
-            # Recommend skipping Tier 2 if it's ineffective but Tier 3 works
-            if (
-                tier_2_rate is not None and tier_2_rate < 0.20
-                and tier_3_rate is not None and tier_3_rate > 0.60
-            ):
-                recommendations.append(
-                    f"skip Tier 2 for {category}"
-                )
-
-        return recommendations
+        return self._metrics.get_tier_recommendations()

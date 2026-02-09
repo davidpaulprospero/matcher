@@ -567,8 +567,9 @@ class TestScreenApprovedVideosSharedState:
 
         # After 2 consecutive 403s, tier should have escalated for those video IDs
         # Verify that escalation was recorded
-        assert esc_mgr._total_403s >= 2, (
-            f"Expected at least 2 recorded 403s, got {esc_mgr._total_403s}"
+        total_403s = esc_mgr.get_metrics()['total_403s']
+        assert total_403s >= 2, (
+            f"Expected at least 2 recorded 403s, got {total_403s}"
         )
 
     @pytest.mark.integration
