@@ -186,6 +186,11 @@ class MatchingScoringConfig:
     # When top-10 candidate similarity variance < this threshold, the match is flagged as ambiguous
     variance_warning_threshold: float = 0.02  # Variance below this triggers ambiguous_pool flag
 
+    # Inter-track embedding diversity (US-84-009) — measure how different V1/V2/V3 really are
+    # When avg pairwise cosine distance between V1/V2/V3 embeddings < this threshold,
+    # the segment is flagged as low-diversity (alternatives look too similar)
+    min_track_diversity_distance: float = 0.15  # Minimum avg pairwise cosine distance
+
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):

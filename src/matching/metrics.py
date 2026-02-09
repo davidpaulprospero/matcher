@@ -39,6 +39,8 @@ class MatchQualityMetrics:
     total_segments: int = 0
     matched_segments: int = 0
     uncertain_matches_count: int = 0  # US-84-008: segments with ambiguous candidate pools
+    track_diversity_score: float = 0.0  # US-84-009: mean pairwise cosine distance V1/V2/V3
+    low_diversity_segments_count: int = 0  # US-84-009: segments where V1/V2/V3 too similar
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metrics to dictionary for checkpoint storage."""
@@ -54,6 +56,8 @@ class MatchQualityMetrics:
             'total_segments': self.total_segments,
             'matched_segments': self.matched_segments,
             'uncertain_matches_count': self.uncertain_matches_count,
+            'track_diversity_score': float(self.track_diversity_score),
+            'low_diversity_segments_count': self.low_diversity_segments_count,
         }
 
     @classmethod
@@ -69,6 +73,8 @@ class MatchQualityMetrics:
             total_segments=data.get('total_segments', 0),
             matched_segments=data.get('matched_segments', 0),
             uncertain_matches_count=data.get('uncertain_matches_count', 0),
+            track_diversity_score=data.get('track_diversity_score', 0.0),
+            low_diversity_segments_count=data.get('low_diversity_segments_count', 0),
         )
 
 
@@ -178,6 +184,9 @@ def log_quality_summary(metrics: MatchQualityMetrics) -> None:
     logger.info(f"  Confidence std: {metrics.confidence_std:.3f}")
     if metrics.uncertain_matches_count > 0:
         logger.info(f"  Uncertain matches (ambiguous pool): {metrics.uncertain_matches_count}")
+    if metrics.track_diversity_score > 0:
+        logger.info(f"  Track diversity score (V1/V2/V3): {metrics.track_diversity_score:.3f}")
+        logger.info(f"  Low diversity segments: {metrics.low_diversity_segments_count}")
     logger.info("=============================")
 
 

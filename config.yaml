@@ -603,6 +603,7 @@ matching:
     duration_ratio_reward_threshold: 0.1       # Ratio deviation from 1.0 for reward (0.9-1.1x) (US-84-007)
     duration_ratio_reward_boost: 0.02          # Boost for near-perfect duration match (US-84-007)
     variance_warning_threshold: 0.02           # Variance below this flags match as ambiguous_pool (US-84-008)
+    min_track_diversity_distance: 0.15         # Min avg pairwise cosine distance V1/V2/V3 (US-84-009)
 
   # Location-aware matching (for travel/location content)
   # Chain-of-thought: Travel/location videos need geographic context matching
