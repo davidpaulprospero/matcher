@@ -49,6 +49,7 @@ from .scoring import (
     apply_entity_match_boost,  # US-77-011
     compute_semantic_coherence,  # US-77-002
     compute_temporal_coherence,  # US-77-003
+    apply_source_stutter_penalty,  # US-84-004
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -148,8 +149,8 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
         'description_relevance', 'tag_keyword_boost', 'chapter_topic_match',
         'chapter_source_consistency', 'chapter_coherence_penalty',
         'cross_chapter_relevance', 'listicle_consistency',
-        'semantic_coherence', 'temporal_coherence', 'explanation_validation',
-        'entity_match_boost', 'diversity_recheck',
+        'semantic_coherence', 'temporal_coherence', 'source_stutter_penalty',
+        'explanation_validation', 'entity_match_boost', 'diversity_recheck',
     }
 
     confidences: List[float] = []
@@ -362,6 +363,8 @@ class TieredMatcher:
         self._previous_match_embedding: Optional[Any] = None
         # US-77-003: Temporal coherence - store previous match segment for source continuity
         self._previous_match_segment: Optional[SRTSegment] = None
+        # US-84-004: Source stutter penalty - store 2-segments-back match for A-B-A detection
+        self._prev_prev_match_segment: Optional[SRTSegment] = None
         self._embedding_lookup: Dict[int, int] = {}  # id(segment) -> index in video_embeddings
         self._video_embeddings: Optional[List] = None  # Reference to video embeddings list
         mc = self.config.matching
@@ -926,8 +929,38 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'temporal_coherence', prev, adjusted_confidence, reason)
 
-        # Update previous match segment for next iteration
+        # Update previous match segments for next iteration (shift window)
+        self._prev_prev_match_segment = self._previous_match_segment
         self._previous_match_segment = best_seg
+
+        return adjusted_confidence, reason
+
+    def _apply_source_stutter_penalty(
+        self, adjusted_confidence: float, best_seg: SRTSegment,
+        confidence_breakdown: list
+    ) -> Tuple[float, str]:
+        """
+        Apply A-B-A source stutter penalty (US-84-004).
+
+        Detects when current source matches 2-segments-ago but differs from previous,
+        creating a jarring visual ping-pong pattern.
+
+        Note: Must be called BEFORE _apply_temporal_coherence, which shifts the
+        segment window. At call time, _previous_match_segment is 1-back and
+        _prev_prev_match_segment is 2-back relative to best_seg.
+
+        Returns (adjusted_confidence, reason).
+        """
+        current_source = getattr(best_seg, 'source_file', None)
+        previous_source = getattr(self._previous_match_segment, 'source_file', None) if self._previous_match_segment else None
+        prev_prev_source = getattr(self._prev_prev_match_segment, 'source_file', None) if self._prev_prev_match_segment else None
+
+        prev = adjusted_confidence
+        adjusted_confidence, reason = apply_source_stutter_penalty(
+            adjusted_confidence, current_source, previous_source,
+            prev_prev_source, self.config
+        )
+        _record_breakdown(confidence_breakdown, 'source_stutter_penalty', prev, adjusted_confidence, reason)
 
         return adjusted_confidence, reason
 
@@ -1234,6 +1267,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
+            # US-84-004: Apply source stutter penalty (A-B-A pattern detection)
+            adjusted_confidence, stutter_reason = self._apply_source_stutter_penalty(
+                adjusted_confidence, best_seg, confidence_breakdown
+            )
+
             # US-77-003: Apply temporal coherence (source continuity between adjacent matches)
             adjusted_confidence, temporal_coherence_reason = self._apply_temporal_coherence(
                 adjusted_confidence, best_seg, confidence_breakdown
@@ -1452,6 +1490,11 @@ class TieredMatcher:
 
             # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
             adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+                adjusted_confidence, best_seg, confidence_breakdown
+            )
+
+            # US-84-004: Apply source stutter penalty (A-B-A pattern detection)
+            adjusted_confidence, stutter_reason = self._apply_source_stutter_penalty(
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
@@ -1726,6 +1769,11 @@ class TieredMatcher:
 
         # US-77-002: Apply semantic coherence (topic flow between adjacent matches)
         adjusted_confidence, semantic_coherence_reason = self._apply_semantic_coherence(
+            adjusted_confidence, best_seg, confidence_breakdown
+        )
+
+        # US-84-004: Apply source stutter penalty (A-B-A pattern detection)
+        adjusted_confidence, stutter_reason = self._apply_source_stutter_penalty(
             adjusted_confidence, best_seg, confidence_breakdown
         )
 

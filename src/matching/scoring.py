@@ -806,6 +806,54 @@ def compute_temporal_coherence(
     return adjusted_confidence, reason
 
 
+def apply_source_stutter_penalty(
+    confidence: float,
+    current_source: Optional[str],
+    previous_source: Optional[str],
+    prev_prev_source: Optional[str],
+    config
+) -> Tuple[float, str]:
+    """
+    Detect and penalize A-B-A source alternation pattern (US-84-004).
+
+    When the current source matches 2-segments-ago but differs from the previous
+    segment, this creates a jarring visual ping-pong (e.g., videoA -> videoB -> videoA).
+    Continuation (A-A-A) and progression (A-B-C) are not penalized.
+
+    Args:
+        confidence: Current confidence score
+        current_source: Source file/ID of the current candidate
+        previous_source: Source file/ID of the previous segment's match
+        prev_prev_source: Source file/ID of the segment 2 positions back
+        config: Config with matching.scoring.source_stutter_penalty
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    # Need all three sources to detect A-B-A pattern
+    if not current_source or not previous_source or not prev_prev_source:
+        return confidence, ""
+
+    # A-B-A pattern: current == prev_prev AND current != previous
+    is_stutter = (current_source == prev_prev_source and current_source != previous_source)
+
+    if not is_stutter:
+        return confidence, ""
+
+    # Get penalty magnitude from config
+    mc = config.matching
+    scoring_config = getattr(mc, 'scoring', None)
+    penalty_magnitude = getattr(scoring_config, 'source_stutter_penalty', 0.04) if scoring_config else 0.04
+
+    adjusted = max(0.0, confidence - penalty_magnitude)
+    reason = (
+        f"source stutter A-B-A: {prev_prev_source[:12]}->{previous_source[:12]}->{current_source[:12]}, "
+        f"-{penalty_magnitude:.2f}"
+    )
+
+    return adjusted, reason
+
+
 def _is_jarring_context_switch(
     current_segment: SRTSegment,
     adjacent_segment: SRTSegment

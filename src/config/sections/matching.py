@@ -172,6 +172,11 @@ class MatchingScoringConfig:
     max_cumulative_negative_adjustment: float = -0.30  # Threshold for dampening remaining negatives
     compounding_dampening_factor: float = 0.50  # Multiply remaining negatives by this when threshold exceeded
 
+    # Source stutter penalty (US-84-004) — penalize A-B-A video alternation pattern
+    # Detects when current source matches 2-segments-ago but differs from previous segment
+    # This creates a jarring visual ping-pong effect (e.g., videoA -> videoB -> videoA)
+    source_stutter_penalty: float = 0.04  # Magnitude of penalty for A-B-A pattern
+
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):
