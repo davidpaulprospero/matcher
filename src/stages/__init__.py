@@ -25,6 +25,59 @@ class DependencyError(Exception):
     pass
 
 
+class BatchFailureThresholdExceeded(Exception):
+    """Raised when a batch stage's failure rate exceeds the configured threshold.
+
+    US-81-009: Allows stages to abort early when too many items are failing,
+    rather than grinding through an entire batch with a high failure rate.
+    """
+
+    def __init__(self, failure_rate: float, threshold: float, processed: int,
+                 failed: int, failed_items: list = None):
+        self.failure_rate = failure_rate
+        self.threshold = threshold
+        self.processed = processed
+        self.failed = failed
+        self.failed_items = failed_items or []
+        super().__init__(
+            f"Batch failure rate {failure_rate:.1%} exceeds threshold {threshold:.1%} "
+            f"({failed}/{processed} items failed)"
+        )
+
+
+def check_batch_failure_threshold(
+    items_processed: int,
+    items_failed: int,
+    threshold: float,
+    failed_items: list = None,
+) -> None:
+    """Check if the batch failure rate exceeds the configured threshold.
+
+    US-81-009: Called after each batch item completes. Raises
+    BatchFailureThresholdExceeded if the failure rate exceeds the threshold.
+
+    Args:
+        items_processed: Total items processed so far (successes + failures).
+        items_failed: Number of items that have failed so far.
+        threshold: Maximum allowed failure rate (0.0 to 1.0). Values >= 1.0 disable the check.
+        failed_items: Optional list of failure details for error reporting.
+
+    Raises:
+        BatchFailureThresholdExceeded: When failure_rate > threshold.
+    """
+    if threshold >= 1.0 or items_processed == 0:
+        return
+    failure_rate = items_failed / items_processed
+    if failure_rate > threshold:
+        raise BatchFailureThresholdExceeded(
+            failure_rate=failure_rate,
+            threshold=threshold,
+            processed=items_processed,
+            failed=items_failed,
+            failed_items=failed_items,
+        )
+
+
 @dataclass
 class StageMetrics:
     """

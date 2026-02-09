@@ -1868,6 +1868,11 @@ pipeline:
   parallel_transcription: true
   parallel_embedding: true
 
+  # Batch failure threshold (US-81-009)
+  # Abort batch stages when failure rate exceeds this value (0.0-1.0).
+  # Checked after each item. Set to 1.0 to disable.
+  batch_failure_threshold: 0.5
+
   # Quality gates (US-81-005)
   # Non-blocking checks between pipeline stages that warn on low coverage.
   quality_gates:

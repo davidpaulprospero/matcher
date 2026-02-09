@@ -132,7 +132,7 @@
       "id": "US-81-009",
       "title": "Add configurable failure threshold for batch stage abort decisions",
       "priority": "low",
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "New config option pipeline.batch_failure_threshold (float, default 0.5) controls when a batch stage aborts vs continues",
         "When failure rate exceeds threshold during a batch stage, the stage aborts immediately with a clear error message listing all accumulated failures",
@@ -140,7 +140,7 @@
         "The threshold is checked after each batch item completes, not just at the end",
         "A test verifies that with threshold=0.3, a batch of 10 items aborts after the 4th failure (3 fails + 1 success already = 75% fail rate > 30%)"
       ],
-      "notes": "Tier: reliability. Companion to US-81-002 (per-item error isolation). Without a threshold, a batch with 95% failures would grind through all items. Source files: src/stages/caption_stage.py, src/stages/download_segments.py (add threshold check in batch loops), src/config/sections/ (add pipeline config section with batch_failure_threshold). The threshold should be configurable per stage via config overrides."
+      "notes": "Done. Added batch_failure_threshold to PipelineConfig (default 0.5). check_batch_failure_threshold helper + BatchFailureThresholdExceeded exception in stages/__init__.py. Threshold checked per-item in download_segments loop and after batch in caption_stage. 13 tests in test_batch_failure_threshold.py. Config also added to config.yaml."
     },
     {
       "id": "US-81-010",

@@ -464,12 +464,18 @@ class DownloadVideoSegmentsStage(Stage):
                         f"videos recovered from previous session"
                     )
 
+            # US-81-009: Get batch failure threshold from config
+            _batch_failure_threshold = getattr(
+                config.pipeline, 'batch_failure_threshold', 0.5
+            )
+
             downloaded_segments, download_stats, throughput_samples = self._download_segments(
                 segments_to_download,
                 output_dir,
                 buffer_seconds,
                 checkpoint_progress,
                 partial_progress=_partial_progress,
+                batch_failure_threshold=_batch_failure_threshold,
             )
 
             # US-51-010: Merge pre-retry downloads into main list
@@ -682,6 +688,7 @@ class DownloadVideoSegmentsStage(Stage):
         buffer_seconds: float,
         progress_callback,
         partial_progress: Optional[Dict[str, Any]] = None,
+        batch_failure_threshold: float = 1.0,
     ):
         """Download video segments via sub-methods: prepare, check, execute, handle.
 
@@ -692,6 +699,7 @@ class DownloadVideoSegmentsStage(Stage):
         Args:
             partial_progress: Mutable dict shared with checkpoint callback.
                 Updated in-place with completed_ids, failed_ids, total_count.
+            batch_failure_threshold: US-81-009: Max failure rate before abort (1.0 = disabled).
         """
         from ..state import DownloadedVideo
 
@@ -797,6 +805,22 @@ class DownloadVideoSegmentsStage(Stage):
 
             if abort:
                 break
+
+            # US-81-009: Check batch failure threshold after each item
+            items_done = stats.succeeded + stats.cached + stats.failed
+            if items_done > 0 and batch_failure_threshold < 1.0:
+                from . import check_batch_failure_threshold, BatchFailureThresholdExceeded
+                try:
+                    check_batch_failure_threshold(
+                        items_processed=items_done,
+                        items_failed=stats.failed,
+                        threshold=batch_failure_threshold,
+                        failed_items=partial_progress.get('failed_ids', []),
+                    )
+                except BatchFailureThresholdExceeded as e:
+                    logger.error(f"[US-81-009] {e}")
+                    print(f"\n  ! Batch failure threshold exceeded: {e}")
+                    break
 
             # Checkpoint progress
             if progress_callback:

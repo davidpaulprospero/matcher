@@ -1125,6 +1125,24 @@ class CaptionStage(Stage):
             # Legacy fail_count for backwards compatibility (includes both no_captions and errors)
             fail_count = no_captions_count + fetch_failed_count
 
+            # US-81-009: Check batch failure threshold (only for actual fetch errors, not no_captions)
+            _batch_failure_threshold = getattr(
+                config.pipeline, 'batch_failure_threshold', 0.5
+            )
+            total_processed = success_count + skip_count + fetch_failed_count
+            if total_processed > 0 and _batch_failure_threshold < 1.0:
+                from . import check_batch_failure_threshold, BatchFailureThresholdExceeded
+                try:
+                    check_batch_failure_threshold(
+                        items_processed=total_processed,
+                        items_failed=fetch_failed_count,
+                        threshold=_batch_failure_threshold,
+                    )
+                except BatchFailureThresholdExceeded as e:
+                    logger.error(f"[US-81-009] Caption batch: {e}")
+                    print(f"\n  ! Caption batch failure threshold exceeded: {e}")
+                    warnings.append(f"Batch failure threshold exceeded: {e}")
+
             # US-63-006: Add INFO log for count of videos with no captions
             if no_captions_count > 0:
                 logger.info(

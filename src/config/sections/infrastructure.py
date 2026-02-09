@@ -146,6 +146,10 @@ class PipelineConfig:
     # Quality gates (US-81-005)
     quality_gates: QualityGatesConfig = field(default_factory=QualityGatesConfig)
 
+    # US-81-009: Batch failure threshold — abort batch stages when failure rate exceeds this
+    # 0.5 = abort when >50% of processed items have failed. Set to 1.0 to disable.
+    batch_failure_threshold: float = 0.5
+
     def __post_init__(self):
         """Convert dict configs to dataclass instances (per Rule 2)."""
         if isinstance(self.quality_gates, dict):
