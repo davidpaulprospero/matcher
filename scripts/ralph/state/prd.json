@@ -112,8 +112,8 @@
                 "The stage's _execute_download_loop() calls orchestrator.download_segment() instead of managing yt-dlp opts directly",
                 "Unit tests verify DownloadOrchestrator with a mock VideoDownloader handles success, retry, and escalation scenarios"
             ],
-            "passes": false,
-            "notes": "Tier: abstraction layer. Files: src/stages/download_segments.py (1,803 lines - VideoDownloader instantiation at ~line 368, _apply_escalation_to_ydl_opts at ~line 962-989, download loop at ~lines 500-800), src/downloader/orchestrator.py (new file), src/downloader/core.py (VideoDownloader class). Currently the stage directly constructs and configures VideoDownloader, applies escalation args to yt-dlp opts, and manages retry loops - all implementation details that should be behind an abstraction."
+            "passes": true,
+            "notes": "Created SegmentDownloadOrchestrator in src/downloader/orchestrator.py with download_segment() and get_stats() methods. Encapsulates VideoDownloader instantiation, ydl_opts construction, escalation arg application, and stall-timeout execution. DownloadVideoSegmentsStage now receives orchestrator via constructor and delegates _execute_download() and retry downloads through it. Lazy _get_orchestrator() ensures backward compatibility with tests that set stage.downloader directly. 14 new tests covering init, download success/failure/file-missing/escalation, get_stats, and stage integration."
         },
         {
             "id": "US-82-008",

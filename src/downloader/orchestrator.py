@@ -2,23 +2,26 @@
 Download orchestrator - batch coordination logic extracted from core.py.
 
 Handles:
-- Batch processing across multiple keywords
+- Batch processing across multiple keywords (DownloadOrchestrator)
+- Segment-level download abstraction (SegmentDownloadOrchestrator, US-82-007)
 - Retry queue coordination
 - Progress tracking and checkpointing
 - Source diversity reporting
 
 The VideoDownloader in core.py focuses on single-video download mechanics,
-while this orchestrator handles the higher-level batch coordination.
+while these orchestrators handle higher-level coordination logic.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import time
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple, TYPE_CHECKING, Callable
+from typing import Any, List, Dict, Optional, Tuple, TYPE_CHECKING, Callable
 
 from ..state import DownloadedVideo
 from ..rate_limit.coordinator import GlobalRateLimitCoordinator
@@ -29,6 +32,7 @@ from .escalation_manager import EscalationManager
 
 if TYPE_CHECKING:
     from .core import VideoDownloader
+    from ..config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -582,3 +586,344 @@ class DownloadOrchestrator:
             }
 
         return stats
+
+
+@dataclass
+class SegmentDownloadResult:
+    """Result of a single segment download attempt.
+
+    US-82-007: Typed result returned by SegmentDownloadOrchestrator.download_segment().
+    """
+
+    success: bool
+    duration: float = 0.0
+    error_msg: str = ''
+    file_missing: bool = False
+    output_path: str = ''
+
+
+class SegmentDownloadOrchestrator:
+    """Orchestrates individual segment downloads for the DOWNLOAD_SEGMENTS stage.
+
+    US-82-007: Encapsulates VideoDownloader instantiation, escalation arg
+    application, ydl_opts construction, and single-segment download execution.
+
+    The DownloadVideoSegmentsStage delegates download mechanics to this class
+    instead of directly constructing a VideoDownloader and managing yt-dlp opts.
+    """
+
+    def __init__(self, config: 'Config') -> None:
+        """Instantiate a VideoDownloader and wire up escalation/cookie managers.
+
+        Args:
+            config: Application Config (used to construct VideoDownloader).
+        """
+        from .core import VideoDownloader
+
+        self._config = config
+        self._downloader = VideoDownloader(config=config)
+
+    # -- public properties for stage-level access ----------------------------
+
+    @property
+    def downloader(self) -> 'VideoDownloader':
+        """Expose underlying VideoDownloader for retry-queue and checkpoint access."""
+        return self._downloader
+
+    @property
+    def escalation_manager(self):
+        return getattr(self._downloader, 'escalation_manager', None)
+
+    @property
+    def cookie_rotator(self):
+        return getattr(self._downloader, 'cookie_rotator', None)
+
+    @property
+    def circuit_breaker(self):
+        return getattr(self._downloader, 'circuit_breaker', None)
+
+    @property
+    def impersonation_manager(self):
+        return getattr(self._downloader, 'impersonation_manager', None)
+
+    @property
+    def retry_queue(self):
+        return getattr(self._downloader, 'retry_queue', None)
+
+    @property
+    def download_config(self):
+        return getattr(self._downloader, 'download_config', None)
+
+    # -- core download method ------------------------------------------------
+
+    def download_segment(
+        self,
+        video_id: str,
+        start: float,
+        end: float,
+        output_file: Path,
+        *,
+        progress_hooks: Optional[List] = None,
+        stall_timeout: int = 120,
+    ) -> SegmentDownloadResult:
+        """Download a single video segment via yt-dlp Python API.
+
+        Encapsulates ydl_opts construction, escalation application, cookie
+        propagation, and stall-timeout execution.
+
+        Args:
+            video_id: YouTube video ID.
+            start: Segment start time in seconds (with buffer already applied).
+            end: Segment end time in seconds (with buffer already applied).
+            output_file: Destination file path.
+            progress_hooks: Optional yt-dlp progress hook callables.
+            stall_timeout: Seconds before killing a stalled download (0=no timeout).
+
+        Returns:
+            SegmentDownloadResult with success/error info.
+        """
+        import yt_dlp
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+
+        ydl_opts, escalation_result = self._build_ydl_opts(
+            video_id=video_id,
+            start=start,
+            end=end,
+            output_file=output_file,
+            progress_hooks=progress_hooks,
+        )
+
+        if escalation_result:
+            try:
+                if escalation_result.tier.value > 1:
+                    logger.info(
+                        f"Segment {video_id}: using escalation tier "
+                        f"{escalation_result.tier.name}"
+                    )
+            except (TypeError, AttributeError):
+                pass
+
+        seg_start_time = time.time()
+        try:
+            if stall_timeout and stall_timeout > 0:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    def _do_download():
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            ydl.download([url])
+
+                    future = executor.submit(_do_download)
+                    try:
+                        future.result(timeout=stall_timeout)
+                    except concurrent.futures.TimeoutError:
+                        elapsed = time.time() - seg_start_time
+                        logger.warning(
+                            f"Segment {video_id}: ydl.download() stalled for "
+                            f"{elapsed:.1f}s (timeout={stall_timeout}s) — killing"
+                        )
+                        raise TimeoutError(
+                            f"ydl.download() stalled for {elapsed:.1f}s "
+                            f"(segment_stall_timeout={stall_timeout}s)"
+                        )
+            else:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+
+            duration = time.time() - seg_start_time
+            if output_file.exists():
+                return SegmentDownloadResult(
+                    success=True,
+                    duration=duration,
+                    output_path=str(output_file),
+                )
+            return SegmentDownloadResult(
+                success=False,
+                file_missing=True,
+                duration=duration,
+            )
+        except Exception as e:
+            return SegmentDownloadResult(
+                success=False,
+                error_msg=str(e),
+            )
+
+    # -- get_stats -----------------------------------------------------------
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Return statistics about the orchestrator's underlying components.
+
+        Returns:
+            Dict with circuit_breaker, escalation, and retry_queue info.
+        """
+        stats: Dict[str, Any] = {}
+
+        cb = self.circuit_breaker
+        if cb:
+            stats['circuit_breaker'] = {
+                'total_trips': cb.state.total_trips,
+                'total_paused_seconds': round(cb.state.total_paused_seconds, 1),
+            }
+
+        esc_mgr = self.escalation_manager
+        if esc_mgr and hasattr(esc_mgr, 'get_metrics'):
+            try:
+                stats['escalation'] = esc_mgr.get_metrics()
+            except Exception:
+                pass
+
+        rq = self.retry_queue
+        if rq:
+            try:
+                stats['retry_queue'] = rq.get_stats()
+            except Exception:
+                pass
+
+        return stats
+
+    # -- private helpers (moved from download_segments stage) -----------------
+
+    def _build_ydl_opts(
+        self,
+        *,
+        video_id: str,
+        start: float,
+        end: float,
+        output_file: Path,
+        progress_hooks: Optional[List] = None,
+    ) -> tuple:
+        """Build ydl_opts dict for a yt-dlp Python API download call.
+
+        Encapsulates base options, cookie propagation, and escalation application.
+
+        Returns:
+            (ydl_opts, escalation_result) tuple. escalation_result may be None.
+        """
+        dl_cfg = self.download_config
+        esc_mgr = self.escalation_manager
+        cookie_rotator = self.cookie_rotator
+
+        # Read segment config from download config with fallback defaults
+        _socket_timeout = 30
+        _max_res = 1080
+        _seg_format = 'best[height<={segment_max_resolution}]'
+        if dl_cfg:
+            _seg_sock = getattr(dl_cfg, 'segment_socket_timeout', 0)
+            _socket_timeout = _seg_sock if _seg_sock else getattr(dl_cfg, 'socket_timeout', 30)
+            _max_res = getattr(dl_cfg, 'segment_max_resolution', 1080)
+            _seg_format = getattr(dl_cfg, 'segment_format', _seg_format)
+
+        # Build format string with fallback chain
+        _primary_format = _seg_format.format(segment_max_resolution=_max_res)
+        _format_with_fallback = f'{_primary_format}/best/bestvideo+bestaudio'
+
+        ydl_opts: Dict[str, Any] = {
+            'format': _format_with_fallback,
+            'outtmpl': str(output_file),
+            'quiet': True,
+            'no_warnings': True,
+            'ignore_no_formats_error': True,
+            'remote_components': {'ejs:github'},
+            'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
+            'force_keyframes_at_cuts': True,
+            'socket_timeout': _socket_timeout,
+            'retries': 10,
+            'fragment_retries': 10,
+        }
+
+        if progress_hooks:
+            ydl_opts['progress_hooks'] = progress_hooks
+
+        # Cookie propagation
+        if dl_cfg:
+            _browser = getattr(dl_cfg, 'cookies_from_browser', '')
+            if _browser:
+                ydl_opts['cookiesfrombrowser'] = [_browser]
+            else:
+                _cookies_path = getattr(dl_cfg, 'cookies_path', '')
+                if not _cookies_path:
+                    _cookie_rotation = getattr(dl_cfg, 'cookie_rotation', None)
+                    if _cookie_rotation:
+                        _cookie_files = getattr(_cookie_rotation, 'cookie_files', [])
+                        if _cookie_files:
+                            _cookies_path = _cookie_files[0]
+                if _cookies_path:
+                    ydl_opts['cookiefile'] = _cookies_path
+
+        # Escalation application
+        escalation_result = None
+        if esc_mgr:
+            try:
+                escalation_result = esc_mgr.get_escalation_args(video_id)
+                _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
+
+                # Tier 3: apply cookie rotation
+                if escalation_result.rotate_cookies and cookie_rotator:
+                    cookie_path = cookie_rotator.get_current_cookie()
+                    if cookie_path:
+                        ydl_opts['cookiefile'] = cookie_path
+                        ydl_opts.pop('cookiesfrombrowser', None)
+            except Exception as esc_err:
+                logger.debug(f"Escalation lookup failed for {video_id}: {esc_err}")
+        elif self.impersonation_manager:
+            try:
+                imp_args = self.impersonation_manager.get_impersonate_args()
+                if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
+                    ydl_opts['impersonate'] = imp_args[1]
+            except Exception:
+                pass
+
+        return ydl_opts, escalation_result
+
+
+def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -> None:
+    """Translate EscalationResult CLI args to yt-dlp Python API ydl_opts.
+
+    The EscalationManager returns CLI args (e.g., ['--impersonate', 'X',
+    '--extractor-args', 'youtube:player_client=a,b']). This function
+    translates them to ydl_opts dict keys for the Python API.
+
+    Translation:
+        --impersonate X           -> ydl_opts['impersonate'] = 'X'
+        --extractor-args youtube:player_client=X  -> ydl_opts['extractor_args'] = ...
+
+    Cookie rotation is handled separately via cookiefile, not via CLI args.
+    """
+    if not escalation_result or not escalation_result.args:
+        return
+
+    args = escalation_result.args
+    i = 0
+    while i < len(args):
+        if args[i] == '--impersonate' and i + 1 < len(args):
+            try:
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+            except ImportError:
+                logger.warning(
+                    "ImpersonateTarget not available in this yt-dlp version; "
+                    "skipping impersonation for '%s'", args[i + 1]
+                )
+                i += 2
+                continue
+            try:
+                target = ImpersonateTarget.from_str(args[i + 1])
+                target = ImpersonateTarget(
+                    client=target.client.lower() if target.client else None,
+                    version=target.version,
+                    os=target.os.lower() if target.os else None,
+                    os_version=target.os_version,
+                )
+                ydl_opts['impersonate'] = target
+            except Exception:
+                logger.warning(
+                    "Failed to parse impersonate target '%s'; skipping impersonation",
+                    args[i + 1]
+                )
+            i += 2
+        elif args[i] == '--extractor-args' and i + 1 < len(args):
+            logger.debug(
+                "Skipping escalation extractor_args for segment download: %s",
+                args[i + 1],
+            )
+            i += 2
+        else:
+            i += 1

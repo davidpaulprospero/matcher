@@ -21,7 +21,12 @@ Original VideoDownloader (~2,388 lines) → streamlined core (~1,100 lines) = 54
 
 # Core class (NEW - Phase 9 complete)
 from .core import VideoDownloader
-from .orchestrator import DownloadOrchestrator, RateLimitHooks
+from .orchestrator import (
+    DownloadOrchestrator,
+    RateLimitHooks,
+    SegmentDownloadOrchestrator,
+    SegmentDownloadResult,
+)
 
 # Dataclasses and exceptions (from types.py)
 from .types import (
@@ -106,6 +111,8 @@ __all__ = [
     'VideoDownloader',
     'DownloadOrchestrator',
     'RateLimitHooks',
+    'SegmentDownloadOrchestrator',
+    'SegmentDownloadResult',
 
     # Dataclasses and exceptions
     'MatchedSegment',

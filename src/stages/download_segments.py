@@ -257,8 +257,25 @@ class DownloadVideoSegmentsStage(Stage):
     # Browsers that yt-dlp supports for cookie extraction
     _KNOWN_BROWSERS = ('firefox', 'chrome', 'edge', 'safari', 'opera', 'brave')
 
-    def __init__(self):
+    def __init__(self, orchestrator=None):
         self.downloader = None
+        self._orchestrator = orchestrator
+
+    def _get_orchestrator(self):
+        """Return the orchestrator, creating a lightweight wrapper if needed.
+
+        US-82-007: When tests set self.downloader directly (bypassing run()),
+        wrap it in a SegmentDownloadOrchestrator so _execute_download works.
+        """
+        if self._orchestrator is not None:
+            return self._orchestrator
+        if self.downloader is not None:
+            from ..downloader.orchestrator import SegmentDownloadOrchestrator
+            orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+            orch._config = None
+            orch._downloader = self.downloader
+            self._orchestrator = orch
+        return self._orchestrator
 
     @staticmethod
     def _validate_cookie_config(download_config) -> None:
@@ -363,9 +380,11 @@ class DownloadVideoSegmentsStage(Stage):
 
             print(f"    Total segments: {len(segments_to_download)}")
 
-            # Initialize downloader
-            from ..downloader import VideoDownloader
-            self.downloader = VideoDownloader(config=config)
+            # Initialize downloader via orchestrator (US-82-007)
+            if self._orchestrator is None:
+                from ..downloader.orchestrator import SegmentDownloadOrchestrator
+                self._orchestrator = SegmentDownloadOrchestrator(config=config)
+            self.downloader = self._orchestrator.downloader
             output_dir = Path(config.downloaded_videos_dir)
 
             # US-51-010: Restore retry queue from checkpoint on resume
@@ -939,36 +958,13 @@ class DownloadVideoSegmentsStage(Stage):
         """Run the actual yt-dlp download for a single segment.
 
         US-57-007: Extracts download execution from the main loop.
+        US-82-007: Delegates to SegmentDownloadOrchestrator.download_segment().
 
         Returns:
             A dict with keys ``success`` (bool), and optionally ``duration``,
             ``error_msg``, or ``file_missing``.
         """
-        import yt_dlp
-
-        url = f"https://www.youtube.com/watch?v={video_id}"
         _progress_hook = self._make_progress_hook(video_id, ctx.stats)
-
-        ydl_opts, escalation_result = self._build_ydl_opts(
-            video_id=video_id,
-            start=start,
-            end=end,
-            output_file=output_file,
-            download_config=ctx.download_config,
-            escalation_mgr=ctx.escalation_mgr,
-            cookie_rotator=ctx.cookie_rotator,
-            progress_hooks=[_progress_hook],
-        )
-
-        if escalation_result:
-            try:
-                if escalation_result.tier.value > 1:
-                    logger.info(
-                        f"Segment {video_id}: using escalation tier "
-                        f"{escalation_result.tier.name}"
-                    )
-            except (TypeError, AttributeError):
-                pass
 
         # US-49-004: Read stall timeout for process-level hang detection
         _stall_timeout = 120
@@ -979,37 +975,23 @@ class DownloadVideoSegmentsStage(Stage):
             except (TypeError, ValueError):
                 _stall_timeout = 120
 
-        seg_start_time = time.time()
-        try:
-            if _stall_timeout and _stall_timeout > 0:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    def _do_download():
-                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                            ydl.download([url])
+        orch = self._get_orchestrator()
+        result = orch.download_segment(
+            video_id=video_id,
+            start=start,
+            end=end,
+            output_file=output_file,
+            progress_hooks=[_progress_hook],
+            stall_timeout=_stall_timeout,
+        )
 
-                    future = executor.submit(_do_download)
-                    try:
-                        future.result(timeout=_stall_timeout)
-                    except concurrent.futures.TimeoutError:
-                        elapsed = time.time() - seg_start_time
-                        logger.warning(
-                            f"Segment {video_id}: ydl.download() stalled for "
-                            f"{elapsed:.1f}s (timeout={_stall_timeout}s) — killing"
-                        )
-                        raise TimeoutError(
-                            f"ydl.download() stalled for {elapsed:.1f}s "
-                            f"(segment_stall_timeout={_stall_timeout}s)"
-                        )
-            else:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-
-            duration = time.time() - seg_start_time
-            if output_file.exists():
-                return {'success': True, 'duration': duration}
-            return {'success': False, 'file_missing': True, 'duration': duration}
-        except Exception as e:
-            return {'success': False, 'error_msg': str(e)}
+        # Convert SegmentDownloadResult to dict for backward-compat with _handle_result
+        return {
+            'success': result.success,
+            'duration': result.duration,
+            'error_msg': result.error_msg,
+            'file_missing': result.file_missing,
+        }
 
     def _handle_result(
         self,
@@ -1552,7 +1534,6 @@ class DownloadVideoSegmentsStage(Stage):
         the escalated tier).
         """
         from ..state import DownloadedVideo
-        import yt_dlp
 
         if not self.downloader or not self.downloader.retry_queue:
             return
@@ -1601,61 +1582,49 @@ class DownloadVideoSegmentsStage(Stage):
                 continue
 
             retry_attempts += 1
-            try:
-                url = f"https://www.youtube.com/watch?v={video_id}"
 
-                # US-49-010: Apply stored escalation tier floor before getting args.
-                # This ensures the retry starts at the tier where the original
-                # download failed (or higher), avoiding wasted lower-tier attempts.
-                if escalation_mgr and item.escalation_tier > 1:
-                    try:
-                        from ..downloader.types import EscalationTier
-                        stored_tier = EscalationTier(item.escalation_tier)
-                        esc_state = escalation_mgr._get_state(video_id)
-                        if esc_state.current_tier < stored_tier:
-                            esc_state.current_tier = stored_tier
-                            logger.debug(
-                                f"Retry {video_id}: elevated escalation tier to "
-                                f"{stored_tier.name} (from retry queue)"
-                            )
-                    except (ValueError, Exception):
-                        pass
+            url = f"https://www.youtube.com/watch?v={video_id}"
 
-                # US-52-005: Build ydl_opts via builder (retry path)
-                _dl_cfg = getattr(self.downloader, 'download_config', None)
-                ydl_opts, _esc_result = self._build_ydl_opts(
-                    video_id=video_id,
-                    start=start,
-                    end=end,
-                    output_file=output_file,
-                    download_config=_dl_cfg,
-                    escalation_mgr=escalation_mgr,
-                    cookie_rotator=cookie_rotator,
-                )
+            # US-49-010: Apply stored escalation tier floor before getting args.
+            if escalation_mgr and item.escalation_tier > 1:
+                try:
+                    from ..downloader.types import EscalationTier
+                    stored_tier = EscalationTier(item.escalation_tier)
+                    esc_state = escalation_mgr._get_state(video_id)
+                    if esc_state.current_tier < stored_tier:
+                        esc_state.current_tier = stored_tier
+                        logger.debug(
+                            f"Retry {video_id}: elevated escalation tier to "
+                            f"{stored_tier.name} (from retry queue)"
+                        )
+                except (ValueError, Exception):
+                    pass
 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+            # US-82-007: Delegate retry download to orchestrator
+            result = self._get_orchestrator().download_segment(
+                video_id=video_id,
+                start=start,
+                end=end,
+                output_file=output_file,
+            )
 
-                if output_file.exists():
-                    downloaded.append(DownloadedVideo(
-                        file=str(output_file),
-                        url=url,
-                        source='segment_retry'
-                    ))
-                    retry_queue.mark_success(item.video_id)
-                    if escalation_mgr:
-                        escalation_mgr.record_success(video_id)
-                    logger.info(f"Retry succeeded for {video_id}")
-                else:
-                    retry_queue.mark_failed(item.video_id)
-
-            except Exception as e:
-                error_msg = str(e)
-                logger.warning(f"Retry failed for {video_id}: {error_msg}")
+            if result.success:
+                downloaded.append(DownloadedVideo(
+                    file=str(output_file),
+                    url=url,
+                    source='segment_retry'
+                ))
+                retry_queue.mark_success(item.video_id)
+                if escalation_mgr:
+                    escalation_mgr.record_success(video_id)
+                logger.info(f"Retry succeeded for {video_id}")
+            elif result.error_msg:
+                logger.warning(f"Retry failed for {video_id}: {result.error_msg}")
                 retry_queue.mark_failed(item.video_id)
-                # Record failure for escalation progression on next retry
-                if escalation_mgr and _is_escalation_error(error_msg):
-                    escalation_mgr.record_failure(video_id, error_msg)
+                if escalation_mgr and _is_escalation_error(result.error_msg):
+                    escalation_mgr.record_failure(video_id, result.error_msg)
+            else:
+                retry_queue.mark_failed(item.video_id)
 
             # Delay between retry requests to avoid rate-limiting
             if _retry_delay > 0:
