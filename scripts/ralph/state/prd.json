@@ -1,197 +1,197 @@
-{
-  "sprintNumber": 85,
-  "focusArea": "pipeline",
-  "branchName": "ralph/sprint-85",
-  "projectContext": {
-    "sourceDir": "src/",
-    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-    "testsDir": "tests/",
-    "testFramework": "pytest",
-    "testCommand": "pytest tests/ -v --tb=short"
-  },
-  "userStories": [
-    {
-      "id": "US-85-001",
-      "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'pipeline' focus area",
-        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-        "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'pipeline'",
-        "Add stories US-85-002 through US-85-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-        "Each story MUST have 4-6 testable acceptance criteria",
-        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-85-NNN to be unique across sprints",
-        "Mark this story (US-85-001) as passes: true when done"
-      ],
-      "passes": true,
-      "priority": "high",
-      "title": "Generate sprint stories for pipeline focus area",
-      "notes": "Seed story completed. Generated 11 pipeline improvement stories (US-85-002 through US-85-012) covering: exception specificity, checkpoint backup optimization, state attribute auto-defaults, within-stage resumption for MATCH, config schema validation, structured logging, download jitter, segment path indexing, stage metric standardization, match normalization extraction, and parallel stage partial success."
-    },
-    {
-      "id": "US-85-002",
-      "title": "Replace broad except-Exception blocks with specific exception types in pipeline stages",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Identify all `except Exception` blocks in `src/pipeline.py` that catch-and-ignore or catch-and-log-debug (at least 5 instances)",
-        "Replace each with specific exception types (e.g., `FileNotFoundError`, `json.JSONDecodeError`, `KeyError`, `ValueError`) appropriate to the code in the try block",
-        "Add a test that verifies a specific pipeline error (e.g., invalid config) raises the expected exception type instead of being swallowed",
-        "Ensure `python -m py_compile src/pipeline.py` passes with no errors",
-        "Run `pytest tests/test_pipeline*.py tests/test_stage*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: quick-win. Replaced 7 except-Exception blocks in src/pipeline.py with specific types: (1) _log_stage_estimate: OSError/JSONDecodeError/KeyError/TypeError/ValueError/ZeroDivisionError, (2) _save_stage_timing: same minus ZeroDivisionError, (3-6) 4 callback handlers: TypeError/ValueError/RuntimeError/OSError, (7) _collect_escalation_metrics: ImportError/AttributeError/TypeError/KeyError/ValueError. Added import json. Added tests/test_pipeline_specific_exceptions.py with 11 tests verifying specific catches AND propagation of unexpected types (RuntimeError, KeyboardInterrupt, SystemExit)."
-    },
-    {
-      "id": "US-85-003",
-      "title": "Optimize checkpoint backup rotation to skip on minor updates",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add a `min_rotation_interval_seconds` field (default 60) to checkpoint config in `src/config/sections/` and `config.yaml`",
-        "Modify `CheckpointManager._atomic_save()` in `src/checkpoint.py` to only rotate backups when elapsed time since last rotation exceeds the configured interval OR when a major stage completes",
-        "Add a `_last_rotation_time` timestamp tracking field to `CheckpointManager`",
-        "Add a test that verifies rapid successive saves do NOT trigger backup rotation when interval hasn't elapsed",
-        "Add a test that verifies backup rotation IS triggered when a stage boundary is crossed regardless of interval",
-        "Run `pytest tests/test_checkpoint*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: targeted. Files: `src/checkpoint.py` (lines ~743-807, `_atomic_save` and backup rotation logic), `src/config/sections/core.py` or relevant config section. Currently rotates backups on EVERY save including minor stat updates during DOWNLOAD_SEGMENTS, which creates unnecessary I/O. Stage-boundary saves should always rotate; intermediate saves should respect the interval."
-    },
-    {
-      "id": "US-85-004",
-      "title": "Auto-generate state attribute defaults from PipelineState dataclass annotations",
-      "priority": "medium",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Replace the manual `_STATE_ATTR_DEFAULTS` dict in `src/stages/__init__.py` (lines ~410-443) with an auto-generated dict derived from `PipelineState` field annotations and default values",
-        "Use `dataclasses.fields()` to introspect `PipelineState` and build the defaults dict at import time",
-        "Add a test that verifies `_STATE_ATTR_DEFAULTS` contains an entry for every field in `PipelineState` that has a default value",
-        "Add a test that verifies adding a new field to `PipelineState` with a default automatically appears in the defaults dict without manual update",
-        "Ensure `python -m py_compile src/stages/__init__.py` passes"
-      ],
-      "notes": "Tier: targeted. Files: `src/stages/__init__.py` (lines ~410-443, `_STATE_ATTR_DEFAULTS`), `src/state.py` (PipelineState dataclass, lines ~272-464). The manual dict has 20+ entries that must stay synchronized with PipelineState. Auto-generation eliminates drift. Use `dataclasses.fields(PipelineState)` to extract name + default_factory or default."
-    },
-    {
-      "id": "US-85-005",
-      "title": "Add within-stage resumption support for MATCH stage",
-      "priority": "high",
-      "passes": true,
-      "acceptanceCriteria": [
-        "Add an `intermediate_checkpoint()` method call inside the MATCH stage's segment-processing loop (in `src/stages/match.py`) that saves progress every N segments (configurable, default 25)",
-        "Store partial match results in checkpoint under a `partial_matches` key so that on resume, already-matched segments are skipped",
-        "Add a `_restore_partial_matches()` method that loads partial results from checkpoint and merges with new results on completion",
-        "Add a test that simulates a MATCH stage interruption mid-way and verifies resumption starts from the last checkpointed segment, not from scratch",
-        "Add a test that verifies the final match results are identical whether run to completion or interrupted+resumed",
-        "Run `pytest tests/test_match*.py tests/test_checkpoint*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: deep. Implemented within-stage resumption for MATCH stage. Added `progress_callback` + `start_index` + `prior_results` params to `match_all_segments()` in `src/matching/main.py`. Added `_restore_partial_matches()`, `_make_checkpoint_callback()`, `_clear_partial_matches()` methods to MatchStage. Checkpoint saves every 25 segments (configurable via `matching.intermediate_checkpoint_interval`). Partial matches stored under `partial_matches` key and cleared on completion. 9 new tests in `tests/test_match_within_stage_resume.py` all passing. 360 tests pass in match+checkpoint suite."
-    },
-    {
-      "id": "US-85-006",
-      "title": "Add config schema validation that fails fast on invalid YAML before pipeline runs",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Create a `validate_config_schema()` function in `src/config/` that checks all required fields exist and have correct types before pipeline execution",
-        "Validate at minimum: all section names are recognized, numeric fields are numbers, boolean fields are booleans, nested objects match expected structure",
-        "Call `validate_config_schema()` early in pipeline initialization (before stage construction) in `src/pipeline.py`",
-        "Add a test with a config containing an unknown section name that triggers a warning (not error, for forward compat)",
-        "Add a test with a config containing a string where a number is expected that raises `ConfigValidationError`",
-        "Run `pytest tests/test_config*.py tests/test_pipeline*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: targeted. Files: `src/config/` (new function or module), `src/pipeline.py` (line ~694, near `config.freeze()`). Currently config is only validated at runtime when individual fields are accessed, leading to cryptic errors deep in pipeline stages. Fail-fast on invalid YAML catches typos and structure issues before any work is done. Use `dataclasses.fields()` to auto-derive expected schema from config section dataclasses."
-    },
-    {
-      "id": "US-85-007",
-      "title": "Add structured logging context to pipeline stage execution",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Create a `StageLogContext` dataclass with fields: `stage_name`, `stage_index`, `total_stages`, `elapsed_seconds`, `items_processed`, `items_failed`",
-        "Add a `_format_log_context()` method to PipelineOrchestrator that returns a structured dict for inclusion in log messages",
-        "Modify at least 5 key log points in `src/pipeline.py` to include structured context (stage entry, stage exit, stage failure, recovery attempt, timing summary)",
-        "Add a test that captures log output from a mocked stage run and verifies the structured context fields are present in the log message",
-        "Ensure backward compatibility: existing log format still readable by humans (structured data appended, not replacing)",
-        "Run `pytest tests/test_pipeline*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: targeted. Files: `src/pipeline.py` (logging calls at lines ~468-516 timing, ~559-597 quality gate, ~842 stage failure). Currently error messages use f-strings with inline context. Structured context enables log aggregation and filtering. Keep human-readable format but add parseable context suffix like `[stage=MATCH idx=3/7 elapsed=42.1s items=50/0]`."
-    },
-    {
-      "id": "US-85-008",
-      "title": "Add randomized jitter to download adaptive delay to prevent thundering herd",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Modify the adaptive delay calculation in `src/stages/download_segments.py` to add random jitter of +/-25% to the computed delay",
-        "Add a `jitter_factor` config field (default 0.25) in the download config section",
-        "Ensure jitter is applied consistently in both the main download loop and the retry queue processing",
-        "Add a test that runs the delay calculation 100 times and verifies the results are not identical (proving jitter is applied)",
-        "Add a test that verifies jitter stays within the configured bounds (delay * (1 - jitter_factor) to delay * (1 + jitter_factor))",
-        "Run `pytest tests/test_download*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: quick-win. Files: `src/stages/download_segments.py` (lines ~752-754, ~833-837 adaptive delay logic), `src/config/sections/download.py`. Currently uses exponential backoff with a max cap but no randomization. When multiple segments hit rate limits simultaneously, they all retry at the exact same intervals, creating synchronized request bursts. Use `random.uniform(1 - jitter, 1 + jitter)` multiplier."
-    },
-    {
-      "id": "US-85-009",
-      "title": "Build segment path index for O(1) file lookup in OUTPUT stage",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Create a `SegmentPathIndex` class in `src/stages/output.py` (or new `src/segment_index.py`) that builds a dict mapping `(video_id, start, end)` tuples to file paths",
-        "Populate the index once at OUTPUT stage start by scanning both legacy `*_segments` dirs and flat download dir",
-        "Replace the per-match file discovery calls in `_scan_video_segments()` with index lookups",
-        "Add a test that verifies index lookup returns the correct path for a known segment file",
-        "Add a test that verifies index handles the case where a segment exists in both legacy and flat directories (flat dir takes precedence)",
-        "Run `pytest tests/test_pipeline*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: targeted. Files: `src/stages/output.py` (lines ~112-214, `_scan_video_segments`). Currently scans directories for every match resolution, which is O(n*m) for n matches and m files. An upfront index scan is O(m) build + O(1) per lookup. Per CLAUDE.md rule 38, must check BOTH legacy dirs AND flat dir. Use `pathlib.Path.glob()` for initial scan."
-    },
-    {
-      "id": "US-85-010",
-      "title": "Standardize StageMetrics schema with required vs optional fields per stage type",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Define a `StageMetricsSchema` enum or dict in `src/stages/__init__.py` that categorizes stages into types: `download`, `processing`, `analysis`, `output`",
-        "For each stage type, specify which `StageMetrics` fields are required (e.g., download stages must set `items_processed` and `items_failed`; processing stages must set `duration_seconds`)",
-        "Add a `validate_metrics()` method to `StageMetrics` that checks the required fields for the given stage type are populated",
-        "Call `validate_metrics()` in `StageResult` construction and log warnings for missing required fields",
-        "Add a test that verifies a download-type stage missing `items_failed` triggers a warning",
-        "Run `pytest tests/test_stage*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: polish. Files: `src/stages/__init__.py` (StageMetrics class lines ~82-166, StageResult lines ~168-198). Currently different stages populate different subsets of StageMetrics fields with no consistency enforcement. The timing summary table in `pipeline.py` (lines ~468-516) shows gaps when stages don't report expected metrics. Warnings only (not errors) to avoid breaking existing stages."
-    },
-    {
-      "id": "US-85-011",
-      "title": "Extract match normalization logic from OUTPUT stage into dedicated module",
-      "priority": "low",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Move the `_normalize_matches()` method (currently in `src/stages/output.py`, ~136 lines) into a new `src/matching/match_normalizer.py` module",
-        "Create a `MatchNormalizer` class with a `normalize()` method that accepts checkpoint match data and returns `List[MatchResult]`",
-        "Update `src/stages/output.py` to import and delegate to `MatchNormalizer` instead of containing the logic inline",
-        "Add a unit test for `MatchNormalizer.normalize()` with mock checkpoint data containing primary + alternative matches",
-        "Add a unit test that verifies multi-track (V1-V8) match data is correctly extracted during normalization",
-        "Ensure `python -m py_compile src/stages/output.py src/matching/match_normalizer.py` passes"
-      ],
-      "notes": "Tier: refactor. Files: `src/stages/output.py` (lines ~766-902, `_normalize_matches`). This 136-line method handles checkpoint restoration, multi-track data extraction, and match type conversion -- responsibilities that belong to the matching domain, not the output stage. Extracting it makes the OUTPUT stage thinner and the normalization logic independently testable. Import path: `from src.matching.match_normalizer import MatchNormalizer`."
-    },
-    {
-      "id": "US-85-012",
-      "title": "Add partial success handling for parallel stage execution in pipeline orchestrator",
-      "priority": "medium",
-      "passes": false,
-      "acceptanceCriteria": [
-        "Modify `_run_parallel_stages()` in `src/pipeline.py` to classify stages as `critical` (failure aborts) vs `optional` (failure logs warning but pipeline continues)",
-        "Add a `critical` boolean field (default True) to the stage registration metadata in `src/stages/__init__.py`",
-        "When an optional parallel stage fails, collect its error into a `partial_failures` list on PipelineState and continue with remaining stages",
-        "Add a test that runs two parallel stages where the optional one fails and verifies the pipeline completes with a warning",
-        "Add a test that runs two parallel stages where the critical one fails and verifies the pipeline aborts",
-        "Run `pytest tests/test_pipeline*.py -v --tb=short -x` with no new failures"
-      ],
-      "notes": "Tier: deep. Files: `src/pipeline.py` (lines ~974-1096, `_run_parallel_stages`), `src/stages/__init__.py` (stage registry decorator). Currently all parallel futures are collected before checking failures -- one failure cascades to abort all. For future parallel configurations (e.g., CAPTION + VIDEO_SEARCH in parallel), a failed optional stage shouldn't block the pipeline. Use `concurrent.futures.as_completed()` for early failure detection."
-    }
-  ]
+﻿{
+    "sprintNumber":  85,
+    "focusArea":  "pipeline",
+    "branchName":  "ralph/sprint-85",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
+    "userStories":  [
+                        {
+                            "id":  "US-85-001",
+                            "acceptanceCriteria":  [
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027pipeline\u0027 focus area",
+                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+                                                       "Read CLAUDE.md for project conventions and known issues",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027pipeline\u0027",
+                                                       "Add stories US-85-002 through US-85-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Each story MUST have 4-6 testable acceptance criteria",
+                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+                                                       "IMPORTANT: Story IDs MUST follow format US-85-NNN to be unique across sprints",
+                                                       "Mark this story (US-85-001) as passes: true when done"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Generate sprint stories for pipeline focus area",
+                            "notes":  "Seed story completed. Generated 11 pipeline improvement stories (US-85-002 through US-85-012) covering: exception specificity, checkpoint backup optimization, state attribute auto-defaults, within-stage resumption for MATCH, config schema validation, structured logging, download jitter, segment path indexing, stage metric standardization, match normalization extraction, and parallel stage partial success."
+                        },
+                        {
+                            "id":  "US-85-002",
+                            "title":  "Replace broad except-Exception blocks with specific exception types in pipeline stages",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Identify all `except Exception` blocks in `src/pipeline.py` that catch-and-ignore or catch-and-log-debug (at least 5 instances)",
+                                                       "Replace each with specific exception types (e.g., `FileNotFoundError`, `json.JSONDecodeError`, `KeyError`, `ValueError`) appropriate to the code in the try block",
+                                                       "Add a test that verifies a specific pipeline error (e.g., invalid config) raises the expected exception type instead of being swallowed",
+                                                       "Ensure `python -m py_compile src/pipeline.py` passes with no errors",
+                                                       "Run `pytest tests/test_pipeline*.py tests/test_stage*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: quick-win. Replaced 7 except-Exception blocks in src/pipeline.py with specific types: (1) _log_stage_estimate: OSError/JSONDecodeError/KeyError/TypeError/ValueError/ZeroDivisionError, (2) _save_stage_timing: same minus ZeroDivisionError, (3-6) 4 callback handlers: TypeError/ValueError/RuntimeError/OSError, (7) _collect_escalation_metrics: ImportError/AttributeError/TypeError/KeyError/ValueError. Added import json. Added tests/test_pipeline_specific_exceptions.py with 11 tests verifying specific catches AND propagation of unexpected types (RuntimeError, KeyboardInterrupt, SystemExit)."
+                        },
+                        {
+                            "id":  "US-85-003",
+                            "title":  "Optimize checkpoint backup rotation to skip on minor updates",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Add a `min_rotation_interval_seconds` field (default 60) to checkpoint config in `src/config/sections/` and `config.yaml`",
+                                                       "Modify `CheckpointManager._atomic_save()` in `src/checkpoint.py` to only rotate backups when elapsed time since last rotation exceeds the configured interval OR when a major stage completes",
+                                                       "Add a `_last_rotation_time` timestamp tracking field to `CheckpointManager`",
+                                                       "Add a test that verifies rapid successive saves do NOT trigger backup rotation when interval hasn\u0027t elapsed",
+                                                       "Add a test that verifies backup rotation IS triggered when a stage boundary is crossed regardless of interval",
+                                                       "Run `pytest tests/test_checkpoint*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: targeted. Files: `src/checkpoint.py` (lines ~743-807, `_atomic_save` and backup rotation logic), `src/config/sections/core.py` or relevant config section. Currently rotates backups on EVERY save including minor stat updates during DOWNLOAD_SEGMENTS, which creates unnecessary I/O. Stage-boundary saves should always rotate; intermediate saves should respect the interval."
+                        },
+                        {
+                            "id":  "US-85-004",
+                            "title":  "Auto-generate state attribute defaults from PipelineState dataclass annotations",
+                            "priority":  "medium",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Replace the manual `_STATE_ATTR_DEFAULTS` dict in `src/stages/__init__.py` (lines ~410-443) with an auto-generated dict derived from `PipelineState` field annotations and default values",
+                                                       "Use `dataclasses.fields()` to introspect `PipelineState` and build the defaults dict at import time",
+                                                       "Add a test that verifies `_STATE_ATTR_DEFAULTS` contains an entry for every field in `PipelineState` that has a default value",
+                                                       "Add a test that verifies adding a new field to `PipelineState` with a default automatically appears in the defaults dict without manual update",
+                                                       "Ensure `python -m py_compile src/stages/__init__.py` passes"
+                                                   ],
+                            "notes":  "Tier: targeted. Files: `src/stages/__init__.py` (lines ~410-443, `_STATE_ATTR_DEFAULTS`), `src/state.py` (PipelineState dataclass, lines ~272-464). The manual dict has 20+ entries that must stay synchronized with PipelineState. Auto-generation eliminates drift. Use `dataclasses.fields(PipelineState)` to extract name + default_factory or default."
+                        },
+                        {
+                            "id":  "US-85-005",
+                            "title":  "Add within-stage resumption support for MATCH stage",
+                            "priority":  "high",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Add an `intermediate_checkpoint()` method call inside the MATCH stage\u0027s segment-processing loop (in `src/stages/match.py`) that saves progress every N segments (configurable, default 25)",
+                                                       "Store partial match results in checkpoint under a `partial_matches` key so that on resume, already-matched segments are skipped",
+                                                       "Add a `_restore_partial_matches()` method that loads partial results from checkpoint and merges with new results on completion",
+                                                       "Add a test that simulates a MATCH stage interruption mid-way and verifies resumption starts from the last checkpointed segment, not from scratch",
+                                                       "Add a test that verifies the final match results are identical whether run to completion or interrupted+resumed",
+                                                       "Run `pytest tests/test_match*.py tests/test_checkpoint*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: deep. Implemented within-stage resumption for MATCH stage. Added `progress_callback` + `start_index` + `prior_results` params to `match_all_segments()` in `src/matching/main.py`. Added `_restore_partial_matches()`, `_make_checkpoint_callback()`, `_clear_partial_matches()` methods to MatchStage. Checkpoint saves every 25 segments (configurable via `matching.intermediate_checkpoint_interval`). Partial matches stored under `partial_matches` key and cleared on completion. 9 new tests in `tests/test_match_within_stage_resume.py` all passing. 360 tests pass in match+checkpoint suite."
+                        },
+                        {
+                            "id":  "US-85-006",
+                            "title":  "Add config schema validation that fails fast on invalid YAML before pipeline runs",
+                            "priority":  "medium",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Create a `validate_config_schema()` function in `src/config/` that checks all required fields exist and have correct types before pipeline execution",
+                                                       "Validate at minimum: all section names are recognized, numeric fields are numbers, boolean fields are booleans, nested objects match expected structure",
+                                                       "Call `validate_config_schema()` early in pipeline initialization (before stage construction) in `src/pipeline.py`",
+                                                       "Add a test with a config containing an unknown section name that triggers a warning (not error, for forward compat)",
+                                                       "Add a test with a config containing a string where a number is expected that raises `ConfigValidationError`",
+                                                       "Run `pytest tests/test_config*.py tests/test_pipeline*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Complete. src/config/schema_validation.py with validate_config_schema() auto-derives schema from 30+ config dataclasses. Wired into Config.from_yaml() for fail-fast. 26 tests in test_config_schema_validation.py: 4 unknown-section warning tests (triggers warning not error), 7 type-mismatch tests (string->int raises ConfigValidationError), nested validation, edge cases, helpers, and 3 integration tests. All 22 failures in broader config/pipeline suite are pre-existing (test_config_base_coverage, test_config, etc. — none in files modified by this story)."
+                        },
+                        {
+                            "id":  "US-85-007",
+                            "title":  "Add structured logging context to pipeline stage execution",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Create a `StageLogContext` dataclass with fields: `stage_name`, `stage_index`, `total_stages`, `elapsed_seconds`, `items_processed`, `items_failed`",
+                                                       "Add a `_format_log_context()` method to PipelineOrchestrator that returns a structured dict for inclusion in log messages",
+                                                       "Modify at least 5 key log points in `src/pipeline.py` to include structured context (stage entry, stage exit, stage failure, recovery attempt, timing summary)",
+                                                       "Add a test that captures log output from a mocked stage run and verifies the structured context fields are present in the log message",
+                                                       "Ensure backward compatibility: existing log format still readable by humans (structured data appended, not replacing)",
+                                                       "Run `pytest tests/test_pipeline*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: targeted. Files: `src/pipeline.py` (logging calls at lines ~468-516 timing, ~559-597 quality gate, ~842 stage failure). Currently error messages use f-strings with inline context. Structured context enables log aggregation and filtering. Keep human-readable format but add parseable context suffix like `[stage=MATCH idx=3/7 elapsed=42.1s items=50/0]`."
+                        },
+                        {
+                            "id":  "US-85-008",
+                            "title":  "Add randomized jitter to download adaptive delay to prevent thundering herd",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Modify the adaptive delay calculation in `src/stages/download_segments.py` to add random jitter of +/-25% to the computed delay",
+                                                       "Add a `jitter_factor` config field (default 0.25) in the download config section",
+                                                       "Ensure jitter is applied consistently in both the main download loop and the retry queue processing",
+                                                       "Add a test that runs the delay calculation 100 times and verifies the results are not identical (proving jitter is applied)",
+                                                       "Add a test that verifies jitter stays within the configured bounds (delay * (1 - jitter_factor) to delay * (1 + jitter_factor))",
+                                                       "Run `pytest tests/test_download*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: quick-win. Files: `src/stages/download_segments.py` (lines ~752-754, ~833-837 adaptive delay logic), `src/config/sections/download.py`. Currently uses exponential backoff with a max cap but no randomization. When multiple segments hit rate limits simultaneously, they all retry at the exact same intervals, creating synchronized request bursts. Use `random.uniform(1 - jitter, 1 + jitter)` multiplier."
+                        },
+                        {
+                            "id":  "US-85-009",
+                            "title":  "Build segment path index for O(1) file lookup in OUTPUT stage",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Create a `SegmentPathIndex` class in `src/stages/output.py` (or new `src/segment_index.py`) that builds a dict mapping `(video_id, start, end)` tuples to file paths",
+                                                       "Populate the index once at OUTPUT stage start by scanning both legacy `*_segments` dirs and flat download dir",
+                                                       "Replace the per-match file discovery calls in `_scan_video_segments()` with index lookups",
+                                                       "Add a test that verifies index lookup returns the correct path for a known segment file",
+                                                       "Add a test that verifies index handles the case where a segment exists in both legacy and flat directories (flat dir takes precedence)",
+                                                       "Run `pytest tests/test_pipeline*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: targeted. Files: `src/stages/output.py` (lines ~112-214, `_scan_video_segments`). Currently scans directories for every match resolution, which is O(n*m) for n matches and m files. An upfront index scan is O(m) build + O(1) per lookup. Per CLAUDE.md rule 38, must check BOTH legacy dirs AND flat dir. Use `pathlib.Path.glob()` for initial scan."
+                        },
+                        {
+                            "id":  "US-85-010",
+                            "title":  "Standardize StageMetrics schema with required vs optional fields per stage type",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Define a `StageMetricsSchema` enum or dict in `src/stages/__init__.py` that categorizes stages into types: `download`, `processing`, `analysis`, `output`",
+                                                       "For each stage type, specify which `StageMetrics` fields are required (e.g., download stages must set `items_processed` and `items_failed`; processing stages must set `duration_seconds`)",
+                                                       "Add a `validate_metrics()` method to `StageMetrics` that checks the required fields for the given stage type are populated",
+                                                       "Call `validate_metrics()` in `StageResult` construction and log warnings for missing required fields",
+                                                       "Add a test that verifies a download-type stage missing `items_failed` triggers a warning",
+                                                       "Run `pytest tests/test_stage*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: polish. Files: `src/stages/__init__.py` (StageMetrics class lines ~82-166, StageResult lines ~168-198). Currently different stages populate different subsets of StageMetrics fields with no consistency enforcement. The timing summary table in `pipeline.py` (lines ~468-516) shows gaps when stages don\u0027t report expected metrics. Warnings only (not errors) to avoid breaking existing stages."
+                        },
+                        {
+                            "id":  "US-85-011",
+                            "title":  "Extract match normalization logic from OUTPUT stage into dedicated module",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Move the `_normalize_matches()` method (currently in `src/stages/output.py`, ~136 lines) into a new `src/matching/match_normalizer.py` module",
+                                                       "Create a `MatchNormalizer` class with a `normalize()` method that accepts checkpoint match data and returns `List[MatchResult]`",
+                                                       "Update `src/stages/output.py` to import and delegate to `MatchNormalizer` instead of containing the logic inline",
+                                                       "Add a unit test for `MatchNormalizer.normalize()` with mock checkpoint data containing primary + alternative matches",
+                                                       "Add a unit test that verifies multi-track (V1-V8) match data is correctly extracted during normalization",
+                                                       "Ensure `python -m py_compile src/stages/output.py src/matching/match_normalizer.py` passes"
+                                                   ],
+                            "notes":  "Tier: refactor. Files: `src/stages/output.py` (lines ~766-902, `_normalize_matches`). This 136-line method handles checkpoint restoration, multi-track data extraction, and match type conversion -- responsibilities that belong to the matching domain, not the output stage. Extracting it makes the OUTPUT stage thinner and the normalization logic independently testable. Import path: `from src.matching.match_normalizer import MatchNormalizer`."
+                        },
+                        {
+                            "id":  "US-85-012",
+                            "title":  "Add partial success handling for parallel stage execution in pipeline orchestrator",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Modify `_run_parallel_stages()` in `src/pipeline.py` to classify stages as `critical` (failure aborts) vs `optional` (failure logs warning but pipeline continues)",
+                                                       "Add a `critical` boolean field (default True) to the stage registration metadata in `src/stages/__init__.py`",
+                                                       "When an optional parallel stage fails, collect its error into a `partial_failures` list on PipelineState and continue with remaining stages",
+                                                       "Add a test that runs two parallel stages where the optional one fails and verifies the pipeline completes with a warning",
+                                                       "Add a test that runs two parallel stages where the critical one fails and verifies the pipeline aborts",
+                                                       "Run `pytest tests/test_pipeline*.py -v --tb=short -x` with no new failures"
+                                                   ],
+                            "notes":  "Tier: deep. Files: `src/pipeline.py` (lines ~974-1096, `_run_parallel_stages`), `src/stages/__init__.py` (stage registry decorator). Currently all parallel futures are collected before checking failures -- one failure cascades to abort all. For future parallel configurations (e.g., CAPTION + VIDEO_SEARCH in parallel), a failed optional stage shouldn\u0027t block the pipeline. Use `concurrent.futures.as_completed()` for early failure detection."
+                        }
+                    ]
 }
