@@ -25,6 +25,9 @@ class EmbeddingSearchConfig:
     """Configuration for embedding search."""
     embedding_candidates: int = 20  # Number of candidates to retrieve
     max_candidates_per_source: int = 3  # Max results from same video_id (0 = disabled)
+    min_candidates: int = 15  # Minimum adaptive candidate pool size
+    max_candidates: int = 100  # Maximum adaptive candidate pool size
+    complexity_scaling_factor: float = 0.5  # How much complexity affects pool size
 
 
 class EmbeddingSearch:
@@ -85,9 +88,15 @@ class EmbeddingSearch:
         embedding_candidates = getattr(matching_config, 'embedding_candidates', 20)
         max_per_source_raw = getattr(matching_config, 'max_candidates_per_source', 3)
         max_per_source = max_per_source_raw if isinstance(max_per_source_raw, int) else 3
+        min_candidates = getattr(matching_config, 'min_candidates', 15)
+        max_candidates = getattr(matching_config, 'max_candidates', 100)
+        complexity_scaling_factor = getattr(matching_config, 'complexity_scaling_factor', 0.5)
         config = EmbeddingSearchConfig(
             embedding_candidates=embedding_candidates,
             max_candidates_per_source=max_per_source,
+            min_candidates=min_candidates,
+            max_candidates=max_candidates,
+            complexity_scaling_factor=complexity_scaling_factor,
         )
         return cls(config, video_embeddings, video_segments, embedding_index)
 
@@ -98,6 +107,7 @@ class EmbeddingSearch:
         relevance_matrix: Optional[List[List[float]]] = None,
         voiceover_chapter_index: int = -1,
         relevance_boost_weight: float = 0.1,
+        voiceover_text: Optional[str] = None,
     ) -> List[Tuple['SRTSegment', float]]:
         """
         Search for top-k similar video segments.
@@ -110,11 +120,24 @@ class EmbeddingSearch:
                 candidates from relevant video chapters (US-71-011).
             voiceover_chapter_index: Current voiceover chapter index (-1 = no chapter)
             relevance_boost_weight: Weight for the relevance boost (default 0.1)
+            voiceover_text: Original voiceover text for complexity-based pool sizing (US-84-003)
 
         Returns:
             List of (video_segment, similarity_score) tuples, sorted by similarity
         """
-        k = num_candidates or self.config.embedding_candidates
+        if num_candidates is not None:
+            k = num_candidates
+        elif voiceover_text is not None:
+            # Adaptive pool sizing based on segment complexity (US-84-003)
+            complexity = self._compute_complexity_score(voiceover_text)
+            base_k = self.config.embedding_candidates
+            # Inverse: low complexity (simple/short) -> larger pool for broader search
+            # High complexity (specific/entities) -> standard pool for precision
+            inverse_complexity = 1.0 - complexity
+            scaled_k = base_k * (1.0 + self.config.complexity_scaling_factor * inverse_complexity)
+            k = int(max(self.config.min_candidates, min(self.config.max_candidates, scaled_k)))
+        else:
+            k = self.config.embedding_candidates
         k = max(k, 20)  # Ensure minimum candidates for variety
 
         max_per_source = self.config.max_candidates_per_source
@@ -141,6 +164,61 @@ class EmbeddingSearch:
             candidates = self._deduplicate_by_source(candidates, max_per_source, k)
 
         return candidates
+
+    # Common location words for complexity scoring
+    _LOCATION_WORDS = frozenset([
+        'city', 'town', 'village', 'country', 'state', 'province', 'region',
+        'mountain', 'river', 'lake', 'ocean', 'sea', 'island', 'beach',
+        'street', 'road', 'bridge', 'park', 'building', 'tower', 'castle',
+        'cathedral', 'temple', 'mosque', 'church', 'monument', 'palace',
+        'museum', 'harbor', 'port', 'airport', 'station', 'square', 'plaza',
+    ])
+
+    def _compute_complexity_score(self, text: str) -> float:
+        """
+        Compute complexity score from voiceover segment text (US-84-003).
+
+        Scores range from 0.0 (simple/generic) to 1.0 (complex/specific).
+        Factors:
+        - Word count: more words = more specific context
+        - Entity presence: capitalized multi-word phrases suggest named entities
+        - Location words: geographic specificity increases complexity
+
+        Args:
+            text: Voiceover segment text
+
+        Returns:
+            Complexity score between 0.0 and 1.0
+        """
+        if not text or not text.strip():
+            return 0.0
+
+        words = text.split()
+        word_count = len(words)
+
+        # Word count factor: 0.0 for <=3 words, scales to 1.0 at 15+ words
+        if word_count <= 3:
+            word_factor = 0.0
+        elif word_count >= 15:
+            word_factor = 1.0
+        else:
+            word_factor = (word_count - 3) / 12.0
+
+        # Entity detection: look for capitalized words that aren't sentence-starts
+        entity_count = 0
+        for i, word in enumerate(words):
+            if i > 0 and word and word[0].isupper() and len(word) > 1:
+                entity_count += 1
+        entity_factor = min(entity_count / 3.0, 1.0)
+
+        # Location word detection
+        lower_words = set(w.lower() for w in words)
+        location_count = len(lower_words & self._LOCATION_WORDS)
+        location_factor = min(location_count / 2.0, 1.0)
+
+        # Weighted combination
+        score = 0.4 * word_factor + 0.35 * entity_factor + 0.25 * location_factor
+        return min(max(score, 0.0), 1.0)
 
     def _apply_chapter_boost(
         self,
