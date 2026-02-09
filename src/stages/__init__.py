@@ -407,40 +407,23 @@ def get_orphan_stages() -> Dict[str, type]:
     }
 
 
-# Default values for state attributes when missing
-# Must match default_factory types from PipelineState (src/state.py)
-_STATE_ATTR_DEFAULTS = {
-    # INPUT STATE
-    'voiceover_path': '',
-    'voiceover_segments': [],
-    'keywords': [],
-    'topic_context': '',
-    'extracted_entities': [],
-    # VIDEO SEARCH STATE
-    'video_ids': [],
-    'video_search_results': [],
-    'search_failed_keywords': [],
-    # CAPTION STATE
-    'caption_results': {},
-    'text_metadata': [],
-    # MATCHING STATE
-    'matches': [],
-    'alternatives': {},
-    # DOWNLOAD STATE
-    'downloaded_segments': [],
-    # OUTPUT STATE
-    'output_files': [],
-    'otio_files': [],
-    # ENTITY STATE
-    'entity_images': {},
-    'entity_videos': {},
-    # EMBEDDING STATE
-    'voiceover_embeddings': None,
-    # RUNTIME STATE
-    'face_preference': 'neutral',
-    'location_chapters': [],
-    'stage_timings': {},
-}
+# Auto-generate default values for state attributes from PipelineState dataclass.
+# This eliminates manual drift between PipelineState field definitions and the
+# defaults dict used by validate_required_state_attrs().
+def _build_state_attr_defaults() -> Dict[str, Any]:
+    """Build defaults dict from PipelineState dataclass field annotations."""
+    import dataclasses as _dc
+    from ..state import PipelineState
+    defaults = {}
+    for f in _dc.fields(PipelineState):
+        if f.default is not _dc.MISSING:
+            defaults[f.name] = f.default
+        elif f.default_factory is not _dc.MISSING:
+            defaults[f.name] = f.default_factory()
+        # Fields with no default at all are skipped (none in PipelineState currently)
+    return defaults
+
+_STATE_ATTR_DEFAULTS: Dict[str, Any] = _build_state_attr_defaults()
 
 
 def validate_required_state_attrs(
