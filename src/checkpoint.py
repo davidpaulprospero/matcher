@@ -200,6 +200,11 @@ class CheckpointManager:
         self._backup_count = getattr(
             getattr(config, 'pipeline', None), 'checkpoint_backup_count', 3
         ) if config else 3
+        # US-85-003: Interval-gated backup rotation for intermediate saves
+        self._min_rotation_interval = getattr(
+            getattr(config, 'pipeline', None), 'min_rotation_interval_seconds', 60
+        ) if config else 60
+        self._last_rotation_time: float = 0.0  # epoch seconds of last rotation
         
     def exists(self) -> bool:
         """Check if a checkpoint exists"""
@@ -484,7 +489,7 @@ class CheckpointManager:
             # Save migrated checkpoint
             try:
                 self.data = migrated
-                self._atomic_save()
+                self._atomic_save(force_rotate=True)
                 logger.info(f"Migrated checkpoint to v{CURRENT_CHECKPOINT_VERSION} saved successfully")
             except Exception as e:
                 logger.warning(f"Could not save migrated checkpoint: {e}")
@@ -610,7 +615,8 @@ class CheckpointManager:
             self.data.stage_metrics[stage] = stage_metrics
 
         # Atomic save: write to temp, then rename
-        self._atomic_save()
+        # Stage completions always rotate backups (force_rotate=True)
+        self._atomic_save(force_rotate=True)
 
     def save_intermediate(self, stage: str, stage_data: Dict[str, Any] = None):
         """
@@ -648,7 +654,8 @@ class CheckpointManager:
                 setattr(self.data, stage_key, stage_data)
 
         logger.debug(f"Saving intermediate checkpoint for {stage}")
-        self._atomic_save()
+        # Intermediate saves respect the rotation interval (force_rotate=False)
+        self._atomic_save(force_rotate=False)
 
     def save_stage_timing_summary(
         self,
@@ -689,7 +696,7 @@ class CheckpointManager:
             'stages_skipped': list(skipped_stages),
         }
 
-        self._atomic_save()
+        self._atomic_save(force_rotate=True)
 
     def mark_stage_incomplete(self, stage: str):
         """
@@ -722,7 +729,7 @@ class CheckpointManager:
         if hasattr(self.data, stage_key):
             setattr(self.data, stage_key, {})
 
-        self._atomic_save()
+        self._atomic_save(force_rotate=True)
         logger.info(f"Marked {stage} as incomplete - will be re-run")
 
     def _get_backup_path(self, index: int) -> Path:
@@ -764,13 +771,28 @@ class CheckpointManager:
         except Exception as e:
             logger.warning(f"Failed to rotate backups: {e}")
 
-    def _atomic_save(self):
-        """Atomically save checkpoint (write temp, then rename)"""
+    def _atomic_save(self, force_rotate: bool = True):
+        """Atomically save checkpoint (write temp, then rename).
+
+        Args:
+            force_rotate: If True, always rotate backups (stage completions).
+                If False, only rotate when min_rotation_interval has elapsed
+                (intermediate saves during long-running stages).
+        """
         start_time = time.perf_counter()
         temp_path = self.checkpoint_path.with_suffix('.tmp')
         try:
-            # US-51-007: Rotate backups before overwriting
-            self._rotate_backups()
+            # US-85-003: Gate backup rotation on interval for intermediate saves
+            now = time.time()
+            elapsed = now - self._last_rotation_time
+            if force_rotate or elapsed >= self._min_rotation_interval:
+                self._rotate_backups()
+                self._last_rotation_time = now
+            else:
+                logger.debug(
+                    f"Skipping backup rotation (elapsed={elapsed:.0f}s < "
+                    f"interval={self._min_rotation_interval}s)"
+                )
 
             # Write to temp file
             with open(temp_path, 'w', encoding='utf-8') as f:
@@ -926,7 +948,7 @@ class CheckpointManager:
 
         self.data.transcription_metrics = metrics_summary
         self.data.updated_at = datetime.now().isoformat()
-        self._atomic_save()
+        self._atomic_save(force_rotate=False)
         logger.info(
             f"Saved transcription metrics: {metrics_summary.get('transcribed_count', 0)} transcribed, "
             f"{metrics_summary.get('cached_hits', 0)} cached, "

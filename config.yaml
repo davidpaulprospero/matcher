@@ -1872,6 +1872,10 @@ pipeline:
   # Number of rotated backup files: checkpoint.backup.json, .backup.1.json, .backup.2.json
   checkpoint_backup_count: 3
 
+  # US-85-003: Minimum seconds between backup rotations for intermediate saves.
+  # Stage-boundary saves always rotate regardless of this interval.
+  min_rotation_interval_seconds: 60
+
   # Parallel processing
   parallel_transcription: true
   parallel_embedding: true

@@ -260,8 +260,10 @@ class TestSaveCreatesBackup:
 
     @pytest.mark.fast
     def test_save_intermediate_also_creates_backup(self, tmp_path):
-        """Verify save_intermediate() also creates backup."""
+        """Verify save_intermediate() creates backup when rotation interval allows it."""
         manager = CheckpointManager(tmp_path)
+        # US-85-003: Set interval to 0 so intermediate save always rotates
+        manager._min_rotation_interval = 0
         manager.save("ANALYZE", {"keywords": ["test"]})
 
         # Now call save_intermediate, which should back up the current state

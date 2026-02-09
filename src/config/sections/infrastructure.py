@@ -139,6 +139,10 @@ class PipelineConfig:
     # Checkpoint backup rotation (US-51-007)
     checkpoint_backup_count: int = 3  # Number of rotated backup files to keep
 
+    # US-85-003: Minimum seconds between backup rotations for intermediate saves.
+    # Stage-boundary saves always rotate regardless of this interval.
+    min_rotation_interval_seconds: int = 60
+
     # Parallel processing
     parallel_transcription: bool = True
     parallel_embedding: bool = True
