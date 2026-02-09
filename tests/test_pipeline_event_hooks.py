@@ -1,9 +1,10 @@
 """
-Tests for pipeline event hooks system (US-81-012).
+Tests for pipeline event hooks system (US-81-012) and PipelineEventBus (US-82-011).
 
 Verifies:
 - PipelineEvent dataclass fields
-- register_hook / emit_event methods
+- PipelineEventBus: subscribe, emit, get_handlers, ordering, handler error isolation
+- register_hook / emit_event methods on PipelineOrchestrator (delegates to event bus)
 - Multiple callbacks per event type called in registration order
 - before_stage, after_stage, on_stage_error, on_pipeline_complete events emitted
 - Existing on_stage_start / on_stage_complete callbacks still work (backward compat)
@@ -17,6 +18,7 @@ from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
 from src.pipeline import PipelineOrchestrator, PipelineEvent
+from src.pipeline_events import PipelineEventBus
 from src.state import PipelineState
 from src.stages import Stage, StageResult, StageMetrics
 
@@ -323,3 +325,158 @@ class TestEventsDuringPipelineRun:
         success = pipeline.run(resume=False)
         assert success is False
         assert len(complete_events) == 0
+
+
+class TestPipelineEventBus:
+    """Standalone tests for PipelineEventBus (US-82-011)."""
+
+    def test_subscribe_and_emit(self):
+        """AC: subscribe() registers handler, emit() calls it."""
+        bus = PipelineEventBus()
+        received = []
+        bus.subscribe('before_stage', lambda e: received.append(e))
+
+        event = PipelineEvent(
+            event_type='before_stage', stage_name='ANALYZE', timestamp=1.0,
+        )
+        bus.emit(event)
+
+        assert len(received) == 1
+        assert received[0] is event
+
+    def test_get_handlers_returns_registered(self):
+        """AC: get_handlers() returns list of registered handlers."""
+        bus = PipelineEventBus()
+        h1 = lambda e: None
+        h2 = lambda e: None
+
+        bus.subscribe('after_stage', h1)
+        bus.subscribe('after_stage', h2)
+
+        handlers = bus.get_handlers('after_stage')
+        assert len(handlers) == 2
+        assert handlers[0] is h1
+        assert handlers[1] is h2
+
+    def test_get_handlers_empty_for_unregistered(self):
+        """get_handlers() returns empty list for unregistered event type."""
+        bus = PipelineEventBus()
+        assert bus.get_handlers('nonexistent') == []
+
+    def test_handlers_called_in_registration_order(self):
+        """AC: Handlers called in order of registration."""
+        bus = PipelineEventBus()
+        call_order = []
+
+        bus.subscribe('before_stage', lambda e: call_order.append('first'))
+        bus.subscribe('before_stage', lambda e: call_order.append('second'))
+        bus.subscribe('before_stage', lambda e: call_order.append('third'))
+
+        bus.emit(PipelineEvent(
+            event_type='before_stage', stage_name='X', timestamp=0,
+        ))
+
+        assert call_order == ['first', 'second', 'third']
+
+    def test_handler_error_isolation(self):
+        """AC: One failing handler doesn't block others."""
+        bus = PipelineEventBus()
+        received = []
+
+        def bad_handler(e):
+            raise RuntimeError("boom")
+
+        bus.subscribe('after_stage', bad_handler)
+        bus.subscribe('after_stage', lambda e: received.append(e.stage_name))
+        bus.subscribe('after_stage', lambda e: received.append('third'))
+
+        bus.emit(PipelineEvent(
+            event_type='after_stage', stage_name='MATCH', timestamp=0,
+        ))
+
+        # Both subsequent handlers ran despite first crashing
+        assert received == ['MATCH', 'third']
+
+    def test_emit_no_handlers_is_noop(self):
+        """Emitting with no handlers for that type is a no-op."""
+        bus = PipelineEventBus()
+        bus.emit(PipelineEvent(
+            event_type='unknown', stage_name='X', timestamp=0,
+        ))  # Should not raise
+
+    def test_different_event_types_independent(self):
+        """Handlers for different event types don't interfere."""
+        bus = PipelineEventBus()
+        before = []
+        after = []
+
+        bus.subscribe('before_stage', lambda e: before.append(e.stage_name))
+        bus.subscribe('after_stage', lambda e: after.append(e.stage_name))
+
+        bus.emit(PipelineEvent(event_type='before_stage', stage_name='A', timestamp=0))
+        bus.emit(PipelineEvent(event_type='after_stage', stage_name='B', timestamp=0))
+
+        assert before == ['A']
+        assert after == ['B']
+
+    def test_event_type_routing(self):
+        """PipelineEvent.event_type field correctly routes to handlers."""
+        bus = PipelineEventBus()
+        error_events = []
+        complete_events = []
+
+        bus.subscribe('on_stage_error', lambda e: error_events.append(e))
+        bus.subscribe('on_pipeline_complete', lambda e: complete_events.append(e))
+
+        bus.emit(PipelineEvent(
+            event_type='on_stage_error', stage_name='FAIL', timestamp=0, error='oops',
+        ))
+        bus.emit(PipelineEvent(
+            event_type='on_pipeline_complete', stage_name='', timestamp=0,
+        ))
+
+        assert len(error_events) == 1
+        assert error_events[0].error == 'oops'
+        assert len(complete_events) == 1
+
+    def test_get_handlers_returns_copy(self):
+        """get_handlers() returns a copy, not a mutable reference."""
+        bus = PipelineEventBus()
+        bus.subscribe('before_stage', lambda e: None)
+
+        handlers = bus.get_handlers('before_stage')
+        handlers.clear()  # Mutate the returned list
+
+        # Original handlers should be unaffected
+        assert len(bus.get_handlers('before_stage')) == 1
+
+
+class TestOrchestratorEventBusDelegation:
+    """Test that PipelineOrchestrator delegates to PipelineEventBus (US-82-011)."""
+
+    def test_orchestrator_has_event_bus(self, pipeline):
+        """AC: PipelineOrchestrator uses PipelineEventBus."""
+        assert hasattr(pipeline, 'event_bus')
+        assert isinstance(pipeline.event_bus, PipelineEventBus)
+
+    def test_register_hook_delegates_to_bus(self, pipeline):
+        """register_hook() adds handler to the event bus."""
+        handler = lambda e: None
+        pipeline.register_hook('before_stage', handler)
+
+        bus_handlers = pipeline.event_bus.get_handlers('before_stage')
+        assert len(bus_handlers) == 1
+        assert bus_handlers[0] is handler
+
+    def test_emit_event_delegates_to_bus(self, pipeline):
+        """emit_event() routes through the event bus."""
+        received = []
+        pipeline.event_bus.subscribe('after_stage', lambda e: received.append(e))
+
+        event = PipelineEvent(
+            event_type='after_stage', stage_name='TEST', timestamp=0,
+        )
+        pipeline.emit_event(event)
+
+        assert len(received) == 1
+        assert received[0] is event

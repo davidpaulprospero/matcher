@@ -25,13 +25,12 @@ import logging
 import os
 import shutil
 import time
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
+from .pipeline_events import PipelineEvent, PipelineEventBus, EventCallback
 from .pipeline_history import append_stage_timing, estimate_duration
 from .pipeline_progress import ProgressReporter
 from .pipeline_validator import PipelineValidator, StageValidationResult
@@ -46,27 +45,6 @@ if TYPE_CHECKING:
 # Type aliases for callbacks
 StageStartCallback = Callable[[str], None]  # (stage_name) -> None
 StageCompleteCallback = Callable[[str, StageResult, float], None]  # (stage_name, result, elapsed_seconds) -> None
-
-# Event hook callback type: receives a PipelineEvent
-EventCallback = Callable[['PipelineEvent'], None]
-
-
-@dataclass
-class PipelineEvent:
-    """Structured event emitted during pipeline lifecycle.
-
-    Attributes:
-        event_type: One of 'before_stage', 'after_stage', 'on_stage_error', 'on_pipeline_complete'
-        stage_name: Name of the stage (empty string for pipeline-level events)
-        timestamp: Unix timestamp when the event was created
-        data: Arbitrary data dict (e.g., elapsed time, metrics)
-        error: Optional error string if the event relates to a failure
-    """
-    event_type: str
-    stage_name: str
-    timestamp: float
-    data: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
 
 
 logger = logging.getLogger(__name__)
@@ -137,8 +115,8 @@ class PipelineOrchestrator:
         # Progress reporter for real-time progress.json updates
         self.progress_reporter = ProgressReporter(project_dir)
 
-        # Event hook registry: event_type -> list of callbacks (US-81-012)
-        self._event_hooks: Dict[str, List[EventCallback]] = defaultdict(list)
+        # Event bus for decoupled stage lifecycle notifications (US-82-011)
+        self.event_bus = PipelineEventBus()
 
     def add_stage(self, stage: Stage) -> 'PipelineOrchestrator':
         """Add a stage to the pipeline (fluent interface)"""
@@ -148,31 +126,26 @@ class PipelineOrchestrator:
     def register_hook(self, event_type: str, callback: EventCallback) -> None:
         """Register a callback for a pipeline event type.
 
-        Multiple callbacks can be registered per event type. They are called
-        in registration order when the event is emitted.
+        Delegates to PipelineEventBus.subscribe(). Multiple callbacks can be
+        registered per event type and are called in registration order.
 
         Args:
             event_type: One of 'before_stage', 'after_stage', 'on_stage_error',
                         'on_pipeline_complete'
             callback: Function that receives a PipelineEvent
         """
-        self._event_hooks[event_type].append(callback)
+        self.event_bus.subscribe(event_type, callback)
 
     def emit_event(self, event: PipelineEvent) -> None:
-        """Emit a pipeline event, calling all registered hooks in order.
+        """Emit a pipeline event via the event bus.
 
-        Callback exceptions are logged but do not interrupt pipeline execution.
+        Delegates to PipelineEventBus.emit(). Handler exceptions are logged
+        but do not interrupt pipeline execution.
 
         Args:
             event: The PipelineEvent to emit
         """
-        for callback in self._event_hooks.get(event.event_type, []):
-            try:
-                callback(event)
-            except Exception as e:
-                logger.warning(
-                    f"Event hook failed for {event.event_type}/{event.stage_name}: {e}"
-                )
+        self.event_bus.emit(event)
 
     def load_checkpoint(self) -> bool:
         """
