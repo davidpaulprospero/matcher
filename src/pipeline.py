@@ -21,6 +21,7 @@ Pipeline Variants:
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import os
 import shutil
@@ -434,7 +435,7 @@ class PipelineOrchestrator:
                     f"  Estimated duration for {stage_name}: ~{est_str}"
                     f" (based on {items_count} items, historical throughput)"
                 )
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
             logger.debug(f"Could not estimate duration for {stage_name}: {exc}")
 
     def _save_stage_timing(self, stage_name: str, elapsed: float) -> None:
@@ -446,7 +447,7 @@ class PipelineOrchestrator:
             append_stage_timing(
                 self.project_dir, stage_name, elapsed, items, throughput
             )
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             logger.debug(f"Could not save stage timing for {stage_name}: {exc}")
 
     def _guess_items_count(self, stage_name: str) -> int:
@@ -779,7 +780,7 @@ class PipelineOrchestrator:
             if on_stage_start:
                 try:
                     on_stage_start(stage_name)
-                except Exception as e:
+                except (TypeError, ValueError, RuntimeError, OSError) as e:
                     logger.warning(f"on_stage_start callback failed for {stage_name}: {e}")
 
             # Emit before_stage event (US-81-012)
@@ -818,7 +819,7 @@ class PipelineOrchestrator:
             if on_stage_complete:
                 try:
                     on_stage_complete(stage_name, result, elapsed)
-                except Exception as e:
+                except (TypeError, ValueError, RuntimeError, OSError) as e:
                     logger.warning(f"on_stage_complete callback failed for {stage_name}: {e}")
 
             # Handle result
@@ -1030,7 +1031,7 @@ class PipelineOrchestrator:
             if on_stage_start:
                 try:
                     on_stage_start(stage.name)
-                except Exception as e:
+                except (TypeError, ValueError, RuntimeError, OSError) as e:
                     logger.warning(f"on_stage_start callback failed for {stage.name}: {e}")
 
             logger.info(f"Running parallel stage: {stage.name}")
@@ -1069,7 +1070,7 @@ class PipelineOrchestrator:
             if on_stage_complete:
                 try:
                     on_stage_complete(stage_name, result, elapsed)
-                except Exception as e:
+                except (TypeError, ValueError, RuntimeError, OSError) as e:
                     logger.warning(f"on_stage_complete callback failed for {stage_name}: {e}")
 
             # Handle failure
@@ -1470,8 +1471,8 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
                 if hasattr(orchestrator, 'wire_escalation_manager'):
                     orchestrator.wire_escalation_manager(esc_mgr)
                 return
-    except Exception:
-        pass  # Non-critical: metrics collection should never break the pipeline
+    except (ImportError, AttributeError, TypeError, KeyError, ValueError) as exc:
+        logger.debug(f"Non-critical: escalation metrics collection failed: {exc}")
 
 
 def run_pipeline_with_healing(
