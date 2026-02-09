@@ -110,3 +110,26 @@ AUTH_PATTERNS: list[str] = [
 FORMAT_UNAVAILABLE_PATTERNS: list[str] = [
     "requested format is not available",
 ]
+
+
+# =============================================================================
+# Severity-classified pattern groups (US-82-012)
+# =============================================================================
+# These provide the shared base patterns for error severity classification.
+# Consumers (e.g. downloader/error_classification.py) import these and may
+# append module-specific patterns.
+
+# High severity: bot detection + quota exceeded (subset of RATE_LIMIT_PATTERNS)
+HIGH_SEVERITY_PATTERNS: list[str] = BOT_DETECTION_PATTERNS + [
+    "quota exceeded",
+]
+
+# Medium severity: core rate-limit patterns (excluding those assigned elsewhere)
+# 'quota exceeded' -> high, 'throttle'/'rate-limit'/'slow down' -> low or excluded
+MEDIUM_SEVERITY_PATTERNS: list[str] = [
+    p for p in RATE_LIMIT_PATTERNS
+    if p not in ("quota exceeded", "throttle", "rate-limit", "slow down")
+]
+
+# Low severity: auth patterns (age-gate, login)
+LOW_SEVERITY_PATTERNS: list[str] = list(AUTH_PATTERNS)

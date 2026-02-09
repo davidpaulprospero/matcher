@@ -35,6 +35,9 @@ import logging
 from ..common.error_patterns import (
     AUTH_PATTERNS,
     BOT_DETECTION_PATTERNS,
+    HIGH_SEVERITY_PATTERNS,
+    LOW_SEVERITY_PATTERNS,
+    MEDIUM_SEVERITY_PATTERNS,
     RATE_LIMIT_PATTERNS,
 )
 from .errors import (
@@ -123,22 +126,17 @@ BOT_DETECTION_ABORT_THRESHOLD = 10
 #
 # US-67-009: High-severity bot detection patterns and medium-severity rate limit
 # patterns are sourced from src/common/error_patterns.py (shared with caption system).
-# Module-specific patterns (e.g. 'please try again later') are appended here.
+# US-82-012: Base patterns imported from common module; downloader-specific patterns appended.
 ERROR_SEVERITY_PATTERNS = {
     # High severity: quota exceeded, bot detection, severe blocks
-    # Core patterns from shared module + 'quota exceeded' (overlap with RATE_LIMIT_PATTERNS)
-    'high': [p for p in BOT_DETECTION_PATTERNS] + [
-        'quota exceeded',
-    ],
-    # Medium severity: standard rate limits, too many requests
-    # Core patterns from shared module + downloader-specific patterns
-    'medium': [p for p in RATE_LIMIT_PATTERNS if p not in ('quota exceeded', 'throttle', 'rate-limit', 'slow down')] + [
+    'high': HIGH_SEVERITY_PATTERNS,
+    # Medium severity: standard rate limits + downloader-specific patterns
+    'medium': MEDIUM_SEVERITY_PATTERNS + [
         'please try again later',
         'temporarily unavailable',
     ],
-    # Low severity: brief rate limits, minor throttling
-    # Auth patterns from shared module + downloader-specific patterns
-    'low': [p for p in AUTH_PATTERNS] + [
+    # Low severity: auth patterns + downloader-specific patterns
+    'low': LOW_SEVERITY_PATTERNS + [
         'slow down',
     ],
 }

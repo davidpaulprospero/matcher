@@ -192,6 +192,30 @@ class TestAddingSharedPatternPropagates:
         result = classify_error_severity("test_sentinel_xyzzy happened")
         assert result == 'medium'
 
+    def test_severity_high_uses_shared_high_severity_patterns(self):
+        """ERROR_SEVERITY_PATTERNS['high'] starts with HIGH_SEVERITY_PATTERNS from shared module."""
+        from src.common.error_patterns import HIGH_SEVERITY_PATTERNS
+        from src.downloader.error_classification import ERROR_SEVERITY_PATTERNS
+        high = ERROR_SEVERITY_PATTERNS['high']
+        for pattern in HIGH_SEVERITY_PATTERNS:
+            assert pattern in high, f"Shared HIGH_SEVERITY pattern '{pattern}' missing from severity 'high'"
+
+    def test_severity_medium_uses_shared_medium_severity_patterns(self):
+        """ERROR_SEVERITY_PATTERNS['medium'] starts with MEDIUM_SEVERITY_PATTERNS from shared module."""
+        from src.common.error_patterns import MEDIUM_SEVERITY_PATTERNS
+        from src.downloader.error_classification import ERROR_SEVERITY_PATTERNS
+        medium = ERROR_SEVERITY_PATTERNS['medium']
+        for pattern in MEDIUM_SEVERITY_PATTERNS:
+            assert pattern in medium, f"Shared MEDIUM_SEVERITY pattern '{pattern}' missing from severity 'medium'"
+
+    def test_severity_low_uses_shared_low_severity_patterns(self):
+        """ERROR_SEVERITY_PATTERNS['low'] starts with LOW_SEVERITY_PATTERNS from shared module."""
+        from src.common.error_patterns import LOW_SEVERITY_PATTERNS
+        from src.downloader.error_classification import ERROR_SEVERITY_PATTERNS
+        low = ERROR_SEVERITY_PATTERNS['low']
+        for pattern in LOW_SEVERITY_PATTERNS:
+            assert pattern in low, f"Shared LOW_SEVERITY pattern '{pattern}' missing from severity 'low'"
+
     def test_new_bot_detection_pattern_propagates_to_downloader(self, monkeypatch):
         """A new bot detection pattern added to shared module is used by downloader."""
         from src.common import error_patterns
