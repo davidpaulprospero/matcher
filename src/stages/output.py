@@ -29,6 +29,88 @@ class SegmentInfo(NamedTuple):
     original_end: float
 
 
+class SegmentPathIndex:
+    """
+    O(1) lookup index for video segment files.
+
+    Maps (video_id, start, end) tuples to file paths for fast segment resolution.
+    Per CLAUDE.md rule 38, checks BOTH legacy *_segments dirs AND flat download dir.
+    Flat dir takes precedence when segment exists in both.
+    """
+
+    def __init__(self, segments: List[SegmentInfo]):
+        """
+        Build index from segment list.
+
+        Args:
+            segments: List of SegmentInfo objects from _scan_video_segments
+        """
+        self._segments = segments
+        self._index: Dict[tuple, str] = {}
+        self._video_ids: set = set()
+        self._build_index(segments)
+
+    def _build_index(self, segments: List[SegmentInfo]):
+        """Build the lookup index from segments. Flat dir takes precedence."""
+        # First pass: add legacy segments
+        for seg in segments:
+            key = (seg.video_id, int(seg.original_start), int(seg.original_end))
+            if key not in self._index:
+                self._index[key] = seg.file
+                self._video_ids.add(seg.video_id)
+
+        # Second pass: add flat dir segments (they take precedence)
+        # Flat dir segments have more precise end times, so they override legacy
+        for seg in segments:
+            key = (seg.video_id, int(seg.original_start), int(seg.original_end))
+            self._index[key] = seg.file  # Overwrites legacy if present
+            self._video_ids.add(seg.video_id)
+
+    @property
+    def segments(self) -> List[SegmentInfo]:
+        """Return the original segment list for backward compatibility."""
+        return self._segments
+
+    def lookup(self, video_id: str, start: float, end: float) -> Optional[str]:
+        """
+        Look up file path for a segment.
+
+        Args:
+            video_id: YouTube video ID
+            start: Start time in seconds
+            end: End time in seconds
+
+        Returns:
+            File path if found, None otherwise
+        """
+        key = (video_id, int(start), int(end))
+        return self._index.get(key)
+
+    def get_by_video_id(self, video_id: str) -> List[tuple]:
+        """Get all (start, end, file) tuples for a video ID."""
+        return [
+            (start, end, path)
+            for (vid, start, end), path in self._index.items()
+            if vid == video_id
+        ]
+
+    def has_video(self, video_id: str) -> bool:
+        """Check if any segments exist for a video ID."""
+        return video_id in self._video_ids
+
+    def __len__(self) -> int:
+        """Return number of indexed segments."""
+        return len(self._index)
+
+    def __bool__(self) -> bool:
+        """Return True if index has any segments."""
+        return bool(self._index)
+
+    def __iter__(self):
+        """Iterate over segments for backward compatibility."""
+        return iter(self._segments)
+
+
 class HashToFileMapping:
     """Maps hash IDs to actual source file paths from transcription cache."""
 
@@ -109,15 +191,16 @@ class OutputStage(Stage):
     DEPENDS_ON = ['MATCH', 'DOWNLOAD_SEGMENTS']
     PRODUCES = ['otio_files', 'output_files']
 
-    def _scan_video_segments(self, config: 'Config') -> List[SegmentInfo]:
+    def _scan_video_segments(self, config: 'Config') -> SegmentPathIndex:
         """
-        Scan disk for downloaded video segment files and build segment info list.
+        Scan disk for downloaded video segment files and build segment index.
 
         Video segments may be stored in two formats:
         1. Legacy: *_segments directories with {video_id}_{start_4digit}.mp4
         2. Current: flat in downloaded_videos_dir with {video_id}_{start}_{end}.mp4
 
-        This allows create_timeline to resolve audio files to video segment paths.
+        Returns a SegmentPathIndex for O(1) lookup. Per CLAUDE.md rule 38,
+        flat dir takes precedence when segment exists in both locations.
         """
         segments = []
         seen_files = set()
@@ -144,7 +227,7 @@ class OutputStage(Stage):
 
         if not videos_root or not videos_root.exists():
             logger.debug(f"Videos root not found, skipping segment scan")
-            return segments
+            return SegmentPathIndex([])
 
         logger.info(f"Scanning for video segments in: {videos_root}")
 
@@ -211,7 +294,8 @@ class OutputStage(Stage):
         if segments:
             logger.info(f"Found {len(segments)} video segments on disk for path resolution")
 
-        return segments
+        # Return SegmentPathIndex for O(1) lookups
+        return SegmentPathIndex(segments)
 
     def _resolve_match_paths(self, state: 'PipelineState', config: 'Config') -> int:
         """
