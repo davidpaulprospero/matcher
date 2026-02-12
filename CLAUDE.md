@@ -91,6 +91,9 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 35 | PowerShell threading | Never use `[System.Threading.Thread]` with PS cmdlets — use `[powershell]::Create()` with `.AddArgument()` for background work; raw threads crash the host process |
 | 36 | Console Quick Edit | Ralph disables Quick Edit Mode at startup (`Disable-QuickEditMode`) — clicking the console window freezes ALL `Write-Host` calls, blocking the monitoring loop, stall detection, and heartbeat while Claude keeps running |
 | 37 | Non-locking file reads | Python `open()` on Windows blocks other writers — use `os.open(path, os.O_RDONLY \| os.O_BINARY)` for files Ralph writes concurrently (metrics.csv, prd.json, sprint_history.json) |
+| 41 | PS string interpolation | Em dashes and `$()` in double-quoted `Write-Host` strings cause cascading parse errors — use `--` and extract to `$var` first |
+| 42 | PS syntax check | Use `[Parser]::ParseFile()` in a separate `.ps1` script to validate — inline `powershell -Command` quoting is unreliable |
+| 43 | PS regex lookbehinds | .NET regex doesn't support variable-length lookbehinds — use sequential `if`/`elseif` instead of `(?<!pattern?)` |
 
 ### Bug Fixing
 
@@ -365,6 +368,7 @@ pytest tests/ -v --tb=short -x
 | Checkpoint corrupted | Various | Restore from `checkpoint.backup.json` |
 | Subprocess crash | Windows encoding | Rule 27: Add `encoding='utf-8', errors='replace'` |
 | Videos skipped (budget_exhausted) | Logs show `EXHAUSTED` | Increase `retry_budget.max_attempts` or check for rate limiting |
+| Evidence 0/N rejected | LLM evidence returns all-false | `Confirm-CriteriaEvidence` returns array (not `$null`) when LLM output unparseable — keyword fallback triggers on `parsedCount == 0` or all-false safety net |
 
 ### Debug Workflows
 
@@ -373,6 +377,24 @@ pytest tests/ -v --tb=short -x
 **Match quality issues?** Check: match counts, confidence scores, video variety, empty source_file warnings.
 
 **Output ≠ Success:** Pipeline completing doesn't mean quality is acceptable. Always verify results.
+
+### MiniMax Model (Alternative to Claude)
+
+MiniMax M2.5 (released Feb 2026) provides Anthropic-compatible API via Claude Code CLI:
+- **SWE-Bench:** 80.2%, **Context:** 204.8K tokens, **Speed:** matches Claude Opus 4.6
+- **Pricing:** $0.30/M input, $1.20/M output (10% of Claude Sonnet 4.5)
+
+**Setup in `~/.claude/settings.json`:**
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_MINIMAX_API_KEY",
+    "ANTHROPIC_MODEL": "MiniMax-M2.5"
+  }
+}
+```
+Then update `scripts/ralph/config/ralph-config.json` to use `MiniMax-M2.5` model.
 
 ## Ralph Loop (Autonomous Development)
 
@@ -424,4 +446,4 @@ Invoke-Pester -Path 'scripts/ralph/tests' -Output Detailed
 
 ## Session History
 
-See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent: FAISS index space mismatch fix (iterative match gap filling), Embedding model migration (text-embedding-004 → gemini-embedding-001), Carlini-inspired Ralph improvements, OTIO available_range ffprobe fix.
+See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent: Quick Edit Mode periodic re-check safeguard (console output freeze prevention), Pre-flight fast-path for pre-implemented stories (infinite loop fix), evidence gate tolerant parsing + all-false safety net, Ollama embedding provider (nomic-embed-text) with asymmetric search and provider-specific cache keys, Carlini-inspired Ralph improvements, Terminal OUTPUT stage checkpoint false WARNING fix, FAISS index space mismatch fix.

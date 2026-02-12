@@ -2,6 +2,8 @@
 
 | Date | Changes |
 |------|---------|
+| 2026-02-13 | Fix: Add periodic Quick Edit Mode re-check safeguard — re-disable Quick Edit Mode every 60 seconds during Claude monitoring loop to prevent console output freeze when user clicks on console window; 27 tests (2 skipped), 11/11 mutations killed |
+| 2026-02-08 | Fix: Pre-flight fast-path for pre-implemented stories — stories from earlier sprints caused infinite loops (LLM rejected "Mark as complete" commits as "different sprint"); added 3 fast paths in metrics.ps1, ralph.ps1, quality.ps1; also hardened evidence gate with tolerant MET/NOT_MET parsing and all-false safety net; 24 tests, 10/10 mutations killed |
 | 2026-02-08 | Fix: Ralph Object[] to Boolean crash — unsuppressed function returns in Resolve-ClaudeResult leaked into pipeline; added `$null =` suppression (6 calls) and `[bool](... \| Select-Object -Last 1)` cast at all 15 call sites; 13 tests, 10/10 mutations killed |
 | 2026-02-07 | Feat: Add Ollama embedding provider (nomic-embed-text) with asymmetric search (`embed_mode` param), provider-specific cache keys, Gemini `task_type` fix; 26 tests + 16 mutations |
 | 2026-02-07 | Feat: Phases 0-2 Carlini improvements proven with mutation testing — early-exit tuning, structured test output (`Format-TestSummary`), fast test mode, sprint progress doc, sprint diagnostics, oracle regression guard (`Test-RegressionBaseline`), deterministic test subsampling (`Get-SubsampledTestCommand`), learning injection (`Get-LearningInjection`), role specialization (`Get-StoryRole` with 6 roles); all feature-gated; 90 tests, 35/35 mutations killed |
