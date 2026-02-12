@@ -78,7 +78,7 @@
                             "id":  "US-86-004",
                             "title":  "Add pytest markers for test categorization",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Define @pytest.mark.unit for isolated unit tests",
                                                        "Define @pytest.mark.integration for component integration tests",
@@ -87,13 +87,13 @@
                                                        "Add marker documentation in conftest.py docstring",
                                                        "Run pytest --markers to verify markers are registered"
                                                    ],
-                            "notes":  "Tier: infrastructure. Files: tests/conftest.py (add ~30 lines for marker definitions). Markers help with selective test execution."
+                            "notes":  "Added flaky marker to pytest_configure, updated docstring with marker documentation. Verified with pytest --markers."
                         },
                         {
                             "id":  "US-86-005",
                             "title":  "Add mock LLM client fixture for deterministic testing",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Create MockLLMClient class in tests/conftest.py",
                                                        "Implement mock_generate() that returns configurable responses",
@@ -102,13 +102,13 @@
                                                        "Test mock with sample prompt and verify response structure",
                                                        "Add fixture to override LLM dependency in tests"
                                                    ],
-                            "notes":  "Tier: infrastructure. Files: tests/conftest.py (add ~80 lines for mock LLM). This enables testing LLM-dependent code without API calls."
+                            "notes":  "Tier: infrastructure. Files: tests/conftest.py (add ~80 lines for mock LLM). This enables testing LLM-dependent code without API calls. Implemented MockLLMClient class with generate(), embed(), set_response(), set_text_response(), set_embedding(). Added mock_llm_client and mock_llm_client_with_response fixtures. Verified all acceptance criteria pass."
                         },
                         {
                             "id":  "US-86-006",
                             "title":  "Add mock downloader fixture for offline testing",
                             "priority":  "high",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Create MockDownloader class in tests/conftest.py",
                                                        "Implement mock_download() that returns cached test files",
@@ -117,7 +117,7 @@
                                                        "Add fixture tmp_video_dir() for temporary video storage",
                                                        "Test mock downloader with sample video ID"
                                                    ],
-                            "notes":  "Tier: infrastructure. Files: tests/conftest.py (add ~60 lines for mock downloader). Enables testing download-dependent code without network."
+                            "notes":  "Tier: infrastructure. Implemented MockYTDL class (mimics yt-dlp YoutubeDL interface) with extract_info() and download(). Implemented MockDownloader class with download_video(), get_video_info(), search_videos(). Added mock_youtube_dl, mock_downloader, and tmp_video_dir fixtures. Verified all acceptance criteria pass with 5 tests."
                         },
                         {
                             "id":  "US-86-007",
