@@ -5,10 +5,54 @@ Provides fixtures and marks for integration tests that require
 external resources (videos, API keys, etc.).
 """
 
+import json
 import os
 import pytest
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+
+
+# =============================================================================
+# FIXTURE DATA LOADER (US-86-002, Sprint 86)
+# =============================================================================
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def fixtures() -> Dict[str, Any]:
+    """
+    Load all test fixture data files.
+
+    Returns a dictionary with keys:
+        - voiceover: sample.srt content as string
+        - video: sample_video.json as dict
+        - caption: sample_captions.json as dict
+        - match: sample_matches.json as dict
+
+    Usage:
+        def test_something(fixtures):
+            voiceover_text = fixtures['voiceover']
+            video_data = fixtures['video']
+            caption_data = fixtures['caption']
+            match_data = fixtures['match']
+    """
+    return {
+        'voiceover': (FIXTURES_DIR / 'voiceover' / 'sample.srt').read_text(encoding='utf-8'),
+        'video': json.loads((FIXTURES_DIR / 'video' / 'sample_video.json').read_text(encoding='utf-8')),
+        'caption': json.loads((FIXTURES_DIR / 'caption' / 'sample_captions.json').read_text(encoding='utf-8')),
+        'match': json.loads((FIXTURES_DIR / 'match' / 'sample_matches.json').read_text(encoding='utf-8')),
+    }
+
+
+@pytest.fixture
+def fixture_data() -> Dict[str, Any]:
+    """
+    Fixture providing access to all test fixture data files.
+
+    Returns:
+        Dictionary with fixture data for voiceover, video, caption, and match.
+    """
+    return fixtures()
 
 
 # =============================================================================
@@ -857,6 +901,202 @@ def segment_download_stats_factory():
         return stats
 
     return _make
+
+
+# =============================================================================
+# PIPELINE STATE FIXTURES (US-86-003, Sprint 86)
+# =============================================================================
+#
+# Fixtures providing populated dataclass instances for common pipeline state objects.
+# These fixtures create fully initialized objects with realistic test data.
+# =============================================================================
+
+
+@pytest.fixture
+def pipeline_state() -> 'PipelineState':
+    """
+    Fixture providing a fully populated PipelineState with all required fields.
+
+    Returns:
+        PipelineState with populated voiceover_segments, video_search_results,
+        matches, and other common fields for testing.
+    """
+    from src.state import PipelineState, VoiceoverSegment, VideoSearchResult, Match
+
+    voiceover_segments = [
+        VoiceoverSegment(index=0, start=0.0, end=5.0, text="Welcome to the tutorial", duration=5.0),
+        VoiceoverSegment(index=1, start=5.0, end=10.0, text="We will learn about Python", duration=5.0),
+        VoiceoverSegment(index=2, start=10.0, end=15.0, text="Let's get started with the basics", duration=5.0),
+    ]
+
+    video_search_results = [
+        VideoSearchResult(
+            video_id="abc123",
+            url="https://youtube.com/watch?v=abc123",
+            title="Python Tutorial",
+            channel="Tech Channel",
+            duration=600.0,
+            duration_tier="medium",
+            keyword="python",
+        ),
+        VideoSearchResult(
+            video_id="def456",
+            url="https://youtube.com/watch?v=def456",
+            title="Learn Programming",
+            channel="Code Channel",
+            duration=300.0,
+            duration_tier="short",
+            keyword="programming",
+        ),
+    ]
+
+    matches = [
+        Match(
+            segment_index=0,
+            video_file="abc123",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.85,
+            strategy="primary",
+            reason="Keyword match",
+        ),
+        Match(
+            segment_index=1,
+            video_file="def456",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.72,
+            strategy="primary",
+            reason="Semantic match",
+        ),
+    ]
+
+    return PipelineState(
+        voiceover_path="/path/to/voiceover.srt",
+        voiceover_segments=voiceover_segments,
+        keywords=["python", "tutorial", "programming"],
+        topic_context="Technology tutorial",
+        video_ids=["abc123", "def456"],
+        video_search_results=video_search_results,
+        matches=matches,
+    )
+
+
+@pytest.fixture
+def downloaded_video() -> 'DownloadedVideo':
+    """
+    Fixture providing a fully populated DownloadedVideo dataclass.
+
+    Returns:
+        DownloadedVideo with typical test values.
+    """
+    from src.state import DownloadedVideo
+
+    return DownloadedVideo(
+        file="abc123.mp4",
+        url="https://youtube.com/watch?v=abc123",
+        title="Python Tutorial",
+        channel="Tech Channel",
+        upload_date="2024-01-15",
+        duration=600.0,
+        duration_tier="medium",
+        keyword="python",
+        download_date="2024-01-20",
+        license="Creative Commons",
+        source="download",
+        video_hash="abc123hash",
+        face_score=0.75,
+        description="Learn Python programming basics",
+    )
+
+
+@pytest.fixture
+def video_search_result() -> 'VideoSearchResult':
+    """
+    Fixture providing a fully populated VideoSearchResult dataclass.
+
+    Returns:
+        VideoSearchResult with typical test values.
+    """
+    from src.state import VideoSearchResult
+
+    return VideoSearchResult(
+        video_id="abc123",
+        url="https://youtube.com/watch?v=abc123",
+        title="Python Tutorial",
+        channel="Tech Channel",
+        duration=600.0,
+        duration_tier="medium",
+        keyword="python",
+        description="Learn Python programming basics",
+    )
+
+
+@pytest.fixture
+def voiceover_segment_list() -> List['VoiceoverSegment']:
+    """
+    Fixture providing a list of VoiceoverSegment dataclasses.
+
+    Returns:
+        List of VoiceoverSegment with typical test values.
+    """
+    from src.state import VoiceoverSegment
+
+    return [
+        VoiceoverSegment(index=0, start=0.0, end=5.0, text="Welcome to the tutorial", duration=5.0),
+        VoiceoverSegment(index=1, start=5.0, end=10.0, text="We will learn about Python", duration=5.0),
+        VoiceoverSegment(index=2, start=10.0, end=15.0, text="Let's get started with the basics", duration=5.0),
+        VoiceoverSegment(index=3, start=15.0, end=20.0, text="Now let's write some code", duration=5.0),
+    ]
+
+
+@pytest.fixture
+def caption_result() -> 'CaptionResult':
+    """
+    Fixture providing a fully populated CaptionResult with segments.
+
+    Returns:
+        CaptionResult with typical test values and caption segments.
+    """
+    from src.caption.models import CaptionResult, CaptionSegment, CaptionStatus
+
+    segments = [
+        CaptionSegment(index=0, start_time=0.0, end_time=5.0, text="Welcome to this tutorial"),
+        CaptionSegment(index=1, start_time=5.0, end_time=10.0, text="We will learn about Python"),
+        CaptionSegment(index=2, start_time=10.0, end_time=15.0, text="Let's get started"),
+    ]
+
+    return CaptionResult(
+        video_id="abc123",
+        segments=segments,
+        language="en",
+        is_auto_generated=False,
+        format_source="vtt",
+        video_duration=600.0,
+        status=CaptionStatus.SUCCESS,
+    )
+
+
+@pytest.fixture
+def match_result() -> 'Match':
+    """
+    Fixture providing a fully populated Match dataclass with confidence scores.
+
+    Returns:
+        Match with typical test values and confidence score.
+    """
+    from src.state import Match
+
+    return Match(
+        segment_index=0,
+        video_file="abc123.mp4",
+        video_start=0.0,
+        video_end=5.0,
+        confidence=0.85,
+        strategy="primary",
+        reason="Keyword and semantic match for Python tutorial content",
+        face_score=0.75,
+    )
 
 
 # =============================================================================
