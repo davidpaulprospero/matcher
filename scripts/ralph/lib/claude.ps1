@@ -474,10 +474,24 @@ function Invoke-ClaudeSubprocess {
         $earlyExitRecheckIntervalSec = 30  # Periodic re-check interval to catch missed file writes
         $lastEarlyExitRecheck = 0
 
+        # Quick Edit Mode safeguard: re-check periodically in case user clicks console
+        $quickEditRecheckIntervalSec = 60
+        $lastQuickEditRecheck = 0
+
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
             $timeSinceProgress += $checkIntervalSec
             $totalElapsed += $checkIntervalSec
+
+            # Safeguard: re-disable Quick Edit Mode periodically in case user clicks console
+            if ($totalElapsed - $lastQuickEditRecheck -ge $quickEditRecheckIntervalSec) {
+                $lastQuickEditRecheck = $totalElapsed
+                $qeDisabled = $false
+                try {
+                    $qeDisabled = Disable-QuickEditMode
+                } catch {}
+                # Silent re-disable - no output to avoid cluttering logs
+            }
 
             if (-not $process.HasExited) {
                 $sample = Get-ProcessMetrics -ProcessId $process.Id
@@ -935,7 +949,11 @@ function Resolve-ClaudeResult {
             # Evidence threshold gate: reject stories with insufficient criteria verification
             $evidenceConfig = $script:Config.stallDetection.storyCompletionEarlyExit
             $evidenceMinPct = if ($evidenceConfig -and $null -ne $evidenceConfig.evidenceThresholdPercent) { $evidenceConfig.evidenceThresholdPercent } else { 90 }
-            if ($evidenceResult -and $evidenceResult.criteriaTotal -gt 0 -and $evidenceResult.percentage -lt $evidenceMinPct) {
+            $belowThreshold = $evidenceResult -and $evidenceResult.criteriaTotal -gt 0 -and $evidenceResult.percentage -lt $evidenceMinPct
+            $keywordFallbackUsed = $evidenceResult -and $evidenceResult.usedKeywordFallback
+
+            if ($belowThreshold -and -not $keywordFallbackUsed) {
+                # LLM-based evidence is below threshold -- reject
                 Write-Host "  Evidence below threshold ($($evidenceResult.percentage)% < $($evidenceMinPct)%) - rejecting story" -ForegroundColor Red
                 [Console]::Out.Flush()
                 $null = Update-StoryStatus -StoryId $Ctx.StoryId -Passes $false -Notes "Evidence gate: $($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal) criteria verified ($($evidenceResult.percentage)%). Minimum: $($evidenceMinPct)%."
@@ -943,6 +961,11 @@ function Resolve-ClaudeResult {
                 $iterationStatus = "evidence_rejected"
                 $script:State.ConsecutiveFailures++
                 Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $false; reason = "evidence_below_threshold"; evidence = "$($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal)" }
+            } elseif ($belowThreshold -and $keywordFallbackUsed) {
+                # Keyword fallback is too weak to override Claude's successful completion
+                Write-Host "  Evidence: keyword fallback $($evidenceResult.percentage)% < $($evidenceMinPct)% -- accepting (keyword matching too weak to reject)" -ForegroundColor DarkYellow
+                [Console]::Out.Flush()
+                Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $true; reason = "keyword_fallback_accepted"; evidence = "$($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal)" }
             } else {
                 Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $true }
             }
