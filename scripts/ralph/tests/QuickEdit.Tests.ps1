@@ -149,3 +149,46 @@ Describe 'Disable-QuickEditMode - Integration in ralph.ps1' {
         $callPos | Should -BeLessThan $loopsLoadPos
     }
 }
+
+Describe 'QuickEditMode periodic safeguard in claude.ps1' {
+
+    BeforeAll {
+        $script:ClaudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+    }
+
+    It 'Defines quickEditRecheckIntervalSec variable in Invoke-ClaudeSubprocess' {
+        $script:ClaudeSource | Should -Match 'quickEditRecheckIntervalSec\s*=\s*60'
+    }
+
+    It 'Initializes lastQuickEditRecheck to 0' {
+        $script:ClaudeSource | Should -Match '\$lastQuickEditRecheck\s*=\s*0'
+    }
+
+    It 'Re-checks Quick Edit Mode within the monitoring loop' {
+        # The re-disable logic should be after the while loop starts
+        $script:ClaudeSource | Should -Match 'while.*HasExited.*\{[\s\S]{0,1000}lastQuickEditRecheck'
+    }
+
+    It 'Uses try/catch around Disable-QuickEditMode in the safeguard' {
+        # Should have try/catch to prevent crashes when console is unavailable
+        # Check for try/catch pattern around Disable-QuickEditMode
+        $script:ClaudeSource | Should -Match 'try\s*\{[^}]*Disable-QuickEditMode[^}]*\}[\s]*catch'
+    }
+
+    It 'Compares elapsed time against quickEditRecheckIntervalSec' {
+        $script:ClaudeSource | Should -Match '\$totalElapsed\s*-\s*\$lastQuickEditRecheck\s*-ge\s*\$quickEditRecheckIntervalSec'
+    }
+
+    It 'Updates lastQuickEditRecheck after re-checking' {
+        $script:ClaudeSource | Should -Match '\$lastQuickEditRecheck\s*=\s*\$totalElapsed'
+    }
+
+    It 'Does not output messages during periodic re-check (silent safeguard)' {
+        # Should NOT have Write-Host inside the periodic re-check block
+        $match = $script:ClaudeSource -match '(if\s*\(\s*\$totalElapsed\s*-\s*\$lastQuickEditRecheck[\s\S]{0,300}\$qeDisabled\s*=\s*Disable-QuickEditMode[\s\S]{0,100})'
+        if ($match) {
+            $block = $Matches[1]
+            $block | Should -Not -Match 'Write-Host'
+        }
+    }
+}

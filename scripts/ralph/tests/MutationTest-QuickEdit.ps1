@@ -15,11 +15,13 @@ param(
 
 $RalphDir = Split-Path -Parent $PSScriptRoot
 $DisplayFile = Join-Path $RalphDir 'lib\display.ps1'
+$ClaudeFile = Join-Path $RalphDir 'lib\claude.ps1'
 $RalphFile = Join-Path $RalphDir 'ralph.ps1'
 $TestFile = Join-Path $PSScriptRoot 'QuickEdit.Tests.ps1'
 
 # Read originals
 $displayOriginal = Get-Content $DisplayFile -Raw
+$claudeOriginal = Get-Content $ClaudeFile -Raw
 $ralphOriginal = Get-Content $RalphFile -Raw
 
 # Define mutations
@@ -100,6 +102,42 @@ function _Disable-QuickEditMode_Dead {'
         Pattern = '$quickEditDisabled = Disable-QuickEditMode'
         Replacement = '$quickEditDisabled = $false  # MUTANT: call removed'
         ExpectedFailures = @('Disable-QuickEditMode.*ralph\.ps1')
+    },
+    # --- claude.ps1 periodic safeguard mutations ---
+    @{
+        File = "claude.ps1"
+        FilePath = $ClaudeFile
+        Original = $claudeOriginal
+        Name = "Change quickEditRecheckIntervalSec from 60 to 5 seconds"
+        Pattern = 'quickEditRecheckIntervalSec = 60'
+        Replacement = 'quickEditRecheckIntervalSec = 5'
+        ExpectedFailures = @('quickEditRecheckIntervalSec.*60')
+    },
+    @{
+        File = "claude.ps1"
+        FilePath = $ClaudeFile
+        Original = $claudeOriginal
+        Name = "Remove try block (will crash on console error)"
+        Pattern = 'try \{'
+        Replacement = '# try removed'
+        ExpectedFailures = @('try.*catch')
+    },
+    @{
+        File = "claude.ps1"
+        FilePath = $ClaudeFile
+        Original = $claudeOriginal
+        Name = "Change interval check from ge to gt (never triggers)"
+        Pattern = '-ge $quickEditRecheckIntervalSec'
+        Replacement = '-gt $quickEditRecheckIntervalSec'
+        ExpectedFailures = @('quickEditRecheckIntervalSec')
+    },
+    @{
+        File = "claude.ps1"
+        FilePath = $ClaudeFile
+        Name = "Add Write-Host output in safeguard (verbose mode)"
+        Pattern = '# Silent re-disable'
+        Replacement = 'Write-Host "QuickEdit re-check"'
+        ExpectedFailures = @('Does not output messages')
     }
 )
 
