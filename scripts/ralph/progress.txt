@@ -288,3 +288,31 @@
 - Config option pre_check_availability exists (CaptionFirstConfig: config.yaml:118456,8)
 - Pre-check cached via ListSubsCache class (cache.py:1190)
 - Config verified: python -c "from src.config.sections.download import CaptionFirstConfig; c = CaptionFirstConfig(); print('pre_check_availability:', c.pre_check_availability)" -> True
+
+## Iteration N - [US-94-002] Add search budget awareness to video search configuration
+- All 6 acceptance criteria implemented:
+  1. Added search_budget_aware (default: true) to config.yaml video_search section
+  2. Added auto_distribute_budget (default: true) to config.yaml
+  3. Read max_total_results and results_per_keyword from config in video_search.py
+  4. Calculate adjusted results_per_keyword when keywords * results > max_total_results
+  5. Keywords beyond budget capacity get reduced results (not skipped) - uses max(1, max_total // keyword_count)
+  6. Added 6 tests in TestBudgetDistribution class verifying budget math
+- Budget formula: effective_results = max(1, max_total_results // keyword_count) when over budget
+- All 40 tests in test_stage_video_search.py pass
+- Files: config.yaml, src/stages/video_search.py, tests/test_stage_video_search.py
+## Iteration N - [US-94-004] Add chapter/topic splitting to keyword extraction
+- Enhanced Get-ChapterDistributedKeywords function in lib/interview.ps1:
+  1. Added comma and semicolon handling - splits "Feature: Part 1, Part 2, Part 3" into individual keywords
+  2. Added prefix preservation - applies prefix like "Feature:" to subsequent parts after comma
+  3. Handles chapter patterns: "Chapter X: Title", "Part X: Title", Roman numerals
+  4. Handles standalone "Part X" without title after comma split
+- Added 9 tests in Interview.Tests.ps1 covering:
+  - Basic chapter patterns (Chapter 1, Part 1, Roman numerals)
+  - Comma-separated topics ("Feature: Part 1, Part 2, Part 3")
+  - Semicolon-separated topics ("API: Auth; Rate Limit; Caching")
+  - Edge cases (empty input, non-chapter keywords, duplicates)
+- Integrated with Show-SearchBudgetStatus to display keyword splitting effects:
+  - Shows "Keywords Provided: N -> M after splitting" when chapters detected
+  - Uses split keywords for budget calculation
+- All 9 tests pass
+- Files: scripts/ralph/lib/interview.ps1, scripts/ralph/tests/Interview.Tests.ps1

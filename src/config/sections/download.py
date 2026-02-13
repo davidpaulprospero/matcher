@@ -30,6 +30,9 @@ __all__ = [
     'ExtractorArgsConfig',
     'ErrorPatternsConfig',
     'AdaptiveSeverityConfig',
+    'BandwidthThrottleConfig',
+    'DownloadResumeConfig',
+    'FormatPreferenceConfig',
     'DownloadConfig',
     'DownloadingConfig',
 ]
@@ -1319,6 +1322,201 @@ class AdaptiveSeverityConfig:
 
 
 @dataclass
+class BandwidthThrottleConfig:
+    """Bandwidth throttling configuration for downloads (US-93-007).
+
+    Limits download bandwidth to prevent consuming all available bandwidth
+    during pipeline execution. Uses yt-dlp's --downloader-args to pass
+    rate limiting to ffmpeg.
+
+    Example with defaults:
+      - Global limit: 5M (5 MB/s = 40 Mbps)
+      - Per-download limit: disabled by default
+      - Small file bypass: files under 10MB skip throttling
+      - Logging: always logs when throttling is applied
+
+    Configure in config.yaml under download.bandwidth_throttle.
+    """
+    # Enable/disable bandwidth throttling
+    # When False, all other settings are ignored
+    enabled: bool = False
+
+    # Global bandwidth limit for all downloads
+    # Format: number followed by K (KB/s) or M (MB/s)
+    # Examples: "5M" = 5 MB/s, "1M" = 1 MB/s, "500K" = 500 KB/s
+    # Set to "0" or empty to disable global limit
+    global_limit: str = "5M"
+
+    # Per-download bandwidth limit (optional override)
+    # If set, applies this limit instead of global_limit for each download
+    # Empty string = use global_limit
+    per_download_limit: str = ""
+
+    # File size threshold to bypass throttling (MB)
+    # Files smaller than this will not have throttling applied
+    # This speeds up small file downloads while limiting large ones
+    # Set to 0 to always throttle, or very high to never throttle
+    bypass_under_mb: float = 10.0
+
+    # Minimum file size for per-download limit (MB)
+    # When per_download_limit is set, only apply it to files >= this size
+    # Smaller files use global_limit or no throttling
+    per_download_min_size_mb: float = 50.0
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        if self.bypass_under_mb < 0:
+            raise ValueError(
+                f"BandwidthThrottleConfig.bypass_under_mb must be >= 0, got {self.bypass_under_mb}"
+            )
+        if self.per_download_min_size_mb < 0:
+            raise ValueError(
+                f"BandwidthThrottleConfig.per_download_min_size_mb must be >= 0, got {self.per_download_min_size_mb}"
+            )
+
+    def get_limit_for_size(self, file_size_mb: float) -> str | None:
+        """
+        Get the appropriate bandwidth limit for a given file size.
+
+        Args:
+            file_size_mb: Estimated file size in MB
+
+        Returns:
+            Bandwidth limit string (e.g., "5M") or None if throttling disabled
+        """
+        if not self.enabled:
+            return None
+
+        # Check if file is small enough to bypass
+        if file_size_mb < self.bypass_under_mb:
+            return None
+
+        # Use per-download limit if file is large enough and per-download limit is set
+        if self.per_download_limit and file_size_mb >= self.per_download_min_size_mb:
+            return self.per_download_limit
+
+        # Use global limit if enabled
+        if self.global_limit and self.global_limit != "0":
+            return self.global_limit
+
+        return None
+
+
+@dataclass
+class DownloadResumeConfig:
+    """Download resume configuration (US-93-008).
+
+    Enables resuming partial downloads when interrupted, reducing bandwidth waste.
+    Uses yt-dlp's --continue flag to resume from last byte position.
+
+    Partial files are detected by:
+    - File extension .part (yt-dlp default)
+    - File size > 0 with no complete file present
+
+    Configure in config.yaml under download.download_resume.
+    """
+    # Enable/disable download resume functionality
+    # When False, partial files are cleaned up and downloads start fresh
+    enabled: bool = True
+
+    # Minimum partial file size to consider for resume (bytes)
+    # Files smaller than this are treated as incomplete and discarded
+    # This prevents resuming tiny partial files from failed downloads
+    min_partial_size_bytes: int = 1024  # 1KB minimum
+
+    # Partial file extension used by yt-dlp
+    # yt-dlp appends this extension during download, removes on completion
+    partial_extension: str = ".part"
+
+    # Clean up partial files on final failure (after all retries exhausted)
+    # When True, deletes incomplete downloads when retries are exhausted
+    # When False, partial files remain for manual inspection
+    cleanup_on_failure: bool = True
+
+    # Log resume attempts for debugging
+    # When True, logs when a resume is detected and attempted
+    log_resume_attempts: bool = True
+
+
+@dataclass
+class FormatPreferenceConfig:
+    """Format preference configuration (US-93-009).
+
+    Controls video format (container/codec) selection for yt-dlp downloads.
+    Allows preferring specific formats (mp4, webm) over others and selecting
+    quality preference (highest/best/worst).
+
+    yt-dlp format selection works as a fallback chain:
+    - First preferred format is tried
+    - If unavailable, falls back to next format
+    - If all preferred formats unavailable, uses yt-dlp default
+
+    Examples:
+      - preference_order: ["mp4", "webm"] + quality: "highest"
+        → Tries mp4 first, then webm, prefers highest quality available
+      - preference_order: ["mp4"] + quality: "best"
+        → Tries mp4 only, uses "best" quality selection
+      - preference_order: [] (empty) + quality: "best"
+        → Uses yt-dlp default behavior (no format preference)
+
+    Configure in config.yaml under download.format_preference.
+    """
+    # Enable/disable format preference
+    # When False, uses yt-dlp default format selection
+    enabled: bool = True
+
+    # Preferred format order (first available is used)
+    # yt-dlp format selectors: mp4, webm, mkv, mov, avi
+    # Empty list = use yt-dlp default (no preference)
+    preference_order: List[str] = field(default_factory=lambda: ["mp4", "webm"])
+
+    # Quality selection strategy:
+    # - "highest": Prefer highest resolution/quality available
+    # - "best": Best quality (same as highest for most cases)
+    # - "worst": Lowest quality (smallest file size)
+    # Note: yt-dlp's "best" includes both resolution and codec quality
+    # while "highest" is purely resolution-based
+    quality: str = "highest"
+
+    # Log format selection decisions for transparency
+    # When True, logs which format was selected and why
+    log_selection: bool = True
+
+    # Fallback behavior when preferred formats unavailable:
+    # - "any": Use any available format
+    # - "fail": Skip download with error
+    fallback_behavior: str = "any"
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        valid_qualities = ("highest", "best", "worst")
+        if self.quality not in valid_qualities:
+            raise ValueError(
+                f"FormatPreferenceConfig.quality must be one of {valid_qualities}, "
+                f"got '{self.quality}'"
+            )
+
+        valid_fallbacks = ("any", "fail")
+        if self.fallback_behavior not in valid_fallbacks:
+            raise ValueError(
+                f"FormatPreferenceConfig.fallback_behavior must be one of {valid_fallbacks}, "
+                f"got '{self.fallback_behavior}'"
+            )
+
+        # Validate preference_order contains valid formats
+        valid_formats = {"mp4", "webm", "mkv", "mov", "avi", "m4a", "opus", "flac"}
+        for fmt in self.preference_order:
+            if fmt.lower() not in valid_formats:
+                raise ValueError(
+                    f"FormatPreferenceConfig.preference_order contains invalid format '{fmt}'. "
+                    f"Valid formats: {sorted(valid_formats)}"
+                )
+
+        # Convert to lowercase for consistency
+        self.preference_order = [fmt.lower() for fmt in self.preference_order]
+
+
+@dataclass
 class ErrorPatternsConfig:
     """Configurable error patterns for download error classification (US-89-008).
 
@@ -1475,6 +1673,37 @@ class DownloadConfig:
         'longer': 900,   # 15 min timeout for videos 25-50 min
     })
 
+    # Adaptive timeout based on video file size (US-93-005)
+    # Calculates: base_timeout + (estimated_size_mb * size_multiplier)
+    # This prevents premature timeouts on large files while avoiding long waits on small files
+    # Set enabled: false to disable and use tier-based timeouts only
+    adaptive_timeout_enabled: bool = True
+
+    # Base timeout in seconds (added to size-based calculation)
+    # This provides a minimum baseline for connection/setup time
+    adaptive_timeout_base: int = 30
+
+    # Multiplier: seconds to add per MB of estimated file size
+    # For 100MB video: 30 + (100 * 0.5) = 80 second timeout
+    # For 500MB video: 30 + (500 * 0.5) = 280 second timeout
+    adaptive_timeout_multiplier: float = 0.5
+
+    # Maximum adaptive timeout cap (seconds)
+    # Prevents extremely large videos from getting excessive timeouts
+    adaptive_timeout_max: int = 600
+
+    # Estimate file size from duration using these bitrate assumptions (MB/min):
+    # Used when exact filesize is not available from metadata
+    # Format: {resolution: MB per minute}
+    adaptive_timeout_size_estimates: Dict[str, float] = field(default_factory=lambda: {
+        '2160': 25.0,  # 4K
+        '1440': 15.0,  # 2K
+        '1080': 5.0,   # 1080p
+        '720': 2.5,    # 720p
+        '480': 1.5,    # 480p
+        'default': 3.0  # Unknown resolution
+    })
+
     # Audio-first download pipeline (enable per-project for faster downloads)
     audio_first: AudioFirstConfig = field(default_factory=AudioFirstConfig)
 
@@ -1531,6 +1760,24 @@ class DownloadConfig:
     # Tracks error frequency and auto-escalates severity on repeated errors.
     # If not provided, uses AdaptiveSeverityConfig with defaults.
     adaptive_severity: AdaptiveSeverityConfig | None = None
+
+    # Bandwidth throttling configuration (US-93-007)
+    # Limits download bandwidth to prevent consuming all bandwidth during pipeline execution.
+    # Uses yt-dlp --downloader-args to pass rate limiting to ffmpeg.
+    # If not provided, uses BandwidthThrottleConfig with defaults.
+    bandwidth_throttle: BandwidthThrottleConfig | None = None
+
+    # Download resume configuration (US-93-008)
+    # Enables resuming partial downloads when interrupted, reducing bandwidth waste.
+    # Uses yt-dlp's --continue flag to resume from last byte position.
+    # If not provided, uses DownloadResumeConfig with defaults.
+    download_resume: DownloadResumeConfig | None = None
+
+    # Format preference configuration (US-93-009)
+    # Controls video format (container/codec) selection for yt-dlp downloads.
+    # Allows preferring specific formats (mp4, webm) over others.
+    # If not provided, uses FormatPreferenceConfig with defaults.
+    format_preference: FormatPreferenceConfig | None = None
 
     # Segment download settings (used by DOWNLOAD_SEGMENTS stage)
     # Delay between segment download requests (seconds).
@@ -1639,6 +1886,16 @@ class DownloadConfig:
         # US-89-012: Handle adaptive_severity - can be None, dict, or AdaptiveSeverityConfig
         if isinstance(self.adaptive_severity, dict):
             self.adaptive_severity = AdaptiveSeverityConfig(**self.adaptive_severity)
+        # If None or not provided, keep as None (backward compat - use defaults)
+
+        # US-93-007: Handle bandwidth_throttle - can be None, dict, or BandwidthThrottleConfig
+        if isinstance(self.bandwidth_throttle, dict):
+            self.bandwidth_throttle = BandwidthThrottleConfig(**self.bandwidth_throttle)
+        # If None or not provided, keep as None (backward compat - use defaults)
+
+        # US-93-009: Handle format_preference - can be None, dict, or FormatPreferenceConfig
+        if isinstance(self.format_preference, dict):
+            self.format_preference = FormatPreferenceConfig(**self.format_preference)
         # If None or not provided, keep as None (backward compat - use defaults)
 
         # Validate parallel_workers >= 1 (positive integer)

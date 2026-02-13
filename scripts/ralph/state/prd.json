@@ -1,7 +1,7 @@
 ﻿{
-    "sprintNumber":  93,
-    "focusArea":  "download",
-    "branchName":  "ralph/sprint-93",
+    "sprintNumber":  94,
+    "focusArea":  "iterative-phase",
+    "branchName":  "ralph/sprint-94",
     "projectContext":  {
                            "sourceDir":  "src/",
                            "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,189 +11,189 @@
                        },
     "userStories":  [
                         {
-                            "id":  "US-93-001",
+                            "id":  "US-94-001",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027download\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027iterative-phase\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027download\u0027",
-                                                       "Add stories US-93-002 through US-93-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027iterative-phase\u0027",
+                                                       "Add stories US-94-002 through US-94-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-93-NNN to be unique across sprints",
-                                                       "Mark this story (US-93-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Generate sprint stories for download focus area",
-                            "notes":  "Evidence gate: 9/11 criteria verified (82%). Minimum: 90%."
-                        },
-                        {
-                            "id":  "US-93-002",
-                            "acceptanceCriteria":  [
-                                                       "Add hash verification function to src/downloader/utils.py",
-                                                       "Implement SHA256 hash calculation for downloaded files",
-                                                       "Store expected hash in DownloadedVideo state",
-                                                       "Verify file integrity after download completes",
-                                                       "Log verification result (pass/fail) with file details",
-                                                       "Handle missing hash gracefully (skip verification)"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add download segment hash verification",
-                            "notes":  "IMPLEMENTED: Added calculate_file_hash() and verify_download_hash() functions to utils.py. core.py calls verification after each download, stores computed hash in DownloadedVideo.video_hash. Gracefully handles missing expected hashes by skipping verification."
-                        },
-                        {
-                            "id":  "US-93-003",
-                            "acceptanceCriteria":  [
-                                                       "Add retry budget persistence to checkpoint",
-                                                       "Load retry budget state on resume",
-                                                       "Reset budget counters when explicitly requested",
-                                                       "Track per-keyword retry counts",
-                                                       "Export budget state for debugging",
-                                                       "Handle corrupted checkpoint gracefully"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Improve download retry budget persistence",
-                            "notes":  "PRE-IMPLEMENTED: All acceptance criteria already met. rate_limit_budget.py has to_dict() (line 381) and from_dict() (line 400). checkpoint.py stores rate_limit_budget (line 45). core.py saves to checkpoint (line 574). orchestrator.py loads on resume (lines 312-313). clear() method for reset (line 430). get_summary() for debugging (line 357). Handles None gracefully in from_dict() (line 410)."
-                        },
-                        {
-                            "id":  "US-93-004",
-                            "acceptanceCriteria":  [
-                                                       "Implement global download coordinator",
-                                                       "Track active downloads across parallel workers",
-                                                       "Enforce max concurrent downloads limit",
-                                                       "Queue excess downloads for later execution",
-                                                       "Provide status API for active download count",
-                                                       "Handle worker failures gracefully"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add parallel download coordination",
-                            "notes":  "IMPLEMENTED: Added DownloadCoordinator class in orchestrator.py (lines ~38-160). Features: thread-safe semaphore for max_concurrent enforcement, active_count tracking, completed/failed counters, get_status() API. Added max_concurrent config to download.py (defaults to parallel_workers). Integrated into DownloadOrchestrator with get_stats() method. All acceptance criteria met."
-                        },
-                        {
-                            "id":  "US-93-005",
-                            "acceptanceCriteria":  [
-                                                       "Add dynamic timeout calculation based on video file size",
-                                                       "Implement size estimation from YouTube metadata",
-                                                       "Calculate timeout: base + (size_mb * multiplier)",
-                                                       "Add config options for base_timeout and size_multiplier",
-                                                       "Use larger timeouts for longer videos",
-                                                       "Log timeout values for debugging"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Implement adaptive download timeout",
-                            "notes":  "IMPLEMENTED: All 6 criteria verified. 1) calculate_adaptive_timeout in utils.py. 2) Tier-based size estimates in core.py (lines 1998-2004). 3) Formula: base + (size_mb * multiplier) in utils.py line 172. 4) Config: adaptive_timeout_base, adaptive_timeout_multiplier, adaptive_timeout_max in download.py. 5) Larger timeouts for longer videos via tier estimates. 6) Logging in core.py (always logs adaptive timeout values). Tests pass."
-                        },
-                        {
-                            "id":  "US-93-006",
-                            "acceptanceCriteria":  [
-                                                       "Create structured error response class",
-                                                       "Map yt-dlp error codes to user-friendly messages",
-                                                       "Include recovery suggestions in errors",
-                                                       "Log errors with context for debugging",
-                                                       "Handle unknown errors gracefully",
-                                                       "Add error code to all download failures"
+                                                       "IMPORTANT: Story IDs MUST follow format US-94-NNN to be unique across sprints",
+                                                       "Mark this story (US-94-001) as passes: true when done"
                                                    ],
                             "passes":  false,
                             "priority":  "high",
-                            "title":  "Improve download error messages",
-                            "notes":  "Tier: enhancement\nFiles: src/downloader/errors.py (add DownloadError class with suggestions), src/downloader/core.py (use structured errors), src/downloader/retry_queue.py (show suggestions on retry)\nLine ranges: errors.py enhance class ~40 lines, core.py use errors ~30 lines, retry_queue.py show suggestions ~10 lines\nThis feature helps users understand and recover from download failures."
+                            "title":  "Generate sprint stories for iterative-phase focus area",
+                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
                         },
                         {
-                            "id":  "US-93-007",
+                            "id":  "US-94-002",
                             "acceptanceCriteria":  [
-                                                       "Add bandwidth throttling config to download section",
-                                                       "Implement throttling using yt-dlp --downloader-args",
-                                                       "Support per-download and global limits",
-                                                       "Allow throttling bypass for small files",
-                                                       "Log throttling applied for transparency",
-                                                       "Handle throttling disable gracefully"
+                                                       "Add config option \u0027search_budget_aware\u0027 (default: true) to video_search section in config.yaml",
+                                                       "Add config option \u0027auto_distribute_budget\u0027 (default: true) to distribute results evenly across keywords",
+                                                       "Read max_total_results and results_per_keyword from config in video search code",
+                                                       "Calculate adjusted results_per_keyword when keywords exceed budget capacity",
+                                                       "Ensure keywords beyond budget capacity get reduced results, not skipped",
+                                                       "Add test verifying budget distribution math"
                                                    ],
-                            "passes":  false,
-                            "priority":  "low",
-                            "title":  "Add download bandwidth throttling",
-                            "notes":  "Tier: enhancement\nFiles: src/config/sections/download.py (add BandwidthThrottleConfig), src/downloader/core.py (apply throttling), config.yaml (add config options)\nLine ranges: download.py config ~20 lines, core.py throttling ~25 lines, config.yaml ~10 lines\nThis feature prevents download from consuming all bandwidth during pipeline execution."
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Add search budget awareness to video search configuration",
+                            "notes":  "COMPLETED: Added search_budget_aware and auto_distribute_budget to config.yaml. Updated video_search.py to calculate adjusted results_per_keyword when keywords exceed budget capacity. Keywords beyond budget capacity get reduced results, not skipped. Added 6 tests in TestBudgetDistribution class."
                         },
                         {
-                            "id":  "US-93-008",
+                            "id":  "US-94-003",
                             "acceptanceCriteria":  [
-                                                       "Add partial download detection",
-                                                       "Implement resume from last byte position",
-                                                       "Handle incomplete files on retry",
-                                                       "Clean up partial files on final failure",
-                                                       "Add config for resume enable/disable",
-                                                       "Log resume attempts for debugging"
+                                                       "Add Get-SearchBudgetInfo function to lib/interview.ps1",
+                                                       "Function reads video_search.results_per_keyword and video_search.max_total_results from config.yaml",
+                                                       "Returns budget metadata: maxKeywords, currentBudget, resultsPerKeyword",
+                                                       "Add Get-DistributedKeywordBudget function that calculates adjusted results per keyword",
+                                                       "Handle edge cases: 0 keywords, 1 keyword, keywords \u003e max_keywords",
+                                                       "Add test cases for budget calculation scenarios"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Add search budget functions to Ralph interview library",
+                            "notes":  "Tier: feature | Source files: scripts/ralph/lib/interview.ps1, scripts/ralph/config/ralph-config.json | Line ranges: interview.ps1 ~lines 1-100 (need to add new functions at end)"
+                        },
+                        {
+                            "id":  "US-94-004",
+                            "acceptanceCriteria":  [
+                                                       "Add Get-ChapterDistributedKeywords function to lib/interview.ps1",
+                                                       "Detect chapter patterns in topics: \u0027Feature: Part 1, Part 2\u0027, \u0027API: Auth, Rate Limit\u0027",
+                                                       "Split topics with chapters into individual search keywords",
+                                                       "Handle comma-separated, semicolon-separated, and \u0027Part X\u0027 patterns",
+                                                       "Return flattened keyword array with chapter-split keywords",
+                                                       "Integrate with interview UI to show estimated results after splitting"
+                                                   ],
+                            "passes":  true,
+                            "priority":  "medium",
+                            "title":  "Add chapter/topic splitting to keyword extraction",
+                            "notes":  "Implemented: Enhanced Get-ChapterDistributedKeywords to handle comma/semicolon-separated topics. Added prefix preservation for patterns like \u0027Feature: Part 1, Part 2\u0027. Added 9 tests covering chapter patterns, comma/semicolon separation, and edge cases. Integrated with Show-SearchBudgetStatus to display keyword splitting effects."
+                        },
+                        {
+                            "id":  "US-94-005",
+                            "acceptanceCriteria":  [
+                                                       "Add confidence-based gap categorization in gap_analyzer.py",
+                                                       "Categorize gaps into: low_confidence (\u003c0.3), medium_confidence (0.3-0.6), high_confidence (\u003e0.6)",
+                                                       "Apply different search strategies based on confidence category",
+                                                       "Add config option \u0027confidence_thresholds\u0027 in iterative_matching section",
+                                                       "Store confidence category in GapSegment for downstream use",
+                                                       "Add test verifying confidence categorization"
                                                    ],
                             "passes":  false,
                             "priority":  "medium",
-                            "title":  "Implement download resume from partial",
-                            "notes":  "Tier: enhancement\nFiles: src/downloader/core.py (add resume logic), src/downloader/utils.py (check_partial_file), config.yaml (add resume option)\nLine ranges: core.py resume logic ~40 lines, utils.py helpers ~20 lines, config.yaml ~5 lines\nThis feature reduces download time when interrupted downloads are resumed."
+                            "title":  "Add confidence-based gap categorization for smarter strategy selection",
+                            "notes":  "Tier: feature | Source files: src/iterative_match/gap_analyzer.py (GapSegment class ~lines 80-100, _classify_gap_pattern ~lines 250-320), config.yaml iterative_matching section (lines 2290-2350)"
                         },
                         {
-                            "id":  "US-93-009",
+                            "id":  "US-94-006",
                             "acceptanceCriteria":  [
-                                                       "Add format preference to download config",
-                                                       "Support preference order: mp4 \u003e webm \u003e other",
-                                                       "Add quality selection (highest/best/worst)",
-                                                       "Pass preferences to yt-dlp format string",
-                                                       "Log format selection for transparency",
-                                                       "Handle unavailable formats gracefully"
+                                                       "Add multi-factor strategy selection to query_learning.py",
+                                                       "Combine pattern success rate, chapter type success rate, AND confidence factor",
+                                                       "Add confidence_weight config option (default: 0.2) to blend confidence into strategy selection",
+                                                       "Implement get_multi_factor_strategy_ranking method in QueryLearningDB",
+                                                       "Test that low-confidence gaps favor conservative strategies (more keyword exploration)",
+                                                       "Test that high-confidence gaps favor aggressive strategies (similar_to_locked)"
                                                    ],
                             "passes":  false,
                             "priority":  "medium",
-                            "title":  "Add download format preference options",
-                            "notes":  "Tier: enhancement\nFiles: src/config/sections/download.py (add FormatPreferenceConfig), src/downloader/core.py (build format string), config.yaml (add options)\nLine ranges: download.py config ~15 lines, core.py format string ~20 lines, config.yaml ~8 lines\nThis feature ensures consistent video format selection across downloads."
+                            "title":  "Add multi-factor strategy selection combining pattern, chapter, and confidence",
+                            "notes":  "Tier: feature | Source files: src/iterative_match/query_learning.py (QueryLearningDB class ~lines 70-250, get_best_strategy_for_chapter ~lines 130-170), config.yaml iterative_matching section"
                         },
                         {
-                            "id":  "US-93-010",
+                            "id":  "US-94-007",
                             "acceptanceCriteria":  [
-                                                       "Track cookie success rate per cookie",
-                                                       "Prioritize high-success cookies in rotation",
-                                                       "Add cookie health scoring algorithm",
-                                                       "Remove consistently failing cookies automatically",
-                                                       "Add config for success rate threshold",
-                                                       "Log cookie selection rationale"
+                                                       "Add segment duration-based gap prioritization",
+                                                       "Longer gaps (\u003e30 seconds) get priority boost in search order",
+                                                       "Add config option \u0027duration_priority_weight\u0027 (default: 0.1)",
+                                                       "Update GapSegment to include duration field",
+                                                       "Modify gap sorting to factor in segment duration",
+                                                       "Add test for duration-based prioritization"
                                                    ],
                             "passes":  false,
                             "priority":  "medium",
-                            "title":  "Improve cookie rotation strategy",
-                            "notes":  "Tier: enhancement\nFiles: src/downloader/cookie_rotator.py (add health tracking), src/downloader/cookie_method_fallback.py (use health scores), src/config/sections/download.py (add threshold config)\nLine ranges: cookie_rotator.py health ~50 lines, cookie_method_fallback.py use scores ~20 lines, download.py config ~5 lines\nThis feature reduces failed downloads due to bad cookies by prioritizing healthy ones."
+                            "title":  "Add segment duration-based gap prioritization",
+                            "notes":  "Tier: feature | Source files: src/iterative_match/gap_analyzer.py (GapSegment ~lines 80-100, annotate_gaps_with_chapters ~lines 170-260), src/stages/iterative_match.py"
                         },
                         {
-                            "id":  "US-93-011",
+                            "id":  "US-94-008",
                             "acceptanceCriteria":  [
-                                                       "Add Prometheus metrics exporter for downloads",
-                                                       "Export: download_total, download_duration, download_size, download_errors",
-                                                       "Support configurable export interval",
-                                                       "Add metrics to global rate limit coordinator",
-                                                       "Include retry counts in metrics",
-                                                       "Handle metrics export failures gracefully"
+                                                       "Add negative keyword injection for query refinement",
+                                                       "Detect failing query patterns from learning DB",
+                                                       "Inject negative keywords to exclude irrelevant results",
+                                                       "Add config option \u0027enable_negative_keywords\u0027 (default: true)",
+                                                       "Add negative_keyword_patterns to config (e.g., \u0027tutorial\u0027, \u0027review\u0027, \u0027unboxing\u0027)",
+                                                       "Test that negative keywords improve result relevance"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add negative keyword injection to query refinement",
+                            "notes":  "Tier: feature | Source files: src/iterative_match/query_learning.py (~lines 250-350, refine methods), src/stages/iterative_match.py (query generation ~lines 200-350)"
+                        },
+                        {
+                            "id":  "US-94-009",
+                            "acceptanceCriteria":  [
+                                                       "Add source channel diversification to search results",
+                                                       "Limit results from same YouTube channel to max 3 per query",
+                                                       "Add config option \u0027max_videos_per_channel\u0027 (default: 3)",
+                                                       "Add config option \u0027enable_channel_diversity\u0027 (default: true)",
+                                                       "Implement deduplication logic in video search results",
+                                                       "Test that diverse channels appear in results"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add source channel diversification for search results",
+                            "notes":  "Tier: feature | Source files: src/stages/video_search.py (deduplication logic ~lines 150-250), config.yaml video_search section"
+                        },
+                        {
+                            "id":  "US-94-010",
+                            "acceptanceCriteria":  [
+                                                       "Add duration tier diversity enforcement in iterative matching",
+                                                       "Ensure search results include variety across duration tiers (short, medium, long)",
+                                                       "Add config option \u0027tier_diversity_weight\u0027 (default: 0.15)",
+                                                       "Modify result selection to favor diverse duration tiers",
+                                                       "Add test for duration tier diversity",
+                                                       "Document tier diversity behavior in config.yaml comments"
                                                    ],
                             "passes":  false,
                             "priority":  "low",
-                            "title":  "Add download metrics export",
-                            "notes":  "Tier: enhancement\nFiles: src/downloader/metrics_exporter.py (new file), src/downloader/core.py (collect metrics), src/downloader/rate_limit_metrics.py (integrate)\nLine ranges: metrics_exporter.py new ~60 lines, core.py collect ~15 lines, rate_limit_metrics.py integrate ~10 lines\nThis feature enables monitoring download performance in production."
+                            "title":  "Add duration tier diversity enforcement in iterative matching",
+                            "notes":  "Tier: feature | Source files: src/stages/iterative_match.py (result selection ~lines 400-500), config.yaml iterative_matching section"
                         },
                         {
-                            "id":  "US-93-012",
+                            "id":  "US-94-011",
                             "acceptanceCriteria":  [
-                                                       "Add download speed variance tracking",
-                                                       "Detect slow downloads vs network issues",
-                                                       "Add slow download warning threshold",
-                                                       "Log speed metrics for analysis",
-                                                       "Allow speed-based abort decision",
-                                                       "Handle network flakiness gracefully"
+                                                       "Add query result caching for iterative matching",
+                                                       "Cache query results with (query, strategy) as key",
+                                                       "Add config option \u0027cache_query_results\u0027 (default: true)",
+                                                       "Add config option \u0027query_cache_ttl_hours\u0027 (default: 24)",
+                                                       "Invalidate cache on config changes",
+                                                       "Add cache hit/miss metrics to pipeline metrics"
                                                    ],
                             "passes":  false,
                             "priority":  "low",
-                            "title":  "Add download speed variance detection",
-                            "notes":  "Tier: enhancement\nFiles: src/downloader/speed_tracker.py (add variance detection), src/downloader/core.py (use speed warnings), src/config/sections/download.py (add threshold config)\nLine ranges: speed_tracker.py variance ~30 lines, core.py warnings ~15 lines, download.py config ~5 lines\nThis feature helps identify network issues vs slow but valid downloads."
+                            "title":  "Add query result caching for iterative matching",
+                            "notes":  "Tier: optimization | Source files: src/stages/iterative_match.py (~lines 1-100, caching layer), src/cache/ directory, config.yaml iterative_matching section"
+                        },
+                        {
+                            "id":  "US-94-012",
+                            "acceptanceCriteria":  [
+                                                       "Add voiceover context awareness to gap keyword extraction",
+                                                       "Use adjacent segment text to enrich gap keywords",
+                                                       "Add config option \u0027context_window_segments\u0027 (default: 1)",
+                                                       "Add context words to gap keyword extraction in gap_analyzer.py",
+                                                       "Test that context-aware keywords improve match quality",
+                                                       "Document context awareness in gap_analyzer.py docstring"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "title":  "Add voiceover context awareness to gap keyword extraction",
+                            "notes":  "Tier: feature | Source files: src/iterative_match/gap_analyzer.py (extract_keywords_for_gap ~lines 360-420), src/stages/iterative_match.py (segment context ~lines 150-200)"
                         }
                     ]
 }

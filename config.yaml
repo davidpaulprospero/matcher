@@ -1111,6 +1111,21 @@ download:
     long: 900      # 15 min timeout for videos 10-25 min
     longer: 1200   # 20 min timeout for videos 25-50 min
 
+  # US-93-005: Adaptive timeout based on video file size estimation
+  # Calculates: base_timeout + (estimated_size_mb * size_multiplier)
+  # This prevents premature timeouts on large files while avoiding long waits on small files
+  adaptive_timeout_enabled: true
+  adaptive_timeout_base: 30      # Base timeout in seconds (minimum)
+  adaptive_timeout_multiplier: 0.5  # Seconds per MB of estimated file size
+  adaptive_timeout_max: 600      # Maximum timeout cap in seconds
+  adaptive_timeout_size_estimates:  # MB per minute by resolution
+    "2160": 25.0   # 4K
+    "1440": 15.0   # 2K
+    "1080": 5.0    # 1080p
+    "720": 2.5     # 720p
+    "480": 1.5     # 480p
+    "default": 3.0
+
   # Audio-First Mode - Dramatically reduces download time
   # How it works:
   #   1. Downloads audio only (MP3) first - ~5% of video size
@@ -1150,11 +1165,26 @@ download:
     # Non-primary matches get reduced language_confidence (0.8 for 2nd, 0.6 for 3rd+).
     language_priority: ["en", "en-US", "en-GB"]
     timeout: 30                       # Timeout for caption fetch requests (seconds)
+    # Per-format timeout configuration (US-90-011)
+    # Maps caption format types to timeout in seconds
+    # youtube: Default YouTube caption API timeout
+    # transcript: Transcript endpoint is faster
+    # live_subtitle: Live streams may need more time
+    # json3, srv3, vtt, srt: Subtitle format timeouts
+    format_timeouts:
+      youtube: 30
+      transcript: 20
+      live_subtitle: 45
+      json3: 45
+      srv3: 30
+      vtt: 25
+      srt: 25
     prefer_human_captions: true       # Prefer human-uploaded over auto-generated
     allow_auto_generated: true        # Allow auto-generated caption fallback (US-59-007)
     cache_captions: true              # Cache captions for cross-project reuse
     cache_dir: "~/.matcher_caption_cache"  # Global cache directory (supports ~)
     max_cache_age_days: 30            # Cache TTL in days (0 = no expiration)
+    max_cache_size: 0                # Max entries in cache (US-90-010), 0 = no limit, uses LRU eviction
     # Retry settings (US-008): exponential backoff on network errors
     # CaptionUnavailableError (no captions exist) is NOT retried
     # CaptionFetchError (temporary failure) IS retried with backoff
@@ -1208,6 +1238,12 @@ download:
     # repeated expensive lookups. TTL allows re-checking since captions may be added later.
     # Default: 3600 seconds (1 hour). Set to 0 to use max_cache_age_days for negative entries.
     negative_cache_ttl_seconds: 3600  # Negative cache TTL in seconds (default: 1 hour)
+
+    # Per-category negative cache TTL (US-90-003): configurable TTL per error category
+    # - unavailable_ttl: For videos confirmed to have no captions (longer TTL ok)
+    # - error_ttl: For transient errors (network, timeout) - shorter TTL for faster retry
+    unavailable_ttl_seconds: 3600  # Default 1 hour - captions unlikely to appear soon
+    error_ttl_seconds: 300  # Default 5 minutes - transient errors should retry faster
 
     # Per-category retry budgets (US-003 Sprint 7)
     # Maps error type to maximum retry attempts. Different errors need different strategies:
@@ -1296,6 +1332,48 @@ download:
       # Early termination on low success rate (US-37-009)
       min_success_rate: 0.3           # Terminate early if success rate below 30%
       min_sample_for_early_termination: 20  # Check after 20 videos processed
+
+  # Adaptive severity adjustment (US-89-012)
+  # Automatically escalate severity when same error repeats (e.g., 3x 429 = high severity)
+  # Improves backoff timing for persistent errors
+  adaptive_severity:
+    enabled: true                   # Enable adaptive severity adjustment
+    escalation_threshold: 3         # Consecutive errors before escalating severity
+    max_severity: "high"            # Maximum severity level: "medium" or "high"
+    window_size: 10                 # Sliding window size for error tracking
+    reset_on_success: true          # Reset error counts on successful download
+
+  # Bandwidth throttling (US-93-007)
+  # Limits download bandwidth to prevent consuming all bandwidth during pipeline execution
+  # Uses yt-dlp --downloader-args to pass rate limiting to ffmpeg
+  bandwidth_throttle:
+    enabled: false                  # Enable bandwidth throttling (disabled by default)
+    global_limit: "5M"              # Global limit: "5M" = 5 MB/s, "1M" = 1 MB/s, "500K" = 500 KB/s
+    per_download_limit: ""          # Per-download override (empty = use global_limit)
+    bypass_under_mb: 10.0          # Skip throttling for files smaller than this (MB)
+    per_download_min_size_mb: 50.0  # Minimum size for per_download_limit (MB)
+
+  # Download resume from partial (US-93-008)
+  # Resumes partial downloads when interrupted, reducing bandwidth waste
+  # Uses yt-dlp's --continue flag to resume from last byte position
+  download_resume:
+    enabled: true                   # Enable download resume (default: enabled)
+    min_partial_size_bytes: 1024   # Minimum partial file size to consider (bytes)
+    partial_extension: ".part"     # yt-dlp partial file extension
+    cleanup_on_failure: true       # Clean up partial files after all retries exhausted
+    log_resume_attempts: true      # Log when resume is detected
+
+  # Format preference (US-93-009)
+  # Controls video format (container/codec) selection for yt-dlp downloads
+  # Allows preferring specific formats (mp4, webm) over others
+  format_preference:
+    enabled: true                   # Enable format preference (default: enabled)
+    preference_order:              # Preferred format order (first available is used)
+      - "mp4"                     # Prefer MP4 (H.264) for DaVinci compatibility
+      - "webm"                    # Fallback to WebM (VP9/AV1)
+    quality: "highest"            # Quality: "highest", "best", or "worst"
+    log_selection: true           # Log format selection decisions
+    fallback_behavior: "any"      # Fallback: "any" (use any format) or "fail" (error)
 
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
@@ -1460,6 +1538,28 @@ download:
                                         # budget-aware scaling from creating excessively long
                                         # pauses. Default: 300 (5 minutes).
 
+  # Multi-circuit coordination (US-89-009)
+  # Configurable cascade rules for cross-circuit trip propagation
+  circuit_coordination:
+    enabled: true                       # Enable multi-circuit coordination
+    # Cascade rules: when source trips/fails, propagate to target
+    cascade_rules:
+      # search -> caption: propagate failures (existing US-61-003)
+      - source: "search"
+        target: "caption"
+        on_failure: true
+        on_trip: true
+      # caption -> search: propagate failures (existing US-61-003)
+      - source: "caption"
+        target: "search"
+        on_failure: true
+        on_trip: true
+      # search -> download: propagate trip (NEW US-89-009)
+      - source: "search"
+        target: "download"
+        on_failure: false
+        on_trip: true
+
   # Batch retry queue for rate-limited videos
   # When rate limiting affects a batch, collect failed videos and retry them
   # together after a delay. More effective than individual retries because it
@@ -1534,12 +1634,67 @@ download:
     max_vpn_switches: 3         # Max VPN switches per session (0 = unlimited)
     auto_scale_budget: true     # Scale budget limits by keyword count (ceil(n/5), max 5x)
 
+  # US-89-008: Error patterns for download error classification
+  # Allows runtime adjustment of error patterns without code changes.
+  # If not provided, uses default patterns from error_classification.py.
+  # Categories: dns, tcp, tls, http, ffmpeg
+  error_patterns:
+    # DNS resolution error patterns
+    dns:
+      - "getaddrinfo failed"
+      - "Name or service not known"
+      - "Errno 11001"
+      - "nodename nor servname"
+      - "No address associated with hostname"
+      - "Temporary failure in name resolution"
+      - "Failed to resolve"
+    # TCP connection error patterns
+    tcp:
+      - "Network is unreachable"
+      - "ConnectionResetError"
+      - "Connection refused"
+      - "Connection timed out"
+    # TLS/SSL error patterns
+    tls:
+      - "SSL: CERTIFICATE_VERIFY_FAILED"
+      - "SSL: WRONG_VERSION_NUMBER"
+      - "SSLError"
+      - "SSLHandshakeError"
+      - "ssl_"
+      - "OpenSSL.SSL.Error"
+      - "certificate verify failed"
+      - "EOF occurred in violation of protocol"
+      - "no protocols available"
+      - "sslv3 alert handshake failure"
+      - "tlsv1 alert"
+      - "unsupported protocol"
+      - "bad_certificate"
+      - "certificate expired"
+      - "certificate has expired"
+      - "certificate not yet valid"
+      - "hostname mismatch"
+      - "SNI not enabled"
+      - "unsafe legacy renegotiation"
+    # HTTP error patterns
+    http:
+      - "URLError"
+      - "HTTP Error 403"
+      - "HTTP Error 429"
+      - "HTTP Error 5"
+    # FFmpeg exit code patterns (network-related)
+    ffmpeg:
+      - "4294967158"
+      - "-314"
+
   # Segment download settings (DOWNLOAD_SEGMENTS stage)
   # Delay between segment download requests (seconds). Prevents YouTube rate-limiting.
   # Adaptive: doubles after each failure (capped at segment_request_delay_max), resets on success.
   segment_request_delay: 1.0
   # Maximum adaptive delay after consecutive failures (seconds)
   segment_request_delay_max: 30.0
+  # US-85-008: Random jitter factor applied to delay to prevent thundering herd.
+  # Jitter is +/- this factor (e.g., 0.25 = +/-25%). Set to 0 to disable.
+  segment_request_delay_jitter: 0.25
   # Buffer seconds to add before/after each matched segment for editing flexibility
   segment_buffer: 5.0
   # yt-dlp format string for segment downloads (use {segment_max_resolution} placeholder)
@@ -1868,6 +2023,40 @@ pipeline:
   resume_enabled: true
   max_retries: 3
 
+  # Per-stage retry policies (US-88-003)
+  # Configure retry behavior for individual pipeline stages
+  # Unconfigured stages default to max_retries: 3 with exponential backoff
+  retry_policy:
+    # Example configurations:
+    # CAPTION:
+    #   max_attempts: 5
+    #   enabled: true
+    #   strategy:
+    #     strategy: exponential  # exponential, linear, fixed
+    #     base_delay: 2.0
+    #     max_delay: 60.0
+    # DOWNLOAD_SEGMENTS:
+    #   max_attempts: 6
+    #   enabled: true
+    #   strategy:
+    #     strategy: exponential
+    #     base_delay: 2.0
+    #     max_delay: 120.0
+
+  # Per-stage timeout policies (US-88-007)
+  # Configure timeout behavior for individual pipeline stages
+  # Default: 3600s (1 hour) for unconfigured stages
+  timeout_policy:
+    # Example configurations:
+    # DOWNLOAD_SEGMENTS:
+    #   timeout_seconds: 7200      # 2 hours for large downloads
+    #   enabled: true
+    #   save_on_timeout: true      # Save partial progress on timeout
+    # CAPTION:
+    #   timeout_seconds: 1800      # 30 minutes for caption fetching
+    #   enabled: true
+    #   save_on_timeout: true
+
   # Checkpoint backup rotation (US-51-007)
   # Number of rotated backup files: checkpoint.backup.json, .backup.1.json, .backup.2.json
   checkpoint_backup_count: 3
@@ -1884,6 +2073,52 @@ pipeline:
   # Abort batch stages when failure rate exceeds this value (0.0-1.0).
   # Checked after each item. Set to 1.0 to disable.
   batch_failure_threshold: 0.5
+
+  # US-88-006: Configurable cross-stage data drift detection
+  # Detects unexpected data loss between pipeline stages (non-blocking warnings)
+  drift_rules:
+    enabled: true              # Globally enable/disable drift detection
+    track_history: true        # Track drift events for trend analysis
+    max_history: 100           # Maximum drift events to keep in history
+    rules:
+      # After CAPTION: caption_results should have >= 80% of video_ids
+      - trigger_stage: "CAPTION"
+        source_field: "video_ids"
+        target_field: "caption_results"
+        threshold_type: "ratio"  # ratio, absolute_count, percentage
+        threshold: 0.8
+        severity: "warning"      # warning (log) or error (stop pipeline)
+        enabled: true
+        remediation: "Check caption fetch failures, rate limiting, or video availability.
+                      Consider increasing caption_first.retry_budget.max_attempts in config."
+      # After MATCH: text_metadata should have >= 80% of video_ids
+      - trigger_stage: "MATCH"
+        source_field: "video_ids"
+        target_field: "text_metadata"
+        threshold_type: "ratio"
+        threshold: 0.8
+        severity: "warning"
+        enabled: true
+        remediation: "Review matching criteria, search budget, or embedding quality.
+                      Check iterative_match settings for additional search rounds."
+      # After OUTPUT: matches should have >= 50% of voiceover_segments
+      - trigger_stage: "OUTPUT"
+        source_field: "voiceover_segments"
+        target_field: "matches"
+        threshold_type: "ratio"
+        threshold: 0.5
+        severity: "warning"
+        enabled: true
+        remediation: "Verify match quality thresholds or segment extraction issues.
+                      Check quality_gates.match_coverage threshold in config."
+
+  # US-88-008: Pipeline metrics export configuration
+  # Exports stage timings, throughput, and error rates to JSON/Prometheus
+  metrics_export:
+    output_dir: "output/metrics"   # Directory to write exported metrics
+    export_json: true              # Export to JSON format
+    export_prometheus: false      # Export to Prometheus format
+    include_timestamp: true       # Include timestamp in filename
 
   # Quality gates (US-81-005)
   # Non-blocking checks between pipeline stages that warn on low coverage.

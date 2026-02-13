@@ -539,6 +539,25 @@ class AudioFirstPipeline:
                 '--fragment-retries', '10',
             ]
 
+            # US-93-008: Download resume from partial - check for partial files and add --continue
+            resume_config = getattr(self.download_config, 'download_resume', None)
+            if resume_config and resume_config.enabled:
+                # Check for partial files to log resume attempts
+                output_template = str(video_dir / f'{video_id}_%(autonumber)s.%(ext)s')
+                # The actual output path would have .mp4 extension
+                target_path = Path(output_template.replace('%(autonumber)s.%(ext)s', '1.mp4'))
+                partial_info = utils.get_partial_file_info(
+                    target_path,
+                    partial_extension=getattr(resume_config, 'partial_extension', '.part')
+                )
+                if partial_info and getattr(resume_config, 'log_resume_attempts', True):
+                    logger.info(
+                        f"Detected partial download for {video_id}: "
+                        f"{partial_info['size_bytes']} bytes, will resume"
+                    )
+                # Add --continue flag to enable resuming (yt-dlp defaults to this, but explicit is clearer)
+                base_cmd.append('--continue')
+
             # Add ffmpeg location
             ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
             if ffmpeg_loc:
@@ -681,6 +700,18 @@ class AudioFirstPipeline:
             # Log final failure if all retries exhausted
             if not segment_success and last_error:
                 logger.error(f"All {max_retries} attempts failed for {video_id}: {last_error}")
+                # US-93-008: Clean up partial files on final failure
+                resume_config = getattr(self.download_config, 'download_resume', None)
+                if resume_config and getattr(resume_config, 'cleanup_on_failure', True):
+                    # Target file path for segment downloads
+                    output_template = str(video_dir / f'{video_id}_%(autonumber)s.%(ext)s')
+                    target_path = Path(output_template.replace('%(autonumber)s.%(ext)s', '1.mp4'))
+                    utils.cleanup_partial_files(
+                        target_path,
+                        partial_extension=getattr(resume_config, 'partial_extension', '.part'),
+                        min_size_bytes=getattr(resume_config, 'min_partial_size_bytes', 1024),
+                        logger_instance=logger
+                    )
 
             # Check for rate limit signals from speed tracker after each video
             self._check_speed_escalation(keyword)
