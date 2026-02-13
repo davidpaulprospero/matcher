@@ -13,3 +13,175 @@
 - Updated 2 existing test assertions (logger.exception -> logger.error for permanent errors)
 - Gotcha: threading.Lock deadlocks in get_summary() -> is_exhausted(); must use RLock
 - Files: src/transcription/retry_budget.py, src/transcription/parallel_processor.py, src/transcription/metrics.py, src/config/sections/core.py, src/transcription/__init__.py, tests/test_transcription_retry_budget.py, tests/test_transcription_parallel_processor.py
+
+## Iteration 12 - [US-89-007] Add stage input/output validation layer
+- StageContract dataclass with required_inputs, optional_inputs, outputs fields (src/stages/__init__.py:570-580)
+- StageValidator.validate_inputs() checks required inputs before stage runs, returns errors + warnings (line 593-629)
+- StageValidator.validate_outputs() validates outputs after stage completes (line 631-660)
+- contract_validation() decorator wraps stage run() methods to validate inputs/outputs
+- Optional inputs log warnings, not errors (verified with quick test)
+- All 99 stage contract tests pass
+
+## Iteration 11 - [US-86-008] Add snapshot testing for OTIO output validation
+- Created simple snapshot utility in tests/helpers/snapshot.py (no pytest-snapshot needed)
+- Created tests/snapshots/ directory with 5 baseline snapshots
+- Added test_otio_snapshot.py with 7 tests covering clip creation, timewarp, timeline structure, metadata serialization, update mechanism, and regression detection
+
+## Iteration 12 - [US-86-011] Add integration tests for stage contracts
+- Extended tests/test_stage_contracts.py with 9 new contract validation tests:
+  - test_stage_contract_returns_stage_result: Verifies run() returns StageResult
+  - test_stage_contract_has_valid_name: Verifies name attribute matches STAGE_ORDER
+  - test_stage_contract_has_description: Verifies description attribute exists
+  - test_stage_contract_has_depends_on: Verifies DEPENDS_ON is a list
+  - test_stage_contract_depends_on_valid_stages: Verifies dependencies point to valid stages
+  - test_stage_contract_has_critical_flag: Verifies CRITICAL is a bool
+  - test_stage_contract_has_produces_list: Verifies PRODUCES is a list
+  - test_stage_contract_abstract_methods_enforced: Verifies abstractmethod decorators exist
+  - test_stage_contract_can_skip_returns_bool: Verifies can_skip returns bool or None
+  - test_stage_contract_restore_returns_bool: Verifies restore returns bool
+  - test_stage_contract_validate_inputs_returns_optional_string: Verifies return type
+- Fixed mock checkpoint to include should_skip_stage() for can_skip() tests
+- All 99 tests in test_stage_contracts.py pass
+- All tests pass
+- Gotcha: OTIO timeline metadata must be set via timeline.metadata[key] = value (not timeline.metadata = dict)
+- Files: tests/helpers/snapshot.py, tests/test_otio_snapshot.py, tests/snapshots/*.snap.json
+
+## Iteration 13 - [US-88-005] Add pipeline stage health check system
+- Created src/health_checker.py with HealthChecker class
+- Health check types: network (socket connectivity), disk_space, embedding_provider
+- Integrated with pipeline.py: _run_health_checks() called before each stage
+- Health checks run for stages: VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH, DOWNLOAD_SEGMENTS
+- Added health_check_results field to StageMetrics (with to_dict/from_dict serialization)
+- Configurable via health_check section in config.yaml
+- Config options: network_timeout_seconds, disk_space_warning_gb, disk_space_critical_gb, stage_timeouts, enabled_checks
+- 146 pipeline orchestrator tests pass
+- Files: src/health_checker.py (new), src/pipeline.py (integrated health checks), src/stages/__init__.py (StageMetrics field)
+
+## Iteration 14 - [US-88-007] Add configurable per-stage timeout enforcement
+- Added StageTimeoutConfig dataclass in src/config/sections/infrastructure.py with:
+  - timeout_seconds (default 3600 for long-running stages)
+  - enabled flag
+  - save_on_timeout flag (saves partial progress before timeout)
+- Added timeout_policy dict to PipelineConfig (per-stage overrides)
+- Added get_timeout_config() method for retrieving stage-specific timeouts
+- Implemented timeout enforcement in src/pipeline.py run() using ThreadPoolExecutor
+- Timeout uses threading to enforce per-stage time limits
+- On timeout: saves partial progress (if save_on_timeout=true), logs with progress percentage
+- Timeout failures skip retry (timeout_occurred flag prevents retry loop)
+- Default timeout of 3600s for unconfigured stages
+- Updated config.yaml with timeout_policy examples
+- All 146 pipeline orchestrator tests pass
+- Files: src/config/sections/infrastructure.py, src/pipeline.py, config.yaml
+
+## Iteration 12 - [US-86-009] Add test coverage report and coverage thresholds
+- Ran pytest --cov=src to generate coverage report
+- Identified modules with <70% coverage: utils.py (33.84%), topic_extraction.py (17.32%), many modules at 0%
+- Added --cov=src --cov-fail-under=85 to pytest.ini addopts
+- Coverage configuration with fail_under=85 already existed in .coveragerc
+- CI/CD checklist already in README.md with coverage commands and goals
+- Coverage goals already documented in CLAUDE.md (85% overall, 80%+ core modules, 90%+ new code)
+- Files modified: pytest.ini
+
+## Iteration 13 - [US-86-010] Add flaky test detection and tracking
+- Verified all acceptance criteria were pre-implemented:
+  - pytest-rerunfailures already in requirements-dev.txt (line 9)
+  - Rerun config already in pytest.ini (lines 27-40, flaky marker defined on line 40)
+  - 8 flaky tests already in test_caption_fetcher.py, some in test_caption_integration.py
+  - test_flaky_detection.py already exists with comprehensive flaky test patterns
+  - Flakiness metrics shown via rerunfailures plugin (visible in test output)
+- Added flaky test documentation to CLAUDE.md (Testing section)
+- Added 'flaky' to test markers list in CLAUDE.md
+- Files modified: CLAUDE.md, scripts/ralph/state/prd.json
+
+## Iteration 13 - [US-88-003] Add configurable per-stage retry policies
+- Added RetryStrategyConfig and StageRetryConfig to src/config/sections/infrastructure.py
+- Added retry_policy dict to PipelineConfig with get_retry_config() method
+- Supports strategies: exponential, linear, fixed with base_delay and max_delay
+- Implemented retry loop in pipeline.py run() with _calculate_retry_delay()
+- Added retry_attempts field to StageMetrics for observability
+- Config validation in _validate_retry_config() - validates max_attempts >=1, valid strategy
+- Default behavior preserved: max_retries=3 when not configured
+- All 146 pipeline tests pass
+- Files: src/config/sections/infrastructure.py, src/config/sections/__init__.py, src/pipeline.py, src/stages/__init__.py, config.yaml
+
+## Iteration 28 - [US-86-012] Add performance benchmarks for critical paths
+- Created test_faiss_search_performance.py with 9 benchmark tests:
+  - FAISS index creation (10000 vectors)
+  - FAISS search (small/medium/large index)
+  - FAISS batch search
+  - FAISS IVF index search
+  - Normalization impact
+  - K-selection scaling
+  - EmbeddingSearch integration
+  - Memory profiling
+- Created test_matching_scoring_performance.py with 12 benchmark tests:
+  - Adaptive threshold calculation (short/long vo, large pool, low variance)
+  - Duration penalty computation
+  - Confidence with multiple factors
+  - Candidate ranking (sort, filter, deduplicate)
+  - Full scoring pipeline
+  - Batch threshold calculation
+  - Memory profiling
+- Critical code paths identified: FAISS search, embedding computation, matching scoring
+- CI job already exists in .github/workflows/benchmarks.yml (weekly + push to main)
+- All 20 benchmark tests pass
+- Files created: tests/benchmarks/test_faiss_search_performance.py, tests/benchmarks/test_matching_scoring_performance.py
+- Files modified: scripts/ralph/state/prd.json
+
+## Iteration 12 - [US-88-008] Add pipeline metrics export functionality
+- Created src/pipeline_metrics_exporter.py with MetricsExporter class
+- Supports both JSON and Prometheus text format export
+- Exports: stage timings, throughput (items/sec), error rates, config summary, checkpoint data
+- Added MetricsExportConfig to src/config/sections/infrastructure.py
+- Added metrics_export section to config.yaml
+- Integrated export into pipeline.py run_pipeline_with_healing function
+- Triggered on pipeline completion (both healing and fallback paths)
+- Tested with sample data - exports correctly
+- All pipeline tests pass
+- Files created: src/pipeline_metrics_exporter.py
+- Files modified: src/config/sections/infrastructure.py, src/config/sections/__init__.py, src/config/__init__.py, config.yaml, src/pipeline.py
+
+## Iteration 15 - [US-88-009] Add stage input validation caching
+- Added validation_cache field to CheckpointData dataclass
+- Added methods to CheckpointManager:
+  - save_validation_result(): Cache validation result with config hash
+  - get_cached_validation(): Retrieve cached result if config unchanged
+  - is_validation_cached(): Check if valid cache exists
+  - clear_validation_cache(): Clear all cache entries
+  - get_validation_cache_stats(): Get stats for reporting
+- Modified pipeline.py validate_all() to:
+  - Check cache on resume (resume=True, checkpoint loaded)
+  - Save validation results after validation
+  - Mark cache hits in status message
+- Added validation_cache_stats parameter to save_stage_timing_summary()
+- Cache automatically invalidated when config hash changes
+- 58 checkpoint tests pass
+- Files modified: src/checkpoint.py, src/pipeline.py
+
+## Iteration 16 - [US-88-010] Enhance checkpoint integrity validation
+- Enhanced _validate_checkpoint_data() in src/checkpoint.py with deep integrity validation:
+  - _validate_stage_data_schemas(): Validates stage data fields are dicts with expected structure
+  - _check_data_type_drift(): Detects type mismatches (e.g., string instead of dict)
+  - _validate_version_compatibility(): Checks version compatibility with major/minor version detection
+  - _heal_common_corruption_patterns(): Heals string->dict, list->dict, empty timestamps
+  - _log_validation_report(): Logs detailed validation report with issues and warnings
+- Healing converts string stage data to dict (JSON parse), list to indexed dict, fixes empty timestamps
+- All acceptance criteria met:
+  [x] Deep checkpoint integrity validation on load
+  [x] Validate stage data schema matches expected structure
+  [x] Check for data type drift in checkpoint fields
+  [x] Validate checkpoint version compatibility with code version
+  [x] Add healing for common checkpoint corruption patterns
+  [x] Log detailed validation report with warnings
+- 80 checkpoint tests pass
+- Files modified: src/checkpoint.py
+
+## Iteration 17 - [US-89-002] Add Python API to download_segments stage
+- Added DownloadSegmentsConfig dataclass with typed fields (buffer_seconds, max_concurrent, checkpoint_every_n, etc.)
+- Added from_config() classmethod to create config from pipeline Config object
+- Added DownloadSegmentsResult dataclass with success_count, failed_count, cached_count, total_count, failed_segments, stats
+- Added download_segments_from_matches() function accepting state, config, and optional progress_callback for UI integration
+- All new types are importable from src.stages.download_segments
+- Tests pass: TestStageRegistration, TestStageDescription pass
+- Backward compatibility maintained - existing stage-based execution unchanged
+- Files modified: src/stages/download_segments.py

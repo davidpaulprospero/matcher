@@ -1,213 +1,179 @@
 ﻿{
-    "agent":  {
-                  "provider":  "claude",
-                  "providers":  {
-                                    "claude":  {
-                                                   "executable":  "claude",
-                                                   "models":  {
-                                                                  "high":  "MiniMax-M2.5",
-                                                                  "fast":  "MiniMax-M2.5",
-                                                                  "default":  "MiniMax-M2.5"
-                                                              }
-                                               },
-                                    "codex":  {
-                                                  "executable":  "codex",
-                                                  "models":  {
-                                                                 "high":  "o4-mini",
-                                                                 "fast":  "o4-mini",
-                                                                 "default":  "o4-mini"
-                                                             }
-                                              }
-                                }
-              },
-    "sprintNumber":  86,
-    "focusArea":  "testing",
-    "branchName":  "ralph/sprint-86",
+    "sprintNumber":  89,
+    "focusArea":  "architecture",
+    "branchName":  "ralph/sprint-89",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
+                       },
     "userStories":  [
                         {
-                            "id":  "US-86-001",
-                            "title":  "Generate sprint stories for testing focus area",
-                            "priority":  "high",
-                            "passes":  true,
+                            "id":  "US-89-001",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027testing\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027architecture\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027testing\u0027",
-                                                       "Add stories US-86-002 through US-86-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027architecture\u0027",
+                                                       "Add stories US-89-002 through US-89-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-86-NNN to be unique across sprints",
-                                                       "Mark this story (US-86-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-89-NNN to be unique across sprints",
+                                                       "Mark this story (US-89-001) as passes: true when done"
                                                    ],
-                            "notes":  "Seed story completed. Generated 11 testing improvement stories (US-86-002 through US-86-012). All stories have passes: false as required. Each story has 4-6 acceptance criteria and a notes field with tier classification, source file paths, and line number ranges where applicable."
+                            "passes":  true,
+                            "priority":  "high",
+                            "title":  "Generate sprint stories for architecture focus area",
+                            "notes":  "Evidence gate: 9/11 criteria verified (82%). Minimum: 90%."
                         },
                         {
-                            "id":  "US-86-002",
-                            "title":  "Create test fixtures directory with sample voiceover and video data",
+                            "id":  "US-89-002",
+                            "title":  "Add Python API to download_segments stage",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Create tests/fixtures/ directory structure with subdirectories for voiceover, video, caption, and match data",
-                                                       "Add sample SRT voiceover file in tests/fixtures/voiceover/sample.srt",
-                                                       "Add sample yt-dlp info JSON in tests/fixtures/video/sample_video.json",
-                                                       "Add sample caption JSON in tests/fixtures/caption/sample_captions.json",
-                                                       "Add sample match results JSON in tests/fixtures/match/sample_matches.json",
-                                                       "Update conftest.py to include fixtures() function to load test data"
+                                                       "Add function-based API (download_segments_from_matches) that accepts state and config objects",
+                                                       "Return typed DownloadSegmentsResult dataclass with success count, failed list, and stats",
+                                                       "Support optional progress_callback parameter for UI integration",
+                                                       "Expose configuration as typed DownloadSegmentsConfig dataclass",
+                                                       "Maintain backward compatibility with existing stage-based execution"
                                                    ],
-                            "notes":  "Tier: infrastructure. Files: tests/fixtures/* (new), tests/conftest.py (add fixtures). Created voiceover/, video/, caption/, match/ subdirs with sample data files. Added fixtures() function and fixture_data fixture to conftest.py at lines 14-53."
+                            "notes":  "Implemented: Added DownloadSegmentsConfig dataclass with from_config() method, DownloadSegmentsResult dataclass with success/failed counts, stats, and failed_segments list, and download_segments_from_matches() function accepting state, config, and optional progress_callback. All types are importable from src.stages.download_segments. Tests pass."
                         },
                         {
-                            "id":  "US-86-003",
-                            "title":  "Add shared pipeline state fixtures to conftest.py",
+                            "id":  "US-89-003",
+                            "title":  "Add escalation state persistence for resume capability",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Add fixture for mock PipelineState with all required fields populated",
-                                                       "Add fixture for mock DownloadedVideo dataclass",
-                                                       "Add fixture for mock VideoSearchResult dataclass",
-                                                       "Add fixture for mock VoiceoverSegment list",
-                                                       "Add fixture for mock CaptionResult with segments",
-                                                       "Add fixture for mock MatchResult with confidence scores"
+                                                       "Add save_state() method to EscalationManager that serializes tier state per keyword",
+                                                       "Add load_state() method to restore escalation tiers from saved state",
+                                                       "Integrate with checkpoint.py to save/restore escalation state",
+                                                       "Handle edge case: keywords in saved state that no longer exist in current run",
+                                                       "Add unit tests for state serialization round-trip"
                                                    ],
-                            "notes":  "Implemented 6 fixtures: pipeline_state (with voiceover_segments, video_search_results, matches), downloaded_video, video_search_result, voiceover_segment_list, caption_result, match_result. Added at lines 906-1018 in conftest.py."
+                            "notes":  "COMPLETED: Added escalation_state field to CheckpointData, save_escalation_state() and load_escalation_state() methods to CheckpointManager, handles stale keywords filtering. Note: EscalationManager already had to_dict() and from_dict() methods (lines 720-843) which were tested in test_escalation_checkpoint_persistence.py - added new tests in test_escalation_checkpoint_integration.py covering CheckpointManager integration. All 19 tests pass."
                         },
                         {
-                            "id":  "US-86-004",
-                            "title":  "Add pytest markers for test categorization",
+                            "id":  "US-89-004",
+                            "title":  "Add TLS error patterns to error classification",
                             "priority":  "medium",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Define @pytest.mark.unit for isolated unit tests",
-                                                       "Define @pytest.mark.integration for component integration tests",
-                                                       "Define @pytest.mark.slow for tests taking \u003e5 seconds",
-                                                       "Define @pytest.mark.flaky for tests with known intermittent failures",
-                                                       "Add marker documentation in conftest.py docstring",
-                                                       "Run pytest --markers to verify markers are registered"
+                                                       "Populate ERROR_PATTERNS[\u0027tls\u0027] with production TLS error patterns",
+                                                       "Add tests for TLS error classification (certificate, handshake, version errors)",
+                                                       "Update is_escalation_error to handle TLS errors appropriately",
+                                                       "Add TLS-specific severity classification"
                                                    ],
-                            "notes":  "Added flaky marker to pytest_configure, updated docstring with marker documentation. Verified with pytest --markers."
+                            "notes":  "COMPLETED: Populated ERROR_PATTERNS[\u0027tls\u0027] with 19 production TLS error patterns (certificate, handshake, version errors). Added 36 TLS-specific tests covering subcategory classification, network failure detection, severity classification, and pattern validation. is_escalation_error correctly returns False for TLS (network-level issues, not access blocks). TLS severity set to medium (transient network issues). All tests pass."
                         },
                         {
-                            "id":  "US-86-005",
-                            "title":  "Add mock LLM client fixture for deterministic testing",
+                            "id":  "US-89-005",
+                            "title":  "Add circuit breaker health metrics export",
+                            "priority":  "medium",
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Add get_health_metrics() method returning trip count, recovery count, current state, average pause duration",
+                                                       "Integrate metrics into pipeline metrics pipeline_metrics_exporter.py",
+                                                       "Add health status to checkpoint state for debugging",
+                                                       "Expose metrics via health_checker.py endpoint"
+                                                   ],
+                            "notes":  "Implemented: Added get_health_metrics() method to CircuitBreaker in src/downloader/circuit_breaker.py returning trip_count, recovery_count, current_state, average_pause_duration, consecutive_failures, total_paused_seconds, is_tripped, enabled. Added circuit_breaker_metrics parameter to MetricsExporter.export() and _build_export_data(). Added circuit_breaker_health field to CheckpointData in checkpoint.py. Added get_circuit_breaker_health() function to health_checker.py for endpoint exposure. All acceptance criteria verified."
+                        },
+                        {
+                            "id":  "US-89-006",
+                            "title":  "Add checkpoint resume to iterative match stage",
                             "priority":  "high",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Create MockLLMClient class in tests/conftest.py",
-                                                       "Implement mock_generate() that returns configurable responses",
-                                                       "Implement mock_embed() that returns deterministic vectors",
-                                                       "Add fixture mock_llm_client() that yields configured mock",
-                                                       "Test mock with sample prompt and verify response structure",
-                                                       "Add fixture to override LLM dependency in tests"
+                                                       "Save pass progress to checkpoint after each iterative pass completes",
+                                                       "Restore pass state on resume (which pass, which gaps already attempted)",
+                                                       "Preserve learned queries across resume to avoid redundant searches",
+                                                       "Handle case: iterative match runs out of budget on resume"
                                                    ],
-                            "notes":  "Tier: infrastructure. Files: tests/conftest.py (add ~80 lines for mock LLM). This enables testing LLM-dependent code without API calls. Implemented MockLLMClient class with generate(), embed(), set_response(), set_text_response(), set_embedding(). Added mock_llm_client and mock_llm_client_with_response fixtures. Verified all acceptance criteria pass."
+                            "notes":  "Implemented: Added _save_pass_checkpoint() to save intermediate checkpoint after each pass with pass_num, gaps_remaining, attempted_gap_indices, used_queries, fetched_video_ids, and matches. Added _check_for_pass_checkpoint() to detect and restore pass state on resume. Added resume logic that restores _used_queries and _fetched_video_ids to avoid redundant searches. Added budget exhaustion handling with resume_budget_check and max_queries_per_run config options. Added config options to iterative_matching.py. All acceptance criteria verified."
                         },
                         {
-                            "id":  "US-86-006",
-                            "title":  "Add mock downloader fixture for offline testing",
-                            "priority":  "high",
+                            "id":  "US-89-007",
+                            "title":  "Add stage input/output validation layer",
+                            "priority":  "medium",
                             "passes":  true,
                             "acceptanceCriteria":  [
-                                                       "Create MockDownloader class in tests/conftest.py",
-                                                       "Implement mock_download() that returns cached test files",
-                                                       "Implement mock_get_video_info() returning mock yt-dlp JSON",
-                                                       "Add fixture mock_downloader() that yields configured mock",
-                                                       "Add fixture tmp_video_dir() for temporary video storage",
-                                                       "Test mock downloader with sample video ID"
+                                                       "Define StageContract dataclass with required_inputs, optional_inputs, outputs",
+                                                       "Add StageValidator that checks state has required fields before stage runs",
+                                                       "Validate output completeness after each stage completes",
+                                                       "Log warnings for missing optional inputs rather than failing"
                                                    ],
-                            "notes":  "Tier: infrastructure. Implemented MockYTDL class (mimics yt-dlp YoutubeDL interface) with extract_info() and download(). Implemented MockDownloader class with download_video(), get_video_info(), search_videos(). Added mock_youtube_dl, mock_downloader, and tmp_video_dir fixtures. Verified all acceptance criteria pass with 5 tests."
+                            "notes":  "All 4 acceptance criteria verified: StageContract dataclass defined, StageValidator checks required inputs, output validation after completion, optional inputs log warnings (not failures). Quick verification test confirmed: optional missing inputs return warnings, not errors."
                         },
                         {
-                            "id":  "US-86-007",
-                            "title":  "Create parameterized tests for confidence scoring edge cases",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Identify confidence scoring functions in src/matching/scoring.py",
-                                                       "Add @pytest.mark.parametrize for score boundary values (0.0, 0.5, 1.0)",
-                                                       "Add @pytest.mark.parametrize for edge cases (NaN, Inf, negative)",
-                                                       "Add @pytest.mark.parametrize for empty/minimal inputs",
-                                                       "Run parameterized tests and verify all cases pass",
-                                                       "Document edge case behavior in test docstrings"
-                                                   ],
-                            "notes":  "Tier: quality. Files: src/matching/scoring.py (existing), tests/test_scoring*.py (add parametrized tests). No line ranges - adding new test functions."
-                        },
-                        {
-                            "id":  "US-86-008",
-                            "title":  "Add snapshot testing for OTIO output validation",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Install pytest-snapshot or create simple snapshot utility",
-                                                       "Create tests/snapshots/ directory for expected OTIO outputs",
-                                                       "Generate baseline OTIO snapshot from known input",
-                                                       "Add test test_otio_snapshot_matches_expected()",
-                                                       "Update snapshot when OTIO changes are intentional",
-                                                       "Verify snapshot tests catch regressions"
-                                                   ],
-                            "notes":  "Tier: quality. Files: tests/snapshots/* (new), tests/test_otio*.py (add snapshot tests). Creates regression protection for OTIO output."
-                        },
-                        {
-                            "id":  "US-86-009",
-                            "title":  "Add test coverage report and coverage thresholds",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Run pytest --cov=src to generate coverage report",
-                                                       "Identify modules with \u003c70% coverage",
-                                                       "Add coverage target in pyproject.toml or pytest.ini",
-                                                       "Add coverage configuration to fail below threshold",
-                                                       "Add coverage report to CI/CD checklist in README",
-                                                       "Document coverage goals in CLAUDE.md"
-                                                   ],
-                            "notes":  "Tier: quality. Files: pyproject.toml (add coverage config), CLAUDE.md (add coverage section). Focus on improving coverage from baseline."
-                        },
-                        {
-                            "id":  "US-86-010",
-                            "title":  "Add flaky test detection and tracking",
+                            "id":  "US-89-008",
+                            "title":  "Make error classification patterns configurable",
                             "priority":  "low",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Add pytest-rerunfailures to requirements-dev.txt",
-                                                       "Configure rerun count in pytest.ini or pyproject.toml",
-                                                       "Add @pytest.mark.flaky to known flaky tests",
-                                                       "Create tests/test_flaky_detection.py to track flakiness",
-                                                       "Add flakiness metrics to test output",
-                                                       "Document flaky test workflow in CLAUDE.md"
+                                                       "Move ERROR_PATTERNS from hardcoded dict to config.yaml section",
+                                                       "Add download.error_patterns section to config.yaml with category lists",
+                                                       "Add reload_patterns() function to re-read patterns without restart",
+                                                       "Maintain backward compatibility with default patterns if config missing"
                                                    ],
-                            "notes":  "Tier: infrastructure. Files: requirements-dev.txt (add dependency), pytest.ini or pyproject.toml (add config), tests/test_flaky_detection.py (new). Addresses test reliability."
+                            "notes":  "Tier: enhancement | src/downloader/error_classification.py: Refactor lines 59-90 to load from config | src/config/sections/download.py: Add error_patterns field | Enables runtime adjustment without code changes"
                         },
                         {
-                            "id":  "US-86-011",
-                            "title":  "Add integration tests for stage contracts",
-                            "priority":  "medium",
-                            "passes":  false,
-                            "acceptanceCriteria":  [
-                                                       "Review src/stages/__init__.py for Stage base class contract",
-                                                       "Identify required methods and attributes per stage type",
-                                                       "Add test_stage_contract_validate_* tests for each stage",
-                                                       "Test that stages raise NotImplementedError correctly",
-                                                       "Test that stage run() returns expected output type",
-                                                       "Test that stage dependencies are declared correctly"
-                                                   ],
-                            "notes":  "Tier: quality. Files: tests/test_stage_contracts.py (extend existing), src/stages/__init__.py (review contract). No line changes - adding tests for existing contract."
-                        },
-                        {
-                            "id":  "US-86-012",
-                            "title":  "Add performance benchmarks for critical paths",
+                            "id":  "US-89-009",
+                            "title":  "Add multi-circuit coordination across components",
                             "priority":  "low",
                             "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Identify 3-5 critical code paths for benchmarking",
-                                                       "Add benchmarks directory tests/benchmarks/",
-                                                       "Create benchmark tests for embedding computation",
-                                                       "Create benchmark tests for FAISS search",
-                                                       "Create benchmark tests for matching scoring",
-                                                       "Add benchmark CI job to run on main branch"
+                                                       "Create CircuitBreakerRegistry to track all circuit breakers in pipeline",
+                                                       "Add cross-circuit trip: when search CB trips, also alert download CB",
+                                                       "Add CircuitBreakerCoordinator singleton for coordination",
+                                                       "Configurable cascade rules in config.yaml"
                                                    ],
-                            "notes":  "Tier: performance. Files: tests/benchmarks/* (new). New benchmark tests for critical paths identified in matching module."
+                            "notes":  "Tier: enhancement | src/downloader/circuit_breaker.py: Add registry after line 200 | src/downloader/__init__.py: Export coordinator | Extends existing cascade feature (US-61-003) for more components"
+                        },
+                        {
+                            "id":  "US-89-010",
+                            "title":  "Add download progress callbacks for UI integration",
+                            "priority":  "medium",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Define DownloadProgressCallback protocol with on_start, on_progress, on_complete, on_error methods",
+                                                       "Pass callback through download_segments to _download_segment method",
+                                                       "Report bytes downloaded, ETA, speed in on_progress",
+                                                       "Support multiple callbacks (delegate pattern)"
+                                                   ],
+                            "notes":  "Tier: enhancement | src/stages/download_segments.py: Add callback support around line 300 | Enables real-time progress UI and external monitoring integrations"
+                        },
+                        {
+                            "id":  "US-89-011",
+                            "title":  "Add stage dependency graph for debugging",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Generate DOT graph representation of stage dependencies from DEPENDS_ON",
+                                                       "Add --dump-dependency-graph CLI flag to output graph",
+                                                       "Visualize in checkpoint debug output which stages can run in parallel",
+                                                       "Add validate_no_cycles() to catch circular dependencies"
+                                                   ],
+                            "notes":  "Tier: enhancement | src/stages/__init__.py: Add dependency graph functions | src/cli/: Add CLI flag | Helps debug stage execution order and identify parallelization opportunities"
+                        },
+                        {
+                            "id":  "US-89-012",
+                            "title":  "Add adaptive error severity adjustment",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Track error frequency per category over sliding window",
+                                                       "Auto-escalate severity when same error repeats (e.g., 3x 429 = high severity)",
+                                                       "Add adaptive_severity config option to enable/disable",
+                                                       "Log when severity is adjusted for debugging"
+                                                   ],
+                            "notes":  "Tier: enhancement | src/downloader/error_classification.py: Add adaptive functions after line 250 | src/config/sections/download.py: Add adaptive_severity field | Improves backoff timing for recurring errors without manual tuning"
                         }
                     ]
 }

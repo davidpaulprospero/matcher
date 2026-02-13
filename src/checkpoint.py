@@ -83,6 +83,10 @@ class CheckpointData:
     # Stores TranscriptionMetrics.get_summary_dict() output for cross-run comparison
     transcription_metrics: Dict[str, Any] = field(default_factory=dict)
 
+    # US-88-009: Stage input validation cache for faster resume
+    # Maps stage name -> {config_hash, validated_at, result}
+    validation_cache: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return asdict(self)
     
@@ -503,9 +507,19 @@ class CheckpointManager:
         """
         Validate that checkpoint data has required fields.
 
+        US-88-010: Enhanced with deep integrity validation, schema validation,
+        data type drift detection, version compatibility, and healing.
+
         Returns True if valid, False if there are issues (but data is usable).
         """
         issues = []
+        warnings = []
+
+        # US-88-010: Attempt healing for common corruption patterns FIRST
+        # This fixes common issues before validation so healed data can pass
+        healing_actions = self._heal_common_corruption_patterns(data)
+        if healing_actions:
+            warnings.append(f"Healing actions applied: {', '.join(healing_actions)}")
 
         # Check version compatibility
         if data.version and data.version != CURRENT_CHECKPOINT_VERSION:
@@ -525,12 +539,236 @@ class CheckpointManager:
         if data.last_completed_stage and data.last_completed_stage not in STAGE_ORDER:
             issues.append(f"Unknown stage: {data.last_completed_stage}")
 
+        # US-88-010: Deep integrity validation - validate stage data schemas
+        stage_data_issues = self._validate_stage_data_schemas(data)
+        issues.extend(stage_data_issues)
+
+        # US-88-010: Check for data type drift in checkpoint fields
+        type_drift_issues = self._check_data_type_drift(data)
+        warnings.extend(type_drift_issues)
+
+        # US-88-010: Validate checkpoint version compatibility
+        version_issues = self._validate_version_compatibility(data)
+        issues.extend(version_issues)
+
+        # Log detailed validation report
+        self._log_validation_report(issues, warnings)
+
         if issues:
             for issue in issues:
                 logger.debug(f"Checkpoint validation: {issue}")
             return False
 
         return True
+
+    def _validate_stage_data_schemas(self, data: CheckpointData) -> List[str]:
+        """
+        Validate that stage data fields match expected schema (US-88-010).
+
+        Checks that each stage data field is a dict with expected structure
+        based on what each stage typically produces.
+        """
+        issues = []
+        expected_stage_fields = {
+            'analyze': ['keywords', 'segments'],
+            'video_search': ['video_ids', 'search_results'],
+            'caption': ['captions', 'caption_count'],
+            'match': ['matches', 'match_count'],
+            'iterative_match': ['gap_analysis', 'additional_matches'],
+            'download_segments': ['downloaded_segments', 'download_results'],
+        }
+
+        for stage_name, expected_keys in expected_stage_fields.items():
+            stage_data = getattr(data, stage_name, None)
+            if not stage_data:
+                continue
+
+            if not isinstance(stage_data, dict):
+                issues.append(
+                    f"Stage '{stage_name}' data is {type(stage_data).__name__}, expected dict"
+                )
+                continue
+
+            # Check for unexpected types in stage data values
+            for key, value in stage_data.items():
+                if value is None:
+                    issues.append(
+                        f"Stage '{stage_name}' has null value for key '{key}'"
+                    )
+                elif isinstance(value, (str, int, float, bool)):
+                    # Primitives are acceptable
+                    pass
+                elif isinstance(value, (list, dict)):
+                    # Collections are acceptable
+                    pass
+                else:
+                    issues.append(
+                        f"Stage '{stage_name}' has unexpected type {type(value).__name__} "
+                        f"for key '{key}'"
+                    )
+
+        return issues
+
+    def _check_data_type_drift(self, data: CheckpointData) -> List[str]:
+        """
+        Check for data type drift in checkpoint fields (US-88-010).
+
+        Detects when field types have changed unexpectedly (e.g., string
+        where dict was expected, list where string was expected).
+        """
+        warnings = []
+
+        # Expected field types based on CheckpointData dataclass
+        expected_types = {
+            'version': str,
+            'created_at': str,
+            'updated_at': str,
+            'last_completed_stage': str,
+            'config_hash': str,
+            'voiceover_path': str,
+            'voiceover_hash': str,
+            'analyze': dict,
+            'video_search': dict,
+            'caption': dict,
+            'match': dict,
+            'iterative_match': dict,
+            'download_segments': dict,
+            'chapter_data': dict,
+            'stage_metrics': dict,
+            'transcription_metrics': dict,
+            'validation_cache': dict,
+        }
+
+        for field_name, expected_type in expected_types.items():
+            actual_value = getattr(data, field_name, None)
+            if actual_value is None:
+                continue
+
+            if not isinstance(actual_value, expected_type):
+                warnings.append(
+                    f"Data type drift in '{field_name}': expected {expected_type.__name__}, "
+                    f"got {type(actual_value).__name__}"
+                )
+
+        return warnings
+
+    def _validate_version_compatibility(self, data: CheckpointData) -> List[str]:
+        """
+        Validate checkpoint version compatibility with code version (US-88-010).
+
+        Returns list of compatibility issues.
+        """
+        issues = []
+        checkpoint_version = data.version
+
+        # Version format: "X.Y"
+        if checkpoint_version:
+            try:
+                parts = checkpoint_version.split('.')
+                if len(parts) >= 2:
+                    major, minor = int(parts[0]), int(parts[1])
+
+                    # Current major version
+                    current_parts = CURRENT_CHECKPOINT_VERSION.split('.')
+                    current_major = int(current_parts[0])
+
+                    if major < current_major:
+                        issues.append(
+                            f"Checkpoint version {checkpoint_version} is incompatible "
+                            f"with current version {CURRENT_CHECKPOINT_VERSION} "
+                            f"(major version mismatch)"
+                        )
+                    elif major == current_major:
+                        # Same major version - minor version differences are OK
+                        # but log a warning
+                        if minor < int(current_parts[1]):
+                            issues.append(
+                                f"Checkpoint version {checkpoint_version} is older than "
+                                f"current {CURRENT_CHECKPOINT_VERSION}, consider fresh run"
+                            )
+            except (ValueError, IndexError) as e:
+                issues.append(f"Invalid checkpoint version format: {checkpoint_version}")
+
+        return issues
+
+    def _heal_common_corruption_patterns(self, data: CheckpointData) -> List[str]:
+        """
+        Attempt healing for common checkpoint corruption patterns (US-88-010).
+
+        Returns list of healing actions taken.
+        """
+        healing_actions = []
+
+        # Pattern 1: Stage data is a string instead of dict
+        for stage_name in ['analyze', 'video_search', 'caption', 'match',
+                          'iterative_match', 'download_segments', 'chapter_data']:
+            stage_data = getattr(data, stage_name, None)
+            if isinstance(stage_data, str):
+                # Try to parse as JSON
+                import json
+                try:
+                    parsed = json.loads(stage_data)
+                    if isinstance(parsed, dict):
+                        setattr(data, stage_name, parsed)
+                        healing_actions.append(f"Parsed {stage_name} from JSON string")
+                    else:
+                        setattr(data, stage_name, {})
+                        healing_actions.append(f"Reset {stage_name} (parsed JSON was not dict)")
+                except json.JSONDecodeError:
+                    setattr(data, stage_name, {})
+                    healing_actions.append(f"Reset {stage_name} (string parse failed)")
+
+        # Pattern 2: Stage data is a list instead of dict
+        for stage_name in ['analyze', 'video_search', 'caption', 'match',
+                          'iterative_match', 'download_segments', 'chapter_data']:
+            stage_data = getattr(data, stage_name, None)
+            if isinstance(stage_data, list):
+                # Convert list to dict if possible (common case: list of items)
+                if stage_data and isinstance(stage_data[0], dict):
+                    # Convert to indexed dict
+                    converted = {f"item_{i}": item for i, item in enumerate(stage_data)}
+                    setattr(data, stage_name, converted)
+                    healing_actions.append(f"Converted {stage_name} from list to indexed dict")
+                else:
+                    setattr(data, stage_name, {})
+                    healing_actions.append(f"Reset {stage_name} (list type not convertible)")
+
+        # Pattern 3: stage_metrics or validation_cache is not a dict
+        for field_name in ['stage_metrics', 'validation_cache', 'transcription_metrics']:
+            field_data = getattr(data, field_name, None)
+            if field_data is not None and not isinstance(field_data, dict):
+                setattr(data, field_name, {})
+                healing_actions.append(f"Reset {field_name} (was {type(field_data).__name__})")
+
+        # Pattern 4: Fix empty string timestamps
+        for field_name in ['created_at', 'updated_at']:
+            field_value = getattr(data, field_name, None)
+            if field_value == '':
+                from datetime import datetime
+                setattr(data, field_name, datetime.now().isoformat())
+                healing_actions.append(f"Fixed empty {field_name}")
+
+        return healing_actions
+
+    def _log_validation_report(self, issues: List[str], warnings: List[str]) -> None:
+        """
+        Log detailed validation report with warnings (US-88-010).
+        """
+        if issues or warnings:
+            logger.info("=== Checkpoint Validation Report ===")
+
+        if issues:
+            logger.warning(f"  Issues found: {len(issues)}")
+            for issue in issues:
+                logger.warning(f"    - {issue}")
+
+        if warnings:
+            logger.info(f"  Warnings: {len(warnings)}")
+            for warning in warnings:
+                logger.info(f"    - {warning}")
+
+        if not issues and not warnings:
+            logger.debug("Checkpoint validation passed - no issues or warnings")
 
     def restore_state(self, state: 'PipelineState' = None) -> 'PipelineState':
         """
@@ -661,7 +899,8 @@ class CheckpointManager:
         self,
         stage_timings: Dict[str, float],
         total_duration: float,
-        skipped_stages: set
+        skipped_stages: set,
+        validation_cache_stats: Dict[str, Any] = None
     ):
         """
         Persist pipeline timing summary to checkpoint stage_metrics.
@@ -673,6 +912,7 @@ class CheckpointManager:
             stage_timings: Map of stage_name -> elapsed seconds for stages that ran.
             total_duration: Total pipeline wall-clock duration in seconds.
             skipped_stages: Set of stage names that were restored from checkpoint.
+            validation_cache_stats: Optional validation cache statistics (US-88-009).
         """
         if self.data is None:
             return
@@ -689,12 +929,21 @@ class CheckpointManager:
                 self.data.stage_metrics[stage_name] = {}
             self.data.stage_metrics[stage_name]['skipped'] = True
 
-        # Store pipeline-level timing summary
-        self.data.stage_metrics['_pipeline'] = {
+        # Build pipeline-level timing summary
+        pipeline_metrics: Dict[str, Any] = {
             'total_duration_seconds': total_duration,
             'stages_run': list(stage_timings.keys()),
             'stages_skipped': list(skipped_stages),
         }
+
+        # US-88-009: Add validation cache statistics
+        if validation_cache_stats:
+            pipeline_metrics['validation_cache'] = validation_cache_stats
+        elif self.data.validation_cache:
+            # Use current validation cache stats if not provided
+            pipeline_metrics['validation_cache'] = self.get_validation_cache_stats()
+
+        self.data.stage_metrics['_pipeline'] = pipeline_metrics
 
         self._atomic_save(force_rotate=True)
 
@@ -1000,6 +1249,114 @@ class CheckpointManager:
         if not self.data or not self.data.stage_metrics:
             return {}
         return self.data.stage_metrics.get(stage, {})
+
+    # === US-88-009: Stage input validation caching ===
+
+    def save_validation_result(
+        self,
+        stage: str,
+        is_valid: bool,
+        error_message: Optional[str] = None
+    ) -> None:
+        """
+        Save stage input validation result to cache.
+
+        Stores the validation result along with the current config hash
+        so we can skip redundant validation on resume when config hasn't changed.
+
+        Args:
+            stage: Stage name (e.g., 'DOWNLOAD_SEGMENTS')
+            is_valid: Whether stage inputs are valid
+            error_message: Optional error message if validation failed
+        """
+        if self.data is None:
+            self.data = CheckpointData(
+                created_at=datetime.now().isoformat(),
+                config_hash=self.config_hash
+            )
+
+        self.data.validation_cache[stage] = {
+            'config_hash': self.config_hash,
+            'validated_at': datetime.now().isoformat(),
+            'is_valid': is_valid,
+            'error_message': error_message,
+        }
+        logger.debug(
+            f"Validation cache saved for {stage}: valid={is_valid}, "
+            f"config_hash={self.config_hash[:8] if self.config_hash else 'none'}"
+        )
+
+    def get_cached_validation(self, stage: str) -> Optional[Dict[str, Any]]:
+        """
+        Get cached validation result for a stage.
+
+        Returns the cached validation if:
+        - Cache entry exists for this stage
+        - Config hash matches current config
+
+        Args:
+            stage: Stage name
+
+        Returns:
+            Dict with cached validation result, or None if cache is invalid/missing.
+        """
+        if not self.data or not self.data.validation_cache:
+            return None
+
+        cached = self.data.validation_cache.get(stage)
+        if not cached:
+            return None
+
+        # Check if config hash matches
+        cached_hash = cached.get('config_hash')
+        if cached_hash and cached_hash != self.config_hash:
+            logger.debug(
+                f"Validation cache invalidated for {stage}: "
+                f"config changed ({cached_hash[:8]} -> {self.config_hash[:8]})"
+            )
+            return None
+
+        logger.debug(
+            f"Validation cache hit for {stage}: "
+            f"is_valid={cached.get('is_valid')}"
+        )
+        return cached
+
+    def is_validation_cached(self, stage: str) -> bool:
+        """Check if valid validation cache exists for a stage."""
+        return self.get_cached_validation(stage) is not None
+
+    def clear_validation_cache(self) -> None:
+        """Clear all validation cache entries."""
+        if self.data:
+            self.data.validation_cache = {}
+            logger.debug("Validation cache cleared")
+
+    def get_validation_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get validation cache statistics for reporting.
+
+        Returns:
+            Dict with cache statistics including hit/miss counts.
+        """
+        if not self.data or not self.data.validation_cache:
+            return {
+                'total_cached': 0,
+                'entries': {},
+            }
+
+        entries = {}
+        for stage, cached in self.data.validation_cache.items():
+            entries[stage] = {
+                'is_valid': cached.get('is_valid'),
+                'validated_at': cached.get('validated_at'),
+                'config_hash': cached.get('config_hash', '')[:8] if cached.get('config_hash') else None,
+            }
+
+        return {
+            'total_cached': len(entries),
+            'entries': entries,
+        }
     
     def should_skip_stage(self, stage: str) -> bool:
         """Check if a stage should be skipped (already completed)"""
