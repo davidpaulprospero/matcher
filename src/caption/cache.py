@@ -117,6 +117,11 @@ class CaptionCache(BaseCache):
             # LRU eviction config (US-90-010)
             # Maximum number of entries in cache (0 = no limit)
             self.max_cache_size = getattr(config, 'max_cache_size', 0)
+            # Validate max_cache_size if set (must be >= 100)
+            if self.max_cache_size > 0 and self.max_cache_size < 100:
+                raise ValueError(
+                    f"max_cache_size must be >= 100 if set, got {self.max_cache_size}"
+                )
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
@@ -145,6 +150,9 @@ class CaptionCache(BaseCache):
         )
 
         self.max_age_days = max_age_days
+
+        # Track eviction statistics (US-100-004)
+        self._eviction_count = 0
 
         logger.debug(f"CaptionCache initialized: dir={cache_dir}, "
                     f"ttl={max_age_days} days, enabled={self.enabled}, "
@@ -204,6 +212,9 @@ class CaptionCache(BaseCache):
                     del self.index[key]
             if entries_to_evict and self.auto_save:
                 self._save_index()
+
+            # Track eviction count (US-100-004)
+            self._eviction_count += len(entries_to_evict)
 
             logger.info(f"LRU eviction: removed {len(entries_to_evict)} entries "
                        f"(cache now has {self._count_entries()} entries)")
@@ -1276,7 +1287,10 @@ class CaptionCache(BaseCache):
         """Get cache statistics.
 
         Returns:
-            Dict with cache metrics.
+            Dict with cache metrics including:
+            - current_size: Number of entries in cache
+            - eviction_count: Total number of entries evicted
+            - oldest_entry_age: Age of oldest entry in days
         """
         base_stats = super().get_stats()
 
@@ -1284,6 +1298,10 @@ class CaptionCache(BaseCache):
         total_segments = 0
         auto_generated_count = 0
         manual_count = 0
+
+        # Track current_size and oldest_entry_age (US-100-004)
+        current_size = 0
+        oldest_cached_at = None
 
         for entry in self.get_all().values():
             try:
@@ -1293,8 +1311,18 @@ class CaptionCache(BaseCache):
                     auto_generated_count += 1
                 else:
                     manual_count += 1
+
+                # Track current_size and oldest entry (US-100-004)
+                current_size += 1
+                if oldest_cached_at is None or entry.cached_at < oldest_cached_at:
+                    oldest_cached_at = entry.cached_at
             except Exception:
                 pass
+
+        # Calculate oldest_entry_age (US-100-004)
+        oldest_entry_age = 0.0
+        if oldest_cached_at is not None:
+            oldest_entry_age = (time.time() - oldest_cached_at) / (24 * 3600)
 
         base_stats.update({
             'total_segments': total_segments,
@@ -1302,6 +1330,11 @@ class CaptionCache(BaseCache):
             'manual_entries': manual_count,
             'max_age_days': self.max_age_days,
             'enabled': self.enabled,
+            # LRU eviction statistics (US-100-004)
+            'current_size': current_size,
+            'eviction_count': self._eviction_count,
+            'oldest_entry_age': oldest_entry_age,
+            'max_cache_size': self.max_cache_size,
         })
 
         return base_stats

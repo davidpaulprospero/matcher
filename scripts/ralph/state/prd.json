@@ -1,7 +1,7 @@
 ﻿{
-    "sprintNumber":  99,
-    "focusArea":  "config",
-    "branchName":  "ralph/sprint-99",
+    "sprintNumber":  100,
+    "focusArea":  "caption",
+    "branchName":  "ralph/sprint-100",
     "projectContext":  {
                            "sourceDir":  "src/",
                            "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
@@ -11,180 +11,189 @@
                        },
     "userStories":  [
                         {
-                            "id":  "US-99-001",
+                            "id":  "US-100-001",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027config\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027caption\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027config\u0027",
-                                                       "Add stories US-99-002 through US-99-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027caption\u0027",
+                                                       "Add stories US-100-002 through US-100-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-99-NNN to be unique across sprints",
-                                                       "Mark this story (US-99-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-100-NNN to be unique across sprints",
+                                                       "Mark this story (US-100-001) as passes: true when done"
                                                    ],
                             "passes":  true,
                             "priority":  "high",
-                            "title":  "Generate sprint stories for config focus area",
-                            "notes":  "User context: improvement: Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\n- Ensure new features have corresponding config options\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\n- Scans completed: 2\n- pipeline_stages : findings available\n- config_structure : findings available"
+                            "title":  "Generate sprint stories for caption focus area",
+                            "notes":  "Evidence gate: 11/11 criteria verified (100%)."
                         },
                         {
-                            "id":  "US-99-002",
-                            "acceptanceCriteria":  [
-                                                       "Add Get-SearchBudgetInfo function to scripts/ralph/lib/interview.ps1 that reads config.yaml for search limits",
-                                                       "Function returns max_total_results and results_per_keyword from search_budget section",
-                                                       "Function returns video_search.results_per_keyword and video_search.max_total_results as fallback",
-                                                       "Add unit tests for Get-SearchBudgetInfo with mock config.yaml",
-                                                       "Verify function handles missing config sections gracefully"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add Get-SearchBudgetInfo function to Ralph interview lib",
-                            "notes":  "Tier: feature | Files: scripts/ralph/lib/interview.ps1 (add function), scripts/ralph/tests/interview.Tests.ps1 (add tests)"
-                        },
-                        {
-                            "id":  "US-99-003",
-                            "acceptanceCriteria":  [
-                                                       "Add Get-DistributedKeywordBudget function to scripts/ralph/lib/interview.ps1",
-                                                       "Function calculates adjusted results_per_keyword when keywords exceed budget",
-                                                       "Function handles edge cases: 0 keywords, 1 keyword, keywords \u003e max_keywords",
-                                                       "Formula: adjusted = floor(max_total_results / keyword_count)",
-                                                       "Add unit tests covering all edge cases",
-                                                       "Function returns hashtable with adjusted_budget and keyword_count"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add Get-DistributedKeywordBudget function",
-                            "notes":  "Evidence gate: 6/6 criteria verified (100%). All tests pass."
-                        },
-                        {
-                            "id":  "US-99-004",
-                            "acceptanceCriteria":  [
-                                                       "Add Get-ChapterDistributedKeywords function to scripts/ralph/lib/interview.ps1",
-                                                       "Function detects chapter patterns: \u0027Feature: Part 1, Part 2, Part 3\u0027, \u0027API: Auth, Rate Limit, Retry\u0027",
-                                                       "Function splits topics containing chapter markers into individual keywords",
-                                                       "Function handles comma-separated chapter lists within topic strings",
-                                                       "Add unit tests for chapter pattern detection",
-                                                       "Function returns flattened keyword array"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add Get-ChapterDistributedKeywords function for chapter splitting",
-                            "notes":  "Evidence gate: 6/6 criteria verified (100%). All tests pass."
-                        },
-                        {
-                            "id":  "US-99-005",
-                            "acceptanceCriteria":  [
-                                                       "Modify scripts/ralph/interview.ps1 to display search budget status after keyword collection",
-                                                       "Show budget: max_total_results | keyword_count keywords = X results each",
-                                                       "Show warning when keywords \u003e max_keywords (budget will be reduced)",
-                                                       "Display chapter detection status (topics with chapters split)",
-                                                       "Integrate Get-SearchBudgetInfo, Get-DistributedKeywordBudget, Get-ChapterDistributedKeywords"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Integrate search budget display in Ralph interview UI",
-                            "notes":  "Evidence gate: 5/5 criteria verified (100%). Integrated Show-SearchBudgetStatus after focus area approval. All 55 tests pass."
-                        },
-                        {
-                            "id":  "US-99-006",
-                            "acceptanceCriteria":  [
-                                                       "Add SearchBudgetConfig dataclass to src/config/sections/video_search.py if not present",
-                                                       "Ensure config.yaml has search_budget section with max_total_results and results_per_keyword",
-                                                       "Add __post_init__ to convert nested fields if needed",
-                                                       "Export SearchBudgetConfig from src/config/sections/__init__.py",
-                                                       "Verify: python -m py_compile src/config/sections/video_search.py passes"
-                                                   ],
-                            "passes":  true,
+                            "id":  "US-100-002",
+                            "title":  "Add video metadata language detection for caption fetching",
                             "priority":  "medium",
-                            "title":  "Ensure SearchBudgetConfig exists in video_search.py config section",
-                            "notes":  "Tier: enhancement | Files: src/config/sections/video_search.py (add/update config), config.yaml (verify section), src/config/sections/__init__.py (update exports) | Evidence: SearchBudgetConfig already existed in video_search.py (lines 17-26), config.yaml has search_budget section (lines 126-128), exported from __init__.py, py_compile passes for both files"
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Implement language detection from video metadata (title, description, tags) before caption fetch",
+                                                       "Add language prediction confidence scoring (0.0-1.0) based on metadata analysis",
+                                                       "Use detected language to prioritize fetch order or skip pre-check for high-confidence predictions",
+                                                       "Add config option to enable/disable metadata-based language detection",
+                                                       "Cache language predictions per video_id for cross-session reuse",
+                                                       "Log language detection results at DEBUG level with confidence scores"
+                                                   ],
+                            "notes":  "Evidence gate: 6/6 criteria verified (100%). All criteria complete."
                         },
                         {
-                            "id":  "US-99-007",
-                            "acceptanceCriteria":  [
-                                                       "Add config validation at pipeline startup in src/config.py or src/cli/",
-                                                       "Validate required fields: video_search.results_per_keyword \u003e 0, video_search.max_total_results \u003e 0",
-                                                       "Validate search_budget values match or are consistent with video_search values",
-                                                       "Add validation for duration_tiers configuration (must have at least one tier)",
-                                                       "Add validation for matching.min_confidence is between 0 and 1",
-                                                       "Log warnings for deprecated config options found in config.yaml"
-                                                   ],
-                            "passes":  true,
+                            "id":  "US-100-003",
+                            "title":  "Improve caption coverage quality scoring algorithm",
                             "priority":  "medium",
-                            "title":  "Add startup config validation for required fields",
-                            "notes":  "All 6 criteria implemented: 1) validate_config_at_startup() in src/cli/config_utils.py called from main.py:435; 2) validates video_search.results_per_keyword/max_total_results \u003e 0 (lines 368-383); 3) validates search_budget consistency (lines 385-402); 4) validates duration_tiers has at least one tier (lines 404-423); 5) validates matching.min_confidence is 0-1 (lines 425-435); 6) logs deprecated warnings (lines 437-455). Also added video_search and search_budget fields to Config class in base.py. py_compile passes."
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Refactor coverage calculation to weight segments by content density (longer segments = higher quality)",
+                                                       "Add silence/gap detection to penalize captions with excessive pauses",
+                                                       "Implement coverage confidence score that accounts for video duration vs caption length",
+                                                       "Add config options for coverage calculation weights (segment_density_weight, gap_penalty)",
+                                                       "Include coverage quality in CaptionMetrics export for analysis",
+                                                       "Log coverage breakdown at INFO level: total_duration, caption_duration, effective_coverage"
+                                                   ],
+                            "notes":  "All 6 criteria implemented: 1) CoverageMetrics class with effective_coverage (log-scaled duration weighting), 2) gap_count/gap_penalty in CoverageMetrics, 3) confidence_score based on video/caption duration ratio, 4) Config options in CaptionFirstConfig and config.yaml, 5) Added to CaptionResult.to_dict(), 6) INFO logging in caption_fetcher.py"
                         },
                         {
-                            "id":  "US-99-008",
-                            "acceptanceCriteria":  [
-                                                       "Scan src/stages/ for hardcoded values that should be config options",
-                                                       "Identify at least 3 hardcoded values to convert to config",
-                                                       "Add new config options to appropriate section in src/config/sections/",
-                                                       "Update config.yaml with new options and comments",
-                                                       "Verify the new config options are used in the stages"
-                                                   ],
-                            "passes":  true,
+                            "id":  "US-100-004",
+                            "title":  "Add caption cache LRU eviction and size limits",
                             "priority":  "medium",
-                            "title":  "Convert hardcoded values to config options in stages",
-                            "notes":  "Evidence gate: 5/5 criteria verified (100%). Found hardcoded min_duration=30, max_duration=600 in iterative_match.py:1617-1618, entity_display_limit=5 in entity_videos.py:206. Added search_min_duration, search_max_duration to IterativeMatchingConfig, entity_display_limit to ImageSearchConfig. Config.yaml updated with comments. Stages now use getattr() to read config values. py_compile passes."
+                            "passes":  true,
+                            "acceptanceCriteria":  [
+                                                       "Implement LRU eviction policy when cache exceeds max_cache_size entries",
+                                                       "Add cache access tracking (hit/miss timestamps) for eviction decisions",
+                                                       "Add cache size statistics to metrics: current_size, eviction_count, oldest_entry_age",
+                                                       "Implement cache directory cleanup task for stale entries beyond max_cache_age_days",
+                                                       "Add config validation for max_cache_size (must be \u003e= 100 if set)",
+                                                       "Log cache operations at DEBUG: evictions, hits, misses, size_changes"
+                                                   ],
+                            "notes":  "All 6 criteria implemented: 1) LRU eviction in _evict_lru_entries (already existed), 2) Access tracking in _update_last_used (already existed), 3) Added current_size, eviction_count, oldest_entry_age to get_stats(), 4) cleanup_stale_entries already existed, 5) Added ValueError validation if max_cache_size \u003c 100, 6) DEBUG logging already existed"
                         },
                         {
-                            "id":  "US-99-009",
-                            "acceptanceCriteria":  [
-                                                       "Add config migration guide to CLAUDE.md for new config options",
-                                                       "Document pattern for adding new config sections (dataclass + __post_init__ + yaml + exports)",
-                                                       "Document Config Rule #1: Update BOTH src/config/sections/*.py AND config.yaml",
-                                                       "Document Config Rule #2: __post_init__ for nested dataclass fields that load as dict",
-                                                       "Add troubleshooting section for common config issues"
-                                                   ],
-                            "passes":  true,
+                            "id":  "US-100-005",
+                            "title":  "Improve caption error classification for retry decisions",
                             "priority":  "medium",
-                            "title":  "Improve config documentation in CLAUDE.md",
-                            "notes":  "Added: config migration guide with explicit CRITICAL Rule #1 and Rule #2 callouts, troubleshooting section with 6 common config issues"
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Add error sub-classification for NETWORK errors (DNS, connection, timeout, SSL)",
+                                                       "Implement error severity scoring to prioritize retryable vs non-retryable errors",
+                                                       "Add per-error-category retry budgets (already in config, need enforcement)",
+                                                       "Implement error pattern learning: track error frequency by video/channel for adaptive retry",
+                                                       "Add error classification metrics: error_type_distribution, retry_effectiveness_by_type",
+                                                       "Log error classification decisions at WARNING level with reasoning"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/caption/error_classification.py (new file), src/caption_fetcher.py (error handling section) | Line ranges: caption_fetcher.py ~line 300-400 for error handling, new error_classification.py ~line 1-100"
                         },
                         {
-                            "id":  "US-99-010",
-                            "acceptanceCriteria":  [
-                                                       "Add --validate-config CLI flag to main.py that checks config without running pipeline",
-                                                       "Flag outputs: config loaded successfully, validation results, deprecated options warnings",
-                                                       "Add unit test for config validation CLI flag",
-                                                       "Integration: python main.py --validate-config -p test_project returns valid JSON output"
-                                                   ],
-                            "passes":  true,
+                            "id":  "US-100-006",
+                            "title":  "Add adaptive parallel fetch worker count based on batch size",
                             "priority":  "low",
-                            "title":  "Add --validate-config CLI flag for config checking",
-                            "notes":  "Added --validate-config flag (already existed), enhanced output with 'Config loaded successfully', warnings, and added --validate-config-json for JSON output. Added 2 unit tests. Flag appears in --help."
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Implement worker count calculation: scale workers based on batch size (more workers for larger batches)",
+                                                       "Add config option for worker_count_strategy: \u0027static\u0027, \u0027adaptive\u0027, \u0027cpu_count\u0027",
+                                                       "Implement adaptive scaling: start with 4 workers, scale up to 8 for batches \u003e 100 videos",
+                                                       "Add rate limit feedback loop: reduce workers when rate limit errors increase",
+                                                       "Log worker count decisions at INFO: strategy_used, calculated_count, batch_size",
+                                                       "Add worker_count to CaptionMetrics for correlation analysis with success rate"
+                                                   ],
+                            "notes":  "Tier: optimization | Files: src/stages/caption_stage.py (run method worker selection), src/config/sections/download.py (CaptionFirstConfig) | Line ranges: caption_stage.py ~line 190-210 for max_workers selection"
                         },
                         {
-                            "id":  "US-99-011",
+                            "id":  "US-100-007",
+                            "title":  "Improve multi-language caption preference handling",
+                            "priority":  "medium",
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Add test_config_validation.py to tests/ with tests for config validation",
-                                                       "Test validation catches: negative results_per_keyword, max_total_results=0, invalid confidence",
-                                                       "Test validation warns on deprecated options",
-                                                       "Test validation passes for valid config.yaml",
-                                                       "Run: pytest tests/test_config_validation.py -v"
+                                                       "Refactor language_priority to support weighted preferences (not just order)",
+                                                       "Add config option for language_fallback_strategy: \u0027sequential\u0027, \u0027coverage_first\u0027, \u0027confidence_weighted\u0027",
+                                                       "Implement coverage-based language selection: prefer language with highest coverage ratio",
+                                                       "Add multi-language caption aggregation: combine captions from multiple languages if available",
+                                                       "Add language coverage metrics: per_language_coverage, selected_language, fallback_count",
+                                                       "Log language selection decision at INFO with coverage ratios for each candidate"
                                                    ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "title":  "Add config validation tests",
-                            "notes":  "Implemented: Added test_config_validation.py with 14 tests covering validation catches for video_search values, confidence warnings, deprecated options warnings, valid config passes, and CLI --validate-config flag. Added video_search and search_budget to section_mapping in Config._from_dict() to enable YAML loading. Added _validate_deprecations() method for deprecated field warnings."
+                            "notes":  "Tier: enhancement | Files: src/caption_fetcher.py (language selection logic), src/config/sections/download.py (CaptionFirstConfig.language_priority, new field) | Line ranges: caption_fetcher.py ~line 500-600 for language handling"
                         },
                         {
-                            "id":  "US-99-012",
+                            "id":  "US-100-008",
+                            "title":  "Improve caption segment timing alignment and validation",
+                            "priority":  "medium",
+                            "passes":  false,
                             "acceptanceCriteria":  [
-                                                       "Review src/config/sections/ for consistency in config patterns",
-                                                       "Ensure all dataclasses have type hints for all fields",
-                                                       "Ensure all nested list/dict fields have None defaults and __post_init__ handling",
-                                                       "Ensure all config sections export from __init__.py",
-                                                       "Run: python -m py_compile on all config section files"
+                                                       "Refactor timing validation to use video duration from metadata (not caption endpoints)",
+                                                       "Add segment continuity scoring: detect gaps/overlaps between adjacent segments",
+                                                       "Implement timestamp normalization: handle various caption format timestamps consistently",
+                                                       "Add config option for timing_validation_mode: \u0027strict\u0027, \u0027lenient\u0027, \u0027off\u0027",
+                                                       "Add segment validation metrics: gap_count, overlap_count, continuity_score",
+                                                       "Log timing validation results at DEBUG with segment count and duration covered"
                                                    ],
-                            "passes":  true,
+                            "notes":  "Tier: enhancement | Files: src/caption/parsers/ (format parsers), src/caption_fetcher.py (timing validation) | Line ranges: caption_fetcher.py ~line 700-800 for timing validation, parsers for format-specific handling"
+                        },
+                        {
+                            "id":  "US-100-009",
+                            "title":  "Export caption fetch metrics to persistent storage",
                             "priority":  "low",
-                            "title":  "Audit config section consistency and type hints",
-                            "notes":  "Implemented: Fixed type hints by adding Optional[] to nested dataclass fields in core.py (pause_split), matching.py (location_matching, chapter_detection, scoring, context_enrichment, chapter_grouping), keywords.py (list_detection), and video_search.py (negative_keywords, topic_tags). Added missing Optional imports to core.py, keywords.py, and video_search.py. Fixed list/dict type hints to use proper generic types (List[str], Dict[str, List[str]]). All config section files compile successfully with py_compile. All exports verified in __init__.py."
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Implement metrics export to JSON file in project .cache directory",
+                                                       "Export per-video metrics: video_id, language, coverage, quality, fetch_duration, error_if_any",
+                                                       "Export aggregate metrics: total_videos, success_rate, avg_coverage, error_distribution",
+                                                       "Add config option for metrics_export_path (default: .cache/caption_metrics.json)",
+                                                       "Implement metrics retention policy: keep last N runs, auto-cleanup old files",
+                                                       "Add metrics import function for cross-project analysis"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/caption/metrics.py (CaptionMetrics class), src/stages/caption_stage.py (export call) | Line ranges: metrics.py ~line 100-200 for export methods, caption_stage.py ~line 850 for export call"
+                        },
+                        {
+                            "id":  "US-100-010",
+                            "title":  "Optimize batch pre-check channel grouping algorithm",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Refactor channel grouping to use hierarchical clustering for similar channels",
+                                                       "Add channel similarity scoring based on caption availability patterns",
+                                                       "Implement adaptive sample size: reduce samples for high-confidence channel patterns",
+                                                       "Add config options for precheck_clustering_enabled, min_cluster_size",
+                                                       "Add precheck efficiency metrics: clusters_formed, avg_samples_per_cluster, api_calls_saved",
+                                                       "Log clustering decisions at INFO: clusters_identified, samples_efficiency"
+                                                   ],
+                            "notes":  "Tier: optimization | Files: src/caption_fetcher.py (batch_precheck_by_channel method), src/config/sections/download.py (CaptionFirstConfig batch precheck fields) | Line ranges: caption_fetcher.py ~line 450-520 for precheck logic"
+                        },
+                        {
+                            "id":  "US-100-011",
+                            "title":  "Add caption budget consumption visualization and reporting",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Implement budget consumption progress bar in TTY mode (current/total attempts)",
+                                                       "Add budget exhaustion warning at 80% threshold with projected exhaustion time",
+                                                       "Add post-run budget summary: total_attempts, success_rate_at_budget_level, recommendations",
+                                                       "Implement budget recovery suggestions: --reset-budget, increase max_attempts, enable VPN",
+                                                       "Add config option for budget_warning_threshold (default 0.8)",
+                                                       "Log budget metrics at INFO: budget_percent_remaining, estimated_videos_affected"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/caption/retry_budget.py (budget tracking), src/stages/caption_stage.py (reporting) | Line ranges: retry_budget.py ~line 80-120 for consumption tracking, caption_stage.py ~line 300-350 for reporting"
+                        },
+                        {
+                            "id":  "US-100-012",
+                            "title":  "Add caption format auto-detection and parser selection",
+                            "priority":  "low",
+                            "passes":  false,
+                            "acceptanceCriteria":  [
+                                                       "Implement automatic caption format detection from response headers or content signature",
+                                                       "Add parser selection logic: prefer native JSON over XML/TTML/SRT based on availability",
+                                                       "Add config option for preferred_caption_formats: list in priority order",
+                                                       "Implement format fallback chain: primary format → secondary → transcript fallback",
+                                                       "Add format detection metrics: format_detected, parser_used, fallback_count",
+                                                       "Log format detection at DEBUG with detected type and parser decision reasoning"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/caption/parsers/ (format parsers), src/caption_fetcher.py (format detection) | Line ranges: caption_fetcher.py ~line 600-700 for format handling, parsers/__init__.py for parser registry"
                         }
                     ]
 }
