@@ -102,6 +102,7 @@ video_search:
   use_description_context: true   # Extract keywords from video descriptions to refine queries
   use_negative_context: false     # Filter results using negative keywords
   use_chapter_queries: true      # US-98-005: Use chapter topics for targeted search queries
+  listicle_topic_as_search_terms: true  # US-98-008: Use listicle topics for targeted search queries
   negative_keywords:              # Global negative keywords to exclude from results
     - "trailer"
     - "teaser"
@@ -823,7 +824,10 @@ image_search:
   
   # Videos per entity for stock footage (3 recommended)
   videos_per_entity: 1
-  
+
+  # US-99-008: Number of entities to display in summary output (0 = no limit)
+  entity_display_limit: 5
+
   # Minimum file size in MB (1MB ensures quality)
   min_size_mb: 1.0
   
@@ -1202,6 +1206,27 @@ download:
     # Tries each code in order before falling back to auto-generated captions.
     # Non-primary matches get reduced language_confidence (0.8 for 2nd, 0.6 for 3rd+).
     language_priority: ["en", "en-US", "en-GB"]
+
+    # Weighted language preferences (US-100-007)
+    # Dictionary mapping language codes to preference weights (0.0-1.0).
+    # When weights are provided, language selection uses weighted scoring.
+    # Empty dict = use language_priority ordering (backward compatible).
+    language_priority_weights: {}  # Example: {"en": 1.0, "es": 0.8}
+
+    # Language fallback strategy (US-100-007)
+    # Strategy for selecting the best language when multiple options are available:
+    # - 'sequential': Try languages in priority order, use first available (default)
+    # - 'coverage_first': Prefer language with highest coverage ratio for the video
+    # - 'confidence_weighted': Score languages by combining priority weight and coverage
+    language_fallback_strategy: "sequential"
+
+    # Multi-language caption aggregation (US-100-007)
+    # When enabled, combine captions from multiple languages if primary is incomplete.
+    enable_multi_language_aggregation: false
+
+    # Language coverage metrics tracking (US-100-007)
+    # Track per-language coverage statistics and selection metrics.
+    language_coverage_metrics_enabled: true
     timeout: 30                       # Timeout for caption fetch requests (seconds)
     # Per-format timeout configuration (US-90-011)
     # Maps caption format types to timeout in seconds
@@ -1231,6 +1256,19 @@ download:
                                       # Actual delays: 2s, 4s, 8s (exponential backoff)
     # Parallel fetching (US-001): speed up projects with 50+ videos
     max_parallel_fetches: 4           # Number of concurrent caption fetches (1 = sequential)
+    # Adaptive worker count strategy (US-100-006)
+    # Strategy for determining worker count based on batch size:
+    # - 'static': Use max_parallel_fetches directly (default, backward compatible)
+    # - 'adaptive': Scale workers based on batch size (more workers for larger batches)
+    # - 'cpu_count': Use CPU count as worker count (up to max_parallel_fetches)
+    worker_count_strategy: static     # Default is static for backward compatibility
+    min_workers: 4                    # Minimum workers for adaptive mode
+    max_workers_limit: 8              # Maximum workers for adaptive mode
+    batch_size_threshold: 100         # Batch size at which workers start scaling up
+    # Rate limit feedback loop (US-100-006)
+    # When enabled, reduce workers dynamically when rate limit errors increase
+    rate_limit_feedback_enabled: true
+    rate_limit_error_threshold: 0.15 # Reduce workers when rate limit errors exceed 15%
     # Live stream detection (US-002): skip caption fetch for live streams
     # Live streams can hang indefinitely during caption fetch
     skip_live_streams: true           # Skip caption fetch for live/was_live videos
@@ -1241,6 +1279,18 @@ download:
     # Coverage threshold (US-004): videos below this ratio are flagged for transcription fallback
     # Coverage = sum of segment durations / video duration (0.0-1.0)
     min_coverage_threshold: 0.5       # Flag videos with <50% caption coverage
+    # Coverage quality calculation weights (US-100-003)
+    # These control how coverage quality is calculated:
+    # - segment_density_weight (0.0-1.0): Weight for content density (longer segments = higher quality)
+    # - gap_penalty_weight (0.0-1.0): Weight for silence/gap detection penalty
+    # - confidence_weight (0.0-1.0): Weight for coverage confidence (video vs caption duration)
+    # These must sum to <= 1.0
+    segment_density_weight: 0.5        # Weight for duration-weighted coverage
+    gap_penalty_weight: 0.3           # Weight for gap detection penalty
+    confidence_weight: 0.2            # Weight for video duration ratio confidence
+    # Gap threshold for coverage calculation (US-100-003)
+    # Minimum gap duration in seconds to count as a pause (contributes to gap_penalty)
+    coverage_gap_threshold: 2.0       # Gaps >2s count as pauses
     # Format preference (US-006): order of subtitle formats to try
     # json3 is preferred by default since it's already structured (no conversion needed)
     # Falls back to next format on parse error or unavailability
@@ -1259,6 +1309,14 @@ download:
     # Example: 299.999s caption in 300s video is valid with 100ms epsilon
     # Set to 0 for exact matching (may cause false positives from float precision)
     timing_epsilon_ms: 100.0      # Timing tolerance in milliseconds (default: 100ms)
+    # Timing validation mode (US-100-008): controls segment timing validation
+    # 'strict': validate gaps/overlaps, reject on issues; 'lenient': log warnings (default); 'off': skip
+    timing_validation_mode: "lenient"
+    # Minimum gap duration in seconds to count as timing issue
+    continuity_gap_threshold: 1.0
+    # Overlap tolerance in seconds for segment validation
+    overlap_tolerance: 0.1
+
     # Cross-project cache validation (US-008 Sprint 6)
     # Validates cached caption data before use to prevent corrupt data propagation
     # Modes: 'strict' (reject on mismatch), 'warn' (re-fetch on failure), 'skip' (no validation)
@@ -1283,6 +1341,23 @@ download:
     unavailable_ttl_seconds: 3600  # Default 1 hour - captions unlikely to appear soon
     error_ttl_seconds: 300  # Default 5 minutes - transient errors should retry faster
 
+    # Video metadata language detection (US-100-002)
+    # Detect video language from metadata (title, description, tags) before caption fetch.
+    # This can help prioritize fetch order or skip pre-check for high-confidence predictions.
+    enable_language_detection: true
+    language_detection_confidence_threshold: 0.8  # Skip pre-check when confidence >= this
+    language_detection_min_confidence: 0.6  # Min confidence to affect fetch order
+
+    # Metrics export configuration (US-100-009)
+    # Enable export of caption fetch metrics to JSON file
+    metrics_export_enabled: true
+    # Path for metrics export (relative to project directory)
+    metrics_export_path: ".cache/caption_metrics.json"
+    # Number of metric runs to retain (auto-cleanup deletes older files)
+    metrics_retention_runs: 10
+    # Auto-cleanup old metric files beyond retention limit
+    metrics_auto_cleanup: true
+
     # Per-category retry budgets (US-003 Sprint 7)
     # Maps error type to maximum retry attempts. Different errors need different strategies:
     # - network: Transient connectivity issues, retry aggressively
@@ -1306,6 +1381,10 @@ download:
     batch_precheck_confidence: 0.9    # Min confidence to skip individual checks (0.0-1.0)
     batch_precheck_min_samples: 5     # Videos checked per channel before trusting pattern
     batch_precheck_sample_size: 5     # Videos to sample when building channel pattern
+    # Hierarchical clustering for channel grouping (US-100-010)
+    # When enabled, similar channels (by caption availability patterns) are grouped together.
+    precheck_clustering_enabled: false  # Enable clustering (default: false)
+    precheck_min_cluster_size: 3        # Min channels for cluster formation
     # Channel-based fetch prioritization (US-009 Sprint 7)
     # When enabled, videos from channels with higher caption availability are fetched first.
     # This improves average success rate early in the batch and identifies problematic channels faster.
@@ -1370,6 +1449,10 @@ download:
       # Early termination on low success rate (US-37-009)
       min_success_rate: 0.3           # Terminate early if success rate below 30%
       min_sample_for_early_termination: 20  # Check after 20 videos processed
+      # Budget warning threshold (US-100-011)
+      # When budget consumption exceeds this threshold, emit warnings
+      # Default: 0.8 (80%) - warn when 80% of budget is consumed
+      budget_warning_threshold: 0.8    # Warn at 80% consumption
 
   # Adaptive severity adjustment (US-89-012)
   # Automatically escalate severity when same error repeats (e.g., 3x 429 = high severity)
@@ -2406,6 +2489,10 @@ iterative_matching:
   caption_timeout: 30              # Seconds per caption fetch
   caption_batch_size: 10           # Fetch captions in batches to avoid overwhelming the pipeline
   caption_fetch_delay: 0.5         # Delay between caption fetches to avoid rate limiting (seconds)
+
+  # === US-99-008: Duration filter for iterative search videos ===
+  search_min_duration: 30         # Minimum video duration for gap-filling search results (seconds)
+  search_max_duration: 600         # Maximum video duration for gap-filling search results (seconds, 10 min)
 
   # === Logging ===
   log_pass_summaries: true         # Log summary after each pass

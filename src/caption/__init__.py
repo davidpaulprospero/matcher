@@ -85,6 +85,17 @@ from .validators import (
 from .error_handling import (
     categorize_caption_error,
     ErrorPatternDetector,
+    # US-100-005: New error classification features
+    NetworkErrorSubtype,
+    classify_network_error,
+    ErrorSeverity,
+    get_error_severity,
+    get_error_retry_score,
+    CategoryRetryBudget,
+    CategoryBudgetManager,
+    ErrorPatternLearner,
+    ErrorClassificationMetrics,
+    log_classification_decision,
 )
 
 # Retry budget
@@ -196,6 +207,17 @@ __all__ = [
     # Error handling
     'categorize_caption_error',
     'ErrorPatternDetector',
+    # US-100-005: New error classification features
+    'NetworkErrorSubtype',
+    'classify_network_error',
+    'ErrorSeverity',
+    'get_error_severity',
+    'get_error_retry_score',
+    'CategoryRetryBudget',
+    'CategoryBudgetManager',
+    'ErrorPatternLearner',
+    'ErrorClassificationMetrics',
+    'log_classification_decision',
     # Retry budget
     'BatchRetryBudget',
     # Worker progress

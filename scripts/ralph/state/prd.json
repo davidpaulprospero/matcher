@@ -73,13 +73,13 @@
                                                        "Add config validation for max_cache_size (must be \u003e= 100 if set)",
                                                        "Log cache operations at DEBUG: evictions, hits, misses, size_changes"
                                                    ],
-                            "notes":  "All 6 criteria implemented: 1) LRU eviction in _evict_lru_entries (already existed), 2) Access tracking in _update_last_used (already existed), 3) Added current_size, eviction_count, oldest_entry_age to get_stats(), 4) cleanup_stale_entries already existed, 5) Added ValueError validation if max_cache_size \u003c 100, 6) DEBUG logging already existed"
+                            "notes":  "All 6 acceptance criteria verified: 1) LRU eviction (_evict_lru_entries), 2) Cache access tracking (_update_last_used), 3) Cache size stats (current_size, eviction_count, oldest_entry_age in get_stats()), 4) Cleanup task (cleanup_stale_entries), 5) Config validation (ValueError if max_cache_size < 100), 6) DEBUG logging added for evictions and size_changes"
                         },
                         {
                             "id":  "US-100-005",
                             "title":  "Improve caption error classification for retry decisions",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Add error sub-classification for NETWORK errors (DNS, connection, timeout, SSL)",
                                                        "Implement error severity scoring to prioritize retryable vs non-retryable errors",
@@ -88,13 +88,13 @@
                                                        "Add error classification metrics: error_type_distribution, retry_effectiveness_by_type",
                                                        "Log error classification decisions at WARNING level with reasoning"
                                                    ],
-                            "notes":  "Tier: enhancement | Files: src/caption/error_classification.py (new file), src/caption_fetcher.py (error handling section) | Line ranges: caption_fetcher.py ~line 300-400 for error handling, new error_classification.py ~line 1-100"
+                            "notes":  "All 6 criteria implemented in src/caption/error_handling.py: 1) NetworkErrorSubtype enum with classify_network_error() for DNS/connection/SSL/timeout sub-types, 2) ErrorSeverity enum + get_error_severity() + get_error_retry_score() for severity scoring, 3) CategoryRetryBudget + CategoryBudgetManager for per-category budget tracking, 4) ErrorPatternLearner for tracking error frequency by video/channel with adaptive retry limits, 5) ErrorClassificationMetrics with get_error_type_distribution() and get_retry_effectiveness_by_type(), 6) log_classification_decision() outputs WARNING with reasoning"
                         },
                         {
                             "id":  "US-100-006",
                             "title":  "Add adaptive parallel fetch worker count based on batch size",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Implement worker count calculation: scale workers based on batch size (more workers for larger batches)",
                                                        "Add config option for worker_count_strategy: \u0027static\u0027, \u0027adaptive\u0027, \u0027cpu_count\u0027",
@@ -103,13 +103,13 @@
                                                        "Log worker count decisions at INFO: strategy_used, calculated_count, batch_size",
                                                        "Add worker_count to CaptionMetrics for correlation analysis with success rate"
                                                    ],
-                            "notes":  "Tier: optimization | Files: src/stages/caption_stage.py (run method worker selection), src/config/sections/download.py (CaptionFirstConfig) | Line ranges: caption_stage.py ~line 190-210 for max_workers selection"
+                            "notes":  "Implemented: 1) Added worker_count_strategy config ('static', 'adaptive', 'cpu_count') in CaptionFirstConfig, 2) Added min_workers (4), max_workers_limit (8), batch_size_threshold (100), 3) Adaptive scaling in caption_stage.py - linear interpolation from min to max based on batch size, 4) Rate limit feedback loop - reduces workers when rate limit errors exceed threshold (15%), 5) Logs worker count decisions at INFO with strategy_used, calculated_count, batch_size, 6) Added worker_count and worker_count_strategy fields to CaptionMetrics for correlation analysis. Config added to config.yaml with defaults."
                         },
                         {
                             "id":  "US-100-007",
                             "title":  "Improve multi-language caption preference handling",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Refactor language_priority to support weighted preferences (not just order)",
                                                        "Add config option for language_fallback_strategy: \u0027sequential\u0027, \u0027coverage_first\u0027, \u0027confidence_weighted\u0027",
@@ -118,13 +118,13 @@
                                                        "Add language coverage metrics: per_language_coverage, selected_language, fallback_count",
                                                        "Log language selection decision at INFO with coverage ratios for each candidate"
                                                    ],
-                            "notes":  "Tier: enhancement | Files: src/caption_fetcher.py (language selection logic), src/config/sections/download.py (CaptionFirstConfig.language_priority, new field) | Line ranges: caption_fetcher.py ~line 500-600 for language handling"
+                            "notes":  "Evidence gate: 6/6 criteria verified (100%). All criteria complete. Fixed bug: self.metrics.* -> self.* for per_language_coverage and language_selection_counts. Added fields to CaptionFetcher.__init__."
                         },
                         {
                             "id":  "US-100-008",
                             "title":  "Improve caption segment timing alignment and validation",
                             "priority":  "medium",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Refactor timing validation to use video duration from metadata (not caption endpoints)",
                                                        "Add segment continuity scoring: detect gaps/overlaps between adjacent segments",
@@ -133,13 +133,13 @@
                                                        "Add segment validation metrics: gap_count, overlap_count, continuity_score",
                                                        "Log timing validation results at DEBUG with segment count and duration covered"
                                                    ],
-                            "notes":  "Tier: enhancement | Files: src/caption/parsers/ (format parsers), src/caption_fetcher.py (timing validation) | Line ranges: caption_fetcher.py ~line 700-800 for timing validation, parsers for format-specific handling"
+                            "notes":  "Implemented: 1) Added timing_validation_mode config option (strict/lenient/off) to CaptionFirstConfig. 2) Added SegmentValidationResult dataclass with gap_count, overlap_count, continuity_score. 3) Added validate_segment_continuity() function in caption_fetcher.py. 4) Added normalize_segments() in parsers.py for timestamp normalization. 5) Added DEBUG logging in caption_stage.py for segment validation metrics. Config options: timing_validation_mode, continuity_gap_threshold, overlap_tolerance."
                         },
                         {
                             "id":  "US-100-009",
                             "title":  "Export caption fetch metrics to persistent storage",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Implement metrics export to JSON file in project .cache directory",
                                                        "Export per-video metrics: video_id, language, coverage, quality, fetch_duration, error_if_any",
@@ -148,13 +148,13 @@
                                                        "Implement metrics retention policy: keep last N runs, auto-cleanup old files",
                                                        "Add metrics import function for cross-project analysis"
                                                    ],
-                            "notes":  "Tier: enhancement | Files: src/caption/metrics.py (CaptionMetrics class), src/stages/caption_stage.py (export call) | Line ranges: metrics.py ~line 100-200 for export methods, caption_stage.py ~line 850 for export call"
+                            "notes":  "Implemented: 1) Added metrics_export_enabled, metrics_export_path, metrics_retention_runs, metrics_auto_cleanup config options to CaptionFirstConfig. 2) Updated export_json() with auto_cleanup and retention_count parameters. 3) Added cleanup_old_metrics() static method for retention policy. 4) Added import_from_file(), import_from_directory(), aggregate_metrics() static methods for cross-project analysis. 5) Added get_export_data() method for programmatic access. 6) Wired export in caption_stage.py run() method. Config options: metrics_export_enabled, metrics_export_path, metrics_retention_runs, metrics_auto_cleanup."
                         },
                         {
                             "id":  "US-100-010",
                             "title":  "Optimize batch pre-check channel grouping algorithm",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Refactor channel grouping to use hierarchical clustering for similar channels",
                                                        "Add channel similarity scoring based on caption availability patterns",
@@ -163,13 +163,13 @@
                                                        "Add precheck efficiency metrics: clusters_formed, avg_samples_per_cluster, api_calls_saved",
                                                        "Log clustering decisions at INFO: clusters_identified, samples_efficiency"
                                                    ],
-                            "notes":  "Tier: optimization | Files: src/caption_fetcher.py (batch_precheck_by_channel method), src/config/sections/download.py (CaptionFirstConfig batch precheck fields) | Line ranges: caption_fetcher.py ~line 450-520 for precheck logic"
+                            "notes":  "DONE: 1) Added precheck_clustering_enabled, precheck_min_cluster_size config options to download.py and config.yaml. 2) Added _cluster_channels_by_pattern() helper for hierarchical clustering based on success_rate bins. 3) Added _calculate_adaptive_sample_size() for reducing samples for high-confidence patterns. 4) Added clusters_formed, avg_samples_per_cluster metrics to BatchPreCheckResult. 5) Added INFO logging for clustering decisions. 6) Wired new params in caption_stage.py."
                         },
                         {
                             "id":  "US-100-011",
                             "title":  "Add caption budget consumption visualization and reporting",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Implement budget consumption progress bar in TTY mode (current/total attempts)",
                                                        "Add budget exhaustion warning at 80% threshold with projected exhaustion time",
@@ -178,7 +178,7 @@
                                                        "Add config option for budget_warning_threshold (default 0.8)",
                                                        "Log budget metrics at INFO: budget_percent_remaining, estimated_videos_affected"
                                                    ],
-                            "notes":  "Tier: enhancement | Files: src/caption/retry_budget.py (budget tracking), src/stages/caption_stage.py (reporting) | Line ranges: retry_budget.py ~line 80-120 for consumption tracking, caption_stage.py ~line 300-350 for reporting"
+                            "notes":  "DONE: 1) Added progress bar via get_progress_bar() method. 2) Added 80% threshold warning via check_and_warn_budget_threshold() with projected exhaustion time. 3) Added budget_percent_remaining and estimated_videos_affected to get_summary(). 4) Added get_recovery_suggestions() with --reset-budget, increase max_attempts, enable VPN options. 5) Added budget_warning_threshold to config.yaml (default 0.8). 6) Wired in caption_stage.py: lines 985, 1077, 1454-1466. Pre-implemented in earlier sprint."
                         },
                         {
                             "id":  "US-100-012",

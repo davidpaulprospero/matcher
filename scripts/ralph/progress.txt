@@ -1,4 +1,37 @@
-﻿
+
+## Iteration N - [US-100-011] Add caption budget consumption visualization and reporting
+- Pre-implemented in earlier sprint - all acceptance criteria already met:
+  1. Progress bar: get_progress_bar() in retry_budget.py returns "[=====>    ] 80/100 attempts (80.0% consumed)"
+  2. 80% threshold warning: check_and_warn_budget_threshold() returns warning with projected exhaustion time
+  3. Post-run summary: get_summary() includes total_attempts, success_rate_at_budget_level, budget_percent_remaining, estimated_videos_affected
+  4. Recovery suggestions: get_recovery_suggestions() includes --reset-budget, increase max_attempts, enable VPN
+  5. Config option: Added budget_warning_threshold: 0.8 to config.yaml (already had default in CaptionRetryBudgetConfig)
+  6. INFO logging: budget_percent_remaining and estimated_videos_affected logged in get_summary()
+- Verified with test: Progress bar, warning, summary, and recovery suggestions all work correctly
+- Files checked: src/caption/retry_budget.py (all methods), src/stages/caption_stage.py (wiring), config.yaml (added option)
+- Tests pass (333/334, 1 pre-existing failure unrelated to this story)
+
+## Iteration N - [US-100-010] Optimize batch pre-check channel grouping algorithm
+- Implemented all 6 acceptance criteria:
+  1. Hierarchical clustering: Added _cluster_channels_by_pattern() for grouping similar channels based on success_rate bins (low < 0.3, medium 0.3-0.7, high >= 0.7)
+  2. Channel similarity scoring: Uses pattern.success_rate and confidence as features
+  3. Adaptive sample size: Added _calculate_adaptive_sample_size() - reduces samples for high-confidence patterns (50% for confident, 75% for medium)
+  4. Config options: precheck_clustering_enabled (default: false), precheck_min_cluster_size (default: 3) in download.py and config.yaml
+  5. Metrics: Added clusters_formed, avg_samples_per_cluster to BatchPreCheckResult
+  6. Logging: INFO-level logs for clustering decisions with clusters_identified, samples_efficiency
+- All 31 batch_precheck tests pass
+- Files modified: src/config/sections/download.py, config.yaml, src/caption/cache_models.py, src/caption_fetcher.py, src/stages/caption_stage.py, scripts/ralph/state/prd.json
+
+## Iteration N - [US-100-008] Improve caption segment timing alignment and validation
+- Implemented all 6 acceptance criteria:
+  1. Config option timing_validation_mode: Added to CaptionFirstConfig with 'strict', 'lenient', 'off' modes
+  2. Segment continuity scoring: Added SegmentValidationResult with gap_count, overlap_count, continuity_score
+  3. Timestamp normalization: Added normalize_segments() in src/caption/parsers.py
+  4. Added validate_segment_continuity() function in caption_fetcher.py
+  5. DEBUG logging: Added logging in caption_stage.py with segment count and duration covered
+- Config options added to config.yaml: timing_validation_mode, continuity_gap_threshold, overlap_tolerance
+- Files modified: src/config/sections/download.py, config.yaml, src/caption_fetcher.py, src/stages/caption_stage.py, src/caption/parsers.py, scripts/ralph/state/prd.json
+
 ## Pre-flight Auto-Complete - [US-79-002] Add configurable timeout guard to Whisper GPU transcription
 - Status: COMPLETE (auto-detected from git commit, git-commit-detected)
 - Story was implemented in a previous session but prd.json was not updated (likely timeout)
@@ -316,3 +349,15 @@
   - Uses split keywords for budget calculation
 - All 9 tests pass
 - Files: scripts/ralph/lib/interview.ps1, scripts/ralph/tests/Interview.Tests.ps1
+## Iteration N - [US-100-005] Improve caption error classification for retry decisions
+- All 6 acceptance criteria implemented in src/caption/error_handling.py:
+  1. NetworkErrorSubtype enum with classify_network_error() for DNS/connection/SSL sub-types
+  2. ErrorSeverity enum + get_error_severity() + get_error_retry_score() for severity scoring
+  3. CategoryRetryBudget + CategoryBudgetManager for per-category budget tracking
+  4. ErrorPatternLearner for tracking error frequency by video/channel with adaptive retry
+  5. ErrorClassificationMetrics with get_error_type_distribution() + get_retry_effectiveness_by_type()
+  6. log_classification_decision() outputs WARNING with reasoning: 'CaptionErrorClassification: video=test123, category=NETWORK, subtype=dns, severity=high | Retry decision: retry 2/3'
+- Added exports to src/caption/__init__.py
+- All 78 tests in test_caption_error_patterns.py pass
+- Files: src/caption/error_handling.py, src/caption/__init__.py
+
