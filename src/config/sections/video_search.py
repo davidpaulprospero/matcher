@@ -7,6 +7,7 @@ and VideoSearchConfig for the video search stage.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 __all__ = [
     'SearchBudgetConfig',
@@ -61,11 +62,14 @@ class VideoSearchConfig:
     # US-98-005: Chapter-based query generation
     use_chapter_queries: bool = True  # Use chapter topics for targeted search
 
+    # US-98-008: Listicle topic keywords as search terms
+    listicle_topic_as_search_terms: bool = True  # Use listicle topics for targeted search
+
     # Negative keywords (list)
-    negative_keywords: list = None
+    negative_keywords: Optional[List[str]] = None
 
     # Topic tags (dict)
-    topic_tags: dict = None
+    topic_tags: Optional[Dict[str, List[str]]] = None
 
     def __post_init__(self):
         """Set defaults for nested fields."""

@@ -618,19 +618,19 @@ class MatchingConfig:
     explanation_validation_enabled: bool = True  # Enable explanation keyword verification
 
     # Location-aware matching (for travel/location content)
-    location_matching: LocationMatchingConfig = None
+    location_matching: Optional[LocationMatchingConfig] = None
 
     # Enhanced chapter detection
-    chapter_detection: ChapterDetectionConfig = None
+    chapter_detection: Optional[ChapterDetectionConfig] = None
 
     # Scoring thresholds (US-53-002)
-    scoring: MatchingScoringConfig = None
+    scoring: Optional[MatchingScoringConfig] = None
 
     # Context enrichment (US-70-004)
-    context_enrichment: ContextEnrichmentConfig = None
+    context_enrichment: Optional[ContextEnrichmentConfig] = None
 
     # Chapter-level source grouping (US-70-011)
-    chapter_grouping: ChapterGroupingConfig = None
+    chapter_grouping: Optional[ChapterGroupingConfig] = None
 
     def __post_init__(self):
         import logging

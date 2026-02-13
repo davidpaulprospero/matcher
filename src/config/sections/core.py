@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class TranscriptionConfig:
     min_split_duration: float = 4.0  # Minimum duration to consider splitting
 
     # Pause-based splitting
-    pause_split: PauseSplitConfig = None
+    pause_split: Optional[PauseSplitConfig] = None
 
     # Caching
     cache_transcriptions: bool = True
