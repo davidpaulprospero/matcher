@@ -2498,6 +2498,13 @@ iterative_matching:
   log_pass_summaries: true         # Log summary after each pass
   store_strategy_metrics: true     # Track per-strategy effectiveness
 
+  # === US-101-006: Query budget tracking ===
+  # Prevent infinite loops by tracking queries against budget
+  max_queries_per_run: 100        # Maximum queries per run before stopping
+  resume_budget_check: true        # Check budget on resume and stop if exhausted
+  max_queries_per_pass: 20        # Maximum queries per pass
+  budget_warning_threshold: 0.8   # Warning threshold (80% of budget used)
+
 # -----------------------------------------------------------------------------
 # API KEYS
 # -----------------------------------------------------------------------------

@@ -1,4 +1,29 @@
 
+## Iteration N - [US-101-007] Add cross-project learning export/import to QueryLearningDB
+- Implemented all 6 acceptance criteria:
+  1. export/import methods: Added export_to_global() and import_from_global() methods
+  2. Export to JSON: Writes all learning data to JSON file (pattern_strategy_success, template_success, strategy_stats, chapter_strategy_success, template_failure)
+  3. Import from JSON: Loads all learning data from JSON file with version verification
+  4. Global export path: Exports to ~/.matcher_global_cache/query_learning_export.json
+  5. Auto-import on init: Added check in __init__ that calls import_from_global() if local DB is empty
+  6. Version field: Export includes 'version' (self.VERSION) and 'exported_at' timestamp for migration
+- Added helper methods: get_global_export_path(), _is_local_db_empty(), _get_timestamp()
+- All 72 tests pass
+- Files modified: src/iterative_match/query_learning.py
+
+## Iteration N - [US-101-006] Add query budget tracking to iterative matching
+- Implemented all 6 acceptance criteria:
+  1. Query budget tracking: Added queries_per_pass list to track queries per pass
+  2. Total vs budget: Added total_queries_used tracking against max_total_queries
+  3. Per-pass vs pass budget: Added queries_this_pass counter and max_queries_per_pass check
+  4. Budget exhausted check: Added budget check before each search iteration (line 380-385 in iterative_match.py)
+  5. 80% warning: Added warning at budget_warning_threshold (0.8) - prints "Approaching budget limit"
+  6. Graceful stop: Added _log_budget_summary() method that prints budget breakdown when exhausted
+- Config added: max_queries_per_pass (20), budget_warning_threshold (0.8) in iterative_matching.py and config.yaml
+- Final summary now includes query budget usage: "Queries used: X/Y (Z% of budget)"
+- Files modified: src/stages/iterative_match.py, src/config/sections/iterative_matching.py, config.yaml, scripts/ralph/state/prd.json
+- All compilation tests pass
+
 ## Iteration N - [US-100-011] Add caption budget consumption visualization and reporting
 - Pre-implemented in earlier sprint - all acceptance criteria already met:
   1. Progress bar: get_progress_bar() in retry_budget.py returns "[=====>    ] 80/100 attempts (80.0% consumed)"

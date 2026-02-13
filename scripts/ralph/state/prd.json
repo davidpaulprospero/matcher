@@ -179,7 +179,7 @@
                                                        "Edge case: topic without chapters returns original keyword",
                                                        "Edge case: empty topic list returns empty array"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add chapter-based keyword splitting for Ralph interview",
                             "notes":  "Tier: ralph | Files: scripts/ralph/lib/interview.ps1 (new function) | Enables chapter-aware keyword extraction so multi-part topics get separate searches. Line range: new function at end of interview.ps1 (~560-620)"
@@ -194,10 +194,10 @@
                                                        "Log warning when approaching budget limit (80% threshold)",
                                                        "Stop gracefully when budget exhausted with summary"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add query budget tracking to iterative matching",
-                            "notes":  "Tier: feature | Files: src/stages/iterative_match.py (new tracking), src/config/sections/iterative_matching.py (new config), config.yaml:2411-2450 (iterative_matching section) | Prevents infinite loops by tracking queries against budget. Line range: iterative_match.py:100-150 (budget tracking section)"
+                            "notes":  "IMPLEMENTED: Added query budget tracking with total and per-pass tracking. Config: max_queries_per_run (100), max_queries_per_pass (20), budget_warning_threshold (0.8). Budget check before each pass iteration, 80% warning logged, graceful stop with summary. Files: src/stages/iterative_match.py, src/config/sections/iterative_matching.py, config.yaml"
                         },
                         {
                             "id":  "US-101-007",
@@ -209,10 +209,10 @@
                                                        "Import runs at DB initialization if export exists and local DB is empty",
                                                        "Export includes version field for migration"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add cross-project learning export/import to QueryLearningDB",
-                            "notes":  "Tier: feature | Files: src/iterative_match/query_learning.py:82-663 (QueryLearningDB class), src/config/sections/iterative_matching.py:120-122 (learning_db_path config) | Enables sharing learnings across projects. Line range: query_learning.py:660-720 (new export/import methods)"
+                            "notes":  "IMPLEMENTED: Added export_to_global() and import_from_global() methods. Export writes to ~/.matcher_global_cache/query_learning_export.json with version and timestamp. Auto-import on init if local DB is empty. Added _is_local_db_empty(), _get_timestamp(), get_global_export_path() helper methods. Files: src/iterative_match/query_learning.py"
                         },
                         {
                             "id":  "US-101-008",

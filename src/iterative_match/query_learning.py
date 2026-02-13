@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -151,6 +152,10 @@ class QueryLearningDB:
         # Load existing data
         self._load()
 
+        # US-101-007: Auto-import from global cache if local DB is empty
+        if self._is_local_db_empty():
+            self.import_from_global()
+
     def _load(self):
         """Load learning database from disk."""
         if not self.db_path.exists():
@@ -217,6 +222,119 @@ class QueryLearningDB:
 
         except Exception as e:
             logger.warning(f"Failed to save learning DB: {e}")
+
+    def get_global_export_path(self) -> Path:
+        """Get the global export path for cross-project learning sharing."""
+        home_dir = Path.home()
+        global_cache = home_dir / ".matcher_global_cache"
+        return global_cache / "query_learning_export.json"
+
+    def export_to_global(self) -> bool:
+        """
+        Export learning data to global cache for cross-project sharing.
+
+        Exports to ~/.matcher_global_cache/query_learning_export.json
+
+        Returns:
+            True if export succeeded, False otherwise
+        """
+        export_path = self.get_global_export_path()
+
+        try:
+            # Ensure directory exists
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+
+            data = {
+                'version': self.VERSION,
+                'exported_at': self._get_timestamp(),
+                'pattern_strategy_success': {
+                    pattern: dict(strategies)
+                    for pattern, strategies in self.pattern_strategy_success.items()
+                },
+                'template_success': dict(self.template_success),
+                'strategy_stats': {
+                    strategy: stats.to_dict()
+                    for strategy, stats in self.strategy_stats.items()
+                },
+                'chapter_strategy_success': {
+                    chapter_type: dict(strategies)
+                    for chapter_type, strategies in self.chapter_strategy_success.items()
+                },
+                'template_failure': dict(self.template_failure),
+            }
+
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+
+            logger.info(f"Exported query learning to global cache: {export_path}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to export learning DB: {e}")
+            return False
+
+    def import_from_global(self) -> bool:
+        """
+        Import learning data from global cache.
+
+        Loads from ~/.matcher_global_cache/query_learning_export.json
+
+        Returns:
+            True if import succeeded and data was loaded, False otherwise
+        """
+        export_path = self.get_global_export_path()
+
+        if not export_path.exists():
+            logger.debug(f"No global export found at {export_path}")
+            return False
+
+        try:
+            with open(export_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Verify version field for migration compatibility
+            export_version = data.get('version', '1.0')
+            logger.info(f"Importing query learning export (version: {export_version})")
+
+            # Import pattern success rates
+            for pattern, strategies in data.get('pattern_strategy_success', {}).items():
+                for strategy, rate in strategies.items():
+                    self.pattern_strategy_success[pattern][strategy] = rate
+
+            # Import template success counts
+            self.template_success.update(data.get('template_success', {}))
+
+            # Import strategy stats
+            for strategy, stats_dict in data.get('strategy_stats', {}).items():
+                self.strategy_stats[strategy] = StrategyStats.from_dict(stats_dict)
+
+            # Import chapter-type strategy success rates
+            for chapter_type, strategies in data.get('chapter_strategy_success', {}).items():
+                for strategy, rate in strategies.items():
+                    self.chapter_strategy_success[chapter_type][strategy] = rate
+
+            # Import template failure counts
+            self.template_failure.update(data.get('template_failure', {}))
+
+            logger.info(f"Imported query learning from global cache: {export_path}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to import learning DB: {e}")
+            return False
+
+    def _is_local_db_empty(self) -> bool:
+        """Check if the local database has any meaningful data."""
+        return (
+            len(self.pattern_strategy_success) == 0
+            and len(self.template_success) == 0
+            and len(self.chapter_strategy_success) == 0
+        )
+
+    def _get_timestamp(self) -> str:
+        """Get current ISO timestamp for export metadata."""
+        from datetime import datetime
+        return datetime.utcnow().isoformat() + "Z"
 
     def get_best_strategy(self, gap_pattern: str) -> str:
         """

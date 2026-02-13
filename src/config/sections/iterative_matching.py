@@ -127,6 +127,11 @@ class IterativeMatchingConfig:
     caption_batch_size: int = 10  # Fetch captions in batches to avoid overwhelming the pipeline
     caption_fetch_delay: float = 0.5  # Delay between caption fetches to avoid rate limiting (seconds)
 
+    # US-99-008: Duration filter for iterative search videos
+    # Minimum and maximum video duration for gap-filling search results
+    search_min_duration: int = 30  # Minimum duration in seconds
+    search_max_duration: int = 600  # Maximum duration in seconds (10 minutes)
+
     # Logging and metrics
     log_pass_summaries: bool = True  # Log summary after each pass
     store_strategy_metrics: bool = True  # Track per-strategy effectiveness
@@ -134,6 +139,10 @@ class IterativeMatchingConfig:
     # US-89-006: Resume settings
     resume_budget_check: bool = True  # Check budget on resume and stop if exhausted
     max_queries_per_run: int = 100  # Maximum queries per run before stopping
+
+    # US-101-006: Query budget tracking
+    max_queries_per_pass: int = 20  # Maximum queries per pass
+    budget_warning_threshold: float = 0.8  # Warning threshold (80% of budget)
 
     def __post_init__(self):
         """Validate configuration values."""
@@ -151,3 +160,12 @@ class IterativeMatchingConfig:
         self.caption_fetch_delay = max(0.0, self.caption_fetch_delay)
         self.query_cache_ttl_hours = max(0, self.query_cache_ttl_hours)
         self.context_window_segments = max(0, self.context_window_segments)  # US-94-012
+
+        # US-99-008: Validate duration filters
+        self.search_min_duration = max(0, self.search_min_duration)
+        self.search_max_duration = max(self.search_min_duration, self.search_max_duration)  # Must be >= min
+
+        # US-101-006: Validate query budget tracking
+        self.max_queries_per_run = max(1, self.max_queries_per_run)
+        self.max_queries_per_pass = max(1, self.max_queries_per_pass)
+        self.budget_warning_threshold = max(0.0, min(1.0, self.budget_warning_threshold))

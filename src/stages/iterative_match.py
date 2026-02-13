@@ -347,8 +347,34 @@ class IterativeMatchStage(Stage):
 
                 resumed_from_pass = True
 
+            # US-101-006: Initialize query budget tracking
+            total_queries_used = len(self._used_queries)
+            queries_per_pass: List[int] = []  # Track queries used per pass
+            max_queries_per_pass = getattr(iter_config, 'max_queries_per_pass', 20)
+            max_total_queries = getattr(iter_config, 'max_queries_per_run', 100)
+            budget_warning_threshold = getattr(iter_config, 'budget_warning_threshold', 0.8)
+
             for pass_num in range(start_pass_num, max_iterations + 1):
                 pass_start = time.time()
+                queries_this_pass = 0  # Reset per-pass counter
+
+                # US-101-006: Budget check before each search iteration
+                total_queries_used = len(self._used_queries)
+
+                # Check total budget exhaustion
+                if total_queries_used >= max_total_queries:
+                    print(f"\n  ⚠ Total query budget exhausted ({total_queries_used}/{max_total_queries})")
+                    self._log_budget_summary(
+                        total_queries_used, max_total_queries,
+                        queries_per_pass, max_queries_per_pass
+                    )
+                    break
+
+                # Log warning when approaching budget limit (80% threshold)
+                if total_queries_used >= max_total_queries * budget_warning_threshold:
+                    remaining = max_total_queries - total_queries_used
+                    print(f"\n  ⚠ Approaching budget limit: {total_queries_used}/{max_total_queries} ({remaining} remaining)")
+
                 print(f"\n  Pass {pass_num}/{max_iterations}...")
 
                 # 1. Identify gaps and locks
@@ -583,7 +609,27 @@ class IterativeMatchStage(Stage):
                 no_progress_min_pass = _min_pass if isinstance(_min_pass, int) else 3
                 if gaps_filled == 0 and pass_num >= no_progress_min_pass:
                     print(f"  ✓ No progress in pass {pass_num}, stopping")
+                    # US-101-006: Track queries for this pass
+                    queries_this_pass = len(self._used_queries) - total_queries_used
+                    queries_per_pass.append(queries_this_pass)
+                    total_queries_used = len(self._used_queries)
                     break
+
+                # US-101-006: Track queries for this pass
+                queries_this_pass = len(self._used_queries) - total_queries_used
+                queries_per_pass.append(queries_this_pass)
+
+                # US-101-006: Check per-pass budget
+                if queries_this_pass >= max_queries_per_pass:
+                    remaining = max_total_queries - total_queries_used
+                    print(f"\n  ⚠ Per-pass budget reached ({queries_this_pass}/{max_queries_per_pass})")
+                    if remaining <= 0:
+                        print(f"  ⚠ Total budget exhausted, stopping")
+                        self._log_budget_summary(
+                            total_queries_used, max_total_queries,
+                            queries_per_pass, max_queries_per_pass
+                        )
+                        break
 
             # Save learning DB
             if learning_db:
@@ -608,6 +654,9 @@ class IterativeMatchStage(Stage):
             print(f"  Passes run: {len(all_pass_metrics)}")
             print(f"  Gaps filled: {total_filled}")
             print(f"  Final gaps: {final_gap_count} ({final_gap_count / len(state.voiceover_segments):.1%})")
+            # US-101-006: Include budget info in final summary
+            total_queries = len(self._used_queries)
+            print(f"  Queries used: {total_queries}/{max_total_queries} ({total_queries/max_total_queries:.0%} of budget)")
             print(f"  Total time: {total_duration:.1f}s")
 
             # Serialize matches for checkpoint (preserves iterative improvements)
@@ -1613,9 +1662,9 @@ class IterativeMatchStage(Stage):
         results_per_query = getattr(iter_config, 'search_results_per_gap', 10)
         max_new_videos = getattr(iter_config, 'max_new_videos_per_pass', 50)
 
-        # Duration filter (typical for documentary footage)
-        min_duration = 30
-        max_duration = 600  # 10 minutes max
+        # US-99-008: Duration filter from config (typical for documentary footage)
+        min_duration = getattr(iter_config, 'search_min_duration', 30)
+        max_duration = getattr(iter_config, 'search_max_duration', 600)  # 10 minutes max
 
         # Initialize search cache with config options (US-94-011)
         cache_enabled = getattr(iter_config, 'cache_query_results', True)
@@ -1935,6 +1984,30 @@ class IterativeMatchStage(Stage):
         print(f"    Captions: {success_count} fetched ({cache_hits} from cache), {fail_count} unavailable")
 
         return candidates
+
+    # US-101-006: Query budget tracking
+    def _log_budget_summary(
+        self,
+        total_used: int,
+        max_total: int,
+        queries_per_pass: List[int],
+        max_per_pass: int
+    ) -> None:
+        """Log a summary when query budget is exhausted.
+
+        Args:
+            total_used: Total queries used
+            max_total: Maximum queries allowed per run
+            queries_per_pass: List of queries used per pass
+            max_per_pass: Maximum queries allowed per pass
+        """
+        print(f"\n  ─── Query Budget Summary ───")
+        print(f"  Total queries used: {total_used}/{max_total} ({total_used/max_total:.0%})")
+        print(f"  Per-pass breakdown:")
+        for i, count in enumerate(queries_per_pass, 1):
+            pct = count / max_per_pass if max_per_pass > 0 else 0
+            print(f"    Pass {i}: {count} queries ({pct:.0%} of per-pass budget)")
+        print(f"  ─────────────────────────────────")
 
     def _extract_video_id_from_path(self, path: str) -> str:
         """Extract video ID from file path."""
