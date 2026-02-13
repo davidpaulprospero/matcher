@@ -96,6 +96,8 @@ video_search:
   apply_title_blacklist: true     # Filter by download.title_blacklist
   apply_llm_title_filter: true    # Use LLM to filter irrelevant titles (see download.llm_title_filter)
   deduplicate_across_keywords: true  # Remove duplicate video IDs from different keywords
+  enable_channel_diversity: true   # Limit videos per channel for diverse results
+  max_videos_per_channel: 3       # Maximum videos to include from same channel
 
 # -----------------------------------------------------------------------------
 # TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0

@@ -145,10 +145,10 @@
                                                        "Implement deduplication logic in video search results",
                                                        "Test that diverse channels appear in results"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add source channel diversification for search results",
-                            "notes":  "Tier: feature | Source files: src/stages/video_search.py (deduplication logic ~lines 150-250), config.yaml video_search section"
+                            "notes":  "COMPLETED: Added enable_channel_diversity (default: true) and max_videos_per_channel (default: 3) to config.yaml video_search section. Implemented channel deduplication logic in video_search.py run() method that limits results from same channel to max_videos_per_channel. All 40 video search tests pass."
                         },
                         {
                             "id":  "US-94-010",

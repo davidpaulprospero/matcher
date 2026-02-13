@@ -72,11 +72,15 @@ class VideoSearchStage(Stage):
                 max_total_results = search_config.get('max_total_results', 200)
                 search_budget_aware = search_config.get('search_budget_aware', True)
                 auto_distribute_budget = search_config.get('auto_distribute_budget', True)
+                enable_channel_diversity = search_config.get('enable_channel_diversity', True)
+                max_videos_per_channel = search_config.get('max_videos_per_channel', 3)
             else:
                 results_per_keyword = getattr(search_config, 'results_per_keyword', 20)
                 max_total_results = getattr(search_config, 'max_total_results', 200)
                 search_budget_aware = getattr(search_config, 'search_budget_aware', True)
                 auto_distribute_budget = getattr(search_config, 'auto_distribute_budget', True)
+                enable_channel_diversity = getattr(search_config, 'enable_channel_diversity', True)
+                max_videos_per_channel = getattr(search_config, 'max_videos_per_channel', 3)
 
             # Calculate adjusted results_per_keyword when keywords exceed budget capacity
             keyword_count = len(state.keywords)
@@ -137,6 +141,35 @@ class VideoSearchStage(Stage):
                 if len(all_video_ids) >= max_total_results:
                     print(f"\n  Reached max results limit ({max_total_results})")
                     break
+
+            # Apply channel diversity filtering (US-94-009)
+            if enable_channel_diversity and all_search_results:
+                channel_counts: Dict[str, int] = {}
+                filtered_ids = []
+                filtered_results = []
+
+                for r in all_search_results:
+                    channel = r.get('channel', '')
+                    if not channel:
+                        # Include videos without channel info
+                        filtered_ids.append(r['video_id'])
+                        filtered_results.append(r)
+                        continue
+
+                    current_count = channel_counts.get(channel, 0)
+                    if current_count < max_videos_per_channel:
+                        channel_counts[channel] = current_count + 1
+                        filtered_ids.append(r['video_id'])
+                        filtered_results.append(r)
+                    else:
+                        logger.debug(f"Skipping video {r['video_id']} from channel '{channel}' (max {max_videos_per_channel} reached)")
+
+                removed_count = len(all_video_ids) - len(filtered_ids)
+                if removed_count > 0:
+                    print(f"  - Removed {removed_count} videos due to channel diversity limit ({max_videos_per_channel} per channel)")
+
+                all_video_ids = filtered_ids
+                all_search_results = filtered_results
 
             # Store results in state
             state.video_ids = all_video_ids
