@@ -718,3 +718,262 @@ class TestVideoMetadataConstruction:
 
         assert "[Video context: Solar Energy. How panels work]" in enriched[0][0].text
         assert "caption about solar" in enriched[0][0].text
+
+
+class TestUS95VideoMetadataEnrichment:
+    """Tests for US-95-005: Pass full video metadata context to LLM reranker."""
+
+    def test_build_video_context_includes_tags(self):
+        """Verify tags are included in video context."""
+        result = LLMReranker._build_video_context(
+            "Solar Energy",
+            "How solar panels work.",
+            tags=["solar", "renewable", "energy", "panels", "photovoltaic"]
+        )
+        assert "Tags:" in result
+        assert "solar" in result
+        assert "renewable" in result
+
+    def test_build_video_context_includes_chapters(self):
+        """Verify chapter titles are included in video context."""
+        chapters = [
+            {"title": "Introduction to Solar", "start_time": 0},
+            {"title": "How Panels Work", "start_time": 120},
+            {"title": "Cost Analysis", "start_time": 300},
+        ]
+        result = LLMReranker._build_video_context(
+            "Solar Energy",
+            "Complete guide to solar power.",
+            chapters=chapters
+        )
+        assert "Chapters:" in result
+        assert "Introduction to Solar" in result
+        assert "How Panels Work" in result
+
+    def test_build_video_context_tags_limit(self):
+        """Verify tags are limited to 5."""
+        tags = ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7"]
+        result = LLMReranker._build_video_context(
+            "Title", "Description.", tags=tags
+        )
+        # Should only include first 5 tags
+        assert "tag1" in result
+        assert "tag2" in result
+        assert "tag3" in result
+        assert "tag4" in result
+        assert "tag5" in result
+        assert "tag6" not in result
+        assert "tag7" not in result
+
+    def test_build_video_context_chapters_limit(self):
+        """Verify chapters are limited to 3."""
+        chapters = [
+            {"title": "Chapter 1", "start_time": 0},
+            {"title": "Chapter 2", "start_time": 60},
+            {"title": "Chapter 3", "start_time": 120},
+            {"title": "Chapter 4", "start_time": 180},
+        ]
+        result = LLMReranker._build_video_context(
+            "Title", "Description.", chapters=chapters
+        )
+        # Should only include first 3 chapters
+        assert "Chapter 1" in result
+        assert "Chapter 2" in result
+        assert "Chapter 3" in result
+        assert "Chapter 4" not in result
+
+    def test_build_video_context_handles_dict_chapters(self):
+        """Verify chapters can be dict format with title key."""
+        chapters = [{"title": "Getting Started"}, {"title": "Advanced Topics"}]
+        result = LLMReranker._build_video_context(
+            "Python Tutorial", "Learn Python programming.", chapters=chapters
+        )
+        assert "Getting Started" in result
+        assert "Advanced Topics" in result
+
+    def test_build_video_context_empty_when_no_metadata(self):
+        """Verify empty string returned when all metadata is empty."""
+        result = LLMReranker._build_video_context("", "", [], [])
+        assert result == ""
+
+    def test_reranker_include_metadata_config_default(self):
+        """Verify reranker_include_metadata defaults to True."""
+        config = LLMRerankerConfig()
+        assert config.reranker_include_metadata is True
+
+    def test_reranker_include_metadata_config_false(self):
+        """Verify reranker_include_metadata can be set to False."""
+        config = LLMRerankerConfig(reranker_include_metadata=False)
+        assert config.reranker_include_metadata is False
+
+    def test_enrich_candidates_respects_config_flag(self):
+        """Verify enrichment is skipped when config flag is False."""
+        config = LLMRerankerConfig(reranker_include_metadata=False)
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment("caption text", source_file="vid123"), 0.9),
+        ]
+        video_metadata = {
+            "vid123": {"title": "Solar Energy", "description": "About solar.", "tags": ["solar"], "chapters": []},
+        }
+
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        # Should not be enriched because config flag is False
+        assert enriched[0][0].text == "caption text"
+
+    def test_enrich_candidates_with_tags_and_chapters(self):
+        """Verify candidates are enriched with tags and chapters."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment("caption about panels", source_file="vid123"), 0.9),
+        ]
+        video_metadata = {
+            "vid123": {
+                "title": "Solar Energy Guide",
+                "description": "Complete guide to solar.",
+                "tags": ["solar", "renewable", "energy"],
+                "chapters": [
+                    {"title": "Introduction", "start_time": 0},
+                    {"title": "Installation", "start_time": 180},
+                ]
+            },
+        }
+
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        assert "Video context:" in enriched[0][0].text
+        assert "Solar Energy Guide" in enriched[0][0].text
+        assert "Tags:" in enriched[0][0].text
+        assert "solar" in enriched[0][0].text
+        assert "Chapters:" in enriched[0][0].text
+        assert "Introduction" in enriched[0][0].text
+
+    def test_rerank_passes_full_metadata_to_provider(self):
+        """Verify full metadata (tags, chapters) is passed to LLM provider."""
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+        provider = MockLLMProvider()
+
+        candidates = [
+            (MockSRTSegment("solar panel footage", source_file="vid123"), 0.9),
+        ]
+
+        video_metadata = {
+            "vid123": {
+                "title": "Solar Energy Guide",
+                "description": "Complete guide to solar.",
+                "tags": ["solar", "renewable"],
+                "chapters": [{"title": "Getting Started"}],
+            },
+        }
+
+        reranker.rerank(
+            voiceover_text="renewable energy sources",
+            candidates=candidates,
+            primary_provider=provider,
+            video_metadata=video_metadata
+        )
+
+        batch = provider.last_call_args['batch']
+        enriched_candidates = batch[0][1]
+        # First candidate should be enriched with tags and chapters
+        assert "Tags:" in enriched_candidates[0][0].text
+        assert "solar" in enriched_candidates[0][0].text
+        assert "Chapters:" in enriched_candidates[0][0].text
+
+    def test_from_matching_config_includes_reranker_include_metadata(self):
+        """Verify factory method reads reranker_include_metadata from matching config."""
+        matching_config = MagicMock()
+        matching_config.reranker_include_metadata = False
+        matching_config.ambiguous_threshold = 0.65
+        matching_config.cache_llm_responses = True
+        matching_config.llm_reranker_close_spread_threshold = 0.05
+
+        reranker = LLMReranker.from_matching_config(matching_config)
+
+        assert reranker.config.reranker_include_metadata is False
+
+    def test_from_matching_config_defaults_reranker_include_metadata(self):
+        """Verify factory method defaults reranker_include_metadata to True."""
+        matching_config = MagicMock(spec=[])  # Empty spec - no attributes
+
+        reranker = LLMReranker.from_matching_config(matching_config)
+
+        assert reranker.config.reranker_include_metadata is True
+
+    def test_reranker_produces_better_selections_with_metadata(self):
+        """Verify that including metadata leads to better/more informed selections.
+
+        This test demonstrates that metadata (tags, chapters) helps the LLM
+        make better decisions when caption text alone is ambiguous.
+        """
+        config = LLMRerankerConfig()
+        reranker = LLMReranker(config=config)
+
+        # Create a scenario where captions are ambiguous but metadata clarifies intent
+        # Caption text is vague: "The system is working" - could be about many topics
+        candidates = [
+            (MockSRTSegment("The system is working properly", source_file="vid_solar"), 0.85),
+            (MockSRTSegment("The system is working", source_file="vid_car"), 0.85),
+            (MockSRTSegment("The system is working great", source_file="vid_computer"), 0.85),
+        ]
+
+        # With metadata: video is about solar panels
+        video_metadata = {
+            "vid_solar": {
+                "title": "Solar Panel Installation",
+                "description": "How to install solar panels on your roof.",
+                "tags": ["solar", "renewable energy", "photovoltaic", "green energy"],
+                "chapters": [
+                    {"title": "Introduction to Solar", "start_time": 0},
+                    {"title": "Panel Selection", "start_time": 180},
+                ]
+            },
+            "vid_car": {
+                "title": "Car Engine Repair",
+                "description": "How to fix car engine problems.",
+                "tags": ["car", "automotive", "repair", "engine"],
+                "chapters": [
+                    {"title": "Engine Overview", "start_time": 0},
+                ]
+            },
+            "vid_computer": {
+                "title": "Computer Setup Guide",
+                "description": "Setting up your new computer.",
+                "tags": ["computer", "technology", "setup", "guide"],
+                "chapters": []
+            },
+        }
+
+        # Run rerank with voiceover about renewable energy
+        provider_with_metadata = MockLLMProvider(
+            return_values=[
+                (0, 0.9, "Best match: solar panel installation matches renewable energy voiceover", "cot")
+            ]
+        )
+
+        result = reranker.rerank(
+            voiceover_text="I need footage about renewable energy sources and solar power",
+            candidates=candidates,
+            primary_provider=provider_with_metadata,
+            video_metadata=video_metadata
+        )
+
+        # Verify metadata was included in the context passed to LLM
+        batch = provider_with_metadata.last_call_args['batch']
+        enriched_text = batch[0][1][0][0].text
+
+        # The enriched text should contain metadata
+        assert "Video context:" in enriched_text
+        assert "Solar Panel Installation" in enriched_text
+        assert "solar" in enriched_text
+        assert "Tags:" in enriched_text
+        assert "Chapters:" in enriched_text
+
+        # The LLM selected vid_solar (index 0) which has matching solar tags
+        # This demonstrates metadata helps make better selection
+        assert result.selected_idx == 0

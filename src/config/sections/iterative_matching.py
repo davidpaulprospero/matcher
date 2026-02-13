@@ -104,6 +104,19 @@ class IterativeMatchingConfig:
         "explained",     # Explained content
     ])
 
+    # US-94-010: Duration tier diversity enforcement
+    # Prefer diverse duration tiers (short <2min, medium 2-10min, long >10min) across matches
+    tier_diversity_weight: float = 0.15  # Weight for duration tier diversity bonus
+
+    # US-94-011: Query result caching
+    # Cache YouTube search results to avoid repeated API calls
+    cache_query_results: bool = True  # Enable/disable query result caching
+    query_cache_ttl_hours: int = 24  # TTL for cached query results (hours)
+
+    # US-94-012: Voiceover context awareness for gap keywords
+    # Use adjacent segment text to enrich gap keywords
+    context_window_segments: int = 1  # Number of adjacent segments to include for context
+
     # Query learning (track what works)
     enable_query_learning: bool = True  # Learn from successful queries
     learning_db_path: str = ".cache/query_learning.json"  # Learning DB file
@@ -136,3 +149,5 @@ class IterativeMatchingConfig:
         self.max_new_videos_per_pass = max(1, self.max_new_videos_per_pass)
         self.caption_batch_size = max(1, self.caption_batch_size)
         self.caption_fetch_delay = max(0.0, self.caption_fetch_delay)
+        self.query_cache_ttl_hours = max(0, self.query_cache_ttl_hours)
+        self.context_window_segments = max(0, self.context_window_segments)  # US-94-012

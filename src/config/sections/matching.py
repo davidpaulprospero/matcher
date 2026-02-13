@@ -201,12 +201,38 @@ class MatchingScoringConfig:
     # the segment is flagged as low-diversity (alternatives look too similar)
     min_track_diversity_distance: float = 0.15  # Minimum avg pairwise cosine distance
 
+    # Chapter coherence scoring (US-98-006) — reward videos with chapter structure similar to voiceover
+    # When video chapters have similar count, topics, and transition patterns to voiceover chapters,
+    # apply a coherence boost. Penalizes mismatched structures.
+    chapter_coherence_enabled: bool = True  # Enable chapter coherence scoring
+    chapter_coherence_weights: Dict[str, float] = field(default_factory=lambda: {
+        'chapter_count_similarity': 0.3,
+        'topic_overlap': 0.4,
+        'transition_pattern': 0.3,
+    })
+    chapter_coherence_boost_max: float = 0.08  # Maximum boost for highly coherent chapter structure
+    chapter_coherence_penalty_max: float = -0.05  # Maximum penalty for incoherent structure
+
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):
             self.entity_match_boosts = {str(k): v for k, v in self.entity_match_boosts.items()}
         if isinstance(self.keyword_overlap_thresholds, dict):
             self.keyword_overlap_thresholds = {str(k): v for k, v in self.keyword_overlap_thresholds.items()}
+        # Validate chapter_coherence_weights (US-98-006)
+        if isinstance(self.chapter_coherence_weights, dict):
+            weights = self.chapter_coherence_weights
+            required_keys = {'chapter_count_similarity', 'topic_overlap', 'transition_pattern'}
+            if not required_keys.issubset(set(weights.keys())):
+                raise ValueError(
+                    f"chapter_coherence_weights must contain keys {required_keys}, "
+                    f"got {list(weights.keys())}"
+                )
+            total = sum(weights.values())
+            if not (0.99 <= total <= 1.01):  # Allow small floating-point tolerance
+                raise ValueError(
+                    f"chapter_coherence_weights must sum to 1.0, got {total}"
+                )
 
 
 @dataclass
@@ -452,6 +478,14 @@ class MatchingConfig:
     # US-95-005: Include video metadata in LLM reranker context
     reranker_include_metadata: bool = True  # Pass title, description, tags, chapters to LLM
 
+    # US-95-010: Context richness calibration for confidence scores
+    # When enabled, calibrates confidence based on available metadata context:
+    # - Rich metadata (title + description + tags + chapters) -> higher confidence
+    # - Sparse metadata -> conservative (lower) confidence
+    context_richness_calibration: bool = True  # Enable confidence calibration based on context richness
+    context_richness_boost_max: float = 0.08  # Max boost when all context signals present
+    context_richness_penalty_max: float = 0.05  # Max penalty when no context signals
+
     # Delta matching (only match new videos)
     delta_matching_enabled: bool = True  # Enable delta-aware matching
     force_rematch: bool = False  # Force rematch all videos (CLI override)
@@ -461,6 +495,8 @@ class MatchingConfig:
     chapter_matching_enabled: bool = True  # Enable chapter-based topic filtering
     enforce_chapter_boundaries: bool = False  # US-95-004: Penalize cross-chapter matches
     cross_chapter_penalty: float = 0.1  # US-95-004: Penalty for matching video from different chapter
+    prefer_chapter_aligned_segments: bool = True  # US-95-011: Prefer segments aligned with chapter boundaries
+    chapter_alignment_boost: float = 0.05  # US-95-011: Boost for chapter-aligned segments
     topic_mismatch_penalty: float = 0.15  # Confidence penalty for topic mismatch
     extract_video_topics: bool = True  # Extract topics from video transcripts
     min_topic_overlap: int = 1  # Minimum topic keywords that must match

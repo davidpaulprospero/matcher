@@ -523,23 +523,36 @@ def _has_proper_noun(text: str, entity_names: Set[str]) -> bool:
     return len(proper_nouns) >= 1
 
 
-def extract_keywords_for_gap(gap: GapSegment, max_keywords: int = 5) -> List[str]:
+def extract_keywords_for_gap(
+    gap: GapSegment,
+    max_keywords: int = 5,
+    context_text: str = ""
+) -> List[str]:
     """
     Extract search-relevant keywords from a gap segment.
 
+    US-94-012: Added voiceover context awareness - uses adjacent segment text
+    to enrich gap keywords for better search relevance.
+
     Prioritizes:
-    1. Proper nouns (capitalized words)
+    1. Proper nouns (capitalized words) from gap text
     2. Pattern-specific words (actions, locations)
     3. Content words (nouns, verbs, adjectives)
+    4. Context words from adjacent segments (if available)
 
     Args:
         gap: GapSegment to extract keywords from
         max_keywords: Maximum keywords to return
+        context_text: Optional text from adjacent segments for context enrichment.
+            When provided, keywords from context are added with lower priority.
 
     Returns:
         List of keywords suitable for search queries
     """
+    # Combine gap text with context for keyword extraction
+    # Gap text takes precedence; context text provides supplementary keywords
     text = gap.voiceover_text
+    context_lower = context_text.lower() if context_text else ""
     keywords = []
 
     # Stop words to exclude
@@ -577,6 +590,24 @@ def extract_keywords_for_gap(gap: GapSegment, max_keywords: int = 5) -> List[str
     # 3. Add remaining content words
     remaining = [w for w in words if w not in keywords and len(w) > 3]
     keywords.extend(remaining)
+
+    # US-94-012: Add context keywords from adjacent segments
+    # Context words are added with lower priority (after gap keywords)
+    if context_lower:
+        context_words = context_lower.split()
+        context_words = [w.strip('.,!?;:"\'-()[]') for w in context_words]
+        context_words = [w for w in context_words if w and len(w) > 3 and w not in stop_words]
+
+        # Extract proper nouns from context (less prioritized)
+        context_proper_nouns = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', context_text)
+        for pn in context_proper_nouns:
+            if pn.lower() not in [k.lower() for k in keywords]:
+                context_words.insert(0, pn.lower())  # Prioritize proper nouns from context
+
+        # Add unique context words that aren't already in keywords
+        for cw in context_words:
+            if cw.lower() not in [k.lower() for k in keywords] and len(keywords) < max_keywords:
+                keywords.append(cw)
 
     # Deduplicate while preserving order
     seen = set()

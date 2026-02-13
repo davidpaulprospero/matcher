@@ -568,12 +568,14 @@ class MatchStage(Stage):
                 title = getattr(vsr, 'title', '')
                 desc = getattr(vsr, 'description', '')
                 tags = getattr(vsr, 'video_tags', [])
+                channel = getattr(vsr, 'channel', '')
             if vid_id:
                 video_metadata[vid_id] = {
                     'title': title or '',
                     'description': desc or '',
                     'tags': tags or [],
                     'chapters': [],
+                    'channel': channel or '',
                 }
 
         # Enrich from caption_results (tags, chapters — may have data VSR lacks)
@@ -598,6 +600,7 @@ class MatchStage(Stage):
                     'description': '',
                     'tags': cr_tags,
                     'chapters': cr_chapters,
+                    'channel': '',
                 }
 
         return video_metadata

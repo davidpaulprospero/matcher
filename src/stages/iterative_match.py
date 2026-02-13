@@ -69,6 +69,9 @@ class PassMetrics:
     queries_executed: int
     duration_seconds: float = 0.0
     strategy_breakdown: Dict[str, int] = field(default_factory=dict)
+    # US-94-011: Cache metrics
+    cache_hits: int = 0
+    cache_misses: int = 0
 
 
 @register_stage
@@ -149,6 +152,57 @@ class IterativeMatchStage(Stage):
             else:
                 logger.debug("No cookies configured for iterative match")
         return static_args
+
+    def _invalidate_cache_on_config_change(
+        self,
+        search_cache: 'SearchResultsCache',
+        current_ttl: int
+    ) -> None:
+        """
+        Invalidate cache if config has changed.
+
+        US-94-011: Clears cache when TTL config changes, ensuring fresh results
+        when user modifies caching behavior.
+
+        Args:
+            search_cache: The search cache to check
+            current_ttl: Current TTL from config
+        """
+        import os
+        import json
+        from pathlib import Path
+
+        # Check for cached TTL in a marker file
+        cache_marker = search_cache.cache_dir / "config_marker.json"
+
+        if cache_marker.exists():
+            try:
+                with open(cache_marker, 'r') as f:
+                    marker = json.load(f)
+                cached_ttl = marker.get('ttl_hours', -1)
+                if cached_ttl != current_ttl:
+                    # TTL changed - invalidate cache
+                    logger.info(f"Cache TTL changed from {cached_ttl}h to {current_ttl}h - invalidating cache")
+                    search_cache.clear()
+                    marker = {'ttl_hours': current_ttl}
+                    with open(cache_marker, 'w') as f:
+                        json.dump(marker, f)
+            except (json.JSONDecodeError, IOError):
+                # Invalid marker - reset it
+                marker = {'ttl_hours': current_ttl}
+                try:
+                    with open(cache_marker, 'w') as f:
+                        json.dump(marker, f)
+                except IOError:
+                    pass
+        else:
+            # First run - create marker
+            marker = {'ttl_hours': current_ttl}
+            try:
+                with open(cache_marker, 'w') as f:
+                    json.dump(marker, f)
+            except IOError:
+                pass
 
     def run(
         self,
@@ -441,11 +495,11 @@ class IterativeMatchStage(Stage):
                 all_new_candidates = []
                 gaps_filled_total = 0
                 
-                # Search first to get video IDs
-                video_ids = self._search_youtube_for_videos(
+                # Search first to get video IDs (US-94-011: also returns cache metrics)
+                video_ids, cache_hits, cache_misses = self._search_youtube_for_videos(
                     queries, state, config, iter_config
                 )
-                
+
                 if video_ids:
                     print(f"    Found {len(video_ids)} new video candidates")
                     
@@ -506,7 +560,9 @@ class IterativeMatchStage(Stage):
                     gaps_filled=gaps_filled,
                     new_videos_found=len(new_candidates),
                     queries_executed=len(queries),
-                    duration_seconds=pass_duration
+                    duration_seconds=pass_duration,
+                    cache_hits=cache_hits,
+                    cache_misses=cache_misses
                 )
                 all_pass_metrics.append(pass_metrics)
 
@@ -1043,7 +1099,37 @@ class IterativeMatchStage(Stage):
             from ..iterative_match.gap_analyzer import extract_keywords_for_gap
             from ..iterative_match import GapSegment as GapSeg
 
+            # US-94-012: Get context window for voiceover context awareness
+            context_window = getattr(config, 'context_window_segments', 1)
+            voiceover_segments = state.voiceover_segments or []
+
             for gap in gaps[:20]:  # Limit to avoid too many queries
+                # Build context text from adjacent segments
+                context_parts = []
+                seg_idx = gap.segment_index
+                if context_window > 0 and voiceover_segments:
+                    # Get segments before the gap
+                    for i in range(1, context_window + 1):
+                        prev_idx = seg_idx - i
+                        if 0 <= prev_idx < len(voiceover_segments):
+                            prev_seg = voiceover_segments[prev_idx]
+                            if hasattr(prev_seg, 'text'):
+                                context_parts.append(prev_seg.text)
+                            elif isinstance(prev_seg, dict):
+                                context_parts.append(prev_seg.get('text', ''))
+
+                    # Get segments after the gap
+                    for i in range(1, context_window + 1):
+                        next_idx = seg_idx + i
+                        if 0 <= next_idx < len(voiceover_segments):
+                            next_seg = voiceover_segments[next_idx]
+                            if hasattr(next_seg, 'text'):
+                                context_parts.append(next_seg.text)
+                            elif isinstance(next_seg, dict):
+                                context_parts.append(next_seg.get('text', ''))
+
+                context_text = ' '.join(context_parts)
+
                 gap_obj = GapSeg(
                     segment_index=gap.segment_index,
                     confidence=gap.confidence,
@@ -1052,7 +1138,7 @@ class IterativeMatchStage(Stage):
                     pattern_type=gap_analysis.clustered_gaps.get(gap.segment_index, 'other')
                     if gap_analysis else 'other'
                 )
-                keywords = extract_keywords_for_gap(gap_obj, max_keywords=5)
+                keywords = extract_keywords_for_gap(gap_obj, max_keywords=5, context_text=context_text)
                 if keywords:
                     queries.append({
                         'query': ' '.join(keywords),
@@ -1478,7 +1564,7 @@ class IterativeMatchStage(Stage):
         state: 'PipelineState',
         config: 'Config',
         iter_config: Any
-    ) -> List[str]:
+    ) -> Tuple[List[str], int, int]:
         """
         Search YouTube for videos matching the queries.
 
@@ -1492,7 +1578,7 @@ class IterativeMatchStage(Stage):
             iter_config: Iterative matching config
 
         Returns:
-            List of YouTube video IDs found
+            Tuple of (List of YouTube video IDs found, cache_hits, cache_misses)
         """
         import subprocess
         import json
@@ -1531,9 +1617,16 @@ class IterativeMatchStage(Stage):
         min_duration = 30
         max_duration = 600  # 10 minutes max
 
-        # Initialize search cache
-        cache_ttl = getattr(iter_config, 'search_cache_ttl_hours', 24)
-        search_cache = SearchResultsCache(ttl_hours=cache_ttl)
+        # Initialize search cache with config options (US-94-011)
+        cache_enabled = getattr(iter_config, 'cache_query_results', True)
+        cache_ttl = getattr(iter_config, 'query_cache_ttl_hours', 24)
+
+        # US-94-011: Invalidate cache on config changes
+        search_cache = None
+        if cache_enabled:
+            search_cache = SearchResultsCache(ttl_hours=cache_ttl)
+            # Invalidate cache if TTL changed significantly (config was modified)
+            self._invalidate_cache_on_config_change(search_cache, cache_ttl)
 
         # Collect unique video IDs from search
         new_video_ids: Set[str] = set()
@@ -1556,12 +1649,14 @@ class IterativeMatchStage(Stage):
                 continue
 
             try:
-                # Check search cache first
-                cached_videos = search_cache.get_search_result(
-                    keyword=query_text,
-                    tier='iterative',
-                    search_pool=results_per_query
-                )
+                # US-94-011: Check search cache first (if enabled)
+                cached_videos = None
+                if search_cache is not None:
+                    cached_videos = search_cache.get_search_result(
+                        keyword=query_text,
+                        tier='iterative',
+                        search_pool=results_per_query
+                    )
 
                 query_vids = []
 
@@ -1576,7 +1671,7 @@ class IterativeMatchStage(Stage):
                             if len(new_video_ids) >= max_new_videos:
                                 break
                 else:
-                    # Cache miss - search YouTube
+                    # Cache miss or disabled - search YouTube
                     cache_misses += 1
 
                     # Use yt-dlp to search YouTube (metadata only, no download)
@@ -1662,7 +1757,8 @@ class IterativeMatchStage(Stage):
         # Track fetched videos for cross-pass deduplication
         self._fetched_video_ids.update(new_video_ids)
 
-        return list(new_video_ids)
+        # US-94-011: Return video IDs with cache metrics
+        return list(new_video_ids), cache_hits, cache_misses
 
     def _search_and_fetch_captions(
         self,
@@ -1670,7 +1766,7 @@ class IterativeMatchStage(Stage):
         state: 'PipelineState',
         config: 'Config',
         iter_config: Any
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], int, int]:
         """
         Execute YouTube searches and fetch captions for new videos.
 
@@ -1684,13 +1780,16 @@ class IterativeMatchStage(Stage):
             iter_config: Iterative matching config
 
         Returns:
+            Tuple of (List of candidate dicts, cache_hits, cache_misses)
+
+        Returns:
             List of new video candidate dictionaries with caption segments
         """
-        # Search for videos first
-        video_ids = self._search_youtube_for_videos(queries, state, config, iter_config)
+        # Search for videos first (US-94-011: also returns cache metrics)
+        video_ids, cache_hits, cache_misses = self._search_youtube_for_videos(queries, state, config, iter_config)
 
         if not video_ids:
-            return []
+            return [], cache_hits, cache_misses
 
         print(f"    Found {len(video_ids)} new video candidates")
 
@@ -1703,7 +1802,8 @@ class IterativeMatchStage(Stage):
             caption_timeout
         )
 
-        return new_candidates
+        # US-94-011: Return candidates with cache metrics
+        return new_candidates, cache_hits, cache_misses
 
     def _fetch_captions_for_videos(
         self,
@@ -1814,6 +1914,7 @@ class IterativeMatchStage(Stage):
                         'language': result.language,
                         'is_auto_generated': result.is_auto_generated,
                         'caption_quality': quality,
+                        'total_duration': total_duration,  # US-94-010: Store for tier diversity
                     })
                     success_count += 1
 
@@ -1838,6 +1939,28 @@ class IterativeMatchStage(Stage):
     def _extract_video_id_from_path(self, path: str) -> str:
         """Extract video ID from file path."""
         return extract_video_id(path) or ""
+
+    # US-94-010: Duration tier classification for diversity enforcement
+    DURATION_TIER_SHORT = "short"      # < 2 minutes
+    DURATION_TIER_MEDIUM = "medium"    # 2-10 minutes
+    DURATION_TIER_LONG = "long"        # > 10 minutes
+
+    def _get_duration_tier(self, duration_seconds: float) -> str:
+        """
+        Classify video duration into tier for diversity enforcement.
+
+        Args:
+            duration_seconds: Video duration in seconds
+
+        Returns:
+            Tier string: 'short', 'medium', or 'long'
+        """
+        if duration_seconds < 120:  # < 2 minutes
+            return self.DURATION_TIER_SHORT
+        elif duration_seconds < 600:  # 2-10 minutes
+            return self.DURATION_TIER_MEDIUM
+        else:  # > 10 minutes
+            return self.DURATION_TIER_LONG
 
     def _rematch_gaps(
         self,
@@ -1875,6 +1998,7 @@ class IterativeMatchStage(Stage):
             language = candidate.get('language', 'en')
             is_auto = candidate.get('is_auto_generated', False)
             quality = candidate.get('caption_quality', 'medium')
+            total_duration = candidate.get('total_duration', 0)  # US-94-010: For tier diversity
 
             for seg in segments:
                 state.text_metadata.append({
@@ -1888,6 +2012,7 @@ class IterativeMatchStage(Stage):
                     'caption_auto_generated': is_auto,
                     'caption_quality': quality,
                     'iterative_pass': True,  # Mark as from iterative matching
+                    'total_duration': total_duration,  # US-94-010: For tier diversity
                 })
                 new_segment_count += 1
 
@@ -2025,9 +2150,14 @@ class IterativeMatchStage(Stage):
             iter_config = getattr(config, 'iterative_matching', None)
             source_spacing = 300.0
             target_conf = 0.90
+            tier_diversity_weight = 0.15  # US-94-010: Default
             if iter_config:
                 source_spacing = getattr(iter_config, 'source_spacing_seconds', 300.0)
                 target_conf = getattr(iter_config, 'target_confidence', 0.90)
+                tier_diversity_weight = getattr(iter_config, 'tier_diversity_weight', 0.15)
+
+            # US-94-010: Track used duration tiers for diversity enforcement
+            used_tiers: set = set()
 
             gaps_filled = 0
 
@@ -2063,7 +2193,7 @@ class IterativeMatchStage(Stage):
 
                 # Filter to only new segments and check source spacing
                 best_match = None
-                best_conf = 0.0
+                best_adjusted_conf = 0.0
 
                 for dist, idx in zip(distances[0], indices[0]):
                     if idx < 0:
@@ -2089,19 +2219,37 @@ class IterativeMatchStage(Stage):
                     # for normalized vectors): higher = more similar, range [0, 1]
                     confidence = max(0.0, min(1.0, float(dist)))
 
-                    if confidence > best_conf and confidence >= target_conf:
-                        best_conf = confidence
+                    # US-94-010: Apply duration tier diversity bonus
+                    # Get video duration from metadata and compute tier
+                    video_duration = meta.get('total_duration', 0)
+                    tier = self._get_duration_tier(video_duration)
+
+                    # Apply diversity bonus: if tier not yet used, add tier_diversity_weight
+                    # This encourages using different duration tiers across gaps
+                    diversity_bonus = 0.0
+                    if tier not in used_tiers:
+                        diversity_bonus = tier_diversity_weight
+
+                    adjusted_conf = confidence + diversity_bonus
+
+                    if adjusted_conf > best_adjusted_conf and confidence >= target_conf:
+                        best_adjusted_conf = adjusted_conf
                         best_match = {
                             'index': global_idx,
                             'video_id': video_id,
                             'confidence': confidence,
-                            'meta': meta
+                            'adjusted_confidence': adjusted_conf,
+                            'meta': meta,
+                            'tier': tier,  # US-94-010: Store tier for tracking
                         }
 
                 # Update match if we found a good one
                 if best_match:
+                    tier = best_match.get('tier', 'unknown')
                     if self._update_match_for_gap(gap, best_match, state):
                         gaps_filled += 1
+                        # Track this tier as used for diversity
+                        used_tiers.add(tier)
 
                     # Track this source for future spacing checks
                     locked_sources[best_match['video_id']].append(gap.position)

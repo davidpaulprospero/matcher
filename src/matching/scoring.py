@@ -19,7 +19,7 @@ import math
 import statistics
 
 from ..utils import SRTSegment
-from ..topic_extraction import compute_topic_penalty
+from ..topic_extraction import compute_topic_penalty, compute_topic_alignment_boost
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -274,6 +274,68 @@ def apply_topic_penalty(
     if penalty > 0:
         adjusted_confidence = max(0.0, confidence - penalty)
         reason = f"topic mismatch penalty: -{penalty:.2f}"
+        return adjusted_confidence, reason
+
+    return confidence, ""
+
+
+def apply_topic_alignment_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    video_topics: dict,
+    topic_alignment_weight: float = 0.1,
+) -> Tuple[float, str]:
+    """
+    Apply topic alignment boost for matched segments (US-95-007).
+
+    When voiceover topics align with video chapter topics, boost confidence.
+    This rewards segments where the voiceover subject matter matches the video content.
+
+    Boost scales with topic alignment:
+    - 3+ shared keywords: full boost (topic_alignment_weight)
+    - 1-2 shared keywords: partial boost (50% of topic_alignment_weight)
+    - No overlap: no boost
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment (may have topics from chapter assignment)
+        video_segment: Video segment (used to look up video topics)
+        video_topics: Dict mapping video paths to VideoTopics objects
+        topic_alignment_weight: Maximum boost for topic alignment
+
+    Returns:
+        Tuple of (adjusted_confidence, boost_reason)
+    """
+    if topic_alignment_weight <= 0:
+        return confidence, ""
+
+    # Get voiceover chapter topics
+    vo_topics = getattr(vo_segment, 'topics', [])
+    if not vo_topics:
+        return confidence, ""
+
+    # Get video topics from the video_topics dict
+    video_path = video_segment.source_file
+    video_topic_info = video_topics.get(video_path)
+    if not video_topic_info:
+        return confidence, ""
+
+    video_topics_list = video_topic_info.topics if video_topic_info else []
+    if not video_topics_list:
+        return confidence, ""
+
+    # Compute topic alignment boost
+    boost = compute_topic_alignment_boost(
+        vo_topics=vo_topics,
+        video_topics=video_topics_list,
+        max_boost=topic_alignment_weight,
+        min_overlap=1,
+    )
+
+    if boost > 0:
+        adjusted_confidence = min(1.0, confidence + boost)
+        reason = f"topic alignment boost: +{boost:.2f}"
         return adjusted_confidence, reason
 
     return confidence, ""
@@ -1305,6 +1367,103 @@ def _compute_chapter_confidence_weight(chapter_confidence: float) -> float:
     return 0.5 + (chapter_confidence - 0.5) / 0.3 * 0.5
 
 
+# US-95-011: Chapter timestamp alignment
+# Tolerance in seconds for considering a segment boundary "aligned" with a chapter
+CHAPTER_ALIGNMENT_TOLERANCE = 3.0
+
+
+def compute_chapter_alignment_boost(
+    video_segment: SRTSegment,
+    video_chapters: List[dict],
+    config
+) -> Tuple[float, str]:
+    """
+    US-95-011: Compute confidence boost for segments aligned with YouTube chapter timestamps.
+
+    When a video segment's start or end time aligns with a chapter boundary (within tolerance),
+    boost confidence to prefer these natural segment breaks.
+
+    Args:
+        video_segment: Video segment with start_time and end_time
+        video_chapters: List of {title, start_time, end_time} chapter dicts
+        config: Matching config with prefer_chapter_aligned_segments and chapter_alignment_boost
+
+    Returns:
+        Tuple of (boost_amount, reason_string)
+    """
+    # Check if feature is enabled
+    prefer_chapter = getattr(config, 'prefer_chapter_aligned_segments', True) if config else True
+    if not prefer_chapter:
+        return 0.0, "chapter_alignment_disabled"
+
+    if not video_chapters:
+        return 0.0, "no_chapters"
+
+    # Get segment boundaries
+    seg_start = getattr(video_segment, 'start_time', None)
+    seg_end = getattr(video_segment, 'end_time', None)
+
+    if seg_start is None or seg_end is None:
+        return 0.0, "no_segment_times"
+
+    # Check alignment with chapter boundaries
+    start_aligned = False
+    end_aligned = False
+    aligned_chapter = None
+
+    for chapter in video_chapters:
+        ch_start = chapter.get('start_time')
+        ch_end = chapter.get('end_time')
+
+        if ch_start is None:
+            continue
+
+        # Check all possible alignments for this chapter
+        this_start_aligned = False
+        this_end_aligned = False
+
+        # Check if segment start aligns with chapter start (allowing tolerance)
+        if abs(seg_start - ch_start) <= CHAPTER_ALIGNMENT_TOLERANCE:
+            this_start_aligned = True
+
+        # Check if segment end aligns with chapter start
+        if abs(seg_end - ch_start) <= CHAPTER_ALIGNMENT_TOLERANCE:
+            this_end_aligned = True
+
+        # If chapter has end_time, check segment boundaries against it
+        if ch_end is not None:
+            if abs(seg_start - ch_end) <= CHAPTER_ALIGNMENT_TOLERANCE:
+                this_start_aligned = True
+            if abs(seg_end - ch_end) <= CHAPTER_ALIGNMENT_TOLERANCE:
+                this_end_aligned = True
+
+        # If this chapter has any alignment, record it and continue checking others
+        # to find the best match (both start and end ideally)
+        if this_start_aligned or this_end_aligned:
+            aligned_chapter = chapter.get('title', 'Unknown')
+            # Update flags (OR them to keep any alignment found)
+            start_aligned = start_aligned or this_start_aligned
+            end_aligned = end_aligned or this_end_aligned
+            # Only break if both boundaries align (best case)
+            if start_aligned and end_aligned:
+                break
+
+    if not (start_aligned or end_aligned):
+        return 0.0, "not_aligned"
+
+    # Calculate boost
+    boost = getattr(config, 'chapter_alignment_boost', 0.05) if config else 0.05
+
+    # Full boost if both start and end align (segment is within a chapter)
+    # Partial boost if only one boundary aligns
+    if start_aligned and end_aligned:
+        reason = f"segment_within_chapter:{aligned_chapter}"
+    else:
+        reason = f"boundary_aligned:{aligned_chapter}"
+
+    return boost, reason
+
+
 def apply_chapter_topic_match(
     confidence: float,
     vo_segment: SRTSegment,
@@ -1367,6 +1526,150 @@ def apply_chapter_topic_match(
         reason = f"chapter topic mismatch {adjustment:.2f}"
 
     return min(1.0, confidence + adjustment), reason
+
+
+# Chapter coherence scoring constants (US-98-006)
+_DEFAULT_CHAPTER_COHERENCE_BOOST = 0.08
+_DEFAULT_CHAPTER_COHERENCE_PENALTY = -0.05
+
+
+def compute_chapter_coherence_score(
+    vo_chapters: List[dict],
+    video_chapters: List[dict],
+    weights: Optional[dict] = None,
+) -> Tuple[float, str]:
+    """
+    Compute chapter coherence score between voiceover and video chapter structures (US-98-006).
+
+    Measures how well the video's chapter structure matches the voiceover's chapter structure.
+    Higher coherence = more natural alignment between voiceover structure and video chapters.
+
+    Components:
+    - chapter_count_similarity (0.3): How similar the number of chapters are
+    - topic_overlap (0.4): How much topics overlap between corresponding chapters
+    - transition_pattern (0.3): How similar the segment distribution is across chapters
+
+    Args:
+        vo_chapters: List of voiceover chapter dicts with keys: title, keywords, segment_count
+        video_chapters: List of video chapter dicts with keys: title, keywords, segment_count
+        weights: Optional dict with weights for each component (must sum to 1.0)
+
+    Returns:
+        Tuple of (coherence_score, reason_string)
+        coherence_score is in range [-penalty_max, +boost_max] from config
+    """
+    if weights is None:
+        weights = {'chapter_count_similarity': 0.3, 'topic_overlap': 0.4, 'transition_pattern': 0.3}
+
+    # Need at least some chapters on both sides
+    if not vo_chapters or not video_chapters:
+        return 0.0, "no_chapters_for_coherence"
+
+    vo_count = len(vo_chapters)
+    video_count = len(video_chapters)
+
+    # 1. Chapter count similarity (0-1 scale)
+    max_count = max(vo_count, video_count)
+    min_count = min(vo_count, video_count)
+    count_similarity = min_count / max_count if max_count > 0 else 0.0
+
+    # 2. Topic overlap between corresponding chapters
+    topic_overlap_score = 0.0
+    min_chapters = min(vo_count, video_count)
+    for i in range(min_chapters):
+        vo_keywords = set(vo_chapters[i].get('keywords', []))
+        video_keywords = set(video_chapters[i].get('keywords', []))
+        if vo_keywords or video_keywords:
+            overlap = len(vo_keywords & video_keywords)
+            union = len(vo_keywords | video_keywords)
+            jaccard = overlap / union if union > 0 else 0.0
+            topic_overlap_score += jaccard
+    topic_overlap_score = topic_overlap_score / min_chapters if min_chapters > 0 else 0.0
+
+    # 3. Transition pattern - compare segment count distribution
+    # Calculate normalized segment counts per chapter
+    vo_segments = [ch.get('segment_count', 1) for ch in vo_chapters]
+    video_segments = [ch.get('segment_count', 1) for ch in video_chapters]
+
+    vo_total = sum(vo_segments) or 1
+    video_total = sum(video_segments) or 1
+
+    vo_ratios = [s / vo_total for s in vo_segments]
+    video_ratios = [s / video_total for s in video_segments]
+
+    # Compare distributions using mean absolute difference
+    transition_score = 0.0
+    for i in range(min(len(vo_ratios), len(video_ratios))):
+        transition_score += 1.0 - abs(vo_ratios[i] - video_ratios[i])
+    transition_score = transition_score / min(len(vo_ratios), len(video_ratios)) if vo_ratios and video_ratios else 0.0
+
+    # Weighted sum
+    w_count = weights.get('chapter_count_similarity', 0.3)
+    w_topic = weights.get('topic_overlap', 0.4)
+    w_trans = weights.get('transition_pattern', 0.3)
+
+    coherence = (
+        w_count * count_similarity +
+        w_topic * topic_overlap_score +
+        w_trans * transition_score
+    )
+
+    reason = (
+        f"coherence={coherence:.2f} "
+        f"(count_sim={count_similarity:.2f}, topic={topic_overlap_score:.2f}, "
+        f"transition={transition_score:.2f}, vo_chapters={vo_count}, video_chapters={video_count})"
+    )
+
+    return coherence, reason
+
+
+def apply_chapter_coherence_boost(
+    confidence: float,
+    vo_chapters: Optional[List[dict]] = None,
+    video_chapters: Optional[List[dict]] = None,
+    chapter_coherence_enabled: bool = False,
+    weights: Optional[dict] = None,
+    boost_max: float = 0.08,
+    penalty_max: float = -0.05,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply chapter coherence boost/penalty (US-98-006).
+
+    When video chapters have similar structure to voiceover chapters (similar count,
+    overlapping topics, matching transition patterns), apply a boost. Penalize
+    when structures are incoherent (e.g., many video chapters but few voiceover chapters).
+
+    Args:
+        confidence: Current confidence score
+        vo_chapters: List of voiceover chapter dicts with keys: title, keywords, segment_count
+        video_chapters: List of video chapter dicts with keys: title, keywords, segment_count
+        chapter_coherence_enabled: Whether chapter coherence scoring is active
+        weights: Optional weights dict for coherence components
+        boost_max: Maximum boost for highly coherent structure
+        penalty_max: Maximum penalty for incoherent structure
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not chapter_coherence_enabled:
+        return confidence, ""
+
+    if not vo_chapters or not video_chapters:
+        return confidence, ""
+
+    coherence, reason = compute_chapter_coherence_score(vo_chapters, video_chapters, weights)
+
+    # Map coherence [0,1] to adjustment [penalty_max, boost_max]
+    # coherence < 0.5: penalty, coherence >= 0.5: boost
+    if coherence >= 0.5:
+        # Scale from [0.5, 1.0] to [0, boost_max]
+        adjustment = ((coherence - 0.5) / 0.5) * boost_max
+    else:
+        # Scale from [0, 0.5] to [penalty_max, 0]
+        adjustment = (coherence / 0.5) * penalty_max
+
+    final_confidence = min(1.0, confidence + adjustment)
+    return final_confidence, f"chapter_coherence: {adjustment:.3f} ({reason})"
 
 
 # Chapter source consistency constants
@@ -1565,6 +1868,59 @@ def apply_cross_chapter_relevance_boost(
     return min(1.0, confidence + boost), reason
 
 
+# Chapter boundary penalty constants
+_DEFAULT_CROSS_CHAPTER_PENALTY = 0.1
+
+
+def apply_chapter_boundary_penalty(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    enforce_boundaries: bool = False,
+    penalty: float = 0.1,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply penalty for cross-chapter matches (US-95-004).
+
+    When enforce_boundaries is True, voiceover segments should only match video
+    segments within the same chapter. Cross-chapter matches get a penalty.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with chapter_index attribute
+        video_segment: Video segment with chapter_index attribute
+        enforce_boundaries: Whether to enforce chapter boundaries
+        penalty: Penalty amount for cross-chapter match
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not enforce_boundaries:
+        return confidence, ""
+
+    vo_chapter_index = getattr(vo_segment, 'chapter_index', None)
+    if vo_chapter_index is None or vo_chapter_index < 0:
+        # No chapter assigned to voiceover segment - no penalty
+        return confidence, ""
+
+    video_chapter_index = getattr(video_segment, 'chapter_index', None)
+    if video_chapter_index is None or video_chapter_index < 0:
+        # No chapter assigned to video segment - no penalty
+        return confidence, ""
+
+    # Same chapter - no penalty
+    if vo_chapter_index == video_chapter_index:
+        return confidence, ""
+
+    # Cross-chapter match - apply penalty
+    adjusted = max(0.0, confidence - penalty)
+    reason = (
+        f"cross_chapter_boundary: -{penalty:.3f} "
+        f"(vo_ch={vo_chapter_index}, vid_ch={video_chapter_index})"
+    )
+    return adjusted, reason
+
+
 # Listicle consistency boost constant (mirrors MatchScoring.LISTICLE_CONSISTENCY_BOOST)
 _DEFAULT_LISTICLE_CONSISTENCY_BOOST = 0.04
 
@@ -1652,6 +2008,71 @@ def apply_listicle_consistency(
     logger.debug(
         "US-75-007 listicle consistency boost: seg=%d, group=%s, source=%s, boost=%.2f",
         seg_idx, group_id, current_source, boost,
+    )
+
+    return min(1.0, confidence + boost), reason
+
+
+# Source channel consistency constants
+_DEFAULT_SOURCE_CHANNEL_COHERENCE_BOOST = 0.05
+
+
+def apply_source_channel_consistency(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    recent_matches: Optional[List['Match']] = None,
+    current_channel: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, str]:
+    """
+    Standalone function: apply consistency boost for videos from same source channel (US-95-006).
+
+    When the current video is from the same YouTube channel as the previous match,
+    apply a small boost to reward consistent visual style/theme. Videos from the
+    same channel typically share similar production style, lighting, and visual aesthetic.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Current voiceover segment
+        video_segment: Candidate video segment
+        recent_matches: Optional list of recent Match objects (most recent first)
+        current_channel: Channel name of current video candidate
+        config: Config object with source_channel_coherence_boost setting
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not recent_matches or not current_channel:
+        return confidence, ""
+
+    # Get boost from config or use default
+    boost = _DEFAULT_SOURCE_CHANNEL_COHERENCE_BOOST
+    if config:
+        mc = config.matching
+        boost = getattr(mc, 'source_channel_coherence_boost', _DEFAULT_SOURCE_CHANNEL_COHERENCE_BOOST)
+
+    if boost <= 0:
+        return confidence, ""
+
+    # Check previous match
+    prev_match = recent_matches[0]
+    if prev_match is None or prev_match.video_segment is None:
+        return confidence, ""
+
+    # Get previous channel from the match's video segment
+    prev_channel = getattr(prev_match.video_segment, 'channel', None)
+    if not prev_channel:
+        return confidence, ""
+
+    # Check if channels match
+    if prev_channel != current_channel:
+        return confidence, ""
+
+    reason = f"source_channel_coherence: +{boost:.2f} (same channel: {current_channel})"
+    logger.debug(
+        "US-95-006 source channel coherence boost: seg=%d, channel=%s, boost=%.2f",
+        getattr(vo_segment, 'index', -1), current_channel, boost,
     )
 
     return min(1.0, confidence + boost), reason
@@ -2926,6 +3347,75 @@ POOL_LARGE_THRESHOLD = 100  # Pool considered "large" above this
 POOL_TIGHT_MARGIN_THRESHOLD = 0.05  # Top-2 score difference threshold for "tight margin"
 
 
+# Context richness calibration constants
+_CONTEXT_RICHNESS_MAX_SIGNALS = 4  # Max context signals: title, description, tags, chapters
+
+
+def apply_context_richness_calibration(
+    confidence: float,
+    video_title: Optional[str] = None,
+    video_description: Optional[str] = None,
+    video_tags: Optional[List[str]] = None,
+    video_chapter: Optional[str] = None,
+    enabled: bool = True,
+    boost_max: float = 0.08,
+    penalty_max: float = 0.05,
+) -> Tuple[float, str]:
+    """
+    Standalone function: calibrate confidence based on available context richness (US-95-010).
+
+    When video metadata (title, description, tags, chapters) is available, we have more
+    signals to verify the match - this warrants higher confidence. When metadata is sparse,
+    we apply a conservative penalty.
+
+    Args:
+        confidence: Current confidence score
+        video_title: Video title string
+        video_description: Video description string
+        video_tags: List of video tags/keywords
+        video_chapter: Video chapter title (if available)
+        enabled: Whether context richness calibration is enabled
+        boost_max: Maximum boost when all 4 context signals present
+        penalty_max: Maximum penalty when no context signals present
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not enabled:
+        return confidence, ""
+
+    # Count available context signals
+    signals_present = 0
+
+    if video_title and len(video_title.strip()) > 0:
+        signals_present += 1
+    if video_description and len(video_description.strip()) > 0:
+        signals_present += 1
+    if video_tags and len(video_tags) > 0:
+        signals_present += 1
+    if video_chapter and len(video_chapter.strip()) > 0:
+        signals_present += 1
+
+    # Calculate richness ratio (0.0 to 1.0)
+    richness_ratio = signals_present / _CONTEXT_RICHNESS_MAX_SIGNALS
+
+    if richness_ratio >= 0.75:
+        # Rich context (3-4 signals): apply boost
+        adjustment = boost_max * richness_ratio
+        adjusted = min(1.0, confidence + adjustment)
+        reason = f"context_richness_calibration: +{adjustment:.3f} (signals={signals_present}/4, rich)"
+    elif richness_ratio <= 0.25:
+        # Sparse context (0-1 signals): apply penalty
+        adjustment = penalty_max * (1.0 - richness_ratio)
+        adjusted = max(0.0, confidence - adjustment)
+        reason = f"context_richness_calibration: -{adjustment:.3f} (signals={signals_present}/4, sparse)"
+    else:
+        # Moderate context (2 signals): no adjustment
+        return confidence, f"context_richness_calibration: no adjustment (signals={signals_present}/4, moderate)"
+
+    return adjusted, reason
+
+
 class MatchScoring:
     """
     Centralized scoring class for match confidence calculations.
@@ -3788,6 +4278,7 @@ class MatchScoring:
         video_topics: Optional[dict] = None,
         chapter_matching_enabled: bool = False,
         topic_mismatch_penalty: float = 0.15,
+        topic_alignment_weight: float = 0.1,
         video_title: Optional[str] = None,
         chapter_title: Optional[str] = None,
         recent_matches: Optional[List['Match']] = None,
@@ -3819,6 +4310,7 @@ class MatchScoring:
             video_topics: Optional dict of video topics
             chapter_matching_enabled: Whether chapter matching is enabled
             topic_mismatch_penalty: Maximum topic mismatch penalty
+            topic_alignment_weight: Maximum boost for topic alignment (US-95-007)
             video_title: Optional video title for title relevance scoring
             chapter_title: Optional chapter title for chapter topic matching
             recent_matches: Optional list of recent Match objects for source consistency
@@ -3876,6 +4368,18 @@ class MatchScoring:
         if topic_reason:
             reasons.append(topic_reason)
             breakdown.append({'component': 'topic_penalty', 'adjustment': round(confidence - prev, 4), 'reason': topic_reason})
+
+        # 1b. Topic alignment boost (US-95-007) - boost when topics align
+        prev = confidence
+        confidence, topic_align_reason = apply_topic_alignment_boost(
+            confidence, vo_segment, video_segment,
+            video_topics or {},
+            topic_alignment_weight
+        )
+        confidence = _apply_compounding_guard(confidence, prev)
+        if topic_align_reason:
+            reasons.append(topic_align_reason)
+            breakdown.append({'component': 'topic_alignment_boost', 'adjustment': round(confidence - prev, 4), 'reason': topic_align_reason})
 
         # 2. B-roll boost
         prev = confidence

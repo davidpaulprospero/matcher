@@ -865,6 +865,117 @@ def _compute_keyword_topic_penalty(
     return max_penalty  # No match, full penalty
 
 
+def compute_topic_alignment_boost(
+    vo_topics: List[str],
+    video_topics: List[str],
+    max_boost: float = 0.1,
+    min_overlap: int = 1,
+    embedding_provider: Any = None,
+) -> float:
+    """
+    Compute confidence boost based on topic alignment between voiceover and video.
+
+    Uses embedding-based semantic similarity when available, falling back to
+    keyword overlap when embeddings are unavailable.
+
+    Boost scales with topic alignment:
+    - Strong overlap (3+ keywords): full boost
+    - Partial overlap (1-2 keywords): partial boost (50%)
+    - No overlap: no boost
+
+    Args:
+        vo_topics: Voiceover segment/chapter topics
+        video_topics: Video segment topics
+        max_boost: Maximum boost to apply when topics align
+        min_overlap: Minimum keyword overlap for partial boost
+        embedding_provider: Optional EmbeddingProvider for semantic similarity
+
+    Returns:
+        Boost value (0.0 = no boost, max_boost = full boost)
+
+    Example:
+        >>> # With strong keyword overlap
+        >>> compute_topic_alignment_boost(["paris", "eiffel tower", "france"],
+        ...                                ["paris", "eiffel tower", "travel"])
+        0.10  # Full boost
+        >>> # With partial overlap
+        >>> compute_topic_alignment_boost(["travel", "food"],
+        ...                               ["paris", "food", "restaurant"])
+        0.05  # Partial boost
+        >>> # With no overlap
+        >>> compute_topic_alignment_boost(["cooking"], ["car", "driving"])
+        0.0  # No boost
+    """
+    if not vo_topics or not video_topics:
+        return 0.0  # No boost if topics unknown
+
+    # Check for keyword overlap (fast path)
+    overlap_count, overlap_ratio = compute_topic_overlap(vo_topics, video_topics)
+
+    if overlap_count >= 3:
+        return max_boost  # Strong match, full boost
+    elif overlap_count >= min_overlap:
+        return max_boost * 0.5  # Partial match, partial boost
+
+    # Try semantic similarity if embedding provider available
+    if embedding_provider is not None:
+        try:
+            semantic_boost = _compute_semantic_topic_boost(
+                vo_topics, video_topics, max_boost, embedding_provider
+            )
+            if semantic_boost is not None:
+                return semantic_boost
+        except Exception as e:
+            logger.debug(f"Semantic topic boost failed, using keyword fallback: {e}")
+
+    # No boost if no overlap
+    return 0.0
+
+
+def _compute_semantic_topic_boost(
+    vo_topics: List[str],
+    video_topics: List[str],
+    max_boost: float,
+    embedding_provider: Any,
+) -> Optional[float]:
+    """
+    Compute topic alignment boost using semantic similarity between topic lists.
+
+    Uses embedding similarity to detect related topics even without exact keyword matches.
+    Related topics (travel/adventure) will have high similarity, resulting in partial boost.
+    """
+    try:
+        vo_text = " ".join(vo_topics)
+        vid_text = " ".join(video_topics)
+
+        vo_emb = embedding_provider.get_embedding(vo_text)
+        vid_emb = embedding_provider.get_embedding(vid_text)
+
+        # Compute cosine similarity
+        from ..transcription.embeddings import cosine_similarity
+        similarity = cosine_similarity(vo_emb, vid_emb)
+
+        # Scale boost based on similarity:
+        # - similarity 1.0 (identical) -> full boost
+        # - similarity 0.8+ (very similar) -> 80-100% of boost
+        # - similarity 0.6-0.8 (related) -> 40-80% of boost
+        # - similarity 0.4-0.6 (somewhat related) -> partial boost
+        # - similarity <0.4 (unrelated) -> no boost
+
+        if similarity >= 0.8:
+            return max_boost * (1.0 - (0.8 - similarity) / 0.2)  # 80-100%
+        elif similarity >= 0.6:
+            return max_boost * 0.4 * ((similarity - 0.6) / 0.2)  # 0-40%
+        elif similarity >= 0.4:
+            return max_boost * 0.2  # Low boost for somewhat related
+
+        return 0.0  # Unrelated topics
+
+    except Exception as e:
+        logger.debug(f"Embedding-based topic boost failed: {e}")
+        return None
+
+
 def extract_location_from_video_metadata(
     title: str,
     description: str = "",

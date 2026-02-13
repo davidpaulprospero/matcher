@@ -100,6 +100,14 @@ video_search:
   max_videos_per_channel: 3       # Maximum videos to include from same channel
   use_tags_in_search: true        # Expand queries with related topic tags
   use_description_context: true   # Extract keywords from video descriptions to refine queries
+  use_negative_context: false     # Filter results using negative keywords
+  use_chapter_queries: true      # US-98-005: Use chapter topics for targeted search queries
+  negative_keywords:              # Global negative keywords to exclude from results
+    - "trailer"
+    - "teaser"
+    - "compilation"
+    - "best of"
+    - "top 10"
   topic_tags:                     # Tag expansion mapping for query refinement
     nature: ["wildlife", "landscape", "outdoor"]
     travel: ["adventure", "destination", "culture"]
@@ -109,6 +117,14 @@ video_search:
     music: ["concert", "performance", "artist"]
     documentary: ["history", "science", "nature"]
     tutorial: ["howto", "guide", "education"]
+
+# -----------------------------------------------------------------------------
+# SEARCH BUDGET - Ralph Interview Phase Configuration
+# -----------------------------------------------------------------------------
+# Ralph reads these values during interview to show search budget status
+search_budget:
+  max_total_results: 200        # Maximum total video results across all keywords
+  results_per_keyword: 20      # Default results per keyword (before adjustment)
 
 # -----------------------------------------------------------------------------
 # TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0
@@ -459,6 +475,8 @@ matching:
   chapter_matching_enabled: true  # Enable chapter-based topic filtering
   enforce_chapter_boundaries: false  # US-95-004: Penalize cross-chapter matches
   cross_chapter_penalty: 0.1  # US-95-004: Penalty amount for cross-chapter matches
+  prefer_chapter_aligned_segments: true  # US-95-011: Prefer segments aligned with chapter boundaries
+  chapter_alignment_boost: 0.05  # US-95-011: Boost amount for chapter-aligned segments
   topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
   extract_video_topics: true  # Extract topics from video transcripts using LLM
   min_topic_overlap: 1  # Minimum matching topic keywords required

@@ -385,7 +385,7 @@ Describe "Search Budget Functions" -Tag "Unit", "Budget" {
             # Handle edge case: 0 keywords
             if ($Keywords.Count -eq 0) {
                 return @{
-                    adjustedResultsPerKeyword = $ResultsPerKeyword
+                    adjustedResultsPerKeyword = 0
                     totalKeywords = 0
                     willReduce = $false
                     warningMessage = "No keywords provided"
@@ -394,30 +394,26 @@ Describe "Search Budget Functions" -Tag "Unit", "Budget" {
             }
 
             $totalKeywords = $Keywords.Count
-            $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
 
-            if ($totalKeywords -le $budgetThreshold) {
-                return @{
-                    adjustedResultsPerKeyword = $ResultsPerKeyword
-                    totalKeywords = $totalKeywords
-                    willReduce = $false
-                    warningMessage = $null
-                    effectiveTotal = $totalKeywords * $ResultsPerKeyword
-                }
-            }
-
-            # Keywords exceed budget - need to reduce
+            # Always use the formula: floor(max_total_results / keyword_count)
             $adjustedResults = [Math]::Floor($MaxTotalResults / $totalKeywords)
             $effectiveTotal = $totalKeywords * $adjustedResults
 
-            $warningMsg = "WARNING: $totalKeywords keywords exceeds budget of $budgetThreshold. " +
-                          "Results per keyword will be reduced from $ResultsPerKeyword to $adjustedResults to stay within $MaxTotalResults limit."
+            $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
+            $willReduce = $adjustedResults -lt $ResultsPerKeyword
+
+            $warningMessage = $null
+            if ($willReduce) {
+                $warningMsg = "WARNING: $totalKeywords keywords exceeds budget threshold of $budgetThreshold. " +
+                              "Results per keyword will be reduced from $ResultsPerKeyword to $adjustedResults to stay within $MaxTotalResults limit."
+                $warningMessage = $warningMsg
+            }
 
             return @{
                 adjustedResultsPerKeyword = $adjustedResults
                 totalKeywords = $totalKeywords
-                willReduce = $true
-                warningMessage = $warningMsg
+                willReduce = $willReduce
+                warningMessage = $warningMessage
                 effectiveTotal = $effectiveTotal
             }
         }
@@ -433,7 +429,7 @@ Describe "Search Budget Functions" -Tag "Unit", "Budget" {
             # Inline the logic to test edge case handling
             if ($Keywords.Count -eq 0) {
                 $result = @{
-                    adjustedResultsPerKeyword = $ResultsPerKeyword
+                    adjustedResultsPerKeyword = 0
                     totalKeywords = 0
                     willReduce = $false
                     warningMessage = "No keywords provided"
@@ -442,20 +438,71 @@ Describe "Search Budget Functions" -Tag "Unit", "Budget" {
             }
 
             $result.totalKeywords | Should -Be 0
-            $result.adjustedResultsPerKeyword | Should -Be 20
+            $result.adjustedResultsPerKeyword | Should -Be 0  # Edge case: 0 keywords returns 0
             $result.willReduce | Should -Be $false
             $result.warningMessage | Should -Be "No keywords provided"
             $result.effectiveTotal | Should -Be 0
+        }
+
+        # Acceptance criteria tests: 5 keywords -> 40, 10 keywords -> 20, 15 keywords -> 13, 20 keywords -> 10, 25 keywords -> 8
+        It "5 keywords returns 40" {
+            $keywords = 1..5 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjustedResultsPerKeyword | Should -Be 40  # floor(200/5) = 40
+            $result.totalKeywords | Should -Be 5
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $false  # 40 > 20 (not reducing, actually increasing)
+        }
+
+        It "10 keywords returns 20" {
+            $keywords = 1..10 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjustedResultsPerKeyword | Should -Be 20  # floor(200/10) = 20
+            $result.totalKeywords | Should -Be 10
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $false  # 20 == 20
+        }
+
+        It "15 keywords returns 13" {
+            $keywords = 1..15 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjustedResultsPerKeyword | Should -Be 13  # floor(200/15) = 13
+            $result.totalKeywords | Should -Be 15
+            $result.effectiveTotal | Should -Be 195
+            $result.willReduce | Should -Be $true
+        }
+
+        It "20 keywords returns 10" {
+            $keywords = 1..20 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjustedResultsPerKeyword | Should -Be 10  # floor(200/20) = 10
+            $result.totalKeywords | Should -Be 20
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $true
+        }
+
+        It "25 keywords returns 8" {
+            $keywords = 1..25 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjustedResultsPerKeyword | Should -Be 8  # floor(200/25) = 8
+            $result.totalKeywords | Should -Be 25
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $true
         }
 
         It "handles 1 keyword" {
             $result = Get-DistributedKeywordBudget -Keywords @("test") -MaxTotalResults 200 -ResultsPerKeyword 20
 
             $result.totalKeywords | Should -Be 1
-            $result.adjustedResultsPerKeyword | Should -Be 20
+            $result.adjustedResultsPerKeyword | Should -Be 200  # floor(200/1) = 200 (max_total_results)
             $result.willReduce | Should -Be $false
             $result.warningMessage | Should -BeNullOrEmpty
-            $result.effectiveTotal | Should -Be 20
+            $result.effectiveTotal | Should -Be 200
         }
 
         It "handles keywords equal to budget threshold (exactly at limit)" {

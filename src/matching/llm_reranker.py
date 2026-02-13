@@ -28,6 +28,9 @@ class LLMRerankerConfig:
     ambiguous_threshold: float = 0.65  # Confidence below this triggers secondary LLM
     cache_llm_responses: bool = True  # Enable response caching
 
+    # US-95-005: Include video metadata (title, description, tags, chapters) in context
+    reranker_include_metadata: bool = True  # Pass full metadata to LLM for better context
+
     # Confidence calibration based on candidate spread (US-63-008)
     close_spread_threshold: float = 0.05  # If top-2 spread < this, apply reduction
     clear_winner_threshold: float = 0.20  # If top-2 spread > this, apply boost
@@ -77,6 +80,7 @@ class LLMReranker:
         config = LLMRerankerConfig(
             ambiguous_threshold=getattr(matching_config, 'ambiguous_threshold', 0.65),
             cache_llm_responses=getattr(matching_config, 'cache_llm_responses', True),
+            reranker_include_metadata=getattr(matching_config, 'reranker_include_metadata', True),  # US-95-005
             close_spread_threshold=getattr(matching_config, 'llm_reranker_close_spread_threshold', 0.05),
             clear_winner_threshold=getattr(matching_config, 'llm_reranker_clear_winner_threshold', 0.20),
             close_spread_factor=getattr(matching_config, 'llm_reranker_close_spread_factor', 0.9),
@@ -212,13 +216,18 @@ class LLMReranker:
             )
 
     @staticmethod
-    def _build_video_context(title: str, description: str) -> str:
-        """Build video context string from title and description.
+    def _build_video_context(
+        title: str,
+        description: str,
+        tags: Optional[List[str]] = None,
+        chapters: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        """Build video context string from title, description, tags, and chapters (US-95-005).
 
-        Format: 'Video context: {title}. {first_sentence}'
-        Returns empty string if no title/description available.
+        Format: 'Video context: {title}. {first_sentence}. Tags: {tags}. Chapters: {chapter_titles}'
+        Returns empty string if no title/description/tags/chapters available.
         """
-        if not title and not description:
+        if not title and not description and not tags and not chapters:
             return ""
 
         parts = []
@@ -232,20 +241,45 @@ class LLMReranker:
             if first_sentence:
                 parts.append(first_sentence)
 
+        # US-95-005: Add tags to context
+        if tags:
+            # Take up to 5 most relevant tags
+            tag_str = ", ".join(tags[:5])
+            parts.append(f"Tags: {tag_str}")
+
+        # US-95-005: Add chapter titles to context
+        if chapters:
+            # Extract chapter titles (skip timestamps)
+            chapter_titles = []
+            for ch in chapters[:3]:  # Take up to 3 chapters
+                if isinstance(ch, dict):
+                    title = ch.get('title', '')
+                else:
+                    title = str(ch)
+                if title and title != 'Unknown':
+                    chapter_titles.append(title)
+            if chapter_titles:
+                parts.append(f"Chapters: {', '.join(chapter_titles)}")
+
         return "Video context: " + ". ".join(parts)
 
     def _enrich_candidates_with_context(
         self,
         candidates: List[Tuple['SRTSegment', float]],
-        video_metadata: Optional[Dict[str, Dict[str, str]]] = None
+        video_metadata: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> List[Tuple['SRTSegment', float]]:
-        """Enrich candidate segments with video title/description context (US-70-007).
+        """Enrich candidate segments with video title/description/tags/chapters context (US-70-007, US-95-005).
 
         Creates shallow copies of SRTSegments with enriched text that includes
         video context prefix when metadata is available. Falls back to original
         text when no metadata exists for a candidate.
+
+        Args:
+            candidates: List of (segment, similarity) tuples
+            video_metadata: Dict mapping source_file to {title, description, tags, chapters}
         """
-        if not video_metadata:
+        # US-95-005: Check config option to enable/disable metadata enrichment
+        if not video_metadata or not self.config.reranker_include_metadata:
             return candidates
 
         enriched = []
@@ -253,7 +287,10 @@ class LLMReranker:
             meta = video_metadata.get(seg.source_file, {})
             title = meta.get('title', '')
             description = meta.get('description', '')
-            video_context = self._build_video_context(title, description)
+            # US-95-005: Extract tags and chapters from metadata
+            tags = meta.get('tags', [])
+            chapters = meta.get('chapters', [])
+            video_context = self._build_video_context(title, description, tags, chapters)
 
             if video_context:
                 enriched_seg = copy.copy(seg)

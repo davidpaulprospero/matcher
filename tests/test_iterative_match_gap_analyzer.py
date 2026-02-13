@@ -398,6 +398,58 @@ class TestExtractKeywordsForGap:
         keywords = extract_keywords_for_gap(gap)
         assert keywords == []
 
+    # US-94-012: Context-aware keyword extraction tests
+    def test_context_text_adds_keywords(self):
+        """Context from adjacent segments should add supplementary keywords."""
+        gap = _make_gap(1, 0.3, "The hero fought bravely")
+        gap.pattern_type = "action_verb"
+        # Previous segment mentions "Medieval Castle"
+        context = "The Medieval Castle stood tall"
+        keywords = extract_keywords_for_gap(gap, max_keywords=5, context_text=context)
+        # Should include keywords from both gap and context
+        assert len(keywords) > 0
+        # Context proper nouns like "Castle" should be in keywords
+        assert any("castle" in kw.lower() for kw in keywords)
+
+    def test_context_does_not_duplicate_gap_keywords(self):
+        """Context should not duplicate keywords already in gap text."""
+        gap = _make_gap(1, 0.3, "The soldier ran fast")
+        gap.pattern_type = "action_verb"
+        # Context has same keyword
+        context = "The soldier was brave"
+        keywords = extract_keywords_for_gap(gap, max_keywords=5, context_text=context)
+        # Should not have duplicates
+        lower_keywords = [k.lower() for k in keywords]
+        assert len(lower_keywords) == len(set(lower_keywords))
+
+    def test_context_window_multiple_segments(self):
+        """Multiple context segments should all contribute keywords."""
+        gap = _make_gap(2, 0.3, "The event was historic")
+        gap.pattern_type = "abstract_concept"
+        # Context from multiple segments
+        context = "Ancient Rome was powerful. The colosseum hosted games."
+        keywords = extract_keywords_for_gap(gap, max_keywords=5, context_text=context)
+        assert len(keywords) > 0
+
+    def test_context_empty_string(self):
+        """Empty context should work like original behavior."""
+        gap = _make_gap(0, 0.3, "The brave soldier")
+        gap.pattern_type = "other"
+        keywords = extract_keywords_for_gap(gap, max_keywords=5, context_text="")
+        # Should behave like no context
+        assert len(keywords) > 0
+        assert len(keywords) <= 5
+
+    def test_context_prioritizes_gap_keywords(self):
+        """Keywords from gap text should take priority over context."""
+        gap = _make_gap(1, 0.3, "Paris is wonderful")
+        gap.pattern_type = "location"
+        # Context has different city
+        context = "London is also nice"
+        keywords = extract_keywords_for_gap(gap, max_keywords=3, context_text=context)
+        # Gap keywords should be prioritized
+        assert any("paris" in kw.lower() for kw in keywords[:2])
+
 
 # ============================================================================
 # LockedMatch dataclass

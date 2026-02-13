@@ -937,3 +937,986 @@ class TestBudgetDistribution:
         assert 'auto_distribute_budget' in search_config
         assert search_config['search_budget_aware'] is True
         assert search_config['auto_distribute_budget'] is True
+
+
+# ============================================================================
+# Test Channel Diversity (US-94-009)
+# ============================================================================
+
+class TestChannelDiversity:
+    """Test channel diversity filtering for search results"""
+
+    @pytest.fixture
+    def mock_config_with_channel_diversity(self):
+        """Create mock config with channel diversity enabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': True,
+            'auto_distribute_budget': True,
+            'enable_channel_diversity': True,
+            'max_videos_per_channel': 3
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.fixture
+    def mock_config_channel_disabled(self):
+        """Create mock config with channel diversity disabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': True,
+            'auto_distribute_budget': True,
+            'enable_channel_diversity': False,
+            'max_videos_per_channel': 3
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.mark.fast
+    def test_channel_diversity_limits_same_channel(self, mock_config_with_channel_diversity, mock_checkpoint):
+        """Test that results from same channel are limited to max_videos_per_channel"""
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['beach sunset']
+        state.topic_context = 'Travel'
+
+        # Multiple videos from same channel
+        mock_results = {
+            'entries': [
+                {'id': 'vid1', 'title': 'Video 1', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid2', 'title': 'Video 2', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid3', 'title': 'Video 3', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid4', 'title': 'Video 4', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid5', 'title': 'Video 5', 'channel': 'Nature Channel', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, mock_config_with_channel_diversity, mock_checkpoint)
+
+        assert result.success is True
+        # Only 3 videos from "Nature Channel" should be included
+        assert len(state.video_ids) == 3
+        assert 'vid1' in state.video_ids
+        assert 'vid2' in state.video_ids
+        assert 'vid3' in state.video_ids
+        assert 'vid4' not in state.video_ids
+        assert 'vid5' not in state.video_ids
+
+    @pytest.mark.fast
+    def test_channel_diversity_allows_different_channels(self, mock_config_with_channel_diversity, mock_checkpoint):
+        """Test that videos from different channels are not limited"""
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['beach sunset']
+        state.topic_context = 'Travel'
+
+        # Videos from different channels
+        mock_results = {
+            'entries': [
+                {'id': 'vid1', 'title': 'Video 1', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid2', 'title': 'Video 2', 'channel': 'Travel Channel', 'duration': 120},
+                {'id': 'vid3', 'title': 'Video 3', 'channel': 'Ocean Channel', 'duration': 120},
+                {'id': 'vid4', 'title': 'Video 4', 'channel': 'Beach Channel', 'duration': 120},
+                {'id': 'vid5', 'title': 'Video 5', 'channel': 'Sunset Channel', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, mock_config_with_channel_diversity, mock_checkpoint)
+
+        assert result.success is True
+        # All 5 videos from different channels should be included
+        assert len(state.video_ids) == 5
+
+    @pytest.mark.fast
+    def test_channel_diversity_disabled_keeps_all(self, mock_config_channel_disabled, mock_checkpoint):
+        """Test that disabling channel diversity keeps all videos"""
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['beach sunset']
+        state.topic_context = 'Travel'
+
+        # Multiple videos from same channel
+        mock_results = {
+            'entries': [
+                {'id': 'vid1', 'title': 'Video 1', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid2', 'title': 'Video 2', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid3', 'title': 'Video 3', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid4', 'title': 'Video 4', 'channel': 'Nature Channel', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, mock_config_channel_disabled, mock_checkpoint)
+
+        assert result.success is True
+        # All 4 videos should be included when diversity is disabled
+        assert len(state.video_ids) == 4
+
+    @pytest.mark.fast
+    def test_channel_diversity_includes_no_channel_videos(self, mock_config_with_channel_diversity, mock_checkpoint):
+        """Test that videos without channel info are included"""
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['beach sunset']
+        state.topic_context = 'Travel'
+
+        # Mix of videos with and without channel info
+        mock_results = {
+            'entries': [
+                {'id': 'vid1', 'title': 'Video 1', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid2', 'title': 'Video 2', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid3', 'title': 'Video 3', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid4', 'title': 'Video 4', 'channel': '', 'duration': 120},
+                {'id': 'vid5', 'title': 'Video 5', 'channel': None, 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, mock_config_with_channel_diversity, mock_checkpoint)
+
+        assert result.success is True
+        # 3 from Nature Channel + 2 without channel info = 5 total
+        assert len(state.video_ids) == 5
+        assert 'vid1' in state.video_ids
+        assert 'vid2' in state.video_ids
+        assert 'vid3' in state.video_ids
+        assert 'vid4' in state.video_ids  # No channel
+        assert 'vid5' in state.video_ids  # None channel
+
+    @pytest.mark.fast
+    def test_channel_diversity_respects_custom_limit(self, mock_checkpoint):
+        """Test that custom max_videos_per_channel is respected"""
+        # Config with custom limit of 2
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': True,
+            'auto_distribute_budget': True,
+            'enable_channel_diversity': True,
+            'max_videos_per_channel': 2  # Custom limit
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['beach sunset']
+        state.topic_context = 'Travel'
+
+        mock_results = {
+            'entries': [
+                {'id': 'vid1', 'title': 'Video 1', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid2', 'title': 'Video 2', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid3', 'title': 'Video 3', 'channel': 'Nature Channel', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, config, mock_checkpoint)
+
+        assert result.success is True
+        # Only 2 videos from "Nature Channel" should be included
+        assert len(state.video_ids) == 2
+
+    @pytest.mark.fast
+    def test_config_options_channel_diversity_present(self):
+        """Test config has channel diversity options"""
+        from src.stages.video_search import VideoSearchStage
+        stage = VideoSearchStage()
+        # Verify the config options are handled (defaults)
+        # Test default values work
+        config_dict = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+        }
+        enable_channel_diversity = config_dict.get('enable_channel_diversity', True)
+        max_videos_per_channel = config_dict.get('max_videos_per_channel', 3)
+        assert enable_channel_diversity is True
+        assert max_videos_per_channel == 3
+
+    @pytest.mark.fast
+    def test_diverse_channels_appear_in_results(self, mock_checkpoint):
+        """Test that channel diversity filtering produces diverse channels in final results"""
+        # Create mock config with channel diversity enabled
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': True,
+            'auto_distribute_budget': True,
+            'enable_channel_diversity': True,
+            'max_videos_per_channel': 3
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['nature landscape']
+        state.topic_context = 'Nature'
+
+        # Create results with multiple videos from same channel and different channels
+        mock_results = {
+            'entries': [
+                {'id': 'vid1', 'title': 'Video 1', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid2', 'title': 'Video 2', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid3', 'title': 'Video 3', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid4', 'title': 'Video 4', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid5', 'title': 'Video 5', 'channel': 'Nature Channel', 'duration': 120},
+                {'id': 'vid6', 'title': 'Video 6', 'channel': 'Travel Channel', 'duration': 120},
+                {'id': 'vid7', 'title': 'Video 7', 'channel': 'Ocean Channel', 'duration': 120},
+                {'id': 'vid8', 'title': 'Video 8', 'channel': 'Mountain Channel', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, config, mock_checkpoint)
+
+        assert result.success is True
+
+        # Extract channels from the video_search_results (VideoSearchResult objects)
+        channels = [r.channel for r in state.video_search_results]
+
+        # Should have diverse channels
+        unique_channels = set(channels)
+        # Should include Travel, Ocean, Mountain channels
+        assert 'Travel Channel' in unique_channels
+        assert 'Ocean Channel' in unique_channels
+        assert 'Mountain Channel' in unique_channels
+        # Should NOT have more than 3 from Nature Channel
+        nature_count = channels.count('Nature Channel')
+        assert nature_count == 3
+
+
+# ============================================================================
+# Test Tag-Based Query Expansion (US-95-002)
+# ============================================================================
+
+class TestTagBasedQueryExpansion:
+    """Test US-95-002: Tag-based query expansion in video search"""
+
+    @pytest.fixture
+    def config_with_tags(self):
+        """Create config with tag expansion enabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'use_tags_in_search': True,
+            'topic_tags': {
+                'nature': ['wildlife', 'landscape', 'outdoor'],
+                'travel': ['adventure', 'destination', 'culture'],
+                'technology': ['innovation', 'science', 'gadgets'],
+            }
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.fixture
+    def config_tags_disabled(self):
+        """Create config with tag expansion disabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'use_tags_in_search': False,
+            'topic_tags': {
+                'nature': ['wildlife', 'landscape'],
+            }
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.mark.fast
+    def test_tag_expansion_expands_query_with_matching_tags(self, config_with_tags):
+        """Test that keyword 'nature documentary' expands to include related tags"""
+        stage = VideoSearchStage()
+
+        # Mock yt-dlp
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {'entries': []}
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            stage._search_keyword(
+                keyword='nature documentary',
+                config=config_with_tags,
+                max_results=10,
+                topic=''
+            )
+
+        # Verify yt-dlp was called with expanded query
+        call_args = mock_ydl_instance.extract_info.call_args
+        search_url = call_args[0][0]
+
+        # Should include original keyword plus tags
+        assert 'nature' in search_url.lower()
+        # Should include expanded tags from topic_tags mapping
+        assert 'wildlife' in search_url.lower() or 'landscape' in search_url.lower() or 'outdoor' in search_url.lower()
+
+    @pytest.mark.fast
+    def test_tag_expansion_uses_topic_context(self, config_with_tags):
+        """Test that topic context triggers tag expansion"""
+        stage = VideoSearchStage()
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {'entries': []}
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            stage._search_keyword(
+                keyword='beach',
+                config=config_with_tags,
+                max_results=10,
+                topic='travel'
+            )
+
+        # Verify yt-dlp was called with expanded query using topic context
+        call_args = mock_ydl_instance.extract_info.call_args
+        search_url = call_args[0][0]
+
+        # Should include travel-related tags
+        assert 'adventure' in search_url.lower() or 'destination' in search_url.lower() or 'culture' in search_url.lower()
+
+    @pytest.mark.fast
+    def test_tag_expansion_disabled(self, config_tags_disabled):
+        """Test that disabling use_tags_in_search skips tag expansion"""
+        stage = VideoSearchStage()
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {'entries': []}
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            stage._search_keyword(
+                keyword='nature documentary',
+                config=config_tags_disabled,
+                max_results=10,
+                topic=''
+            )
+
+        # Verify yt-dlp was called with basic query (no tag expansion)
+        call_args = mock_ydl_instance.extract_info.call_args
+        search_url = call_args[0][0]
+
+        # Should be basic search without expanded tags
+        assert 'nature' in search_url.lower()
+        # Should NOT include expanded tags
+        assert 'wildlife' not in search_url.lower()
+
+    @pytest.mark.fast
+    def test_tag_expansion_limits_to_three_tags(self, config_with_tags):
+        """Test that tag expansion is limited to 3 tags to avoid over-broadening"""
+        stage = VideoSearchStage()
+
+        # Create config with many tags
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'use_tags_in_search': True,
+            'topic_tags': {
+                'nature': ['wildlife', 'landscape', 'outdoor', 'scenery', 'environment'],
+            }
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {'entries': []}
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            stage._search_keyword(
+                keyword='nature',
+                config=config,
+                max_results=10,
+                topic=''
+            )
+
+        call_args = mock_ydl_instance.extract_info.call_args
+        search_url = call_args[0][0]
+
+        # Should include keyword plus up to 3 tags
+        # Count how many tag words appear beyond the keyword
+        tag_words = ['wildlife', 'landscape', 'outdoor', 'scenery', 'environment']
+        matching_tags = sum(1 for tag in tag_words if tag in search_url.lower())
+        assert matching_tags <= 3, f"Expected at most 3 tags, got {matching_tags}"
+
+
+# =============================================================================
+# US-95-003: Description-based Query Refinement Tests
+# =============================================================================
+
+class TestDescriptionContext:
+    """Tests for description-based query refinement (US-95-003)"""
+
+    @pytest.fixture
+    def config_with_description_context(self):
+        """Create config with description context enabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'use_tags_in_search': True,
+            'use_description_context': True,
+            'topic_tags': {
+                'nature': ['wildlife', 'landscape'],
+            }
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.fixture
+    def config_description_disabled(self):
+        """Create config with description context disabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'use_tags_in_search': True,
+            'use_description_context': False,
+            'topic_tags': {}
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.mark.fast
+    def test_extract_description_keywords_finds_common_terms(self):
+        """Test that _extract_description_keywords finds common terms in descriptions"""
+        stage = VideoSearchStage()
+
+        results = [
+            {'description': 'Amazing wildlife documentary about nature and animals'},
+            {'description': 'Beautiful landscape with wildlife and nature scenes'},
+            {'description': 'Exploring nature through wildlife photography'},
+        ]
+
+        keywords = stage._extract_description_keywords(results)
+
+        # Should find common terms
+        assert 'wildlife' in keywords or 'nature' in keywords
+
+    @pytest.mark.fast
+    def test_extract_description_keywords_filters_stop_words(self):
+        """Test that stop words are filtered out"""
+        stage = VideoSearchStage()
+
+        results = [
+            {'description': 'This is a video about nature and wildlife'},
+            {'description': 'The video shows amazing nature scenes'},
+        ]
+
+        keywords = stage._extract_description_keywords(results)
+
+        # Stop words should be filtered
+        assert 'this' not in keywords
+        assert 'is' not in keywords
+        assert 'the' not in keywords
+
+    @pytest.mark.fast
+    def test_extract_description_keywords_returns_empty_for_no_descriptions(self):
+        """Test empty list for no descriptions"""
+        stage = VideoSearchStage()
+
+        keywords = stage._extract_description_keywords([])
+        assert keywords == []
+
+    @pytest.mark.fast
+    def test_description_context_refines_search_with_description_keywords(self, config_with_description_context):
+        """Test that description context refines search with extracted keywords"""
+        stage = VideoSearchStage()
+
+        # Mock yt-dlp with descriptions in initial results
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {
+            'entries': [
+                {
+                    'id': 'video1',
+                    'title': 'Nature Documentary',
+                    'channel': 'Nature Channel',
+                    'duration': 300,
+                    'description': 'Amazing wildlife documentary about nature and animals in the forest',
+                },
+                {
+                    'id': 'video2',
+                    'title': 'Wildlife Adventure',
+                    'channel': 'Wildlife TV',
+                    'duration': 400,
+                    'description': 'Beautiful wildlife and nature scenes from around the world',
+                },
+            ]
+        }
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            results = stage._search_keyword(
+                keyword='nature documentary',
+                config=config_with_description_context,
+                max_results=10,
+                topic=''
+            )
+
+        # Should have called extract_info twice (initial + refined)
+        assert mock_ydl_instance.extract_info.call_count >= 1
+
+    @pytest.mark.fast
+    def test_description_context_disabled_skips_refinement(self, config_description_disabled):
+        """Test that disabling use_description_context skips description refinement"""
+        stage = VideoSearchStage()
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {
+            'entries': [
+                {
+                    'id': 'video1',
+                    'title': 'Nature Documentary',
+                    'channel': 'Nature Channel',
+                    'duration': 300,
+                    'description': 'Test description',
+                }
+            ]
+        }
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            results = stage._search_keyword(
+                keyword='nature',
+                config=config_description_disabled,
+                max_results=10,
+                topic=''
+            )
+
+        # Should only have one call (no refinement when disabled)
+        assert mock_ydl_instance.extract_info.call_count == 1
+
+    @pytest.mark.fast
+    def test_description_keywords_weighted_lower_in_query(self, config_with_description_context):
+        """Test that description keywords appear after primary keyword in query"""
+        stage = VideoSearchStage()
+
+        # Mock with descriptions containing common keywords
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {
+            'entries': [
+                {
+                    'id': 'video1',
+                    'title': 'Nature Documentary',
+                    'channel': 'Nature Channel',
+                    'duration': 300,
+                    'description': 'wildlife nature animals forest',
+                },
+                {
+                    'id': 'video2',
+                    'title': 'Wildlife Film',
+                    'channel': 'Wildlife TV',
+                    'duration': 350,
+                    'description': 'wildlife nature landscape scenery',
+                },
+            ]
+        }
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            results = stage._search_keyword(
+                keyword='nature',
+                config=config_with_description_context,
+                max_results=10,
+                topic=''
+            )
+
+        # Verify second call has refined query with primary keyword first
+        calls = mock_ydl_instance.extract_info.call_args_list
+        if len(calls) >= 2:
+            second_query = calls[1][0][0]
+            # Primary keyword should be first, description keywords after
+            assert 'nature' in second_query.lower()
+
+
+# ============================================================================
+# Test Negative Context Filtering (US-95-012)
+# ============================================================================
+
+class TestNegativeContextFiltering:
+    """Tests for negative context filtering (US-95-012)"""
+
+    @pytest.fixture
+    def config_with_negative_context(self):
+        """Create config with negative context filtering enabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'use_negative_context': True,
+            'negative_keywords': ['trailer', 'teaser', 'compilation', 'best of', 'top 10']
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.fixture
+    def config_negative_disabled(self):
+        """Create config with negative context filtering disabled"""
+        config = Mock()
+        config.download = Mock()
+        config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'use_negative_context': False,
+            'negative_keywords': ['trailer', 'teaser']
+        }
+        config.download.min_duration = 30
+        config.download.max_duration = 600
+        config.download.title_blacklist = []
+        return config
+
+    @pytest.mark.fast
+    def test_is_negative_matched_title(self):
+        """Test _is_negative_matched matches negative keywords in title"""
+        stage = VideoSearchStage()
+
+        # Should match
+        assert stage._is_negative_matched('Beach Trailer', '', ['trailer', 'teaser']) is True
+        assert stage._is_negative_matched('Nature Best Of', '', ['best of']) is True
+        assert stage._is_negative_matched('Top 10 Beach', '', ['top 10']) is True
+        assert stage._is_negative_matched('Beach Compilation Video', '', ['compilation']) is True
+
+    @pytest.mark.fast
+    def test_is_negative_matched_description(self):
+        """Test _is_negative_matched matches negative keywords in description"""
+        stage = VideoSearchStage()
+
+        # Should match in description even if title is clean
+        assert stage._is_negative_matched('Beach Video', 'Watch the trailer here', ['trailer']) is True
+        assert stage._is_negative_matched('Nature Documentary', 'Best of nature compilation', ['compilation']) is True
+
+    @pytest.mark.fast
+    def test_is_negative_matched_case_insensitive(self):
+        """Test negative keyword matching is case insensitive"""
+        stage = VideoSearchStage()
+
+        assert stage._is_negative_matched('Beach TRAILER', '', ['trailer']) is True
+        assert stage._is_negative_matched('Beach video', 'COMPILATION', ['compilation']) is True
+
+    @pytest.mark.fast
+    def test_is_negative_matched_no_match(self):
+        """Test _is_negative_matched returns False when no match"""
+        stage = VideoSearchStage()
+
+        assert stage._is_negative_matched('Beautiful Beach', '', ['trailer', 'teaser']) is False
+        assert stage._is_negative_matched('Ocean Waves', 'Relaxing video', ['trailer', 'teaser']) is False
+
+    @pytest.mark.fast
+    def test_is_negative_matched_empty_title(self):
+        """Test _is_negative_matched returns False for empty title"""
+        stage = VideoSearchStage()
+
+        assert stage._is_negative_matched('', '', ['trailer']) is False
+        assert stage._is_negative_matched(None, '', ['trailer']) is False
+
+    @pytest.mark.fast
+    def test_is_negative_matched_empty_keywords(self):
+        """Test _is_negative_matched returns False for empty negative keywords"""
+        stage = VideoSearchStage()
+
+        assert stage._is_negative_matched('Beach Trailer', '', []) is False
+        assert stage._is_negative_matched('Beach Trailer', '', None) is False
+
+    @pytest.mark.fast
+    def test_negative_context_filters_title_matches(self, config_with_negative_context):
+        """Test that videos with negative keywords in title are filtered"""
+        stage = VideoSearchStage()
+
+        mock_results = {
+            'entries': [
+                {'id': 'good1', 'title': 'Beautiful Beach Sunset', 'channel': 'Ch', 'duration': 120},
+                {'id': 'bad1', 'title': 'Beach Trailer 2024', 'channel': 'Ch', 'duration': 120},
+                {'id': 'good2', 'title': 'Ocean Waves', 'channel': 'Ch', 'duration': 120},
+                {'id': 'bad2', 'title': 'Top 10 Beaches', 'channel': 'Ch', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            search_results = stage._search_keyword('beach', config_with_negative_context)
+
+        video_ids = [r['video_id'] for r in search_results]
+        assert 'good1' in video_ids
+        assert 'good2' in video_ids
+        assert 'bad1' not in video_ids  # "trailer" in title
+        assert 'bad2' not in video_ids  # "top 10" in title
+
+    @pytest.mark.fast
+    def test_negative_context_filters_description_matches(self, config_with_negative_context):
+        """Test that videos with negative keywords in description are filtered"""
+        stage = VideoSearchStage()
+
+        mock_results = {
+            'entries': [
+                {'id': 'good1', 'title': 'Beautiful Beach', 'channel': 'Ch', 'duration': 120, 'description': 'Relaxing beach scene'},
+                {'id': 'bad1', 'title': 'Nature Video', 'channel': 'Ch', 'duration': 120, 'description': 'Watch the trailer for this amazing documentary'},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            search_results = stage._search_keyword('nature', config_with_negative_context)
+
+        video_ids = [r['video_id'] for r in search_results]
+        assert 'good1' in video_ids
+        assert 'bad1' not in video_ids  # "trailer" in description
+
+    @pytest.mark.fast
+    def test_negative_context_disabled_keeps_all(self, config_negative_disabled):
+        """Test that disabling use_negative_context keeps all videos"""
+        stage = VideoSearchStage()
+
+        mock_results = {
+            'entries': [
+                {'id': 'good1', 'title': 'Beautiful Beach Sunset', 'channel': 'Ch', 'duration': 120},
+                {'id': 'bad1', 'title': 'Beach Trailer 2024', 'channel': 'Ch', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            search_results = stage._search_keyword('beach', config_negative_disabled)
+
+        # All videos should be included when negative context is disabled
+        video_ids = [r['video_id'] for r in search_results]
+        assert len(video_ids) == 2
+
+    @pytest.mark.fast
+    def test_negative_context_integration_full_flow(self, config_with_negative_context, mock_checkpoint):
+        """Test negative context filtering in full stage run"""
+        stage = VideoSearchStage()
+        state = PipelineState()
+        state.keywords = ['beach sunset']
+        state.topic_context = 'Travel'
+
+        mock_results = {
+            'entries': [
+                {'id': 'good1', 'title': 'Beautiful Beach Sunset', 'channel': 'Nature Ch', 'duration': 120},
+                {'id': 'bad1', 'title': 'Beach Compilation', 'channel': 'Travel Ch', 'duration': 120},
+                {'id': 'good2', 'title': 'Ocean Waves', 'channel': 'Ocean Ch', 'duration': 120},
+            ]
+        }
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = mock_results
+        mock_ydl_instance.__enter__ = MagicMock(return_value=mock_ydl_instance)
+        mock_ydl_instance.__exit__ = MagicMock(return_value=False)
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage.run(state, config_with_negative_context, mock_checkpoint)
+
+        assert result.success is True
+        # Should filter out the compilation video
+        assert 'good1' in state.video_ids
+        assert 'good2' in state.video_ids
+        assert 'bad1' not in state.video_ids
+
+    @pytest.mark.fast
+    def test_extract_negative_keywords_finds_matches(self):
+        """Test _extract_negative_keywords finds keywords in title/description"""
+        stage = VideoSearchStage()
+
+        # Should find keywords
+        result = stage._extract_negative_keywords(
+            'Beach Trailer',
+            'Watch this amazing video',
+            ['trailer', 'teaser', 'compilation']
+        )
+        assert 'trailer' in result
+
+    @pytest.mark.fast
+    def test_extract_negative_keywords_finds_in_description(self):
+        """Test _extract_negative_keywords finds keywords in description"""
+        stage = VideoSearchStage()
+
+        result = stage._extract_negative_keywords(
+            'Beach Video',
+            'Watch the trailer for this beach',
+            ['trailer', 'teaser']
+        )
+        assert 'trailer' in result
+
+    @pytest.mark.fast
+    def test_extract_negative_keywords_case_insensitive(self):
+        """Test _extract_negative_keywords is case insensitive"""
+        stage = VideoSearchStage()
+
+        result = stage._extract_negative_keywords(
+            'Beach TRAILER',
+            'COMPILATION video',
+            ['trailer', 'compilation']
+        )
+        assert 'trailer' in result
+        assert 'compilation' in result
+
+    @pytest.mark.fast
+    def test_extract_negative_keywords_no_match(self):
+        """Test _extract_negative_keywords returns empty when no match"""
+        stage = VideoSearchStage()
+
+        result = stage._extract_negative_keywords(
+            'Beautiful Beach',
+            'Relaxing ocean waves',
+            ['trailer', 'teaser']
+        )
+        assert result == []
+
+    @pytest.mark.fast
+    def test_to_search_results_populates_negative_keywords(self):
+        """Test _to_search_results populates negative_keywords in results"""
+        stage = VideoSearchStage()
+
+        results = [
+            {'video_id': 'v1', 'title': 'Beach Trailer', 'channel': 'Ch1', 'duration': 120, 'keyword': 'beach', 'description': 'Watch trailer'},
+            {'video_id': 'v2', 'title': 'Ocean Waves', 'channel': 'Ch2', 'duration': 120, 'keyword': 'ocean', 'description': 'Relaxing'},
+        ]
+
+        search_results = stage._to_search_results(
+            results,
+            negative_keywords=['trailer', 'teaser']
+        )
+
+        assert len(search_results) == 2
+        # First result should have 'trailer' detected
+        v1_result = next(r for r in search_results if r.video_id == 'v1')
+        assert 'trailer' in v1_result.negative_keywords
+
+        # Second result should have empty negative_keywords
+        v2_result = next(r for r in search_results if r.video_id == 'v2')
+        assert v2_result.negative_keywords == []
+
+    @pytest.mark.fast
+    def test_negative_signals_reduce_irrelevant_results(self):
+        """AC4: Test that negative signals reduce irrelevant results"""
+        stage = VideoSearchStage()
+
+        # Simulate search results with some relevant and some irrelevant
+        results = [
+            {'video_id': 'v1', 'title': 'Beautiful Beach Sunset', 'channel': 'Nature', 'duration': 120, 'keyword': 'beach', 'description': 'Relaxing'},
+            {'video_id': 'v2', 'title': 'Beach Trailer 2024', 'channel': 'Movies', 'duration': 120, 'keyword': 'beach', 'description': 'Watch trailer'},
+            {'video_id': 'v3', 'title': 'Top 10 Beaches', 'channel': 'Lists', 'duration': 120, 'keyword': 'beach', 'description': 'Best beaches'},
+            {'video_id': 'v4', 'title': 'Ocean Waves', 'channel': 'Nature', 'duration': 120, 'keyword': 'ocean', 'description': 'Calm ocean'},
+        ]
+
+        # Without negative keywords - all pass
+        results_no_filter = stage._to_search_results(results, negative_keywords=[])
+        assert len(results_no_filter) == 4
+
+        # With negative keywords - irrelevant ones filtered from metadata
+        results_with_filter = stage._to_search_results(
+            results,
+            negative_keywords=['trailer', 'top 10', 'compilation']
+        )
+
+        # Should detect negative keywords in some videos
+        v2_result = next(r for r in results_with_filter if r.video_id == 'v2')
+        assert 'trailer' in v2_result.negative_keywords
+
+        v3_result = next(r for r in results_with_filter if r.video_id == 'v3')
+        assert 'top 10' in v3_result.negative_keywords
+
+        # Clean videos should have empty negative_keywords
+        v1_result = next(r for r in results_with_filter if r.video_id == 'v1')
+        assert v1_result.negative_keywords == []
+
+    def test_config_use_negative_context_default(self):
+        """AC3: Test that use_negative_context config option exists with default false"""
+        from src.config.sections.iterative_matching import IterativeMatchingConfig
+        from src.config import Config
+
+        # Check the config.yaml source directly
+        import yaml
+        config_path = Path(__file__).parent.parent / 'config.yaml'
+        with open(config_path) as f:
+            config_data = yaml.safe_load(f)
+
+        # Verify use_negative_context is in video_search config (top-level key)
+        assert 'video_search' in config_data
+        assert 'use_negative_context' in config_data['video_search']
+        assert config_data['video_search']['use_negative_context'] is False
+

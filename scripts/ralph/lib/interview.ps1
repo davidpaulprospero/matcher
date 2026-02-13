@@ -44,40 +44,57 @@ function Get-SearchBudgetInfo {
     }
 
     try {
-        # Read config.yaml and extract video_search values using regex
+        # Read config.yaml and extract search budget values using regex
         # This avoids dependency on PowerShell-Yaml module
         $configContent = Get-Content $configPath -Raw -ErrorAction Stop
 
-        # Extract video_search section using regex
-        $videoSearchMatch = $configContent -match '(?s)video_search:\s*\n((?:\s{2,}.+\n?)+)'
+        # First try to extract search_budget section (primary)
+        $searchBudgetMatch = $configContent -match '(?s)search_budget:\s*\n((?:\s{2,}.+\n?)+)'
 
-        if ($videoSearchMatch -and $matches) {
-            $videoSearchSection = $matches[1]
+        $maxTotal = 200
+        $resultsPerKw = 20
+        $source = "defaults"
 
-            # Extract max_total_results
-            if ($videoSearchSection -match 'max_total_results:\s*(\d+)') {
+        if ($searchBudgetMatch -and $matches) {
+            # Found dedicated search_budget section
+            $searchBudgetSection = $matches[1]
+
+            if ($searchBudgetSection -match 'max_total_results:\s*(\d+)') {
                 $maxTotal = [int]$matches[1]
-            } else {
-                $maxTotal = 200
             }
 
-            # Extract results_per_keyword
-            if ($videoSearchSection -match 'results_per_keyword:\s*(\d+)') {
+            if ($searchBudgetSection -match 'results_per_keyword:\s*(\d+)') {
                 $resultsPerKw = [int]$matches[1]
-            } else {
-                $resultsPerKw = 20
             }
-        } else {
-            # Defaults if video_search section not found
-            $maxTotal = 200
-            $resultsPerKw = 20
+            $source = "search_budget"
         }
+        else {
+            # Fallback to video_search section
+            $videoSearchMatch = $configContent -match '(?s)video_search:\s*\n((?:\s{2,}.+\n?)+)'
+
+            if ($videoSearchMatch -and $matches) {
+                $videoSearchSection = $matches[1]
+
+                if ($videoSearchSection -match 'max_total_results:\s*(\d+)') {
+                    $maxTotal = [int]$matches[1]
+                }
+
+                if ($videoSearchSection -match 'results_per_keyword:\s*(\d+)') {
+                    $resultsPerKw = [int]$matches[1]
+                }
+                $source = "video_search"
+            }
+        }
+
+        Write-Verbose "  Search budget loaded from: $source"
 
         return @{
             maxKeywords = [Math]::Floor($maxTotal / $resultsPerKw)
             currentBudget = $maxTotal
             resultsPerKeyword = $resultsPerKw
+            maxTotalResults = $maxTotal
             configPath = $configPath
+            source = $source
             found = $true
         }
     }
@@ -87,7 +104,9 @@ function Get-SearchBudgetInfo {
             maxKeywords = 10
             currentBudget = 200
             resultsPerKeyword = 20
+            maxTotalResults = 200
             configPath = $configPath
+            source = "defaults"
             found = $false
         }
     }
@@ -98,8 +117,8 @@ function Get-DistributedKeywordBudget {
     .SYNOPSIS
         Calculates adjusted results_per_keyword based on keyword count
     .DESCRIPTION
-        When keywords exceed the budget (max_total_results / results_per_keyword),
-        this function calculates how many results each keyword will get
+        Always distributes budget evenly: floor(max_total_results / keyword_count)
+        Ensures all keywords receive at least 1 search attempt
     .PARAMETER Keywords
         Array of keyword strings
     .PARAMETER MaxTotalResults
@@ -120,7 +139,7 @@ function Get-DistributedKeywordBudget {
     # Handle edge cases
     if ($Keywords.Count -eq 0) {
         return @{
-            adjustedResultsPerKeyword = $ResultsPerKeyword
+            adjustedResultsPerKeyword = 0
             totalKeywords = 0
             willReduce = $false
             warningMessage = "No keywords provided"
@@ -130,32 +149,29 @@ function Get-DistributedKeywordBudget {
 
     $totalKeywords = $Keywords.Count
 
-    # Calculate the budget threshold
-    $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
-
-    if ($totalKeywords -le $budgetThreshold) {
-        # Keywords fit within budget
-        return @{
-            adjustedResultsPerKeyword = $ResultsPerKeyword
-            totalKeywords = $totalKeywords
-            willReduce = $false
-            warningMessage = $null
-            effectiveTotal = $totalKeywords * $ResultsPerKeyword
-        }
-    }
-
-    # Keywords exceed budget - need to reduce
+    # Always use the formula: floor(max_total_results / keyword_count)
+    # This ensures: 1 keyword -> 200, 5 keywords -> 40, 10 keywords -> 20, etc.
     $adjustedResults = [Math]::Floor($MaxTotalResults / $totalKeywords)
     $effectiveTotal = $totalKeywords * $adjustedResults
 
-    $warningMsg = "WARNING: $totalKeywords keywords exceeds budget of $budgetThreshold. " +
-                  "Results per keyword will be reduced from $ResultsPerKeyword to $adjustedResults to stay within $MaxTotalResults limit."
+    # Determine if we're reducing from the base results_per_keyword
+    $willReduce = $adjustedResults -lt $ResultsPerKeyword
+
+    # Calculate budget threshold
+    $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
+
+    $warningMessage = $null
+    if ($willReduce) {
+        $warningMsg = "WARNING: $totalKeywords keywords exceeds budget threshold of $budgetThreshold. " +
+                      "Results per keyword will be reduced from $ResultsPerKeyword to $adjustedResults to stay within $MaxTotalResults limit."
+        $warningMessage = $warningMsg
+    }
 
     return @{
         adjustedResultsPerKeyword = $adjustedResults
         totalKeywords = $totalKeywords
-        willReduce = $true
-        warningMessage = $warningMsg
+        willReduce = $willReduce
+        warningMessage = $warningMessage
         effectiveTotal = $effectiveTotal
     }
 }
@@ -209,7 +225,9 @@ function Get-ChapterDistributedKeywords {
         # Process each part (either from split or original keyword)
         $isFirst = $true
         foreach ($part in $separatedParts) {
-            if ([string]::IsNullOrWhiteSpace($part) -or $part.Length -lt 2) {
+            # Allow single-character numeric parts (like "1", "2", "3")
+            $isNumeric = $part -match '^\d+$'
+            if ([string]::IsNullOrWhiteSpace($part) -or ($part.Length -lt 2 -and -not $isNumeric)) {
                 continue
             }
 
@@ -267,8 +285,24 @@ function Get-ChapterDistributedKeywords {
             }
 
             if (-not $matched) {
-                # No chapter pattern found - add as-is
-                $individualTerms += $processedPart.Trim()
+                # Check for "top N" patterns (e.g., "Top 5 tips", "top 10 features")
+                # This pattern indicates the user wants N specific items
+                # Pattern: "Top" or "Best" followed by number, then the topic
+                if ($processedPart -match '(?i)^(top|best)\s+(\d+)\s+(.+)$') {
+                    $individualTerms += $processedPart.Trim()
+
+                    # Also add the core topic without the "top N" prefix
+                    if ($matches.Count -ge 4 -and $matches[3]) {
+                        $topicPart = $matches[3].Trim()
+                        if ($topicPart -and $topicPart.Length -gt 2) {
+                            $individualTerms += $topicPart
+                        }
+                    }
+                }
+                else {
+                    # No chapter pattern found - add as-is
+                    $individualTerms += $processedPart.Trim()
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 ﻿{
     "statistics":  {
-                       "totalHardStories":  23,
+                       "totalHardStories":  25,
                        "abandoned":  0,
                        "successfullyDecomposed":  0,
                        "stillHardAfterDecomposition":  0
@@ -779,6 +779,78 @@
                                        }
                                    ],
                         "originalId":  "US-94-001",
+                        "focusArea":  "iterative-phase",
+                        "sprintNumbers":  [
+                                              94
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Add source channel diversification for search results",
+                        "firstFailedAt":  "2026-02-13T21:12:28.1149690+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-13T21:12:28.1149690+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-13T20:56:36.0784768+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-13T21:01:41.6878259+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-13T21:12:28.1099680+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-94-009",
+                        "focusArea":  "iterative-phase",
+                        "sprintNumbers":  [
+                                              94
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Add voiceover context awareness to gap keyword extraction",
+                        "firstFailedAt":  "2026-02-13T21:50:30.1663260+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-13T21:50:30.1663260+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-13T21:44:33.6366521+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-13T21:47:07.4682077+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-13T21:50:30.1608234+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-94-012",
                         "focusArea":  "iterative-phase",
                         "sprintNumbers":  [
                                               94

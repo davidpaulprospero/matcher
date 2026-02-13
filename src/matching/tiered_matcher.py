@@ -43,10 +43,15 @@ from .scoring import (
     apply_tag_keyword_boost,  # US-75-004
     apply_chapter_topic_match,  # US-75-005
     apply_chapter_source_consistency,  # US-75-005
+    apply_source_channel_consistency,  # US-95-006
+    apply_topic_alignment_boost,  # US-95-007
     apply_chapter_coherence_penalty,  # US-75-006
     apply_cross_chapter_relevance_boost,  # US-75-006
+    apply_chapter_boundary_penalty,  # US-95-004
     apply_listicle_consistency,  # US-75-007
     apply_entity_match_boost,  # US-77-011
+    apply_context_richness_calibration,  # US-95-010
+    compute_chapter_alignment_boost,  # US-95-011
     compute_semantic_coherence,  # US-77-002
     compute_temporal_coherence,  # US-77-003
     apply_source_stutter_penalty,  # US-84-004
@@ -148,9 +153,10 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
         'project_boost', 'consecutive_source_penalty', 'title_relevance',
         'description_relevance', 'tag_keyword_boost', 'chapter_topic_match',
         'chapter_source_consistency', 'chapter_coherence_penalty',
-        'cross_chapter_relevance', 'listicle_consistency',
+        'cross_chapter_relevance', 'chapter_boundary_penalty', 'listicle_consistency',
         'semantic_coherence', 'temporal_coherence', 'source_stutter_penalty',
         'explanation_validation', 'entity_match_boost', 'diversity_recheck',
+        'chapter_alignment_boost', 'topic_alignment_boost',  # US-95-011, US-95-007
     }
 
     confidences: List[float] = []
@@ -380,7 +386,10 @@ class TieredMatcher:
 
         # Chapter-based matching
         self.chapter_matching_enabled = getattr(mc, 'chapter_matching_enabled', False)
+        self.enforce_chapter_boundaries = getattr(mc, 'enforce_chapter_boundaries', False)  # US-95-004
+        self.cross_chapter_penalty = getattr(mc, 'cross_chapter_penalty', 0.1)  # US-95-004
         self.topic_mismatch_penalty = getattr(mc, 'topic_mismatch_penalty', 0.15)
+        self.topic_alignment_weight = getattr(mc, 'topic_alignment_weight', 0.1)  # US-95-007
 
         # Location-aware matching (compose LocationMatcher)
         self.location_matching_config = getattr(mc, 'location_matching', None)
@@ -1003,6 +1012,19 @@ class TieredMatcher:
             return meta.get('chapters', []) or []
         return []
 
+    def _get_video_channel(self, segment: SRTSegment) -> Optional[str]:
+        """Resolve video channel from video_metadata using segment's source_file.
+
+        US-95-006: Returns channel name from the video_metadata lookup.
+        Used for source channel consistency scoring.
+        """
+        if not self.video_metadata:
+            return None
+        meta = self.video_metadata.get(segment.source_file)
+        if isinstance(meta, dict):
+            return meta.get('channel') or None
+        return None
+
     def _get_chapter_title(self, segment: SRTSegment) -> Optional[str]:
         """Resolve chapter title from the video segment's chapter_title attribute."""
         return getattr(segment, 'chapter_title', None) or None
@@ -1153,11 +1175,29 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'topic_penalty', prev, adjusted_confidence, topic_penalty_reason)
 
+            # US-95-007: Topic alignment boost
+            prev = adjusted_confidence
+            adjusted_confidence, topic_align_reason = apply_topic_alignment_boost(
+                adjusted_confidence, vo_segment, best_seg,
+                video_topics=self.video_topics,
+                topic_alignment_weight=self.topic_alignment_weight
+            )
+            _record_breakdown(confidence_breakdown, 'topic_alignment_boost', prev, adjusted_confidence, topic_align_reason)
+
             prev = adjusted_confidence
             adjusted_confidence, broll_reason = apply_broll_boost(
                 adjusted_confidence, best_seg, self.config
             )
             _record_breakdown(confidence_breakdown, 'broll_boost', prev, adjusted_confidence, broll_reason)
+
+            # US-95-011: Apply chapter alignment boost
+            prev = adjusted_confidence
+            video_chapters = self._get_video_chapters(best_seg)
+            chapter_boost, chapter_align_reason = compute_chapter_alignment_boost(
+                best_seg, video_chapters, self.config.matching
+            )
+            adjusted_confidence += chapter_boost
+            _record_breakdown(confidence_breakdown, 'chapter_alignment_boost', prev, adjusted_confidence, chapter_align_reason)
 
             # US-007: Apply caption quality adjustment
             prev = adjusted_confidence
@@ -1230,6 +1270,18 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
 
+            # US-95-006: Apply source channel consistency boost
+            current_channel = self._get_video_channel(best_seg)
+            if current_channel:
+                prev = adjusted_confidence
+                adjusted_confidence, channel_reason = apply_source_channel_consistency(
+                    adjusted_confidence, vo_segment, best_seg,
+                    recent_matches=self._recent_matches,
+                    current_channel=current_channel,
+                    config=self.config,
+                )
+                _record_breakdown(confidence_breakdown, 'source_channel_coherence', prev, adjusted_confidence, channel_reason)
+
             # US-75-006: Apply chapter coherence penalty
             prev = adjusted_confidence
             adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
@@ -1248,6 +1300,15 @@ class TieredMatcher:
                 chapter_matching_enabled=self.chapter_matching_enabled
             )
             _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
+
+            # US-95-004: Apply chapter boundary penalty
+            prev = adjusted_confidence
+            adjusted_confidence, chapter_boundary_reason = apply_chapter_boundary_penalty(
+                adjusted_confidence, vo_segment, best_seg,
+                enforce_boundaries=self.enforce_chapter_boundaries,
+                penalty=self.cross_chapter_penalty,
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_boundary_penalty', prev, adjusted_confidence, chapter_boundary_reason)
 
             # US-75-007: Apply listicle consistency boost
             prev = adjusted_confidence
@@ -1279,6 +1340,31 @@ class TieredMatcher:
             adjusted_confidence, temporal_coherence_reason = self._apply_temporal_coherence(
                 adjusted_confidence, best_seg, confidence_breakdown
             )
+
+            # US-95-010: Apply context richness calibration
+            # Get metadata for calibration
+            video_title = self._get_video_title(best_seg)
+            video_desc = self._get_video_description(best_seg)
+            video_tags = self._get_video_tags(best_seg)
+            video_chapter = self._get_chapter_title(best_seg)
+
+            # Get calibration settings from config
+            calibration_enabled = getattr(mc, 'context_richness_calibration', True)
+            calibration_boost = getattr(mc, 'context_richness_boost_max', 0.08)
+            calibration_penalty = getattr(mc, 'context_richness_penalty_max', 0.05)
+
+            prev = adjusted_confidence
+            adjusted_confidence, context_richness_reason = apply_context_richness_calibration(
+                adjusted_confidence,
+                video_title=video_title,
+                video_description=video_desc,
+                video_tags=video_tags,
+                video_chapter=video_chapter,
+                enabled=calibration_enabled,
+                boost_max=calibration_boost,
+                penalty_max=calibration_penalty,
+            )
+            _record_breakdown(confidence_breakdown, 'context_richness_calibration', prev, adjusted_confidence, context_richness_reason)
 
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
@@ -1314,6 +1400,8 @@ class TieredMatcher:
                 final_reasoning += f" [{listicle_reason}]"
             if entity_boost_reason:
                 final_reasoning += f" [{entity_boost_reason}]"
+            if context_richness_reason:
+                final_reasoning += f" [{context_richness_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1380,11 +1468,29 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'topic_penalty', prev, adjusted_confidence, topic_penalty_reason)
 
+            # US-95-007: Topic alignment boost
+            prev = adjusted_confidence
+            adjusted_confidence, topic_align_reason = apply_topic_alignment_boost(
+                adjusted_confidence, vo_segment, best_seg,
+                video_topics=self.video_topics,
+                topic_alignment_weight=self.topic_alignment_weight
+            )
+            _record_breakdown(confidence_breakdown, 'topic_alignment_boost', prev, adjusted_confidence, topic_align_reason)
+
             prev = adjusted_confidence
             adjusted_confidence, broll_reason = apply_broll_boost(
                 adjusted_confidence, best_seg, self.config
             )
             _record_breakdown(confidence_breakdown, 'broll_boost', prev, adjusted_confidence, broll_reason)
+
+            # US-95-011: Apply chapter alignment boost
+            prev = adjusted_confidence
+            video_chapters = self._get_video_chapters(best_seg)
+            chapter_boost, chapter_align_reason = compute_chapter_alignment_boost(
+                best_seg, video_chapters, self.config.matching
+            )
+            adjusted_confidence += chapter_boost
+            _record_breakdown(confidence_breakdown, 'chapter_alignment_boost', prev, adjusted_confidence, chapter_align_reason)
 
             # US-007: Apply caption quality adjustment
             prev = adjusted_confidence
@@ -1457,6 +1563,18 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'chapter_source_consistency', prev, adjusted_confidence, chapter_source_reason)
 
+            # US-95-006: Apply source channel consistency boost
+            current_channel = self._get_video_channel(best_seg)
+            if current_channel:
+                prev = adjusted_confidence
+                adjusted_confidence, channel_reason = apply_source_channel_consistency(
+                    adjusted_confidence, vo_segment, best_seg,
+                    recent_matches=self._recent_matches,
+                    current_channel=current_channel,
+                    config=self.config,
+                )
+                _record_breakdown(confidence_breakdown, 'source_channel_coherence', prev, adjusted_confidence, channel_reason)
+
             # US-75-006: Apply chapter coherence penalty
             prev = adjusted_confidence
             adjusted_confidence, coherence_reason = apply_chapter_coherence_penalty(
@@ -1475,6 +1593,15 @@ class TieredMatcher:
                 chapter_matching_enabled=self.chapter_matching_enabled
             )
             _record_breakdown(confidence_breakdown, 'cross_chapter_relevance', prev, adjusted_confidence, cross_chapter_reason)
+
+            # US-95-004: Apply chapter boundary penalty
+            prev = adjusted_confidence
+            adjusted_confidence, chapter_boundary_reason = apply_chapter_boundary_penalty(
+                adjusted_confidence, vo_segment, best_seg,
+                enforce_boundaries=self.enforce_chapter_boundaries,
+                penalty=self.cross_chapter_penalty,
+            )
+            _record_breakdown(confidence_breakdown, 'chapter_boundary_penalty', prev, adjusted_confidence, chapter_boundary_reason)
 
             # US-75-007: Apply listicle consistency boost
             prev = adjusted_confidence
@@ -1507,6 +1634,31 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
+            # US-95-010: Apply context richness calibration
+            # Get metadata for calibration
+            video_title = self._get_video_title(best_seg)
+            video_desc = self._get_video_description(best_seg)
+            video_tags = self._get_video_tags(best_seg)
+            video_chapter = self._get_chapter_title(best_seg)
+
+            # Get calibration settings from config
+            calibration_enabled = getattr(mc, 'context_richness_calibration', True)
+            calibration_boost = getattr(mc, 'context_richness_boost_max', 0.08)
+            calibration_penalty = getattr(mc, 'context_richness_penalty_max', 0.05)
+
+            prev = adjusted_confidence
+            adjusted_confidence, context_richness_reason = apply_context_richness_calibration(
+                adjusted_confidence,
+                video_title=video_title,
+                video_description=video_desc,
+                video_tags=video_tags,
+                video_chapter=video_chapter,
+                enabled=calibration_enabled,
+                boost_max=calibration_boost,
+                penalty_max=calibration_penalty,
+            )
+            _record_breakdown(confidence_breakdown, 'context_richness_calibration', prev, adjusted_confidence, context_richness_reason)
+
             # US-75-006: Update chapter source tracking
             self._update_chapter_source_counts(vo_segment, best_seg)
 
@@ -1537,6 +1689,8 @@ class TieredMatcher:
                 reasoning += f" [{listicle_reason}]"
             if entity_boost_reason:
                 reasoning += f" [{entity_boost_reason}]"
+            if context_richness_reason:
+                reasoning += f" [{context_richness_reason}]"
 
             # US-63-007: Store confidence breakdown on Match object
             match = Match(
@@ -1688,6 +1842,15 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'broll_boost', prev, adjusted_confidence, broll_reason)
 
+        # US-95-011: Apply chapter alignment boost
+        prev = adjusted_confidence
+        video_chapters = self._get_video_chapters(best_seg)
+        chapter_boost, chapter_align_reason = compute_chapter_alignment_boost(
+            best_seg, video_chapters, self.config.matching
+        )
+        adjusted_confidence += chapter_boost
+        _record_breakdown(confidence_breakdown, 'chapter_alignment_boost', prev, adjusted_confidence, chapter_align_reason)
+
         # US-007: Apply caption quality adjustment
         prev = adjusted_confidence
         adjusted_confidence, caption_quality_reason = apply_caption_quality_adjustment(
@@ -1809,6 +1972,31 @@ class TieredMatcher:
             adjusted_confidence, best_seg, confidence_breakdown
         )
 
+        # US-95-010: Apply context richness calibration
+        # Get metadata for calibration
+        video_title = self._get_video_title(best_seg)
+        video_desc = self._get_video_description(best_seg)
+        video_tags = self._get_video_tags(best_seg)
+        video_chapter = self._get_chapter_title(best_seg)
+
+        # Get calibration settings from config
+        calibration_enabled = getattr(mc, 'context_richness_calibration', True)
+        calibration_boost = getattr(mc, 'context_richness_boost_max', 0.08)
+        calibration_penalty = getattr(mc, 'context_richness_penalty_max', 0.05)
+
+        prev = adjusted_confidence
+        adjusted_confidence, context_richness_reason = apply_context_richness_calibration(
+            adjusted_confidence,
+            video_title=video_title,
+            video_description=video_desc,
+            video_tags=video_tags,
+            video_chapter=video_chapter,
+            enabled=calibration_enabled,
+            boost_max=calibration_boost,
+            penalty_max=calibration_penalty,
+        )
+        _record_breakdown(confidence_breakdown, 'context_richness_calibration', prev, adjusted_confidence, context_richness_reason)
+
         # US-77-004: Apply explanation validation (verify LLM reasoning keywords)
         explanation_validation_reason = ""
         explanation_validation_enabled = getattr(mc, 'explanation_validation_enabled', True)
@@ -1860,6 +2048,8 @@ class TieredMatcher:
             final_reasoning += f" [{listicle_reason}]"
         if entity_boost_reason:
             final_reasoning += f" [{entity_boost_reason}]"
+        if context_richness_reason:
+            final_reasoning += f" [{context_richness_reason}]"
         if explanation_validation_reason:
             final_reasoning += f" [{explanation_validation_reason}]"
         if rerank_result.llm_reasoning_quality == 0:

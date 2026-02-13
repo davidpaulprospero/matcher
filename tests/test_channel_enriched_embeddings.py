@@ -220,3 +220,138 @@ class TestChannelEnrichedEmbeddings:
         assert not entry['text'].startswith('[')
         # embedding_text must have the prefix
         assert entry['embedding_text'].startswith('[ChannelX | Title Here] ')
+
+
+class TestEmbedChannelContextConfig:
+    """Tests for embed_channel_context config option (US-95-008)."""
+
+    @pytest.mark.fast
+    def test_config_option_embed_channel_context_default_true(self):
+        """Config option embed_channel_context defaults to True."""
+        from src.config.sections.matching import ContextEnrichmentConfig
+        config = ContextEnrichmentConfig()
+        assert config.embed_channel_context is True
+
+    @pytest.mark.fast
+    def test_config_option_embed_channel_context_can_be_disabled(self):
+        """Config option embed_channel_context can be set to False."""
+        from src.config.sections.matching import ContextEnrichmentConfig
+        config = ContextEnrichmentConfig(embed_channel_context=False)
+        assert config.embed_channel_context is False
+
+
+class TestChannelContextSearchRelevance:
+    """Tests for channel context improving search relevance (US-95-008)."""
+
+    @pytest.mark.fast
+    def test_channel_context_same_creator_videos_cluster(self):
+        """Videos from same channel should have similar embedding prefixes."""
+        stage = _get_stage()
+
+        # Two videos from same channel
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='vid1', title='Tutorial Part 1', channel='CodingChannel'),
+                FakeVideoSearchResult(video_id='vid2', title='Tutorial Part 2', channel='CodingChannel'),
+                FakeVideoSearchResult(video_id='vid3', title='Unrelated Video', channel='OtherChannel'),
+            ]
+        )
+        caption_results = {
+            'vid1': {'segments': [{'text': 'learning python basics', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+            'vid2': {'segments': [{'text': 'advanced python tricks', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+            'vid3': {'segments': [{'text': 'cooking recipe', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+        }
+        config = _make_config(embed_channel_context=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        # Extract channel prefixes
+        texts = {e['text']: e['embedding_text'] for e in state.text_metadata}
+        prefix1 = texts['learning python basics']  # [CodingChannel | Tutorial Part 1]
+        prefix2 = texts['advanced python tricks']  # [CodingChannel | Tutorial Part 2]
+        prefix3 = texts['cooking recipe']  # [OtherChannel | Unrelated Video]
+
+        # Same channel videos have same channel name
+        assert 'CodingChannel' in prefix1
+        assert 'CodingChannel' in prefix2
+        assert prefix1.startswith('[CodingChannel |')
+        assert prefix2.startswith('[CodingChannel |')
+        # Different channel has different channel name
+        assert 'OtherChannel' in prefix3
+        assert prefix3.startswith('[OtherChannel |')
+
+    @pytest.mark.fast
+    def test_channel_context_differentiates_similar_titles_different_channels(self):
+        """Same title from different channels should have different prefixes."""
+        stage = _get_stage()
+
+        # Same title but different channels
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='vid1', title='How To Cook', channel='ChefChannel'),
+                FakeVideoSearchResult(video_id='vid2', title='How To Cook', channel='TechChannel'),
+            ]
+        )
+        caption_results = {
+            'vid1': {'segments': [{'text': 'make delicious pasta', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+            'vid2': {'segments': [{'text': 'code a web app', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+        }
+        config = _make_config(embed_channel_context=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        texts = {e['text']: e['embedding_text'] for e in state.text_metadata}
+        prefix1 = texts['make delicious pasta'].split('] ')[0]
+        prefix2 = texts['code a web app'].split('] ')[0]
+
+        # Different channels = different prefixes
+        assert 'ChefChannel' in prefix1
+        assert 'TechChannel' in prefix2
+        assert prefix1 != prefix2
+
+    @pytest.mark.fast
+    def test_channel_context_embedding_similarity_pattern(self):
+        """Channel context makes same-creator videos more similar in embedding space."""
+        # This test verifies the expected behavior: channel prefix creates a
+        # similarity pattern that search algorithms can leverage
+        stage = _get_stage()
+
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='v1', title='Video A', channel='MyChannel'),
+                FakeVideoSearchResult(video_id='v2', title='Video B', channel='MyChannel'),
+                FakeVideoSearchResult(video_id='v3', title='Video C', channel='OtherChannel'),
+            ]
+        )
+        caption_results = {
+            'v1': {'segments': [{'text': 'content about topic x', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+            'v2': {'segments': [{'text': 'content about topic x', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+            'v3': {'segments': [{'text': 'content about topic x', 'start': 0, 'end': 5}], 'language': 'en', 'caption_quality': 'high'},
+        }
+        config = _make_config(embed_channel_context=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        texts = [e['embedding_text'] for e in state.text_metadata]
+
+        # All three have same content text, only channel differs
+        # v1 and v2 should have same channel prefix (MyChannel)
+        # v3 should have different channel prefix (OtherChannel)
+        assert texts[0].startswith('[MyChannel | Video A]')
+        assert texts[1].startswith('[MyChannel | Video B]')
+        assert texts[2].startswith('[OtherChannel | Video C]')
+
+        # Simulate similarity calculation: shared channel = higher similarity
+        def simple_similarity(a: str, b: str) -> float:
+            """Count shared words / total words."""
+            words_a = set(a.lower().split())
+            words_b = set(b.lower().split())
+            return len(words_a & words_b) / len(words_a | words_b)
+
+        # Same content, same channel = highest similarity
+        sim_same_channel = simple_similarity(texts[0], texts[1])
+        # Same content, different channel = lower similarity
+        sim_diff_channel = simple_similarity(texts[0], texts[2])
+
+        # Channel context creates measurable similarity difference
+        assert sim_same_channel > sim_diff_channel, "Same-channel videos should be more similar"
