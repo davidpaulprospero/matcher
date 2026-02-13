@@ -1,199 +1,960 @@
 ﻿{
-    "sprintNumber":  94,
-    "focusArea":  "iterative-phase",
-    "branchName":  "ralph/sprint-94",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
+    "agent":  {
+                  "provider":  "claude",
+                  "providers":  {
+                                    "claude":  {
+                                                   "executable":  "claude",
+                                                   "models":  {
+                                                                  "high":  "MiniMax-M2.5",
+                                                                  "fast":  "MiniMax-M2.5",
+                                                                  "default":  "MiniMax-M2.5"
+                                                              }
+                                               },
+                                    "codex":  {
+                                                  "executable":  "codex",
+                                                  "models":  {
+                                                                 "high":  "o4-mini",
+                                                                 "fast":  "o4-mini",
+                                                                 "default":  "o4-mini"
+                                                             }
+                                              }
+                                }
+              },
+    "claudePath":  "claude",
+    "model":  "opus",
+    "iterationTimeout":  600,
+    "focusAreaCategories":  {
+                                "core":  {
+                                             "name":  "Core Infrastructure",
+                                             "emoji":  "U+1F527",
+                                             "areas":  [
+                                                           "pipeline",
+                                                           "config",
+                                                           "architecture",
+                                                           "diagnostics",
+                                                           "checkpoint"
+                                                       ],
+                                             "description":  "Pipeline stages, orchestration, configuration"
+                                         },
+                                "acquisition":  {
+                                                    "name":  "Content Acquisition",
+                                                    "emoji":  "U+1F4E5",
+                                                    "areas":  [
+                                                                  "rate-limiting",
+                                                                  "caption",
+                                                                  "transcription",
+                                                                  "download",
+                                                                  "mullvad-vpn"
+                                                              ],
+                                                    "description":  "YouTube downloads, captions, rate limit handling"
+                                                },
+                                "processing":  {
+                                                   "name":  "Content Processing",
+                                                   "emoji":  "U+2699",
+                                                   "areas":  [
+                                                                 "quality",
+                                                                 "speed",
+                                                                 "compilation",
+                                                                 "iterative-phase",
+                                                                 "listicle-matching",
+                                                                 "context-matching"
+                                                             ],
+                                                   "description":  "Matching, performance, keyword modes"
+                                               },
+                                "output":  {
+                                               "name":  "Output Generation",
+                                               "emoji":  "U+1F4E4",
+                                               "areas":  [
+                                                             "otio"
+                                                         ],
+                                               "description":  "Timeline formats: OTIO, EDL, XML"
+                                           },
+                                "intelligence":  {
+                                                     "name":  "AI \u0026 Learning",
+                                                     "emoji":  "U+1F9E0",
+                                                     "areas":  [
+                                                                   "agents",
+                                                                   "client-learning"
+                                                               ],
+                                                     "description":  "Self-healing, cross-project learning"
+                                                 },
+                                "meta":  {
+                                             "name":  "Development \u0026 Testing",
+                                             "emoji":  "U+1F9EA",
+                                             "areas":  [
+                                                           "testing",
+                                                           "unit-tests",
+                                                           "integration-tests",
+                                                           "mutation-tests",
+                                                           "documentation",
+                                                           "ux",
+                                                           "ralph-improvements",
+                                                           "tools-and-scripts"
+                                                       ],
+                                             "description":  "Tests (unit, integration, mutation), docs, CLI experience"
+                                         }
+                            },
+    "focusAreas":  [
+                       {
+                           "id":  "pipeline",
+                           "name":  "Pipeline Core",
+                           "category":  "core",
+                           "description":  "Core pipeline stages and orchestration"
+                       },
+                       {
+                           "id":  "config",
+                           "name":  "Configuration",
+                           "category":  "core",
+                           "description":  "Config management and validation"
+                       },
+                       {
+                           "id":  "architecture",
+                           "name":  "Architecture",
+                           "category":  "core",
+                           "description":  "Cross-cutting architectural concerns: download_segments Python API, escalation state, error classification, stage integration patterns"
+                       },
+                       {
+                           "id":  "rate-limiting",
+                           "name":  "Rate Limiting",
+                           "category":  "acquisition",
+                           "description":  "YouTube download resilience: cookie rotation, circuit breaker, impersonation escalation, extractor-args bypass"
+                       },
+                       {
+                           "id":  "caption",
+                           "name":  "Caption System",
+                           "category":  "acquisition",
+                           "description":  "YouTube caption fetching (always-on caption-first), transcript caching"
+                       },
+                       {
+                           "id":  "transcription",
+                           "name":  "Transcription System",
+                           "category":  "acquisition",
+                           "description":  "Whisper transcription, parallel processing, transcription caching, caption-to-transcription pipeline"
+                       },
+                       {
+                           "id":  "download",
+                           "name":  "Download Core",
+                           "category":  "acquisition",
+                           "description":  "Core download logic, yt-dlp integration, browser impersonation (curl_cffi), TLS fingerprint bypass"
+                       },
+                       {
+                           "id":  "mullvad-vpn",
+                           "name":  "Mullvad VPN Integration",
+                           "category":  "acquisition",
+                           "description":  "Mullvad VPN for Tier 3 bypass: geographic server rotation, am.i.mullvad.net verification, daemon CLI control"
+                       },
+                       {
+                           "id":  "quality",
+                           "name":  "Match Quality",
+                           "category":  "processing",
+                           "description":  "Improve matching accuracy and confidence scores"
+                       },
+                       {
+                           "id":  "speed",
+                           "name":  "Performance",
+                           "category":  "processing",
+                           "description":  "Optimize pipeline speed and caching"
+                       },
+                       {
+                           "id":  "compilation",
+                           "name":  "Compilation Mode",
+                           "category":  "processing",
+                           "description":  "Keyword compilation and montage features"
+                       },
+                       {
+                           "id":  "iterative-phase",
+                           "name":  "Iterative Match Phase",
+                           "category":  "processing",
+                           "description":  "Gap analysis, query learning, iterative re-search to fill unmatched voiceover segments"
+                       },
+                       {
+                           "id":  "otio",
+                           "name":  "Timeline Output",
+                           "category":  "output",
+                           "description":  "OTIO/EDL/XML timeline generation"
+                       },
+                       {
+                           "id":  "agents",
+                           "name":  "Self-Healing",
+                           "category":  "intelligence",
+                           "description":  "Self-healing agents and error recovery"
+                       },
+                       {
+                           "id":  "client-learning",
+                           "name":  "Client Learning",
+                           "category":  "intelligence",
+                           "description":  "Cross-project learning and client presets"
+                       },
+                       {
+                           "id":  "testing",
+                           "name":  "Test Coverage",
+                           "category":  "meta",
+                           "description":  "General test coverage and reliability"
+                       },
+                       {
+                           "id":  "unit-tests",
+                           "name":  "Unit Testing",
+                           "category":  "meta",
+                           "description":  "Isolated function tests with mocking"
+                       },
+                       {
+                           "id":  "integration-tests",
+                           "name":  "Integration Testing",
+                           "category":  "meta",
+                           "description":  "Component interaction tests"
+                       },
+                       {
+                           "id":  "mutation-tests",
+                           "name":  "Mutation Testing",
+                           "category":  "meta",
+                           "description":  "Verify test quality catches changes"
+                       },
+                       {
+                           "id":  "documentation",
+                           "name":  "Documentation",
+                           "category":  "meta",
+                           "description":  "API docs, README, inline comments"
+                       },
+                       {
+                           "id":  "ux",
+                           "name":  "CLI Experience",
+                           "category":  "meta",
+                           "description":  "Prompts, progress feedback, error messages"
+                       },
+                       {
+                           "id":  "cli-paths",
+                           "name":  "CLI Path Refinement",
+                           "category":  "core",
+                           "description":  "CLI arg path validation, early error detection, --output-only/--match-only path preloading, tilde expansion, double path resolution fix, Windows extended path handling, config search order clarity. Automated bug prevention: validate paths at boundary so bad paths never cascade into AttributeError/KeyError deep in pipeline stages — catches the #1 bug class (dict-vs-object from stale/missing checkpoint paths) before it happens"
+                       },
+                       {
+                           "id":  "listicle-matching",
+                           "name":  "Listicle Matching / Chapter Detection",
+                           "category":  "processing",
+                           "description":  "Detect chapters in source videos (YouTube chapter markers + description parsing), detect listicle structure in voiceover narration, cross-reference video/voiceover chapters for segment grouping and thematic coherence"
+                       },
+                       {
+                           "id":  "context-matching",
+                           "name":  "Context-Enriched Matching",
+                           "category":  "processing",
+                           "description":  "Extract and use video titles, descriptions, tags, and YouTube chapters as context signals in embedding computation, LLM reranking, and confidence scoring"
+                       },
+                       {
+                           "id":  "diagnostics",
+                           "name":  "Diagnostics",
+                           "category":  "core",
+                           "description":  "Pipeline diagnostics, logging improvements, error reporting, debug tooling, health checks, and observability"
+                       },
+                       {
+                           "id":  "checkpoint",
+                           "name":  "Checkpoint / Progress Saving",
+                           "category":  "core",
+                           "description":  "Checkpoint persistence, progress saving, resume reliability, backup/restore, checkpoint validation and healing"
+                       },
+                       {
+                           "id":  "ralph-improvements",
+                           "name":  "Ralph Improvements",
+                           "category":  "meta",
+                           "description":  "Ralph Loop enhancements: story generation, sprint management, stall detection, metrics, prompt engineering, autonomy improvements"
+                       },
+                       {
+                           "id":  "tools-and-scripts",
+                           "name":  "Tools and Scripts",
+                           "category":  "meta",
+                           "description":  "Utility scripts, CLI tools, helper scripts in scripts/, developer tooling, automation"
+                       }
+                   ],
+    "categoryOrder":  [
+                          "core",
+                          "acquisition",
+                          "processing",
+                          "output",
+                          "intelligence",
+                          "meta"
+                      ],
+    "autonomy":  {
+                     "maxIterations":  115,
+                     "iterationTimeout":  600,
+                     "fastFail":  {
+                                      "consecutiveFailures":  3,
+                                      "minIterationTime":  120
+                                  },
+                     "autoRetry":  {
+                                       "enabled":  true,
+                                       "maxRetries":  2,
+                                       "backoffSeconds":  30
+                                   }
+                 },
+    "pipelineStages":  {
+                           "order":  [
+                                         "ANALYZE",
+                                         "VIDEO_SEARCH",
+                                         "CAPTION",
+                                         "MATCH",
+                                         "ITERATIVE_MATCH",
+                                         "DOWNLOAD_SEGMENTS",
+                                         "OUTPUT"
+                                     ],
+                           "groups":  {
+                                          "search":  [
+                                                         "VIDEO_SEARCH",
+                                                         "CAPTION"
+                                                     ],
+                                          "analysis":  [
+                                                           "ANALYZE"
+                                                       ],
+                                          "matching":  [
+                                                           "MATCH",
+                                                           "ITERATIVE_MATCH"
+                                                       ],
+                                          "download":  [
+                                                           "DOWNLOAD_SEGMENTS"
+                                                       ],
+                                          "output":  [
+                                                         "OUTPUT"
+                                                     ]
+                                      },
+                           "legacy":  [
+                                          "DOWNLOAD",
+                                          "STOCK",
+                                          "BROLL_DOWNLOAD",
+                                          "REMIX",
+                                          "TRANSCRIBE",
+                                          "SCENE_DETECTION",
+                                          "BROLL_MATCH"
+                                      ]
+                       },
+    "testProject":  {
+                        "path":  "E:/Edit Job/_ralph_test",
+                        "maxDuration":  30,
+                        "maxVideos":  3
+                    },
+    "testPatterns":  {
+                         "quality":  [
+                                         "test_match*.py",
+                                         "test_scoring*.py",
+                                         "test_stage*.py"
+                                     ],
+                         "speed":  [
+                                       "test_cache*.py",
+                                       "test_parallel*.py",
+                                       "test_embedding*.py"
+                                   ],
+                         "testing":  [
+                                         "test_sprint*.py"
+                                     ],
+                         "agents":  [
+                                        "test_agent*.py",
+                                        "test_healer*.py"
+                                    ],
+                         "otio":  [
+                                      "test_otio*.py",
+                                      "test_timeline*.py"
+                                  ],
+                         "pipeline":  [
+                                          "test_pipeline*.py",
+                                          "test_stage*.py"
+                                      ],
+                         "rate-limiting":  [
+                                               "test_download*.py",
+                                               "test_rate*.py"
+                                           ],
+                         "caption":  [
+                                         "test_caption*.py",
+                                         "test_stage_caption*.py"
+                                     ],
+                         "transcription":  [
+                                               "test_transcription*.py",
+                                               "test_caption*.py",
+                                               "test_caption_fetcher*.py"
+                                           ],
+                         "config":  [
+                                        "test_config*.py"
+                                    ],
+                         "architecture":  [
+                                              "test_download_segment*.py",
+                                              "test_iterative_match*.py",
+                                              "test_error_classif*.py",
+                                              "test_escalation*.py",
+                                              "test_tier*.py"
+                                          ],
+                         "download":  [
+                                          "test_download*.py",
+                                          "test_downloader*.py"
+                                      ],
+                         "mullvad-vpn":  [
+                                             "test_vpn*.py",
+                                             "test_mullvad*.py",
+                                             "test_escalation*.py"
+                                         ],
+                         "unit-tests":  [
+                                            "test_*.py"
+                                        ],
+                         "integration-tests":  [
+                                                   "tests/integration/*.py"
+                                               ],
+                         "mutation-tests":  [
+                                                "tests/*.py"
+                                            ],
+                         "documentation":  [
+                                               "tests/test_docs*.py"
+                                           ],
+                         "ux":  [
+                                    "tests/test_cli*.py",
+                                    "tests/test_prompts*.py"
+                                ],
+                         "compilation":  [
+                                             "test_keyword*.py",
+                                             "test_compilation*.py"
+                                         ],
+                         "iterative-phase":  [
+                                                 "test_iterative_match*.py",
+                                                 "test_stage_iterative_match*.py"
+                                             ],
+                         "client-learning":  [
+                                                 "test_client*.py",
+                                                 "test_profile*.py"
+                                             ],
+                         "listicle-matching":  [
+                                                   "test_match*.py",
+                                                   "test_iterative_match*.py",
+                                                   "test_stage_match*.py",
+                                                   "test_chapter*.py",
+                                                   "test_listicle*.py"
+                                               ],
+                         "context-matching":  [
+                                                  "test_match*.py",
+                                                  "test_scoring*.py",
+                                                  "test_context*.py",
+                                                  "test_caption*.py"
+                                              ],
+                         "diagnostics":  [
+                                             "test_pipeline*.py",
+                                             "test_checkpoint*.py",
+                                             "test_cli*.py"
+                                         ],
+                         "checkpoint":  [
+                                            "test_checkpoint*.py",
+                                            "test_pipeline*.py"
+                                        ],
+                         "ralph-improvements":  [
+                                                    "scripts/ralph/tests/*.Tests.ps1"
+                                                ],
+                         "tools-and-scripts":  [
+                                                   "tests/test_cli*.py"
+                                               ]
+                     },
+    "relevantFiles":  {
+                          "quality":  [
+                                          "src/matching/",
+                                          "src/stages/match.py",
+                                          "src/stages/iterative_match.py",
+                                          "src/embeddings.py"
+                                      ],
+                          "speed":  [
+                                        "src/cache/",
+                                        "src/stages/video_search.py",
+                                        "src/stages/iterative_match.py",
+                                        "src/embeddings.py"
+                                    ],
+                          "testing":  [
+                                          "tests/conftest.py",
+                                          "tests/fixtures/",
+                                          "pyproject.toml",
+                                          "requirements-dev.txt"
+                                      ],
+                          "agents":  [
+                                         "src/agents/"
+                                     ],
+                          "otio":  [
+                                       "src/otio/",
+                                       "src/otio_builder.py"
+                                   ],
+                          "client-learning":  [
+                                                  "src/client_profile.py",
+                                                  "scripts/ralph/clients.json"
+                                              ],
+                          "pipeline":  [
+                                           "src/pipeline.py",
+                                           "src/checkpoint.py",
+                                           "src/stages/"
+                                       ],
+                          "rate-limiting":  [
+                                                "src/downloader/",
+                                                "src/downloader/core.py",
+                                                "src/downloader/rate_limit_budget.py",
+                                                "src/downloader/cookie_rotator.py",
+                                                "src/config/sections/download.py"
+                                            ],
+                          "caption":  [
+                                          "src/caption_fetcher.py",
+                                          "src/stages/caption_stage.py",
+                                          "src/transcription/"
+                                      ],
+                          "transcription":  [
+                                                "src/transcription/",
+                                                "src/caption_fetcher.py",
+                                                "src/caption/",
+                                                "src/stages/caption_stage.py",
+                                                "src/config/sections/core.py"
+                                            ],
+                          "config":  [
+                                         "src/config.py",
+                                         "src/config/",
+                                         "config.yaml"
+                                     ],
+                          "architecture":  [
+                                               "src/stages/download_segments.py",
+                                               "src/stages/iterative_match.py",
+                                               "src/downloader/error_classification.py",
+                                               "src/downloader/escalation_manager.py",
+                                               "src/downloader/circuit_breaker.py"
+                                           ],
+                          "download":  [
+                                           "src/downloader/",
+                                           "src/downloader/core.py",
+                                           "src/downloader/audio_first.py",
+                                           "src/downloader/title_filter.py",
+                                           "src/downloader/speech_screening.py",
+                                           "src/downloader/utils.py",
+                                           "src/caption_fetcher.py",
+                                           "src/config/sections/download.py"
+                                       ],
+                          "mullvad-vpn":  [
+                                              "src/downloader/vpn_manager.py",
+                                              "src/downloader/mullvad_vpn.py",
+                                              "src/downloader/escalation_manager.py",
+                                              "src/downloader/rate_limit_budget.py",
+                                              "src/config/sections/download.py"
+                                          ],
+                          "unit-tests":  [
+                                             "tests/conftest.py",
+                                             "tests/fixtures/",
+                                             "pyproject.toml"
+                                         ],
+                          "integration-tests":  [
+                                                    "tests/integration/"
+                                                ],
+                          "mutation-tests":  [
+                                                 "tests/conftest.py",
+                                                 "pyproject.toml"
+                                             ],
+                          "documentation":  [
+                                                "CLAUDE.md",
+                                                "README.md",
+                                                "REFACTORING.md",
+                                                "docs/"
+                                            ],
+                          "ux":  [
+                                     "src/cli/",
+                                     "main.py"
+                                 ],
+                          "compilation":  [
+                                              "src/keyword_extractor/",
+                                              "src/stages/analyze.py",
+                                              "src/compilation/"
+                                          ],
+                          "iterative-phase":  [
+                                                  "src/iterative_match/",
+                                                  "src/iterative_match/gap_analyzer.py",
+                                                  "src/iterative_match/query_learning.py",
+                                                  "src/stages/iterative_match.py"
+                                              ],
+                          "listicle-matching":  [
+                                                    "src/matching/",
+                                                    "src/stages/match.py",
+                                                    "src/stages/iterative_match.py",
+                                                    "src/iterative_match/",
+                                                    "src/chapter_detection/",
+                                                    "src/caption/models.py",
+                                                    "src/caption_fetcher.py",
+                                                    "src/iterative_match/gap_analyzer.py"
+                                                ],
+                          "context-matching":  [
+                                                   "src/matching/",
+                                                   "src/matching/scoring.py",
+                                                   "src/matching/llm_reranker.py",
+                                                   "src/matching/tiered_matcher.py",
+                                                   "src/caption/models.py",
+                                                   "src/caption_fetcher.py",
+                                                   "src/state.py",
+                                                   "src/stages/caption_stage.py",
+                                                   "src/config/sections/matching.py",
+                                                   "config.yaml"
+                                               ],
+                          "diagnostics":  [
+                                              "src/pipeline.py",
+                                              "src/checkpoint.py",
+                                              "src/cli/",
+                                              "main.py",
+                                              "src/agents/"
+                                          ],
+                          "checkpoint":  [
+                                             "src/checkpoint.py",
+                                             "src/pipeline.py",
+                                             "src/stages/"
+                                         ],
+                          "ralph-improvements":  [
+                                                     "scripts/ralph/ralph.ps1",
+                                                     "scripts/ralph/launcher.ps1",
+                                                     "scripts/ralph/config/ralph-config.json",
+                                                     "scripts/ralph/state/"
+                                                 ],
+                          "tools-and-scripts":  [
+                                                    "scripts/",
+                                                    "src/cli/",
+                                                    "main.py"
+                                                ]
+                      },
+    "flags":  {
+                  "autoGeneratePesterTests":  false,
+                  "llmAsJudgeQuality":  false,
+                  "phaseTracking":  true,
+                  "acceptanceDrivenBackpressure":  false,
+                  "regressionGuard":  false,
+                  "testSubsampling":  false,
+                  "learningInjection":  false,
+                  "roleSpecialization":  false,
+                  "adaptivePruning":  false,
+                  "deltaDebugging":  false,
+                  "parallelExecution":  false
+              },
+    "ralphsChoice":  {
+                         "enabled":  true,
+                         "activityWindowDays":  7,
+                         "maxSprintsBeforeRotate":  3,
+                         "weights":  {
+                                         "recentActivity":  0.5,
+                                         "neglectedArea":  0.3,
+                                         "categoryBalance":  0.2
+                                     },
+                         "autoMode":  {
+                                          "continueDelaySeconds":  10,
+                                          "logFile":  "ralphs_choices.log",
+                                          "maxConsecutiveSprints":  20
+                                      }
+                     },
+    "exploration":  {
+                        "enabled":  true,
+                        "sprintStart":  {
+                                            "enabled":  true,
+                                            "runTests":  true,
+                                            "checkGitHistory":  true,
+                                            "outputFile":  "exploration_context.md"
+                                        },
+                        "periodic":  {
+                                         "enabled":  true,
+                                         "intervalStories":  3,
+                                         "triggerOnGitChanges":  true,
+                                         "useHaiku":  true
+                                     }
+                    },
+    "review":  {
+                   "enabled":  false,
+                   "model":  "opus",
+                   "timeout":  180,
+                   "minScoreToPass":  6
+               },
+    "quality":  {
+                    "minTestRatio":  0.2,
+                    "maxDiffLines":  800
+                },
+    "regression":  {
+                       "enabled":  true,
+                       "blockOnRegression":  true,
+                       "autoRollback":  false
+                   },
+    "selfHealing":  {
+                        "enabled":  true,
+                        "maxAttempts":  3,
+                        "runAfterSuccess":  true,
+                        "runAfterFailure":  true,
+                        "healingTimeout":  300,
+                        "fullRunCadence":  3,
+                        "pytestArgs":  "tests/ --tb=short -q --no-header",
+                        "fastPytestArgs":  "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random",
+                        "criticalFiles":  [
+                                              "main.py",
+                                              "src/__init__.py",
+                                              "config.yaml",
+                                              "src/config.py",
+                                              "src/pipeline.py"
+                                          ]
+                    },
+    "testSubsampling":  {
+                            "maxTestsPerFastRun":  0,
+                            "focusAreaScoped":  true,
+                            "alwaysFullOnCadence":  true
+                        },
+    "roles":  {
+                  "bugfix":  {
+                                 "timeout":  420,
+                                 "maxIterations":  3
+                             },
+                  "refactor":  {
+                                   "timeout":  720,
+                                   "maxIterations":  4
+                               },
+                  "test":  {
+                               "timeout":  360,
+                               "maxIterations":  2
+                           },
+                  "docs":  {
+                               "timeout":  240,
+                               "maxIterations":  2
+                           },
+                  "performance":  {
+                                      "timeout":  600,
+                                      "maxIterations":  3
+                                  },
+                  "feature":  {
+                                  "timeout":  600,
+                                  "maxIterations":  5
+                              }
+              },
+    "budget":  {
+                   "enabled":  false,
+                   "maxTokensPerSprint":  500000,
+                   "warnAtPercent":  80
+               },
+    "prompts":  {
+                    "adaptive":  false,
+                    "maxLength":  10000,
+                    "budgetAllocation":  {
+                                             "storyDetails":  0.40,
+                                             "failureContext":  0.20,
+                                             "contextHints":  0.20,
+                                             "supplementary":  0.20
+                                         }
+                },
+    "parallel":  {
+                     "enabled":  false,
+                     "maxConcurrent":  2
+                 },
+    "health":  {
+                   "enabled":  true,
+                   "trackCoverage":  false,
+                   "trackTechDebt":  true
+               },
+    "healing":  {
+                    "deltaDebugging":  {
+                                           "triggerAfterFailures":  2,
+                                           "minCriteriaToSplit":  2
+                                       }
+                },
+    "ordering":  {
+                     "smart":  false,
+                     "preferTestsFirst":  true
+                 },
+    "stallDetection":  {
+                           "default":  {
+                                           "stallThreshold":  180,
+                                           "killThreshold":  360
+                                       },
+                           "cpuActivity":  {
+                                               "enabled":  true,
+                                               "threshold":  0.5
+                                           },
+                           "subprocessDetection":  {
+                                                       "enabled":  true,
+                                                       "extendTimeoutOnPytest":  true,
+                                                       "pytestTimeoutMultiplier":  3.0
+                                                   },
+                           "storyCompletionEarlyExit":  {
+                                                            "enabled":  true,
+                                                            "gracePeriodSeconds":  30,
+                                                            "evidenceThresholdPercent":  90
+                                                        },
+                           "focusAreaOverrides":  {
+                                                      "testing":  {
+                                                                      "stallThreshold":  300,
+                                                                      "killThreshold":  600
+                                                                  },
+                                                      "unit-tests":  {
+                                                                         "stallThreshold":  300,
+                                                                         "killThreshold":  600
+                                                                     },
+                                                      "integration-tests":  {
+                                                                                "stallThreshold":  420,
+                                                                                "killThreshold":  720
+                                                                            },
+                                                      "mutation-tests":  {
+                                                                             "stallThreshold":  420,
+                                                                             "killThreshold":  720
+                                                                         },
+                                                      "quality":  {
+                                                                      "stallThreshold":  420,
+                                                                      "killThreshold":  900
+                                                                  }
+                                                  }
                        },
     "userStories":  [
                         {
-                            "id":  "US-94-001",
+                            "id":  "US-95-001",
+                            "title":  "Generate sprint stories for context-matching focus area",
+                            "passes":  true,
+                            "priority":  "high",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027iterative-phase\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027context-matching\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027iterative-phase\u0027",
-                                                       "Add stories US-94-002 through US-94-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027context-matching\u0027",
+                                                       "Add stories US-95-002 through US-95-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-94-NNN to be unique across sprints",
-                                                       "Mark this story (US-94-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-95-NNN to be unique across sprints",
+                                                       "Mark this story (US-95-001) as passes: true when done"
                                                    ],
+                            "notes":  "User context: improvement: Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\n- Ensure new features have corresponding config options\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\n- Existing stages: caption\n- Review stage dependencies and execution order\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\n- Scans completed: 2\n- pipeline_stages : findings available\n- config_structure : findings available"
+                        },
+                        {
+                            "id":  "US-95-002",
+                            "title":  "Add tag-based query expansion to VIDEO_SEARCH stage",
+                            "passes":  true,
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "Video search queries are expanded using video tags from metadata",
+                                                       "Tags are converted to search-friendly keywords",
+                                                       "Original keywords + tag-expanded keywords are combined for search",
+                                                       "Config option \u0027use_tags_in_search\u0027 added (default: true)",
+                                                       "Test verifies tag-expanded queries return more relevant results"
+                                                   ],
+                            "notes":  "Implemented: topic_tags config mapping expands queries. Tests pass (4/4). Config use_tags_in_search defaults to true."
+                        },
+                        {
+                            "id":  "US-95-003",
+                            "title":  "Add description-based query refinement during search",
+                            "passes":  true,
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "Video descriptions are analyzed to extract key terms",
+                                                       "Key terms from descriptions are used to refine search queries",
+                                                       "Description keywords are weighted lower than primary keywords",
+                                                       "Config option \u0027use_description_context\u0027 added (default: true)",
+                                                       "Test verifies description context improves search precision"
+                                                   ],
+                            "notes":  "Implemented: Two-phase search - initial search captures descriptions, extracts keywords, refined search adds description keywords (lower weight). Config use_description_context defaults to true. Tests pass (6/6)."
+                        },
+                        {
+                            "id":  "US-95-004",
+                            "title":  "Implement chapter boundary awareness in segment matching",
+                            "passes":  true,
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "Video chapters define semantic boundaries for segment matching",
+                                                       "Voiceover segments are matched against video segments within same chapter",
+                                                       "Cross-chapter matches get penalty (configurable)",
+                                                       "Config option \u0027enforce_chapter_boundaries\u0027 added (default: false)",
+                                                       "Test verifies chapter-aware matching improves coherence"
+                                                   ],
+                            "notes":  "Implemented: Added apply_chapter_boundary_penalty function in scoring.py, enforce_chapter_boundaries config option (default: false) in matching.py and config.yaml, cross_chapter_penalty (default: 0.1). Integrated in tiered_matcher.py (3 call sites). Tests pass (9/9)."
+                        },
+                        {
+                            "id":  "US-95-005",
+                            "title":  "Pass full video metadata context to LLM reranker",
+                            "passes":  true,
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "LLM reranker receives video title, description, tags, chapters in context",
+                                                       "Reranker prompt includes metadata for better semantic understanding",
+                                                       "Config option \u0027reranker_include_metadata\u0027 added (default: true)",
+                                                       "Test verifies reranker produces better selections with metadata"
+                                                   ],
+                            "notes":  "All 4 acceptance criteria verified. 14 tests in TestUS95VideoMetadataEnrichment pass."
+                        },
+                        {
+                            "id":  "US-95-006",
+                            "title":  "Add cross-video context consistency scoring",
+                            "passes":  true,
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Videos from same source channel get consistency boost",
+                                                       "Consistent visual style/theme across matched segments is rewarded",
+                                                       "Config option \u0027source_channel_coherence_boost\u0027 added (default: 0.05)",
+                                                       "Test verifies source channel consistency improves match quality"
+                                                   ],
+                            "notes":  "All 4 acceptance criteria verified. 9 tests in TestUS95SourceChannelConsistency pass."
+                        },
+                        {
+                            "id":  "US-95-007",
+                            "title":  "Add voiceover-to-video topic alignment scoring",
+                            "passes":  true,
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "Voiceover topic extraction aligns with video chapter topics",
+                                                       "Topic alignment scores boost confidence for matched segments",
+                                                       "Config option \u0027topic_alignment_weight\u0027 added (default: 0.1)",
+                                                       "Test verifies topic alignment improves confidence accuracy"
+                                                   ],
+                            "notes":  "All 4 acceptance criteria verified. 10 tests in test_topic_alignment_us95007.py pass. Added compute_topic_alignment_boost in topic_extraction.py, apply_topic_alignment_boost in scoring.py, integrated into tiered_matcher.py, added topic_alignment_weight config option (default: 0.1)."
+                        },
+                        {
+                            "id":  "US-95-008",
+                            "title":  "Enrich embedding context with channel information",
+                            "passes":  true,
+                            "priority":  "low",
+                            "acceptanceCriteria":  [
+                                                       "Video channel name is included in embedding text when available",
+                                                       "Channel context improves search relevance for same-creator videos",
+                                                       "Config option \u0027embed_channel_context\u0027 added (default: true)",
+                                                       "Test verifies channel context improves embedding similarity"
+                                                   ],
+                            "notes":  "All 4 acceptance criteria verified. 7 tests in test_channel_enriched_embeddings.py pass. Added embed_channel_context to ContextEnrichmentConfig in matching.py, updated caption_stage.py to build channel_lookup and include channel in embedding text format: [Channel | Title | Chapter] text."
+                        },
+                        {
+                            "id":  "US-95-009",
+                            "title":  "Add temporal context window for gap keyword extraction",
                             "passes":  false,
-                            "priority":  "high",
-                            "title":  "Generate sprint stories for iterative-phase focus area",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-94-002",
-                            "acceptanceCriteria":  [
-                                                       "Add config option \u0027search_budget_aware\u0027 (default: true) to video_search section in config.yaml",
-                                                       "Add config option \u0027auto_distribute_budget\u0027 (default: true) to distribute results evenly across keywords",
-                                                       "Read max_total_results and results_per_keyword from config in video search code",
-                                                       "Calculate adjusted results_per_keyword when keywords exceed budget capacity",
-                                                       "Ensure keywords beyond budget capacity get reduced results, not skipped",
-                                                       "Add test verifying budget distribution math"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add search budget awareness to video search configuration",
-                            "notes":  "COMPLETED: Added search_budget_aware and auto_distribute_budget to config.yaml. Updated video_search.py to calculate adjusted results_per_keyword when keywords exceed budget capacity. Keywords beyond budget capacity get reduced results, not skipped. Added 6 tests in TestBudgetDistribution class."
-                        },
-                        {
-                            "id":  "US-94-003",
-                            "acceptanceCriteria":  [
-                                                       "Add Get-SearchBudgetInfo function to lib/interview.ps1",
-                                                       "Function reads video_search.results_per_keyword and video_search.max_total_results from config.yaml",
-                                                       "Returns budget metadata: maxKeywords, currentBudget, resultsPerKeyword",
-                                                       "Add Get-DistributedKeywordBudget function that calculates adjusted results per keyword",
-                                                       "Handle edge cases: 0 keywords, 1 keyword, keywords \u003e max_keywords",
-                                                       "Add test cases for budget calculation scenarios"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add search budget functions to Ralph interview library",
-                            "notes":  "Tier: feature | Source files: scripts/ralph/lib/interview.ps1, scripts/ralph/config/ralph-config.json | Line ranges: interview.ps1 ~lines 1-100 (need to add new functions at end)"
-                        },
-                        {
-                            "id":  "US-94-004",
-                            "acceptanceCriteria":  [
-                                                       "Add Get-ChapterDistributedKeywords function to lib/interview.ps1",
-                                                       "Detect chapter patterns in topics: \u0027Feature: Part 1, Part 2\u0027, \u0027API: Auth, Rate Limit\u0027",
-                                                       "Split topics with chapters into individual search keywords",
-                                                       "Handle comma-separated, semicolon-separated, and \u0027Part X\u0027 patterns",
-                                                       "Return flattened keyword array with chapter-split keywords",
-                                                       "Integrate with interview UI to show estimated results after splitting"
-                                                   ],
-                            "passes":  true,
                             "priority":  "medium",
-                            "title":  "Add chapter/topic splitting to keyword extraction",
-                            "notes":  "Implemented: Enhanced Get-ChapterDistributedKeywords to handle comma/semicolon-separated topics. Added prefix preservation for patterns like \u0027Feature: Part 1, Part 2\u0027. Added 9 tests covering chapter patterns, comma/semicolon separation, and edge cases. Integrated with Show-SearchBudgetStatus to display keyword splitting effects."
+                            "acceptanceCriteria":  [
+                                                       "Adjacent voiceover segment text is used to enrich gap keywords",
+                                                       "Config option \u0027context_window_segments\u0027 added (default: 1)",
+                                                       "Context words are added with lower priority than gap-specific keywords",
+                                                       "Test verifies context-aware keywords improve match quality"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/iterative_match/gap_analyzer.py, src/config/sections/iterative_matching.py | Lines: gap_analyzer.py ~550-620"
                         },
                         {
-                            "id":  "US-94-005",
-                            "acceptanceCriteria":  [
-                                                       "Add confidence-based gap categorization in gap_analyzer.py",
-                                                       "Categorize gaps into: low_confidence (\u003c0.3), medium_confidence (0.3-0.6), high_confidence (\u003e0.6)",
-                                                       "Apply different search strategies based on confidence category",
-                                                       "Add config option \u0027confidence_thresholds\u0027 in iterative_matching section",
-                                                       "Store confidence category in GapSegment for downstream use",
-                                                       "Add test verifying confidence categorization"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add confidence-based gap categorization for smarter strategy selection",
-                            "notes":  "COMPLETED: Added ConfidenceCategory enum and confidence_category field to GapSegment. Added categorize_gaps_by_confidence() function that categorizes gaps into low/medium/high based on thresholds. Added get_strategy_for_confidence_category() to provide strategy parameters per category. Added confidence_thresholds config to iterative_matching.py and config.yaml. Added 16 tests covering all scenarios."
-                        },
-                        {
-                            "id":  "US-94-006",
-                            "acceptanceCriteria":  [
-                                                       "Add multi-factor strategy selection to query_learning.py",
-                                                       "Combine pattern success rate, chapter type success rate, AND confidence factor",
-                                                       "Add confidence_weight config option (default: 0.2) to blend confidence into strategy selection",
-                                                       "Implement get_multi_factor_strategy_ranking method in QueryLearningDB",
-                                                       "Test that low-confidence gaps favor conservative strategies (more keyword exploration)",
-                                                       "Test that high-confidence gaps favor aggressive strategies (similar_to_locked)"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add multi-factor strategy selection combining pattern, chapter, and confidence",
-                            "notes":  "COMPLETED: Added confidence_weight: 0.2 config option in config.yaml. Implemented get_multi_factor_strategy_ranking() method in QueryLearningDB that combines pattern success rate (60%), chapter type success rate (40%), and confidence factor. Low confidence favors conservative strategies (voiceover, topic, entity), high confidence favors aggressive strategies (similar_locked). Added 8 tests verifying all acceptance criteria."
-                        },
-                        {
-                            "id":  "US-94-007",
-                            "acceptanceCriteria":  [
-                                                       "Add segment duration-based gap prioritization",
-                                                       "Longer gaps (\u003e30 seconds) get priority boost in search order",
-                                                       "Add config option \u0027duration_priority_weight\u0027 (default: 0.1)",
-                                                       "Update GapSegment to include duration field",
-                                                       "Modify gap sorting to factor in segment duration",
-                                                       "Add test for duration-based prioritization"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add segment duration-based gap prioritization",
-                            "notes":  "COMPLETED: Added duration field to GapSegment. Added DURATION_PRIORITY_THRESHOLD=30s and DEFAULT_DURATION_PRIORITY_WEIGHT=0.1 constants. Modified annotate_gaps_with_chapters() to accept duration_priority_weight param and apply boost to gaps >30s. Updated iterative_match.py to pass segment durations when creating GapSegments and get duration_priority_weight from config. Added 7 tests verifying all acceptance criteria."
-                        },
-                        {
-                            "id":  "US-94-008",
-                            "acceptanceCriteria":  [
-                                                       "Add negative keyword injection for query refinement",
-                                                       "Detect failing query patterns from learning DB",
-                                                       "Inject negative keywords to exclude irrelevant results",
-                                                       "Add config option \u0027enable_negative_keywords\u0027 (default: true)",
-                                                       "Add negative_keyword_patterns to config (e.g., \u0027tutorial\u0027, \u0027review\u0027, \u0027unboxing\u0027)",
-                                                       "Test that negative keywords improve result relevance"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add negative keyword injection to query refinement",
-                            "notes":  "COMPLETED: Added enable_negative_keywords (default: true) and negative_keyword_patterns (tutorial, review, unboxing, explainer, vs comparison, explained) to config. Added template_failure tracking in QueryLearningDB to detect failing patterns. Added record_failure(), get_negative_keywords_for_query(), inject_negative_keywords(), and get_failing_patterns() methods. Updated iterative_match.py to inject negative keywords into queries before YouTube search. Added 14 tests covering all acceptance criteria."
-                        },
-                        {
-                            "id":  "US-94-009",
-                            "acceptanceCriteria":  [
-                                                       "Add source channel diversification to search results",
-                                                       "Limit results from same YouTube channel to max 3 per query",
-                                                       "Add config option \u0027max_videos_per_channel\u0027 (default: 3)",
-                                                       "Add config option \u0027enable_channel_diversity\u0027 (default: true)",
-                                                       "Implement deduplication logic in video search results",
-                                                       "Test that diverse channels appear in results"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add source channel diversification for search results",
-                            "notes":  "COMPLETED: Added enable_channel_diversity (default: true) and max_videos_per_channel (default: 3) to config.yaml video_search section. Implemented channel deduplication logic in video_search.py run() method that limits results from same channel to max_videos_per_channel. All 40 video search tests pass."
-                        },
-                        {
-                            "id":  "US-94-010",
-                            "acceptanceCriteria":  [
-                                                       "Add duration tier diversity enforcement in iterative matching",
-                                                       "Ensure search results include variety across duration tiers (short, medium, long)",
-                                                       "Add config option \u0027tier_diversity_weight\u0027 (default: 0.15)",
-                                                       "Modify result selection to favor diverse duration tiers",
-                                                       "Add test for duration tier diversity",
-                                                       "Document tier diversity behavior in config.yaml comments"
-                                                   ],
+                            "id":  "US-95-010",
+                            "title":  "Implement confidence calibration based on context richness",
                             "passes":  false,
                             "priority":  "low",
-                            "title":  "Add duration tier diversity enforcement in iterative matching",
-                            "notes":  "Tier: feature | Source files: src/stages/iterative_match.py (result selection ~lines 400-500), config.yaml iterative_matching section"
+                            "acceptanceCriteria":  [
+                                                       "Confidence scores are calibrated based on available context signals",
+                                                       "Rich metadata (title + description + tags + chapters) enables higher confidence",
+                                                       "Sparse metadata applies conservative confidence adjustment",
+                                                       "Config option \u0027context_richness_calibration\u0027 added (default: true)",
+                                                       "Test verifies calibration produces more accurate confidence scores"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/matching/scoring.py, src/matching/tiered_matcher.py | Lines: tiered_matcher.py ~1100-1250"
                         },
                         {
-                            "id":  "US-94-011",
-                            "acceptanceCriteria":  [
-                                                       "Add query result caching for iterative matching",
-                                                       "Cache query results with (query, strategy) as key",
-                                                       "Add config option \u0027cache_query_results\u0027 (default: true)",
-                                                       "Add config option \u0027query_cache_ttl_hours\u0027 (default: 24)",
-                                                       "Invalidate cache on config changes",
-                                                       "Add cache hit/miss metrics to pipeline metrics"
-                                                   ],
+                            "id":  "US-95-011",
+                            "title":  "Add YouTube chapter timestamp awareness in segment selection",
                             "passes":  false,
-                            "priority":  "low",
-                            "title":  "Add query result caching for iterative matching",
-                            "notes":  "Tier: optimization | Source files: src/stages/iterative_match.py (~lines 1-100, caching layer), src/cache/ directory, config.yaml iterative_matching section"
+                            "priority":  "medium",
+                            "acceptanceCriteria":  [
+                                                       "Video segments that align with YouTube chapter timestamps are preferred",
+                                                       "Chapter boundaries provide natural segment break points",
+                                                       "Config option \u0027prefer_chapter_aligned_segments\u0027 added (default: true)",
+                                                       "Test verifies chapter-aligned segments improve match quality"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/matching/scoring.py, src/caption/models.py | Lines: caption/models.py ~50-150"
                         },
                         {
-                            "id":  "US-94-012",
-                            "acceptanceCriteria":  [
-                                                       "Add voiceover context awareness to gap keyword extraction",
-                                                       "Use adjacent segment text to enrich gap keywords",
-                                                       "Add config option \u0027context_window_segments\u0027 (default: 1)",
-                                                       "Add context words to gap keyword extraction in gap_analyzer.py",
-                                                       "Test that context-aware keywords improve match quality",
-                                                       "Document context awareness in gap_analyzer.py docstring"
-                                                   ],
+                            "id":  "US-95-012",
+                            "title":  "Add negative context signals for query refinement",
                             "passes":  false,
                             "priority":  "low",
-                            "title":  "Add voiceover context awareness to gap keyword extraction",
-                            "notes":  "Tier: feature | Source files: src/iterative_match/gap_analyzer.py (extract_keywords_for_gap ~lines 360-420), src/stages/iterative_match.py (segment context ~lines 150-200)"
+                            "acceptanceCriteria":  [
+                                                       "Video metadata includes negative keywords (what to avoid)",
+                                                       "Negative signals are used to filter inappropriate search results",
+                                                       "Config option \u0027use_negative_context\u0027 added (default: false)",
+                                                       "Test verifies negative signals reduce irrelevant results"
+                                                   ],
+                            "notes":  "Tier: enhancement | Files: src/stages/video_search.py, src/matching/candidate_filter.py | Lines: video_search.py ~300-400"
                         }
                     ]
 }

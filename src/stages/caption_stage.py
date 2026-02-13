@@ -1963,18 +1963,29 @@ class CaptionStage(Stage):
         chapter_enriched = False  # US-73-004: Chapter-enriched embedding text
         description_enriched = False  # US-75-011: Description keywords in embedding text
         title_lookup = {}
+        # Default values when config is None (backward compatibility)
+        title_enriched = False
+        chapter_enriched = True
+        description_enriched = False
+        channel_enriched = True
         if config is not None:
             ce = getattr(getattr(config, 'matching', None), 'context_enrichment', None)
             title_enriched = getattr(ce, 'title_enriched_embeddings', False)
             chapter_enriched = getattr(ce, 'chapter_enriched_embeddings', True)
             description_enriched = getattr(ce, 'description_enriched_embeddings', False)
+            channel_enriched = getattr(ce, 'embed_channel_context', True)
 
+        # US-95-008: Build channel lookup for embedding enrichment
+        channel_lookup: Dict[str, str] = {}
         if title_enriched and hasattr(state, 'video_search_results'):
             for vsr in state.video_search_results:
                 vid = getattr(vsr, 'video_id', None) if not isinstance(vsr, dict) else vsr.get('video_id')
                 ttl = getattr(vsr, 'title', '') if not isinstance(vsr, dict) else vsr.get('title', '')
+                ch = getattr(vsr, 'channel', '') if not isinstance(vsr, dict) else vsr.get('channel', '')
                 if vid and ttl:
                     title_lookup[vid] = ttl
+                if vid and ch:
+                    channel_lookup[vid] = ch
 
         # US-72-002: Build VSR lookup for propagating caption metadata to state
         vsr_lookup: Dict[str, Any] = {}
@@ -2008,6 +2019,8 @@ class CaptionStage(Stage):
             timing_penalty = result.get('timing_penalty', 1.0)  # US-008 Sprint 7
             # US-70-008: Get video title for this video
             video_title = title_lookup.get(video_id, '')
+            # US-95-008: Get video channel for embedding enrichment
+            video_channel = channel_lookup.get(video_id, '') if channel_enriched else ''
             # US-75-003: Get video description from caption result
             video_description = result.get('video_description', '')
 
@@ -2035,12 +2048,17 @@ class CaptionStage(Stage):
                     # US-75-003: Video description from caption result
                     'video_description': video_description,
                 }
-                # US-70-008 / US-73-004 / US-75-011: Build embedding_text with enrichments
+                # US-70-008 / US-73-004 / US-75-011 / US-95-008: Build embedding_text with enrichments
                 if title_enriched and video_title:
+                    # Build enrichment prefix: [channel | title] or [channel | title | chapter]
+                    prefix_parts = []
+                    if channel_enriched and video_channel:
+                        prefix_parts.append(video_channel)
+                    prefix_parts.append(video_title)
                     if chapter_enriched and ch_title:
-                        embed_text = f'[{video_title} | {ch_title}] {seg_text}'
-                    else:
-                        embed_text = f'[{video_title}] {seg_text}'
+                        prefix_parts.append(ch_title)
+                    prefix = ' | '.join(prefix_parts)
+                    embed_text = f'[{prefix}] {seg_text}'
                     # US-75-011: Append description keywords when enabled
                     if description_enriched and video_description:
                         desc_kw = self._extract_description_keywords(video_description, max_keywords=3)

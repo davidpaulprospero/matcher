@@ -177,6 +177,16 @@ class MatchingScoringConfig:
     # This creates a jarring visual ping-pong effect (e.g., videoA -> videoB -> videoA)
     source_stutter_penalty: float = 0.04  # Magnitude of penalty for A-B-A pattern
 
+    # Source channel coherence boost (US-95-006) — reward videos from same source channel
+    # When current video is from same YouTube channel as previous match, apply a boost
+    # This rewards consistent visual style/theme across matched segments
+    source_channel_coherence_boost: float = 0.05  # Boost for same-channel videos
+
+    # Topic alignment weight (US-95-007) — boost confidence when voiceover topics match video topics
+    # Voiceover topic extraction aligns with video chapter topics; this boosts confidence
+    # for matched segments where topics align
+    topic_alignment_weight: float = 0.1  # Default boost for topic alignment
+
     # Duration ratio reward curve (US-84-007) — smooth curve replacing step-function
     # Near-perfect duration matches (ratio within reward_threshold of 1.0) get a boost
     duration_ratio_reward_threshold: float = 0.1  # Ratio deviation from 1.0 to qualify for reward (0.9-1.1)
@@ -214,6 +224,7 @@ class ContextEnrichmentConfig:
     title_enriched_embeddings: bool = True   # Include title+description in embedding generation
     chapter_enriched_embeddings: bool = True  # Include chapter title in embedding text when available
     description_enriched_embeddings: bool = True  # Append top description keywords to embedding text
+    embed_channel_context: bool = True  # Include channel name in embedding text when available
 
     def __post_init__(self):
         import logging
@@ -438,6 +449,9 @@ class MatchingConfig:
     llm_reranker_close_spread_factor: float = 0.9  # Multiply confidence by this when close spread
     llm_reranker_clear_winner_factor: float = 1.1  # Multiply confidence by this when clear winner
 
+    # US-95-005: Include video metadata in LLM reranker context
+    reranker_include_metadata: bool = True  # Pass title, description, tags, chapters to LLM
+
     # Delta matching (only match new videos)
     delta_matching_enabled: bool = True  # Enable delta-aware matching
     force_rematch: bool = False  # Force rematch all videos (CLI override)
@@ -445,6 +459,8 @@ class MatchingConfig:
 
     # Chapter/topic matching
     chapter_matching_enabled: bool = True  # Enable chapter-based topic filtering
+    enforce_chapter_boundaries: bool = False  # US-95-004: Penalize cross-chapter matches
+    cross_chapter_penalty: float = 0.1  # US-95-004: Penalty for matching video from different chapter
     topic_mismatch_penalty: float = 0.15  # Confidence penalty for topic mismatch
     extract_video_topics: bool = True  # Extract topics from video transcripts
     min_topic_overlap: int = 1  # Minimum topic keywords that must match

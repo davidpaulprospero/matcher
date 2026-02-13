@@ -98,6 +98,17 @@ video_search:
   deduplicate_across_keywords: true  # Remove duplicate video IDs from different keywords
   enable_channel_diversity: true   # Limit videos per channel for diverse results
   max_videos_per_channel: 3       # Maximum videos to include from same channel
+  use_tags_in_search: true        # Expand queries with related topic tags
+  use_description_context: true   # Extract keywords from video descriptions to refine queries
+  topic_tags:                     # Tag expansion mapping for query refinement
+    nature: ["wildlife", "landscape", "outdoor"]
+    travel: ["adventure", "destination", "culture"]
+    technology: ["innovation", "science", "gadgets"]
+    cooking: ["recipe", "food", "kitchen"]
+    fitness: ["workout", "exercise", "health"]
+    music: ["concert", "performance", "artist"]
+    documentary: ["history", "science", "nature"]
+    tutorial: ["howto", "guide", "education"]
 
 # -----------------------------------------------------------------------------
 # TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0
@@ -446,6 +457,8 @@ matching:
   # Chain-of-thought: Match videos based on topic relevance to voiceover chapters
   # Reasoning: Prevents matching Dallas videos to Boise narration
   chapter_matching_enabled: true  # Enable chapter-based topic filtering
+  enforce_chapter_boundaries: false  # US-95-004: Penalize cross-chapter matches
+  cross_chapter_penalty: 0.1  # US-95-004: Penalty amount for cross-chapter matches
   topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
   extract_video_topics: true  # Extract topics from video transcripts using LLM
   min_topic_overlap: 1  # Minimum matching topic keywords required
@@ -604,6 +617,8 @@ matching:
     max_cumulative_negative_adjustment: -0.30  # Dampen remaining negatives past this threshold (US-84-002)
     compounding_dampening_factor: 0.50         # Multiply remaining negatives by this when threshold exceeded
     source_stutter_penalty: 0.04               # Penalty for A-B-A video alternation pattern (US-84-004)
+    source_channel_coherence_boost: 0.05       # Boost for videos from same YouTube channel (US-95-006)
+    topic_alignment_weight: 0.1               # Boost when voiceover topics align with video topics (US-95-007)
     duration_ratio_reward_threshold: 0.1       # Ratio deviation from 1.0 for reward (0.9-1.1x) (US-84-007)
     duration_ratio_reward_boost: 0.02          # Boost for near-perfect duration match (US-84-007)
     variance_warning_threshold: 0.02           # Variance below this flags match as ambiguous_pool (US-84-008)
@@ -635,6 +650,7 @@ matching:
     title_enriched_embeddings: true    # Include title+description in embedding generation
     chapter_enriched_embeddings: true  # Include chapter title in embedding text (e.g. '[Title | Chapter] text')
     description_enriched_embeddings: true   # Append top description keywords to embedding text (changes cache)
+    embed_channel_context: true  # Include channel name in embedding text (e.g. '[Channel | Title] text')
 
   # Chapter-level source grouping (US-70-011)
   # Within voiceover chapters, reusing the same video source is desirable for continuity.
@@ -2346,6 +2362,21 @@ iterative_matching:
     - explainer                   # Explainer videos
     - "vs comparison"             # Comparison videos
     - explained                    # Explained content
+
+  # === US-94-010: Duration tier diversity enforcement ===
+  # Ensures matched videos span different duration tiers for visual variety
+  # Tiers: short (<2min), medium (2-10min), long (>10min)
+  # Bonus applied when selecting matches from tiers not yet used in current pass
+  tier_diversity_weight: 0.15    # Weight for duration tier diversity bonus (0-1)
+
+  # === US-94-011: Query result caching ===
+  # Cache YouTube search results to avoid repeated API calls
+  cache_query_results: true       # Enable/disable query result caching
+  query_cache_ttl_hours: 24       # TTL for cached query results (hours, 0 = no expiration)
+
+  # === US-94-012: Voiceover context awareness ===
+  # Use adjacent segment text to enrich gap keywords
+  context_window_segments: 1      # Number of adjacent segments to include for context
 
   # === Query learning (cross-project improvement) ===
   enable_query_learning: true      # Learn from successful queries
