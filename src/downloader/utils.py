@@ -6,10 +6,12 @@ Migrated from downloader.py lines 122-166, 2431-2456.
 
 from __future__ import annotations
 
-import re
+import hashlib
 import logging
+import os
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -113,3 +115,88 @@ def get_cookies_args(config: 'Config') -> List[str]:
         return ['--cookies', cookies_path]
 
     return []
+
+
+def calculate_file_hash(
+    file_path: Path,
+    algorithm: str = 'sha256',
+    chunk_size: int = 8192
+) -> Optional[str]:
+    """
+    Calculate hash of a file using specified algorithm.
+
+    US-93-002: Download segment hash verification
+
+    Args:
+        file_path: Path to the file
+        algorithm: Hash algorithm (default: sha256)
+        chunk_size: Size of chunks to read (default: 8KB)
+
+    Returns:
+        Hex digest of the file hash, or None if file doesn't exist
+    """
+    if not file_path.exists():
+        return None
+
+    try:
+        hasher = hashlib.new(algorithm)
+        with open(file_path, 'rb') as f:
+            while chunk := f.read(chunk_size):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception as e:
+        logger.warning(f"Failed to calculate {algorithm} hash for {file_path}: {e}")
+        return None
+
+
+def verify_download_hash(
+    file_path: Path,
+    expected_hash: Optional[str] = None,
+    algorithm: str = 'sha256'
+) -> Tuple[bool, Optional[str]]:
+    """
+    Verify file integrity after download using hash verification.
+
+    US-93-002: Download segment hash verification
+
+    Args:
+        file_path: Path to the downloaded file
+        expected_hash: Expected hash value (if provided)
+        algorithm: Hash algorithm to use (default: sha256)
+
+    Returns:
+        Tuple of (verification_passed, actual_hash)
+        - If expected_hash is None/missing: returns (True, actual_hash) - no verification needed
+        - If expected_hash provided but file doesn't exist: returns (False, None)
+        - If verification succeeds: returns (True, actual_hash)
+        - If verification fails: returns (False, actual_hash)
+    """
+    # Handle missing expected hash gracefully - skip verification
+    if not expected_hash:
+        logger.debug(f"Hash verification skipped for {file_path.name}: no expected hash provided")
+        actual_hash = calculate_file_hash(file_path, algorithm)
+        return True, actual_hash
+
+    # File doesn't exist - verification fails
+    if not file_path.exists():
+        logger.warning(f"Hash verification failed for {file_path.name}: file not found")
+        return False, None
+
+    # Calculate actual hash
+    actual_hash = calculate_file_hash(file_path, algorithm)
+    if actual_hash is None:
+        logger.warning(f"Hash calculation failed for {file_path.name}")
+        return False, None
+
+    # Compare hashes
+    passed = actual_hash.lower() == expected_hash.lower()
+
+    if passed:
+        logger.info(f"Hash verification passed for {file_path.name}: {actual_hash[:16]}...")
+    else:
+        logger.warning(
+            f"Hash verification FAILED for {file_path.name}: "
+            f"expected {expected_hash[:16]}..., got {actual_hash[:16]}..."
+        )
+
+    return passed, actual_hash

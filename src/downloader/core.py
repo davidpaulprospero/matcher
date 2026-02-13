@@ -60,10 +60,12 @@ logger = logging.getLogger(__name__)
 
 
 # US-52-006: Error classification delegated to shared module
+# US-89-012: Adaptive severity tracking
 from .error_classification import (
     ERROR_SEVERITY_PATTERNS,
     SEVERITY_MULTIPLIERS,
     classify_error_severity,
+    init_adaptive_tracker,
 )
 
 
@@ -188,6 +190,17 @@ class VideoDownloader:
             tier_download_counts=self.tier_download_counts,
             lock=self._lock
         )
+
+        # US-89-012: Initialize adaptive severity tracker from config
+        adaptive_config = getattr(self.download_config, 'adaptive_severity', None)
+        if adaptive_config:
+            init_adaptive_tracker(
+                enabled=getattr(adaptive_config, 'enabled', True),
+                escalation_threshold=getattr(adaptive_config, 'escalation_threshold', 3),
+                max_severity=getattr(adaptive_config, 'max_severity', 'high'),
+                window_size=getattr(adaptive_config, 'window_size', 10),
+                reset_on_success=getattr(adaptive_config, 'reset_on_success', True),
+            )
 
         # Core state
         self.sources: List[DownloadedVideo] = self.checkpoint_mgr.load_sources()
@@ -1972,6 +1985,57 @@ class VideoDownloader:
             else:
                 base_timeout = getattr(self.download_config, 'download_timeout', 120)
 
+        # US-93-005: Apply adaptive timeout based on video file size estimation
+        # Calculate: adaptive_timeout_base + (estimated_size_mb * size_multiplier)
+        adaptive_enabled = getattr(self.download_config, 'adaptive_timeout_enabled', True)
+        if adaptive_enabled:
+            adaptive_base = getattr(self.download_config, 'adaptive_timeout_base', 30)
+            adaptive_multiplier = getattr(self.download_config, 'adaptive_timeout_multiplier', 0.5)
+            adaptive_max = getattr(self.download_config, 'adaptive_timeout_max', 600)
+
+            # Estimate file size based on tier (tier correlates with duration)
+            # Tier durations: short=<2min, medium=2-10min, long=10-25min, longer=25+min
+            tier_size_estimates = {
+                'short': 10.0,    # ~10 MB for <2 min video
+                'medium': 30.0,   # ~30 MB for 2-10 min video
+                'long': 90.0,     # ~90 MB for 10-25 min video
+                'longer': 200.0,  # ~200 MB for 25+ min video
+            }
+            estimated_size_mb = tier_size_estimates.get(tier, 50.0)
+
+            # Get quality from config for more accurate estimation
+            quality = getattr(self.download_config, 'quality', '1080p')
+            # Extract resolution number (1080p -> 1080)
+            quality_res = ''.join(c for c in quality if c.isdigit()) or '1080'
+
+            # Get size estimates from config if available
+            size_estimates = getattr(self.download_config, 'adaptive_timeout_size_estimates', None)
+            if size_estimates:
+                estimated_size_mb = utils.estimate_video_size_mb(
+                    duration_seconds=int(estimated_size_mb * 2),  # Convert MB estimate back to duration proxy
+                    quality=quality_res,
+                    size_estimates=size_estimates
+                )
+
+            # Calculate adaptive timeout
+            size_based_timeout = utils.calculate_adaptive_timeout(
+                estimated_size_mb=estimated_size_mb,
+                base_timeout=adaptive_base,
+                multiplier=adaptive_multiplier,
+                max_timeout=adaptive_max
+            )
+
+            # Log timeout values for debugging (always log adaptive timeout)
+            logger.debug(
+                f"Adaptive timeout: tier={tier}, estimated_size={estimated_size_mb:.0f}MB, "
+                f"tier_timeout={base_timeout}s, size_based={size_based_timeout}s, "
+                f"adaptive_multiplier={adaptive_multiplier}, max={adaptive_max}s"
+            )
+
+            # Use the larger of tier-based or size-based timeout
+            if size_based_timeout > base_timeout:
+                base_timeout = size_based_timeout
+
         # Apply adaptive timeout based on network speed
         download_timeout = self.speed_tracker.get_adjusted_timeout(base_timeout)
         if download_timeout > base_timeout:
@@ -2480,6 +2544,10 @@ class VideoDownloader:
             # Sanitize filename for NLE compatibility
             final_path = utils.sanitize_filename_for_nle(final_path)
 
+            # US-93-002: Verify file integrity via hash after download
+            expected_hash = metadata.get('hash')  # Could be provided by yt-dlp or external source
+            hash_passed, actual_hash = utils.verify_download_hash(final_path, expected_hash)
+
             # Create source record
             source = DownloadedVideo(
                 file=str(final_path.relative_to(output_dir)),
@@ -2491,7 +2559,8 @@ class VideoDownloader:
                 duration_tier=tier,
                 keyword=keyword,
                 download_date=datetime.now().strftime('%Y-%m-%d'),
-                license=metadata.get('license', 'Unknown')
+                license=metadata.get('license', 'Unknown'),
+                video_hash=actual_hash or ""  # US-93-002: Store computed hash
             )
 
             downloaded.append(source)

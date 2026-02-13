@@ -1,272 +1,199 @@
 ﻿{
-    "focusAreas":  [
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "config"
+    "sprintNumber":  93,
+    "focusArea":  "download",
+    "branchName":  "ralph/sprint-93",
+    "projectContext":  {
+                           "sourceDir":  "src/",
+                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+                           "testsDir":  "tests/",
+                           "testFramework":  "pytest",
+                           "testCommand":  "pytest tests/ -v --tb=short"
                        },
-                       {
-                           "completedAt":  "2026-02-13T12:49:13",
-                           "startedAt":  null,
-                           "completed":  true,
-                           "id":  "pipeline"
-                       },
-                       {
-                           "completedAt":  "2026-02-13T15:00:58",
-                           "startedAt":  null,
-                           "completed":  true,
-                           "id":  "architecture"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "caption"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "download"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "iterative-phase"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "context-matching"
-                       },
-                       {
-                           "completedAt":  null,
-                           "startedAt":  null,
-                           "completed":  false,
-                           "id":  "listicle-matching"
-                       }
-                   ],
-    "sessionId":  "59326812",
-    "createdAt":  "2026-02-13 10:09:23",
-    "interviewContext":  "improvement: Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\r\n- Ensure new features have corresponding config options\r\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\r\n- Scans completed: 2\r\n- pipeline_stages : findings available\r\n- config_structure : findings available",
-    "interviewDetails":  {
-                             "details":  "Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\r\n- Ensure new features have corresponding config options\r\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\r\n- Scans completed: 2\r\n- pipeline_stages : findings available\r\n- config_structure : findings available",
-                             "workType":  "improvement",
-                             "timestamp":  "2026-02-13T10:06:31",
-                             "client":  "",
-                             "priority":  "normal",
-                             "improvedContext":  {
-                                                     "detectedAreas":  [
-                                                                           "config",
-                                                                           "pipeline",
-                                                                           "architecture"
-                                                                       ],
-                                                     "improvedContext":  "Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\r\n- Ensure new features have corresponding config options\r\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\r\n- Scans completed: 2\r\n- pipeline_stages : findings available\r\n- config_structure : findings available",
-                                                     "rawInput":  " Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)",
-                                                     "codebaseFindings":  {
-                                                                              "configOptions":  [
-                                                                                                    "broll",
-                                                                                                    "core",
-                                                                                                    "download",
-                                                                                                    "duration",
-                                                                                                    "entity",
-                                                                                                    "infrastructure",
-                                                                                                    "iterative_matching",
-                                                                                                    "keywords",
-                                                                                                    "llm",
-                                                                                                    "matching",
-                                                                                                    "media",
-                                                                                                    "output",
-                                                                                                    "rate_limit"
-                                                                                                ],
-                                                                              "largeFiles":  [
-
-                                                                                             ],
-                                                                              "existingPatterns":  [
-
-                                                                                                   ],
-                                                                              "relevantCode":  [
-
-                                                                                               ]
-                                                                          }
-                                                 },
-                             "area":  ""
-                         },
-    "session":  {
-                    "currentSprintNumber":  90,
-                    "currentStoryId":  "US-90-001",
-                    "mode":  "Interview",
-                    "sessionId":  "2026-02-13_102404",
-                    "currentFocusArea":  "caption",
-                    "lastActivityAt":  "2026-02-13T15:01:14",
-                    "iterationCount":  34
-                },
     "userStories":  [
                         {
-                            "id":  "US-90-001",
+                            "id":  "US-93-001",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027caption\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027download\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027caption\u0027",
-                                                       "Add stories US-90-002 through US-90-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027download\u0027",
+                                                       "Add stories US-93-002 through US-93-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-90-NNN to be unique across sprints",
-                                                       "Mark this story (US-90-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-93-NNN to be unique across sprints",
+                                                       "Mark this story (US-93-001) as passes: true when done"
                                                    ],
                             "passes":  true,
                             "priority":  "high",
-                            "title":  "Generate sprint stories for caption focus area",
-                            "notes":  "Tier: seed (generates work items). Focus area: caption. Related files: src/caption_fetcher.py, src/stages/caption_stage.py, src/caption/*.py, config.yaml lines 1129-1300."
+                            "title":  "Generate sprint stories for download focus area",
+                            "notes":  "Evidence gate: 9/11 criteria verified (82%). Minimum: 90%."
                         },
                         {
-                            "id":  "US-90-002",
+                            "id":  "US-93-002",
                             "acceptanceCriteria":  [
-                                                       "CaptionFetcher.fetch_captions() returns CaptionResult with quality field populated",
-                                                       "determine_caption_quality() correctly classifies \u0027high\u0027, \u0027medium\u0027, \u0027low\u0027 quality",
-                                                       "Quality classification accounts for auto_generated flag, segment_count, and total_duration",
-                                                       "Config option caption_quality_adjustment_enabled controls whether quality affects matching scores"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Enhance caption quality detection with completeness scoring",
-                            "notes":  "All 4 criteria verified via tests: TestCaptionResult (35 tests), TestDetermineCaptionQuality (7 tests), TestApplyCaptionQualityAdjustment (14 tests including test_disabled_via_config). Config option wired in scoring.py:362 and :433."
-                        },
-                        {
-                            "id":  "US-90-003",
-                            "acceptanceCriteria":  [
-                                                       "Negative cache TTL is configurable per error category",
-                                                       "Cache entries for \u0027unavailable\u0027 status use unavailable_ttl setting",
-                                                       "Cache entries for \u0027error\u0027 status use error_ttl setting",
-                                                       "Expired negative cache entries are correctly re-fetched"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Improve negative cache TTL configuration for caption unavailability",
-                            "notes":  "All 4 criteria verified: Added unavailable_ttl_seconds (default 3600s) and error_ttl_seconds (default 300s) to config.yaml and CaptionFirstConfig. Implemented store_error() method in CaptionCache. Updated is_negative_entry_stale() to use per-category TTL based on format_source. Backward compatible with legacy negative_cache_ttl_seconds setting."
-                        },
-                        {
-                            "id":  "US-90-004",
-                            "acceptanceCriteria":  [
-                                                       "CaptionCircuitBreaker tracks consecutive failures per format type",
-                                                       "Circuit opens after consecutive_failures threshold is reached",
-                                                       "Circuit transitions from closed -\u003e open -\u003e half-open based on reset_timeout",
-                                                       "When circuit is open, caption fetches are fast-failed without network call"
+                                                       "Add hash verification function to src/downloader/utils.py",
+                                                       "Implement SHA256 hash calculation for downloaded files",
+                                                       "Store expected hash in DownloadedVideo state",
+                                                       "Verify file integrity after download completes",
+                                                       "Log verification result (pass/fail) with file details",
+                                                       "Handle missing hash gracefully (skip verification)"
                                                    ],
                             "passes":  true,
                             "priority":  "medium",
-                            "title":  "Add per-format circuit breaker for caption fetching",
-                            "notes":  "All 4 criteria verified: Added CaptionFormatType (youtube, transcript, live_subtitle) to circuit_breaker.py. Per-format state tracked in CaptionCircuitBreakerState.format_states dict. Added check_and_wait_for_format(), record_success_for_format(), record_failure_for_format(), is_format_open(), get_format_stats() methods. get_stats() now includes format_stats. to_checkpoint_dict/from_checkpoint_dict serialize per-format state."
+                            "title":  "Add download segment hash verification",
+                            "notes":  "IMPLEMENTED: Added calculate_file_hash() and verify_download_hash() functions to utils.py. core.py calls verification after each download, stores computed hash in DownloadedVideo.video_hash. Gracefully handles missing expected hashes by skipping verification."
                         },
                         {
-                            "id":  "US-90-005",
+                            "id":  "US-93-003",
                             "acceptanceCriteria":  [
-                                                       "Pre-check availability uses --list-subs instead of full caption download",
-                                                       "Videos without captions are skipped without full fetch attempt",
-                                                       "pre_check_availability config option enables/disables this feature",
-                                                       "Pre-check is cached for subsequent runs"
+                                                       "Add retry budget persistence to checkpoint",
+                                                       "Load retry budget state on resume",
+                                                       "Reset budget counters when explicitly requested",
+                                                       "Track per-keyword retry counts",
+                                                       "Export budget state for debugging",
+                                                       "Handle corrupted checkpoint gracefully"
                                                    ],
                             "passes":  true,
                             "priority":  "high",
-                            "title":  "Optimize caption pre-check to use faster --list-subs API",
-                            "notes":  "PRE-IMPLEMENTED: All 4 criteria verified. Pre-check uses --list-subs (caption_fetcher.py:2765). Videos without captions skipped (line 4867). Config option exists (config.yaml:1188, CaptionFirstConfig:456). Caching via ListSubsCache class (cache.py:1190)."
+                            "title":  "Improve download retry budget persistence",
+                            "notes":  "PRE-IMPLEMENTED: All acceptance criteria already met. rate_limit_budget.py has to_dict() (line 381) and from_dict() (line 400). checkpoint.py stores rate_limit_budget (line 45). core.py saves to checkpoint (line 574). orchestrator.py loads on resume (lines 312-313). clear() method for reset (line 430). get_summary() for debugging (line 357). Handles None gracefully in from_dict() (line 410)."
                         },
                         {
-                            "id":  "US-90-006",
+                            "id":  "US-93-004",
                             "acceptanceCriteria":  [
-                                                       "BatchRetryBudget tracks attempts across entire video batch",
-                                                       "Budget auto-scales based on batch size (attempts_per_video scaling)",
-                                                       "Budget respects max_backoff_time_seconds cumulative limit",
-                                                       "Budget exhaustion triggers fallback to transcription"
+                                                       "Implement global download coordinator",
+                                                       "Track active downloads across parallel workers",
+                                                       "Enforce max concurrent downloads limit",
+                                                       "Queue excess downloads for later execution",
+                                                       "Provide status API for active download count",
+                                                       "Handle worker failures gracefully"
                                                    ],
                             "passes":  true,
-                            "priority":  "high",
-                            "title":  "Improve caption retry budget auto-scaling logic",
-                            "notes":  "FIXED: Added edge case handling in src/caption/retry_budget.py: (1) batch_size=None/0 now handled - skips scaling; (2) max_attempts=0 (unlimited) now preserved - doesn't incorrectly scale to finite value; (3) attempts_per_video<=0 now uses default 1.0. All 334 caption_retry_budget tests pass."
+                            "priority":  "medium",
+                            "title":  "Add parallel download coordination",
+                            "notes":  "IMPLEMENTED: Added DownloadCoordinator class in orchestrator.py (lines ~38-160). Features: thread-safe semaphore for max_concurrent enforcement, active_count tracking, completed/failed counters, get_status() API. Added max_concurrent config to download.py (defaults to parallel_workers). Integrated into DownloadOrchestrator with get_stats() method. All acceptance criteria met."
                         },
                         {
-                            "id":  "US-90-007",
+                            "id":  "US-93-005",
                             "acceptanceCriteria":  [
-                                                       "CaptionStage correctly populates caption_results dict keyed by video_id",
-                                                       "CaptionStage falls back to transcription for videos without captions",
-                                                       "needs_transcription list correctly identifies videos requiring transcription",
-                                                       "Checkpoint correctly saves and restores caption_results"
+                                                       "Add dynamic timeout calculation based on video file size",
+                                                       "Implement size estimation from YouTube metadata",
+                                                       "Calculate timeout: base + (size_mb * multiplier)",
+                                                       "Add config options for base_timeout and size_multiplier",
+                                                       "Use larger timeouts for longer videos",
+                                                       "Log timeout values for debugging"
                                                    ],
                             "passes":  true,
-                            "priority":  "high",
-                            "title":  "Verify caption-to-transcription fallback pipeline",
-                            "notes":  "VERIFIED: All 4 acceptance criteria pass. Tests: test_caption_results_keyed_by_video_id, test_caption_failures_populate_transcription_fallback_list, test_caption_stage_restore_flow.py (9 tests). Fixed mock config bug in test_make_mock_config by adding safe getattr for config.pipeline."
+                            "priority":  "medium",
+                            "title":  "Implement adaptive download timeout",
+                            "notes":  "IMPLEMENTED: All 6 criteria verified. 1) calculate_adaptive_timeout in utils.py. 2) Tier-based size estimates in core.py (lines 1998-2004). 3) Formula: base + (size_mb * multiplier) in utils.py line 172. 4) Config: adaptive_timeout_base, adaptive_timeout_multiplier, adaptive_timeout_max in download.py. 5) Larger timeouts for longer videos via tier estimates. 6) Logging in core.py (always logs adaptive timeout values). Tests pass."
                         },
                         {
-                            "id":  "US-90-008",
+                            "id":  "US-93-006",
                             "acceptanceCriteria":  [
-                                                       "UnifiedCaptionRateLimiter handles per-format rate limits",
-                                                       "Rate limit backoff respects format-specific backoff_multiplier",
-                                                       "Rate limit state is persisted across pipeline runs",
-                                                       "Concurrent fetches respect max_parallel_fetches setting"
+                                                       "Create structured error response class",
+                                                       "Map yt-dlp error codes to user-friendly messages",
+                                                       "Include recovery suggestions in errors",
+                                                       "Log errors with context for debugging",
+                                                       "Handle unknown errors gracefully",
+                                                       "Add error code to all download failures"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "high",
+                            "title":  "Improve download error messages",
+                            "notes":  "Tier: enhancement\nFiles: src/downloader/errors.py (add DownloadError class with suggestions), src/downloader/core.py (use structured errors), src/downloader/retry_queue.py (show suggestions on retry)\nLine ranges: errors.py enhance class ~40 lines, core.py use errors ~30 lines, retry_queue.py show suggestions ~10 lines\nThis feature helps users understand and recover from download failures."
+                        },
+                        {
+                            "id":  "US-93-007",
+                            "acceptanceCriteria":  [
+                                                       "Add bandwidth throttling config to download section",
+                                                       "Implement throttling using yt-dlp --downloader-args",
+                                                       "Support per-download and global limits",
+                                                       "Allow throttling bypass for small files",
+                                                       "Log throttling applied for transparency",
+                                                       "Handle throttling disable gracefully"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "title":  "Add download bandwidth throttling",
+                            "notes":  "Tier: enhancement\nFiles: src/config/sections/download.py (add BandwidthThrottleConfig), src/downloader/core.py (apply throttling), config.yaml (add config options)\nLine ranges: download.py config ~20 lines, core.py throttling ~25 lines, config.yaml ~10 lines\nThis feature prevents download from consuming all bandwidth during pipeline execution."
+                        },
+                        {
+                            "id":  "US-93-008",
+                            "acceptanceCriteria":  [
+                                                       "Add partial download detection",
+                                                       "Implement resume from last byte position",
+                                                       "Handle incomplete files on retry",
+                                                       "Clean up partial files on final failure",
+                                                       "Add config for resume enable/disable",
+                                                       "Log resume attempts for debugging"
                                                    ],
                             "passes":  false,
                             "priority":  "medium",
-                            "title":  "Add format-specific rate limiting backoff multipliers",
-                            "notes":  "Tier: enhancement. File: src/caption/rate_limiter.py, config.yaml lines 1251-1258. Add configurable backoff multipliers per caption format."
+                            "title":  "Implement download resume from partial",
+                            "notes":  "Tier: enhancement\nFiles: src/downloader/core.py (add resume logic), src/downloader/utils.py (check_partial_file), config.yaml (add resume option)\nLine ranges: core.py resume logic ~40 lines, utils.py helpers ~20 lines, config.yaml ~5 lines\nThis feature reduces download time when interrupted downloads are resumed."
                         },
                         {
-                            "id":  "US-90-009",
+                            "id":  "US-93-009",
                             "acceptanceCriteria":  [
-                                                       "Caption metrics are exported via PipelineMetricsExporter",
-                                                       "Metrics include: fetch_success_rate, avg_fetch_time, cache_hit_rate, format_distribution",
-                                                       "Metrics are logged at stage completion",
-                                                       "Metrics are included in checkpoint summary"
+                                                       "Add format preference to download config",
+                                                       "Support preference order: mp4 \u003e webm \u003e other",
+                                                       "Add quality selection (highest/best/worst)",
+                                                       "Pass preferences to yt-dlp format string",
+                                                       "Log format selection for transparency",
+                                                       "Handle unavailable formats gracefully"
                                                    ],
                             "passes":  false,
                             "priority":  "medium",
-                            "title":  "Add comprehensive caption stage metrics tracking",
-                            "notes":  "Tier: observability. File: src/caption/metrics.py, src/stages/caption_stage.py. Add structured metrics for caption fetching performance."
+                            "title":  "Add download format preference options",
+                            "notes":  "Tier: enhancement\nFiles: src/config/sections/download.py (add FormatPreferenceConfig), src/downloader/core.py (build format string), config.yaml (add options)\nLine ranges: download.py config ~15 lines, core.py format string ~20 lines, config.yaml ~8 lines\nThis feature ensures consistent video format selection across downloads."
                         },
                         {
-                            "id":  "US-90-010",
+                            "id":  "US-93-010",
                             "acceptanceCriteria":  [
-                                                       "CaptionCache stores entries with video_id and language as composite key",
-                                                       "Cache correctly handles language fallback chain",
-                                                       "Cache size is bounded by max_cache_size config",
-                                                       "Cache eviction uses LRU policy"
+                                                       "Track cookie success rate per cookie",
+                                                       "Prioritize high-success cookies in rotation",
+                                                       "Add cookie health scoring algorithm",
+                                                       "Remove consistently failing cookies automatically",
+                                                       "Add config for success rate threshold",
+                                                       "Log cookie selection rationale"
                                                    ],
                             "passes":  false,
                             "priority":  "medium",
-                            "title":  "Implement LRU eviction policy for caption cache",
-                            "notes":  "Tier: enhancement. File: src/caption/cache.py, src/caption_fetcher_cache.py. Add max_cache_size enforcement with LRU eviction."
+                            "title":  "Improve cookie rotation strategy",
+                            "notes":  "Tier: enhancement\nFiles: src/downloader/cookie_rotator.py (add health tracking), src/downloader/cookie_method_fallback.py (use health scores), src/config/sections/download.py (add threshold config)\nLine ranges: cookie_rotator.py health ~50 lines, cookie_method_fallback.py use scores ~20 lines, download.py config ~5 lines\nThis feature reduces failed downloads due to bad cookies by prioritizing healthy ones."
                         },
                         {
-                            "id":  "US-90-011",
+                            "id":  "US-93-011",
                             "acceptanceCriteria":  [
-                                                       "FormatTimeoutPolicy applies timeout per format type",
-                                                       "timeout values are configurable per format in config.yaml",
-                                                       "Timeout exceptions are correctly categorized and retried",
-                                                       "Timeout tracking is reset after successful fetch"
+                                                       "Add Prometheus metrics exporter for downloads",
+                                                       "Export: download_total, download_duration, download_size, download_errors",
+                                                       "Support configurable export interval",
+                                                       "Add metrics to global rate limit coordinator",
+                                                       "Include retry counts in metrics",
+                                                       "Handle metrics export failures gracefully"
                                                    ],
                             "passes":  false,
-                            "priority":  "medium",
-                            "title":  "Configure per-format timeout policies in caption fetching",
-                            "notes":  "Tier: enhancement. File: src/caption_timeout_manager.py, config.yaml lines 1152-1153. Make timeout configurable per format (youtube, transcript, live_subtitle)."
+                            "priority":  "low",
+                            "title":  "Add download metrics export",
+                            "notes":  "Tier: enhancement\nFiles: src/downloader/metrics_exporter.py (new file), src/downloader/core.py (collect metrics), src/downloader/rate_limit_metrics.py (integrate)\nLine ranges: metrics_exporter.py new ~60 lines, core.py collect ~15 lines, rate_limit_metrics.py integrate ~10 lines\nThis feature enables monitoring download performance in production."
                         },
                         {
-                            "id":  "US-90-012",
+                            "id":  "US-93-012",
                             "acceptanceCriteria":  [
-                                                       "Test coverage for caption_fetcher module exceeds 80%",
-                                                       "Test coverage for caption_stage module exceeds 80%",
-                                                       "Tests cover: success case, cache hit, cache miss, timeout, format unavailable, circuit breaker open",
-                                                       "Tests use mocking for yt-dlp subprocess calls"
+                                                       "Add download speed variance tracking",
+                                                       "Detect slow downloads vs network issues",
+                                                       "Add slow download warning threshold",
+                                                       "Log speed metrics for analysis",
+                                                       "Allow speed-based abort decision",
+                                                       "Handle network flakiness gracefully"
                                                    ],
                             "passes":  false,
-                            "priority":  "medium",
-                            "title":  "Increase caption module test coverage to 80%",
-                            "notes":  "Tier: testing. Files: tests/test_caption*.py, src/caption_fetcher.py, src/stages/caption_stage.py. Current coverage gaps identified in caption module."
+                            "priority":  "low",
+                            "title":  "Add download speed variance detection",
+                            "notes":  "Tier: enhancement\nFiles: src/downloader/speed_tracker.py (add variance detection), src/downloader/core.py (use speed warnings), src/config/sections/download.py (add threshold config)\nLine ranges: speed_tracker.py variance ~30 lines, core.py warnings ~15 lines, download.py config ~5 lines\nThis feature helps identify network issues vs slow but valid downloads."
                         }
                     ]
 }

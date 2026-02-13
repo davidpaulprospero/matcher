@@ -14,6 +14,18 @@
 - Gotcha: threading.Lock deadlocks in get_summary() -> is_exhausted(); must use RLock
 - Files: src/transcription/retry_budget.py, src/transcription/parallel_processor.py, src/transcription/metrics.py, src/config/sections/core.py, src/transcription/__init__.py, tests/test_transcription_retry_budget.py, tests/test_transcription_parallel_processor.py
 
+## Iteration N - [US-93-005] Implement adaptive download timeout
+- All 6 acceptance criteria verified:
+  1. Dynamic timeout calculation: calculate_adaptive_timeout() in src/downloader/utils.py
+  2. Size estimation: Tier-based estimates in core.py (short=10MB, medium=30MB, long=90MB, longer=200MB)
+  3. Formula: base + (size_mb * multiplier) - implemented in utils.py:172
+  4. Config options: adaptive_timeout_base (30s), adaptive_timeout_multiplier (0.5), adaptive_timeout_max (600s)
+  5. Larger timeouts for longer videos: Uses tier to estimate size, applies larger timeouts
+  6. Logging: Always logs adaptive timeout values in core.py (~line 2030-2036)
+- Enhanced logging: Now logs timeout values even when tier timeout is larger (for debugging)
+- Tests: 15 adaptive timeout tests pass
+- Files: src/downloader/utils.py, src/downloader/core.py, src/config/sections/download.py
+
 ## Iteration 17 - [US-90-007] Verify caption-to-transcription fallback pipeline
 - Verified all 4 acceptance criteria:
   1. CaptionStage correctly populates caption_results dict keyed by video_id ✓
@@ -245,6 +257,29 @@
 - All 62 existing tests pass
 - Per-format behavior verified: youtube failures don't affect transcript, each has own state
 - Files modified: src/caption/circuit_breaker.py
+
+## Iteration 20 - [US-93-003] Improve download retry budget persistence
+- PRE-IMPLEMENTED: All 6 acceptance criteria already met
+- rate_limit_budget.py has to_dict() (line 381) and from_dict() (line 400)
+- checkpoint.py stores rate_limit_budget in DownloadCheckpoint (line 45)
+- core.py saves to checkpoint (line 574): self.checkpoint.rate_limit_budget = self.rate_limit_budget.to_dict()
+- orchestrator.py loads on resume (lines 312-313): d.rate_limit_budget = RateLimitBudget.from_dict(checkpoint.rate_limit_budget)
+- clear() method for reset (line 430)
+- get_summary() for debugging (line 357)
+- Handles None gracefully in from_dict() (line 410)
+- Files: src/downloader/rate_limit_budget.py, src/downloader/checkpoint.py, src/downloader/core.py, src/downloader/orchestrator.py
+
+## Iteration 21 - [US-93-004] Add parallel download coordination
+- Implemented DownloadCoordinator class in orchestrator.py (lines ~38-160)
+- Thread-safe semaphore for max_concurrent enforcement
+- Tracks active_count, completed_count, failed_count
+- get_status() API returns active, max_concurrent, completed, failed, active_downloads, available_slots
+- Added max_concurrent config to download.py (defaults to parallel_workers)
+- Added validation: max_concurrent >= 1 required
+- Integrated into DownloadOrchestrator with get_stats() method
+- Coordinator status logged at end of download_all()
+- Verified: all tests pass, imports work, main.py runs
+- Files: src/downloader/orchestrator.py, src/config/sections/download.py
 
 ## Iteration 19 - [US-90-005] Optimize caption pre-check to use faster --list-subs API
 - PRE-IMPLEMENTED: All 4 acceptance criteria verified

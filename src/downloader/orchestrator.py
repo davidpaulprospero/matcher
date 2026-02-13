@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import threading
 import time
 import logging
 from dataclasses import dataclass, field
@@ -35,6 +36,123 @@ if TYPE_CHECKING:
     from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+
+class DownloadCoordinator:
+    """
+    Global download coordinator to manage concurrent downloads.
+
+    Tracks active downloads across parallel workers and enforces
+    max concurrent downloads limit to prevent resource exhaustion.
+
+    This enables true parallel downloading while respecting resource constraints.
+    """
+
+    def __init__(self, max_concurrent: int = None):
+        """
+        Initialize download coordinator.
+
+        Args:
+            max_concurrent: Maximum concurrent downloads. Defaults to 4.
+        """
+        self._max_concurrent = max_concurrent or 4
+        self._semaphore = threading.Semaphore(self._max_concurrent)
+        self._active_count = 0
+        self._lock = threading.Lock()
+        self._active_downloads: Dict[str, Any] = {}
+        self._completed_count = 0
+        self._failed_count = 0
+
+    @property
+    def max_concurrent(self) -> int:
+        """Return max concurrent downloads setting."""
+        return self._max_concurrent
+
+    @property
+    def active_count(self) -> int:
+        """Return number of currently active downloads."""
+        with self._lock:
+            return self._active_count
+
+    @property
+    def completed_count(self) -> int:
+        """Return total completed downloads."""
+        with self._lock:
+            return self._completed_count
+
+    @property
+    def failed_count(self) -> int:
+        """Return total failed downloads."""
+        with self._lock:
+            return self._failed_count
+
+    def acquire(self, download_id: str = None) -> bool:
+        """
+        Acquire a download slot. Blocks if at max capacity.
+
+        Args:
+            download_id: Optional identifier for tracking
+
+        Returns:
+            True when slot acquired
+        """
+        self._semaphore.acquire()
+        with self._lock:
+            self._active_count += 1
+            if download_id:
+                self._active_downloads[download_id] = {
+                    'started': time.time(),
+                    'id': download_id
+                }
+        logger.debug(f"DownloadCoordinator: acquired slot ({self._active_count}/{self._max_concurrent} active)")
+        return True
+
+    def release(self, download_id: str = None, success: bool = True) -> None:
+        """
+        Release a download slot.
+
+        Args:
+            download_id: Optional identifier that was used for tracking
+            success: Whether the download succeeded
+        """
+        with self._lock:
+            if download_id and download_id in self._active_downloads:
+                del self._active_downloads[download_id]
+            self._active_count -= 1
+            if success:
+                self._completed_count += 1
+            else:
+                self._failed_count += 1
+
+        self._semaphore.release()
+        logger.debug(f"DownloadCoordinator: released slot ({self._active_count}/{self._max_concurrent} active)")
+
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get coordinator status.
+
+        Returns:
+            Dict with active, max_concurrent, completed, failed, and active_downloads info
+        """
+        with self._lock:
+            return {
+                'active': self._active_count,
+                'max_concurrent': self._max_concurrent,
+                'completed': self._completed_count,
+                'failed': self._failed_count,
+                'active_downloads': list(self._active_downloads.keys()),
+                'available_slots': self._max_concurrent - self._active_count,
+            }
+
+    def reset(self) -> None:
+        """Reset all counters (for testing or new batch)."""
+        with self._lock:
+            self._active_count = 0
+            self._completed_count = 0
+            self._failed_count = 0
+            self._active_downloads.clear()
+        # Recreate semaphore to clear any pending acquires
+        self._semaphore = threading.Semaphore(self._max_concurrent)
 
 
 class RateLimitHooks:
@@ -148,6 +266,7 @@ class DownloadOrchestrator:
             downloader: The VideoDownloader to use for actual downloads
         """
         self.downloader = downloader
+        self._coordinator: Optional[DownloadCoordinator] = None
 
     def download_all(
         self,
@@ -174,7 +293,12 @@ class DownloadOrchestrator:
 
         # Use config value if not explicitly provided
         if max_concurrent is None:
-            max_concurrent = getattr(d.download_config, 'parallel_workers', 4)
+            max_concurrent = getattr(d.download_config, 'max_concurrent', 4)
+
+        # Initialize download coordinator for parallel download management
+        self._coordinator = DownloadCoordinator(max_concurrent=max_concurrent)
+        logger.info(f"DownloadCoordinator initialized: max_concurrent={max_concurrent}")
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -247,6 +371,11 @@ class DownloadOrchestrator:
         d.log_source_diversity_report()
         self._log_cache_stats()
         self._log_budget_summary()
+
+        # Log coordinator status
+        if self._coordinator:
+            status = self._coordinator.get_status()
+            logger.info(f"DownloadCoordinator final status: {status}")
 
         # Clear checkpoint on success
         d._clear_checkpoint()
@@ -584,6 +713,22 @@ class DownloadOrchestrator:
                 'failed_keywords': len(d.checkpoint.failed_keywords),
                 'completed_videos': len(d.checkpoint.completed_videos),
             }
+
+        return stats
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get statistics including coordinator status.
+
+        Returns:
+            Dict with coordinator and batch stats
+        """
+        stats: Dict[str, Any] = {}
+
+        if self._coordinator:
+            stats['coordinator'] = self._coordinator.get_status()
+
+        stats['batch'] = self.get_batch_stats()
 
         return stats
 

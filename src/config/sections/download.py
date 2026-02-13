@@ -28,6 +28,8 @@ __all__ = [
     'MullvadConfig',
     'ImpersonationConfig',
     'ExtractorArgsConfig',
+    'ErrorPatternsConfig',
+    'AdaptiveSeverityConfig',
     'DownloadConfig',
     'DownloadingConfig',
 ]
@@ -400,6 +402,11 @@ class CaptionFirstConfig:
     # Captions older than this will be re-fetched
     max_cache_age_days: int = 30
 
+    # Maximum number of entries in caption cache (US-90-010)
+    # When set > 0, cache uses LRU eviction to maintain max entry count
+    # Default 0 = no limit (cache grows indefinitely based on max_cache_age_days)
+    max_cache_size: int = 0
+
     # Retry settings for caption fetch failures (US-008)
     # Max retries on network/temporary errors (CaptionFetchError)
     # CaptionUnavailableError (no captions exist) is NOT retried
@@ -622,6 +629,13 @@ class CaptionFirstConfig:
     # repeated expensive lookups. Default: 3600 seconds (1 hour).
     # If set, this takes precedence over negative_cache_ttl_hours.
     negative_cache_ttl_seconds: int = 3600
+
+    # Per-category negative cache TTL (US-90-003):
+    # Different TTLs for different types of negative cache entries:
+    # - unavailable_ttl: For videos confirmed to have no captions (longer TTL ok)
+    # - error_ttl: For transient errors (network, timeout) - shorter TTL for faster retry
+    unavailable_ttl_seconds: int = 3600  # Default 1 hour - captions unlikely to appear soon
+    error_ttl_seconds: int = 300  # Default 5 minutes - transient errors should retry faster
 
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
@@ -974,6 +988,38 @@ class CircuitBreakerConfig:
 
 
 @dataclass
+class CascadeRuleConfig:
+    """A cascade rule for multi-circuit coordination (US-89-009).
+
+    Defines how one circuit breaker affects another when events occur.
+    """
+    source: str = ""  # Source circuit breaker name (e.g., "search", "caption")
+    target: str = ""  # Target circuit breaker name (e.g., "download")
+    on_trip: bool = True  # Propagate trip to target
+    on_failure: bool = False  # Propagate failure count to target
+
+
+@dataclass
+class CircuitCoordinationConfig:
+    """Multi-circuit coordination configuration (US-89-009).
+
+    Configures cross-circuit trip propagation between multiple circuit breakers
+    in the pipeline. When one circuit trips, it can trigger trips in other
+    circuits based on configured cascade rules.
+
+    Default cascade rules:
+    - search -> caption: trip on failure (existing US-61-003)
+    - caption -> search: trip on failure (existing US-61-003)
+    - search -> download: trip on trip (NEW)
+    """
+    # Enable/disable multi-circuit coordination
+    enabled: bool = True
+
+    # Cascade rules for cross-circuit propagation
+    cascade_rules: List[CascadeRuleConfig] = field(default_factory=list)
+
+
+@dataclass
 class BatchRetryConfig:
     """Batch-level retry queue for rate-limited videos.
 
@@ -1211,6 +1257,144 @@ class ExtractorArgsConfig:
 
 
 @dataclass
+class AdaptiveSeverityConfig:
+    """Adaptive error severity configuration (US-89-012).
+
+    Tracks error frequency per category over a sliding window and auto-escalates
+    severity when the same error repeats. This improves backoff timing for
+    recurring errors without manual tuning.
+
+    Example: After 3 consecutive 429 errors, severity escalates from medium to high,
+    resulting in longer backoff delays (3.0x multiplier instead of 2.0x).
+
+    Configure in config.yaml under download.adaptive_severity.
+    """
+    # Enable/disable adaptive severity adjustment
+    enabled: bool = True
+
+    # Number of consecutive errors of the same category before escalating severity
+    # Example: 3 means after 3x 429 errors, severity escalates
+    escalation_threshold: int = 3
+
+    # Maximum severity level to escalate to: 'medium' or 'high'
+    # 'high' = 3.0x backoff multiplier, 'medium' = 2.0x
+    max_severity: str = "high"
+
+    # Sliding window size for tracking error frequency
+    # Errors older than this window are forgotten
+    window_size: int = 10
+
+    # Categories to track for adaptive severity
+    # Maps category name to whether it's tracked
+    tracked_categories: Dict[str, bool] = field(default_factory=lambda: {
+        "rate_limit": True,      # 429 errors
+        "bot_detection": True,  # 403/bot errors
+        "network": True,         # DNS/connection errors
+        "timeout": True,         # Timeout errors
+        "video_specific": False, # Video-specific errors (rarely retry)
+    })
+
+    # Reset severity tracking on success
+    # When True, resets error count on successful download
+    reset_on_success: bool = True
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        valid_max_severity = ("medium", "high")
+        if self.max_severity not in valid_max_severity:
+            raise ValueError(
+                f"AdaptiveSeverityConfig.max_severity must be one of {valid_max_severity}, "
+                f"got '{self.max_severity}'"
+            )
+        if self.escalation_threshold < 1:
+            raise ValueError(
+                f"AdaptiveSeverityConfig.escalation_threshold must be >= 1, "
+                f"got {self.escalation_threshold}"
+            )
+        if self.window_size < 1:
+            raise ValueError(
+                f"AdaptiveSeverityConfig.window_size must be >= 1, "
+                f"got {self.window_size}"
+            )
+
+
+@dataclass
+class ErrorPatternsConfig:
+    """Configurable error patterns for download error classification (US-89-008).
+
+    Allows runtime adjustment of error patterns without code changes.
+    Patterns are organized by sub-category: dns, tcp, tls, http, ffmpeg.
+
+    Configure in config.yaml under download.error_patterns.
+    """
+    # DNS resolution error patterns
+    dns: List[str] = field(default_factory=lambda: [
+        'getaddrinfo failed',
+        'Name or service not known',
+        'Errno 11001',
+        'nodename nor servname',
+        'No address associated with hostname',
+        'Temporary failure in name resolution',
+        'Failed to resolve',
+    ])
+
+    # TCP connection error patterns
+    tcp: List[str] = field(default_factory=lambda: [
+        'Network is unreachable',
+        'ConnectionResetError',
+        'Connection refused',
+        'Connection timed out',
+    ])
+
+    # TLS/SSL error patterns
+    tls: List[str] = field(default_factory=lambda: [
+        'SSL: CERTIFICATE_VERIFY_FAILED',
+        'SSL: WRONG_VERSION_NUMBER',
+        'SSLError',
+        'SSLHandshakeError',
+        'ssl_',
+        'OpenSSL.SSL.Error',
+        'certificate verify failed',
+        'EOF occurred in violation of protocol',
+        'no protocols available',
+        'sslv3 alert handshake failure',
+        'tlsv1 alert',
+        'unsupported protocol',
+        'bad_certificate',
+        'certificate expired',
+        'certificate has expired',
+        'certificate not yet valid',
+        'hostname mismatch',
+        'SNI not enabled',
+        'unsafe legacy renegotiation',
+    ])
+
+    # HTTP error patterns
+    http: List[str] = field(default_factory=lambda: [
+        'URLError',
+        'HTTP Error 403',
+        'HTTP Error 429',
+        'HTTP Error 5',
+    ])
+
+    # FFmpeg exit code patterns (network-related)
+    ffmpeg: List[str] = field(default_factory=lambda: [
+        '4294967158',
+        '-314',
+    ])
+
+    def to_dict(self) -> dict[str, list[str]]:
+        """Convert to dict format expected by error_classification module."""
+        return {
+            'dns': self.dns,
+            'tcp': self.tcp,
+            'tls': self.tls,
+            'http': self.http,
+            'ffmpeg': self.ffmpeg,
+        }
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
 
@@ -1339,6 +1523,15 @@ class DownloadConfig:
     # Controls how many rotations, backoff time, and VPN switches are available per session
     rate_limit_budget: RateLimitBudgetConfig = field(default_factory=RateLimitBudgetConfig)
 
+    # Error patterns for download error classification (US-89-008)
+    # Allows runtime adjustment without code changes. If not provided, uses defaults.
+    error_patterns: ErrorPatternsConfig | None = None
+
+    # Adaptive severity configuration (US-89-012)
+    # Tracks error frequency and auto-escalates severity on repeated errors.
+    # If not provided, uses AdaptiveSeverityConfig with defaults.
+    adaptive_severity: AdaptiveSeverityConfig | None = None
+
     # Segment download settings (used by DOWNLOAD_SEGMENTS stage)
     # Delay between segment download requests (seconds).
     # Prevents YouTube rate-limiting when downloading many segments back-to-back.
@@ -1347,6 +1540,9 @@ class DownloadConfig:
     segment_request_delay: float = 1.0
     # Maximum adaptive delay after consecutive failures (seconds)
     segment_request_delay_max: float = 30.0
+    # US-85-008: Random jitter factor applied to delay to prevent thundering herd.
+    # Jitter is +/- this factor (e.g., 0.25 = +/-25%). Set to 0 to disable.
+    segment_request_delay_jitter: float = 0.25
     # Buffer seconds to add before/after each matched segment for editing flexibility
     segment_buffer: float = 5.0
     # yt-dlp format string for segment downloads (height capped by segment_max_resolution)
@@ -1400,6 +1596,7 @@ class DownloadConfig:
     # Higher values = faster downloads but more bandwidth/CPU usage
     # Note: Currently sequential, this setting is prepared for future parallel support
     parallel_workers: int = 4  # Concurrent download workers (1-8 recommended)
+    max_concurrent: int = None  # Max concurrent for DownloadCoordinator (defaults to parallel_workers)
 
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
@@ -1434,11 +1631,32 @@ class DownloadConfig:
         if isinstance(self.rate_limit_budget, dict):
             self.rate_limit_budget = RateLimitBudgetConfig(**self.rate_limit_budget)
 
+        # US-89-008: Handle error_patterns - can be None, dict, or ErrorPatternsConfig
+        if isinstance(self.error_patterns, dict):
+            self.error_patterns = ErrorPatternsConfig(**self.error_patterns)
+        # If None or not provided, keep as None (backward compat - use defaults)
+
+        # US-89-012: Handle adaptive_severity - can be None, dict, or AdaptiveSeverityConfig
+        if isinstance(self.adaptive_severity, dict):
+            self.adaptive_severity = AdaptiveSeverityConfig(**self.adaptive_severity)
+        # If None or not provided, keep as None (backward compat - use defaults)
+
         # Validate parallel_workers >= 1 (positive integer)
         if self.parallel_workers < 1:
             raise ValueError(
                 f"DownloadConfig.parallel_workers={self.parallel_workers} must be >= 1. "
                 f"Check download.parallel_workers in config.yaml"
+            )
+
+        # Default max_concurrent to parallel_workers if not set
+        if self.max_concurrent is None:
+            self.max_concurrent = self.parallel_workers
+
+        # Validate max_concurrent >= 1
+        if self.max_concurrent < 1:
+            raise ValueError(
+                f"DownloadConfig.max_concurrent={self.max_concurrent} must be >= 1. "
+                f"Check download.max_concurrent in config.yaml"
             )
 
         # Validate cookies_from_browser is a known browser or empty (disabled)
