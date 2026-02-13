@@ -22,6 +22,7 @@ from src.iterative_match.query_learning import (
     QueryPlan,
     QueryResult,
     StrategyStats,
+    StrategyCalibration,
     QueryLearningDB,
 )
 
@@ -756,6 +757,144 @@ class TestGetPreferredStrategies:
         db.chapter_strategy_success["conclusion"]["entity"] = 0.8
         result = db.get_preferred_strategies("conclusion", top_n=3)
         assert result == ["entity"]
+
+
+# ============================================================================
+# US-101-012: Confidence Calibration Tests
+
+class TestStrategyCalibration:
+    """Tests for StrategyCalibration class."""
+
+    def test_default_calibration_factor_is_one(self):
+        """Default calibration factor is 1.0 (no adjustment)."""
+        calib = StrategyCalibration()
+        assert calib.calibration_factor == 1.0
+
+    def test_no_calibration_with_few_samples(self):
+        """With fewer than 3 samples, factor remains 1.0."""
+        calib = StrategyCalibration()
+        calib.add_sample(0.5, 0.6, "voiceover")
+        calib.add_sample(0.3, 0.4, "voiceover")
+        assert calib.calibration_factor == 1.0
+
+    def test_calibration_factor_after_enough_samples(self):
+        """Calibration factor calculated after 3+ samples."""
+        calib = StrategyCalibration()
+        # predicted=0.5, actual=0.7 -> factor = 1.4 (under-confident)
+        calib.add_sample(0.5, 0.7, "voiceover")
+        calib.add_sample(0.3, 0.5, "voiceover")
+        calib.add_sample(0.4, 0.6, "voiceover")
+        # Should now have a calibration factor != 1.0
+        assert calib.calibration_factor != 1.0
+        assert calib.sample_count == 3
+
+    def test_apply_calibration_returns_unchanged_when_insufficient_data(self):
+        """apply() returns unchanged confidence when <3 samples."""
+        calib = StrategyCalibration()
+        result = calib.apply(0.5)
+        assert result == 0.5
+
+    def test_apply_calibration_scales_confidence(self):
+        """apply() scales confidence by calibration factor."""
+        calib = StrategyCalibration()
+        # Add enough samples to calculate factor
+        calib.add_sample(0.5, 0.7, "voiceover")
+        calib.add_sample(0.3, 0.5, "voiceover")
+        calib.add_sample(0.4, 0.6, "voiceover")
+
+        # Get the factor and verify scaling works
+        factor = calib.calibration_factor
+        result = calib.apply(0.5)
+        expected = 0.5 * factor
+        assert abs(result - expected) < 0.001
+
+    def test_to_dict_and_from_dict_roundtrip(self):
+        """Calibration data serializes and deserializes correctly."""
+        calib = StrategyCalibration()
+        calib.add_sample(0.5, 0.7, "voiceover")
+        calib.add_sample(0.3, 0.5, "entity")
+        calib.add_sample(0.4, 0.6, "topic")
+
+        data = calib.to_dict()
+        restored = StrategyCalibration.from_dict(data)
+
+        assert restored.calibration_factor == calib.calibration_factor
+        assert restored.sample_count == calib.sample_count
+
+
+class TestQueryLearningDBCalibration:
+    """Tests for confidence calibration in QueryLearningDB."""
+
+    def test_record_calibration_creates_strategy_entry(self, tmp_path):
+        """record_calibration creates entry for new strategy."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.record_calibration(0.5, 0.7, "voiceover")
+
+        assert "voiceover" in db.strategy_calibration
+        assert db.strategy_calibration["voiceover"].sample_count == 1
+
+    def test_record_calibration_accumulates_samples(self, tmp_path):
+        """Multiple calls accumulate samples."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.record_calibration(0.5, 0.7, "voiceover")
+        db.record_calibration(0.3, 0.5, "voiceover")
+        db.record_calibration(0.4, 0.6, "voiceover")
+
+        assert db.strategy_calibration["voiceover"].sample_count == 3
+
+    def test_apply_calibration_returns_unchanged_without_data(self, tmp_path):
+        """apply_calibration returns unchanged when no data."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        result = db.apply_calibration(0.5, "voiceover")
+        assert result == 0.5
+
+    def test_apply_calibration_applies_factor(self, tmp_path):
+        """apply_calibration applies learned factor."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        # Add enough samples to get a factor
+        db.record_calibration(0.5, 0.7, "voiceover")
+        db.record_calibration(0.3, 0.5, "voiceover")
+        db.record_calibration(0.4, 0.6, "voiceover")
+
+        # Apply to a new confidence
+        raw_confidence = 0.5
+        calibrated = db.apply_calibration(raw_confidence, "voiceover")
+
+        # Should be scaled by calibration factor
+        factor = db.strategy_calibration["voiceover"].calibration_factor
+        expected = raw_confidence * factor
+        assert abs(calibrated - expected) < 0.001
+
+    def test_get_calibration_stats_returns_all_strategies(self, tmp_path):
+        """get_calibration_stats returns stats for all strategies."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.record_calibration(0.5, 0.7, "voiceover")
+        db.record_calibration(0.3, 0.5, "entity")
+
+        stats = db.get_calibration_stats()
+        assert "voiceover" in stats
+        assert "entity" in stats
+        assert stats["voiceover"]["sample_count"] == 1
+        assert stats["entity"]["sample_count"] == 1
+
+    def test_calibration_persists_to_disk(self, tmp_path):
+        """Calibration data is saved and loaded from disk."""
+        db_path = tmp_path / "db.json"
+
+        # Create DB with calibration data
+        db1 = QueryLearningDB(db_path=str(db_path))
+        db1.record_calibration(0.5, 0.7, "voiceover")
+        db1.record_calibration(0.3, 0.5, "voiceover")
+        db1.record_calibration(0.4, 0.6, "voiceover")
+        db1.save()
+
+        # Load into new DB
+        db2 = QueryLearningDB(db_path=str(db_path))
+
+        # Verify calibration data loaded
+        assert "voiceover" in db2.strategy_calibration
+        assert db2.strategy_calibration["voiceover"].sample_count == 3
+
 
     def test_different_chapter_types_independent(self, tmp_path):
         """Preferred strategies for different chapter types are independent."""

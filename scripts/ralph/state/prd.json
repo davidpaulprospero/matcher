@@ -137,7 +137,7 @@
                             "passes":  true,
                             "priority":  "high",
                             "title":  "Add search budget info function to Ralph interview library",
-                            "notes":  "Tier: ralph | Files: scripts/ralph/lib/interview.ps1 (new function), config.yaml:90-91 (video_search config) | This adds budget awareness to Ralph's interview phase so keywords are searched with appropriate limits. Line range: new function at end of interview.ps1 (~500-550) | VERIFIED: Function already exists at interview.ps1:8-113, reads both config values, calculates max_keywords, handles defaults"
+                            "notes":  "Tier: ralph | Files: scripts/ralph/lib/interview.ps1 (new function), config.yaml:90-91 (video_search config) | This adds budget awareness to Ralph\u0027s interview phase so keywords are searched with appropriate limits. Line range: new function at end of interview.ps1 (~500-550) | VERIFIED: Function already exists at interview.ps1:8-113, reads both config values, calculates max_keywords, handles defaults"
                         },
                         {
                             "id":  "US-101-003",
@@ -167,7 +167,7 @@
                             "passes":  true,
                             "priority":  "high",
                             "title":  "Display search budget status in Ralph interview UI",
-                            "notes":  "IMPLEMENTED: Show-SearchBudgetStatus function at lib/interview.ps1:324-399 displays all budget info. Added budget message format at line 379-383: 'Budget: {max} max | {count} keywords = {adjusted} results each'. Function called from interview.ps1:1593 and 1661. All 55 tests pass."
+                            "notes":  "IMPLEMENTED: Show-SearchBudgetStatus function at lib/interview.ps1:324-399 displays all budget info. Added budget message format at line 379-383: \u0027Budget: {max} max | {count} keywords = {adjusted} results each\u0027. Function called from interview.ps1:1593 and 1661. All 55 tests pass."
                         },
                         {
                             "id":  "US-101-005",
@@ -224,10 +224,10 @@
                                                        "Log output includes: total queries, total gaps filled, success rate per strategy",
                                                        "Summary available via get_summary() method"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add strategy effectiveness analytics to iterative matching",
-                            "notes":  "Tier: feature | Files: src/iterative_match/query_learning.py:647-662 (get_summary method), src/stages/iterative_match.py:200-250 (pass summary logging) | Provides visibility into which search strategies work best. Line range: query_learning.py:660-700 (enhanced summary)"
+                            "notes":  "IMPLEMENTED: Added get_effectiveness_summary() method with per-pattern and per-chapter-type success rates. Updated get_summary() to include effectiveness data. Added strategy effectiveness logging in iterative_match.py after each pass. Files: src/iterative_match/query_learning.py, src/stages/iterative_match.py"
                         },
                         {
                             "id":  "US-101-009",
@@ -239,10 +239,10 @@
                                                        "Max 2 retries per query before marking as permanently failed",
                                                        "Log retry attempts and outcomes"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add smart query retry logic to iterative matching",
-                            "notes":  "Tier: feature | Files: src/stages/iterative_match.py:300-400 (query execution), src/iterative_match/query_learning.py:531-584 (failure tracking) | Improves gap fill rate by intelligently retrying failed queries. Line range: iterative_match.py:350-420 (retry logic)"
+                            "notes":  "IMPLEMENTED: Added _failed_queries dict to track retry state, _broaden_query() to remove specific terms, _generate_retry_queries() for strategy progression (voiceover -> similar_locked -> entity), _track_failed_query() for tracking, _log_retry_summary() for logging. Added enable_smart_retry and max_retries_per_query config options. Integrated retry logic in pass loop after initial queries execute. Files: src/stages/iterative_match.py, src/config/sections/iterative_matching.py, config.yaml"
                         },
                         {
                             "id":  "US-101-010",
@@ -254,10 +254,10 @@
                                                        "Use config: iterative_matching.cache_query_results (already exists)",
                                                        "Log batch optimization savings: queries saved"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
                             "title":  "Add batch query optimization to iterative matching",
-                            "notes":  "Tier: optimization | Files: src/stages/iterative_match.py:400-500 (query grouping), src/iterative_match/query_learning.py:111-119 (cache_query_results config reference) | Reduces API calls by deduplicating similar queries. Line range: iterative_match.py:420-480 (batch optimization)"
+                            "notes":  "IMPLEMENTED: Added _deduplicate_queries() method using Jaccard similarity for query deduplication. Uses normalization (lowercase, punctuation removal) and similarity threshold (0.85 default). Integrated in pass loop after query generation. Added config options: enable_batch_optimization (default true), query_similarity_threshold (default 0.85). Logs optimization savings: 'X queries saved (now Y unique)'. Files: src/stages/iterative_match.py, src/config/sections/iterative_matching.py, config.yaml"
                         },
                         {
                             "id":  "US-101-011",
@@ -269,10 +269,10 @@
                                                        "Report logged at end of each pass when log_pass_summaries=true",
                                                        "Visual: ASCII progress bar showing gap fill percentage"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
                             "title":  "Add gap coverage progress report to iterative matching",
-                            "notes":  "Tier: ux | Files: src/stages/iterative_match.py:500-600 (pass summary), config.yaml:2470 (log_pass_summaries config) | Provides visibility into iterative matching progress. Line range: iterative_match.py:520-580 (progress report)"
+                            "notes":  "IMPLEMENTED: Added _log_gap_coverage_report() method that shows: initial/current/filled gap counts, ASCII progress bar, confidence distribution (low<0.3, medium 0.3-0.6, high>=0.6), and pattern distribution (low_confidence, spacing_violation reasons). Integrated after strategy effectiveness logging, respects log_pass_summaries config. Files: src/stages/iterative_match.py"
                         },
                         {
                             "id":  "US-101-012",
@@ -284,10 +284,10 @@
                                                        "Log calibration adjustments at pass end",
                                                        "Calibration improves over time with more data"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "low",
                             "title":  "Add confidence score calibration to iterative matching",
-                            "notes":  "Tier: optimization | Files: src/matching/scoring.py (confidence scoring), src/iterative_match/query_learning.py:400-430 (result recording) | Improves confidence accuracy by learning from past matches. Line range: scoring.py:200-280 (calibration section)"
+                            "notes":  "IMPLEMENTED: Added StrategyCalibration class with EMA-based factor calculation (3+ samples required). Methods: record_calibration() to track predicted vs actual, apply_calibration() to adjust predictions, get_calibration_stats() for reporting, log_calibration_summary() for pass-end logging. Calibration persists to JSON via save/load/import/export. Files: src/iterative_match/query_learning.py"
                         }
                     ]
 }
