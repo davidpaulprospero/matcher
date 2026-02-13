@@ -108,13 +108,13 @@
                                                        "Validate output completeness after each stage completes",
                                                        "Log warnings for missing optional inputs rather than failing"
                                                    ],
-                            "notes":  "All 4 acceptance criteria verified: StageContract dataclass defined, StageValidator checks required inputs, output validation after completion, optional inputs log warnings (not failures). Quick verification test confirmed: optional missing inputs return warnings, not errors."
+                            "notes":  "Auto-completed by pre-flight check (git-commit-detected). Commit: 5e5f032 chore: [US-89-007] Mark as complete - stage input/output validation layer"
                         },
                         {
                             "id":  "US-89-008",
                             "title":  "Make error classification patterns configurable",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Move ERROR_PATTERNS from hardcoded dict to config.yaml section",
                                                        "Add download.error_patterns section to config.yaml with category lists",
@@ -127,14 +127,14 @@
                             "id":  "US-89-009",
                             "title":  "Add multi-circuit coordination across components",
                             "priority":  "low",
-                            "passes":  false,
+                            "passes":  true,
                             "acceptanceCriteria":  [
                                                        "Create CircuitBreakerRegistry to track all circuit breakers in pipeline",
                                                        "Add cross-circuit trip: when search CB trips, also alert download CB",
                                                        "Add CircuitBreakerCoordinator singleton for coordination",
                                                        "Configurable cascade rules in config.yaml"
                                                    ],
-                            "notes":  "Tier: enhancement | src/downloader/circuit_breaker.py: Add registry after line 200 | src/downloader/__init__.py: Export coordinator | Extends existing cascade feature (US-61-003) for more components"
+                            "notes":  "COMPLETED: CircuitBreakerRegistry (src/downloader/circuit_breaker.py:43-116), CircuitBreakerCoordinator singleton (lines 119-252), cross-circuit trip propagation via coordinator, cascade rules in config.yaml:1463-1483. Tests added: TestCircuitBreakerRegistry (7 tests), TestCircuitBreakerCoordinator (8 tests), TestCascadeRule (1 test)."
                         },
                         {
                             "id":  "US-89-010",

@@ -14,6 +14,15 @@
 - Gotcha: threading.Lock deadlocks in get_summary() -> is_exhausted(); must use RLock
 - Files: src/transcription/retry_budget.py, src/transcription/parallel_processor.py, src/transcription/metrics.py, src/config/sections/core.py, src/transcription/__init__.py, tests/test_transcription_retry_budget.py, tests/test_transcription_parallel_processor.py
 
+## Iteration 14 - [US-89-009] Add multi-circuit coordination across components
+- CircuitBreakerRegistry class (src/downloader/circuit_breaker.py:43-116): register/unregister breakers, get_all_health_metrics(), is_any_tripped(), get_tripped_names(), get_aggregate_stats()
+- CircuitBreakerCoordinator singleton (lines 119-252): propagate_trip(), propagate_failure(), configurable cascade rules, enable/disable
+- CascadeRule dataclass: source, target, on_trip, on_failure
+- Cross-circuit trip propagation: search -> download trips when search trips
+- Configurable cascade rules in config.yaml (lines 1463-1483): search<->caption, search->download
+- CircuitBreakerBuilder updated with with_coordinator() method
+- Tests: 7 for Registry, 8 for Coordinator, 1 for CascadeRule (16 tests total, all pass)
+
 ## Iteration 12 - [US-89-007] Add stage input/output validation layer
 - StageContract dataclass with required_inputs, optional_inputs, outputs fields (src/stages/__init__.py:570-580)
 - StageValidator.validate_inputs() checks required inputs before stage runs, returns errors + warnings (line 593-629)
@@ -185,3 +194,8 @@
 - Tests pass: TestStageRegistration, TestStageDescription pass
 - Backward compatibility maintained - existing stage-based execution unchanged
 - Files modified: src/stages/download_segments.py
+
+## Pre-flight Auto-Complete - [US-89-007] Add stage input/output validation layer
+- Status: COMPLETE (auto-detected from git commit, git-commit-detected)
+- Story was implemented in a previous session but prd.json was not updated (likely timeout)
+- Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
