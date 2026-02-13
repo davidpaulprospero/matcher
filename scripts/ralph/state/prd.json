@@ -1,199 +1,293 @@
 ﻿{
-    "sprintNumber":  100,
-    "focusArea":  "caption",
-    "branchName":  "ralph/sprint-100",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
+    "focusAreas":  [
+                       {
+                           "completedAt":  "2026-02-14T03:28:02",
+                           "startedAt":  null,
+                           "completed":  true,
+                           "id":  "config"
                        },
+                       {
+                           "completedAt":  "2026-02-13T12:49:13",
+                           "startedAt":  null,
+                           "completed":  true,
+                           "id":  "pipeline"
+                       },
+                       {
+                           "completedAt":  "2026-02-13T15:00:58",
+                           "startedAt":  null,
+                           "completed":  true,
+                           "id":  "architecture"
+                       },
+                       {
+                           "completedAt":  "2026-02-14T06:04:27",
+                           "startedAt":  null,
+                           "completed":  true,
+                           "id":  "caption"
+                       },
+                       {
+                           "completedAt":  "2026-02-13T19:46:26",
+                           "startedAt":  null,
+                           "completed":  true,
+                           "id":  "download"
+                       },
+                       {
+                           "completedAt":  null,
+                           "startedAt":  null,
+                           "completed":  false,
+                           "id":  "iterative-phase"
+                       },
+                       {
+                           "completedAt":  "2026-02-14T00:25:25",
+                           "startedAt":  null,
+                           "completed":  true,
+                           "id":  "context-matching"
+                       },
+                       {
+                           "completedAt":  null,
+                           "startedAt":  null,
+                           "completed":  false,
+                           "id":  "listicle-matching"
+                       }
+                   ],
+    "sessionId":  "59326812",
+    "createdAt":  "2026-02-13 10:09:23",
+    "interviewContext":  "improvement: Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\r\n- Ensure new features have corresponding config options\r\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\r\n- Scans completed: 2\r\n- pipeline_stages : findings available\r\n- config_structure : findings available\n",
+    "interviewDetails":  {
+                             "details":  "Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\r\n- Ensure new features have corresponding config options\r\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\r\n- Scans completed: 2\r\n- pipeline_stages : findings available\r\n- config_structure : findings available\n",
+                             "workType":  "improvement",
+                             "timestamp":  "2026-02-13T10:06:31",
+                             "client":  "",
+                             "priority":  "normal",
+                             "improvedContext":  {
+                                                     "detectedAreas":  [
+                                                                           "config",
+                                                                           "pipeline",
+                                                                           "architecture"
+                                                                       ],
+                                                     "improvedContext":  "Context:  Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)\n\nImproved Specifications:\nConfiguration System:\r\n- Existing config sections: broll, core, download, duration, entity, infrastructure, iterative_matching, keywords, llm, matching, media, output, rate_limit\r\n- Ensure new features have corresponding config options\r\n- Follow pattern in src/config/sections/\n\nPipeline Stages:\r\n- Existing stages: caption\r\n- Review stage dependencies and execution order\r\n- Identify bottlenecks and optimization opportunities\n\nCodebase Analysis:\r\n- Scans completed: 2\r\n- pipeline_stages : findings available\r\n- config_structure : findings available\n",
+                                                     "rawInput":  " Ralph Interview Search Budget Specification\n Problem Statement\n During Ralph\u0027s interview phase, keywords/topics gathered are used for YouTube video searches. The pipeline enforces:\n - max_total_results: 200 (config.yaml line 91)\n - results_per_keyword: 20 (config.yaml line 90)\n Issue: With 20 results x 10 keywords = 200, any keywords beyond position 10 are never searched. Ralph has no awareness of this limit during interview.\n Requirements\n 1. Budget Awareness: Ralph must ingest max_total_results and results_per_keyword from config\n 2. Equal Distribution: Search budget distributed evenly across all keywords\n 3. Chapter Support: Topics with chapters are split into individual search terms\n 4. No Skipped Keywords: All keywords receive at least 1 search attempt\n Functional Specification\n 1. Search Budget Calculation\n Current config.yaml settings:\n - video_search.results_per_keyword: 20\n - video_search.max_total_results: 200\n Ralph calculates: max_keywords = floor(200 / 20) = 10 keywords maximum at full rate\n 2. Dynamic Budget Adjustment\n When keywords \u003e max_keywords:\n adjusted_results_per_keyword = floor(max_total_results / keyword_count)\n Examples:\n - 5 keywords -\u003e 20 results each -\u003e 100 total\n - 10 keywords -\u003e 20 results each -\u003e 200 total\n - 15 keywords -\u003e 13 results each -\u003e 195 total\n - 20 keywords -\u003e 10 results each -\u003e 200 total\n - 25 keywords -\u003e 8 results each -\u003e 200 total\n 3. Chapter Extraction\n Topics containing chapter patterns are split:\n - \"Feature: Part 1, Part 2, Part 3\" -\u003e 3 keywords\n - \"API: Auth, Rate Limit, Retry\" -\u003e 3 keywords\n 4. Interview UI Display\n Focus Area Selection:\n [1] download (estimated: 20 results)\n [2] quality (estimated: 20 results)\n [3] matching (estimated: 20 results)\n ...\n Budget: 200 max | 12 keywords = 15 results each\n Warning: Add more keywords to maximize coverage\n Implementation\n Functions to Add:\n Get-SearchBudgetInfo (lib/interview.ps1)\n - Reads config.yaml for search limits\n - Returns budget metadata\n Get-DistributedKeywordBudget (lib/interview.ps1)\n - Input: keyword count\n - Output: adjusted results_per_keyword\n Get-ChapterDistributedKeywords (lib/interview.ps1)\n - Input: topic list with chapters\n - Output: flattened keyword array\n Files Modified\n scripts/ralph/lib/interview.ps1 - Add budget functions\n scripts/ralph/interview.ps1 - Add budget display in UI\n Acceptance Criteria\n - Ralph reads max_total_results from config\n - Ralph reads results_per_keyword from config\n - Interview shows budget status\n - Keywords beyond limit get reduced results (not skipped)\n - Chapter patterns detected and split\n - Edge cases handled (0 keywords, 1 keyword, etc.)",
+                                                     "codebaseFindings":  {
+                                                                              "configOptions":  [
+                                                                                                    "broll",
+                                                                                                    "core",
+                                                                                                    "download",
+                                                                                                    "duration",
+                                                                                                    "entity",
+                                                                                                    "infrastructure",
+                                                                                                    "iterative_matching",
+                                                                                                    "keywords",
+                                                                                                    "llm",
+                                                                                                    "matching",
+                                                                                                    "media",
+                                                                                                    "output",
+                                                                                                    "rate_limit"
+                                                                                                ],
+                                                                              "largeFiles":  [
+
+                                                                                             ],
+                                                                              "existingPatterns":  [
+
+                                                                                                   ],
+                                                                              "relevantCode":  [
+
+                                                                                               ]
+                                                                          }
+                                                 },
+                             "area":  ""
+                         },
+    "session":  {
+                    "currentSprintNumber":  101,
+                    "currentStoryId":  "US-101-001",
+                    "mode":  "Interview",
+                    "sessionId":  "2026-02-14_015137",
+                    "currentFocusArea":  "iterative-phase",
+                    "lastActivityAt":  "2026-02-14T06:04:43",
+                    "iterationCount":  35
+                },
     "userStories":  [
                         {
-                            "id":  "US-100-001",
+                            "id":  "US-101-001",
                             "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027caption\u0027 focus area",
+                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027iterative-phase\u0027 focus area",
                                                        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
                                                        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
                                                        "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027caption\u0027",
-                                                       "Add stories US-100-002 through US-100-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027iterative-phase\u0027",
+                                                       "Add stories US-101-002 through US-101-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
                                                        "Each story MUST have 4-6 testable acceptance criteria",
                                                        "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
                                                        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-100-NNN to be unique across sprints",
-                                                       "Mark this story (US-100-001) as passes: true when done"
+                                                       "IMPORTANT: Story IDs MUST follow format US-101-NNN to be unique across sprints",
+                                                       "Mark this story (US-101-001) as passes: true when done"
                                                    ],
                             "passes":  true,
                             "priority":  "high",
-                            "title":  "Generate sprint stories for caption focus area",
-                            "notes":  "Evidence gate: 11/11 criteria verified (100%)."
+                            "title":  "Generate sprint stories for iterative-phase focus area",
+                            "notes":  "Evidence gate: 3/11 criteria verified (27%). Minimum: 90%."
                         },
                         {
-                            "id":  "US-100-002",
-                            "title":  "Add video metadata language detection for caption fetching",
-                            "priority":  "medium",
-                            "passes":  true,
+                            "id":  "US-101-002",
                             "acceptanceCriteria":  [
-                                                       "Implement language detection from video metadata (title, description, tags) before caption fetch",
-                                                       "Add language prediction confidence scoring (0.0-1.0) based on metadata analysis",
-                                                       "Use detected language to prioritize fetch order or skip pre-check for high-confidence predictions",
-                                                       "Add config option to enable/disable metadata-based language detection",
-                                                       "Cache language predictions per video_id for cross-session reuse",
-                                                       "Log language detection results at DEBUG level with confidence scores"
+                                                       "Add Get-SearchBudgetInfo function to scripts/ralph/lib/interview.ps1",
+                                                       "Function reads video_search.results_per_keyword from config.yaml",
+                                                       "Function reads video_search.max_total_results from config.yaml",
+                                                       "Function returns budget metadata including max_keywords calculation",
+                                                       "Handle case where config values are missing (use defaults: 20 results_per_keyword, 200 max_total_results)"
                                                    ],
-                            "notes":  "Evidence gate: 6/6 criteria verified (100%). All criteria complete."
-                        },
-                        {
-                            "id":  "US-100-003",
-                            "title":  "Improve caption coverage quality scoring algorithm",
-                            "priority":  "medium",
                             "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Refactor coverage calculation to weight segments by content density (longer segments = higher quality)",
-                                                       "Add silence/gap detection to penalize captions with excessive pauses",
-                                                       "Implement coverage confidence score that accounts for video duration vs caption length",
-                                                       "Add config options for coverage calculation weights (segment_density_weight, gap_penalty)",
-                                                       "Include coverage quality in CaptionMetrics export for analysis",
-                                                       "Log coverage breakdown at INFO level: total_duration, caption_duration, effective_coverage"
-                                                   ],
-                            "notes":  "All 6 criteria implemented: 1) CoverageMetrics class with effective_coverage (log-scaled duration weighting), 2) gap_count/gap_penalty in CoverageMetrics, 3) confidence_score based on video/caption duration ratio, 4) Config options in CaptionFirstConfig and config.yaml, 5) Added to CaptionResult.to_dict(), 6) INFO logging in caption_fetcher.py"
+                            "priority":  "high",
+                            "title":  "Add search budget info function to Ralph interview library",
+                            "notes":  "Tier: ralph | Files: scripts/ralph/lib/interview.ps1 (new function), config.yaml:90-91 (video_search config) | This adds budget awareness to Ralph's interview phase so keywords are searched with appropriate limits. Line range: new function at end of interview.ps1 (~500-550) | VERIFIED: Function already exists at interview.ps1:8-113, reads both config values, calculates max_keywords, handles defaults"
                         },
                         {
-                            "id":  "US-100-004",
-                            "title":  "Add caption cache LRU eviction and size limits",
-                            "priority":  "medium",
+                            "id":  "US-101-003",
+                            "acceptanceCriteria":  [
+                                                       "Add Get-DistributedKeywordBudget function to scripts/ralph/lib/interview.ps1",
+                                                       "Function takes keyword count as input",
+                                                       "Function returns adjusted results_per_keyword using formula: floor(max_total_results / keyword_count)",
+                                                       "Edge case: 0 keywords returns 0 results_per_keyword",
+                                                       "Edge case: 1 keyword returns full results_per_keyword",
+                                                       "Function uses config values from Get-SearchBudgetInfo"
+                                                   ],
                             "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Implement LRU eviction policy when cache exceeds max_cache_size entries",
-                                                       "Add cache access tracking (hit/miss timestamps) for eviction decisions",
-                                                       "Add cache size statistics to metrics: current_size, eviction_count, oldest_entry_age",
-                                                       "Implement cache directory cleanup task for stale entries beyond max_cache_age_days",
-                                                       "Add config validation for max_cache_size (must be \u003e= 100 if set)",
-                                                       "Log cache operations at DEBUG: evictions, hits, misses, size_changes"
-                                                   ],
-                            "notes":  "All 6 acceptance criteria verified: 1) LRU eviction (_evict_lru_entries), 2) Cache access tracking (_update_last_used), 3) Cache size stats (current_size, eviction_count, oldest_entry_age in get_stats()), 4) Cleanup task (cleanup_stale_entries), 5) Config validation (ValueError if max_cache_size < 100), 6) DEBUG logging added for evictions and size_changes"
+                            "priority":  "high",
+                            "title":  "Add dynamic budget distribution function",
+                            "notes":  "Tier: ralph | Files: scripts/ralph/lib/interview.ps1 (new function), scripts/ralph/lib/interview.ps1:500-520 (Get-SearchBudgetInfo dependency) | Ensures all keywords get at least 1 search attempt rather than skipping keywords beyond position 10. Line range: new function at end of interview.ps1 (~520-560) | VERIFIED: Function already exists at interview.ps1:115-177, implements floor(maxTotalResults/keywordCount) formula, handles 0 and 1 keyword edge cases, uses config values from Get-SearchBudgetInfo"
                         },
                         {
-                            "id":  "US-100-005",
-                            "title":  "Improve caption error classification for retry decisions",
-                            "priority":  "medium",
+                            "id":  "US-101-004",
+                            "acceptanceCriteria":  [
+                                                       "Update scripts/ralph/interview.ps1 to show budget status",
+                                                       "Display max_total_results in interview UI",
+                                                       "Display current keyword count after keyword gathering",
+                                                       "Display calculated results_per_keyword after distribution",
+                                                       "Show warning when keyword count exceeds max_keywords",
+                                                       "Display message: \u0027Budget: {max} max | {count} keywords = {adjusted} results each\u0027"
+                                                   ],
                             "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Add error sub-classification for NETWORK errors (DNS, connection, timeout, SSL)",
-                                                       "Implement error severity scoring to prioritize retryable vs non-retryable errors",
-                                                       "Add per-error-category retry budgets (already in config, need enforcement)",
-                                                       "Implement error pattern learning: track error frequency by video/channel for adaptive retry",
-                                                       "Add error classification metrics: error_type_distribution, retry_effectiveness_by_type",
-                                                       "Log error classification decisions at WARNING level with reasoning"
-                                                   ],
-                            "notes":  "All 6 criteria implemented in src/caption/error_handling.py: 1) NetworkErrorSubtype enum with classify_network_error() for DNS/connection/SSL/timeout sub-types, 2) ErrorSeverity enum + get_error_severity() + get_error_retry_score() for severity scoring, 3) CategoryRetryBudget + CategoryBudgetManager for per-category budget tracking, 4) ErrorPatternLearner for tracking error frequency by video/channel with adaptive retry limits, 5) ErrorClassificationMetrics with get_error_type_distribution() and get_retry_effectiveness_by_type(), 6) log_classification_decision() outputs WARNING with reasoning"
+                            "priority":  "high",
+                            "title":  "Display search budget status in Ralph interview UI",
+                            "notes":  "IMPLEMENTED: Show-SearchBudgetStatus function at lib/interview.ps1:324-399 displays all budget info. Added budget message format at line 379-383: 'Budget: {max} max | {count} keywords = {adjusted} results each'. Function called from interview.ps1:1593 and 1661. All 55 tests pass."
                         },
                         {
-                            "id":  "US-100-006",
-                            "title":  "Add adaptive parallel fetch worker count based on batch size",
-                            "priority":  "low",
-                            "passes":  true,
+                            "id":  "US-101-005",
                             "acceptanceCriteria":  [
-                                                       "Implement worker count calculation: scale workers based on batch size (more workers for larger batches)",
-                                                       "Add config option for worker_count_strategy: \u0027static\u0027, \u0027adaptive\u0027, \u0027cpu_count\u0027",
-                                                       "Implement adaptive scaling: start with 4 workers, scale up to 8 for batches \u003e 100 videos",
-                                                       "Add rate limit feedback loop: reduce workers when rate limit errors increase",
-                                                       "Log worker count decisions at INFO: strategy_used, calculated_count, batch_size",
-                                                       "Add worker_count to CaptionMetrics for correlation analysis with success rate"
+                                                       "Add Get-ChapterDistributedKeywords function to scripts/ralph/lib/interview.ps1",
+                                                       "Function detects chapter patterns: \u0027Part X\u0027, \u00271. 2. 3.\u0027, \u0027: separated items\u0027",
+                                                       "Function splits topics with chapters into individual search keywords",
+                                                       "Function returns flattened keyword array",
+                                                       "Edge case: topic without chapters returns original keyword",
+                                                       "Edge case: empty topic list returns empty array"
                                                    ],
-                            "notes":  "Implemented: 1) Added worker_count_strategy config ('static', 'adaptive', 'cpu_count') in CaptionFirstConfig, 2) Added min_workers (4), max_workers_limit (8), batch_size_threshold (100), 3) Adaptive scaling in caption_stage.py - linear interpolation from min to max based on batch size, 4) Rate limit feedback loop - reduces workers when rate limit errors exceed threshold (15%), 5) Logs worker count decisions at INFO with strategy_used, calculated_count, batch_size, 6) Added worker_count and worker_count_strategy fields to CaptionMetrics for correlation analysis. Config added to config.yaml with defaults."
-                        },
-                        {
-                            "id":  "US-100-007",
-                            "title":  "Improve multi-language caption preference handling",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Refactor language_priority to support weighted preferences (not just order)",
-                                                       "Add config option for language_fallback_strategy: \u0027sequential\u0027, \u0027coverage_first\u0027, \u0027confidence_weighted\u0027",
-                                                       "Implement coverage-based language selection: prefer language with highest coverage ratio",
-                                                       "Add multi-language caption aggregation: combine captions from multiple languages if available",
-                                                       "Add language coverage metrics: per_language_coverage, selected_language, fallback_count",
-                                                       "Log language selection decision at INFO with coverage ratios for each candidate"
-                                                   ],
-                            "notes":  "Evidence gate: 6/6 criteria verified (100%). All criteria complete. Fixed bug: self.metrics.* -> self.* for per_language_coverage and language_selection_counts. Added fields to CaptionFetcher.__init__."
-                        },
-                        {
-                            "id":  "US-100-008",
-                            "title":  "Improve caption segment timing alignment and validation",
-                            "priority":  "medium",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Refactor timing validation to use video duration from metadata (not caption endpoints)",
-                                                       "Add segment continuity scoring: detect gaps/overlaps between adjacent segments",
-                                                       "Implement timestamp normalization: handle various caption format timestamps consistently",
-                                                       "Add config option for timing_validation_mode: \u0027strict\u0027, \u0027lenient\u0027, \u0027off\u0027",
-                                                       "Add segment validation metrics: gap_count, overlap_count, continuity_score",
-                                                       "Log timing validation results at DEBUG with segment count and duration covered"
-                                                   ],
-                            "notes":  "Implemented: 1) Added timing_validation_mode config option (strict/lenient/off) to CaptionFirstConfig. 2) Added SegmentValidationResult dataclass with gap_count, overlap_count, continuity_score. 3) Added validate_segment_continuity() function in caption_fetcher.py. 4) Added normalize_segments() in parsers.py for timestamp normalization. 5) Added DEBUG logging in caption_stage.py for segment validation metrics. Config options: timing_validation_mode, continuity_gap_threshold, overlap_tolerance."
-                        },
-                        {
-                            "id":  "US-100-009",
-                            "title":  "Export caption fetch metrics to persistent storage",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Implement metrics export to JSON file in project .cache directory",
-                                                       "Export per-video metrics: video_id, language, coverage, quality, fetch_duration, error_if_any",
-                                                       "Export aggregate metrics: total_videos, success_rate, avg_coverage, error_distribution",
-                                                       "Add config option for metrics_export_path (default: .cache/caption_metrics.json)",
-                                                       "Implement metrics retention policy: keep last N runs, auto-cleanup old files",
-                                                       "Add metrics import function for cross-project analysis"
-                                                   ],
-                            "notes":  "Implemented: 1) Added metrics_export_enabled, metrics_export_path, metrics_retention_runs, metrics_auto_cleanup config options to CaptionFirstConfig. 2) Updated export_json() with auto_cleanup and retention_count parameters. 3) Added cleanup_old_metrics() static method for retention policy. 4) Added import_from_file(), import_from_directory(), aggregate_metrics() static methods for cross-project analysis. 5) Added get_export_data() method for programmatic access. 6) Wired export in caption_stage.py run() method. Config options: metrics_export_enabled, metrics_export_path, metrics_retention_runs, metrics_auto_cleanup."
-                        },
-                        {
-                            "id":  "US-100-010",
-                            "title":  "Optimize batch pre-check channel grouping algorithm",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Refactor channel grouping to use hierarchical clustering for similar channels",
-                                                       "Add channel similarity scoring based on caption availability patterns",
-                                                       "Implement adaptive sample size: reduce samples for high-confidence channel patterns",
-                                                       "Add config options for precheck_clustering_enabled, min_cluster_size",
-                                                       "Add precheck efficiency metrics: clusters_formed, avg_samples_per_cluster, api_calls_saved",
-                                                       "Log clustering decisions at INFO: clusters_identified, samples_efficiency"
-                                                   ],
-                            "notes":  "DONE: 1) Added precheck_clustering_enabled, precheck_min_cluster_size config options to download.py and config.yaml. 2) Added _cluster_channels_by_pattern() helper for hierarchical clustering based on success_rate bins. 3) Added _calculate_adaptive_sample_size() for reducing samples for high-confidence patterns. 4) Added clusters_formed, avg_samples_per_cluster metrics to BatchPreCheckResult. 5) Added INFO logging for clustering decisions. 6) Wired new params in caption_stage.py."
-                        },
-                        {
-                            "id":  "US-100-011",
-                            "title":  "Add caption budget consumption visualization and reporting",
-                            "priority":  "low",
-                            "passes":  true,
-                            "acceptanceCriteria":  [
-                                                       "Implement budget consumption progress bar in TTY mode (current/total attempts)",
-                                                       "Add budget exhaustion warning at 80% threshold with projected exhaustion time",
-                                                       "Add post-run budget summary: total_attempts, success_rate_at_budget_level, recommendations",
-                                                       "Implement budget recovery suggestions: --reset-budget, increase max_attempts, enable VPN",
-                                                       "Add config option for budget_warning_threshold (default 0.8)",
-                                                       "Log budget metrics at INFO: budget_percent_remaining, estimated_videos_affected"
-                                                   ],
-                            "notes":  "DONE: 1) Added progress bar via get_progress_bar() method. 2) Added 80% threshold warning via check_and_warn_budget_threshold() with projected exhaustion time. 3) Added budget_percent_remaining and estimated_videos_affected to get_summary(). 4) Added get_recovery_suggestions() with --reset-budget, increase max_attempts, enable VPN options. 5) Added budget_warning_threshold to config.yaml (default 0.8). 6) Wired in caption_stage.py: lines 985, 1077, 1454-1466. Pre-implemented in earlier sprint."
-                        },
-                        {
-                            "id":  "US-100-012",
-                            "title":  "Add caption format auto-detection and parser selection",
-                            "priority":  "low",
                             "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add chapter-based keyword splitting for Ralph interview",
+                            "notes":  "Tier: ralph | Files: scripts/ralph/lib/interview.ps1 (new function) | Enables chapter-aware keyword extraction so multi-part topics get separate searches. Line range: new function at end of interview.ps1 (~560-620)"
+                        },
+                        {
+                            "id":  "US-101-006",
                             "acceptanceCriteria":  [
-                                                       "Implement automatic caption format detection from response headers or content signature",
-                                                       "Add parser selection logic: prefer native JSON over XML/TTML/SRT based on availability",
-                                                       "Add config option for preferred_caption_formats: list in priority order",
-                                                       "Implement format fallback chain: primary format → secondary → transcript fallback",
-                                                       "Add format detection metrics: format_detected, parser_used, fallback_count",
-                                                       "Log format detection at DEBUG with detected type and parser decision reasoning"
+                                                       "Add query budget tracking to iterative matching stage",
+                                                       "Track total queries executed vs total budget",
+                                                       "Track queries per pass vs pass budget",
+                                                       "Add budget_exhausted check before each search iteration",
+                                                       "Log warning when approaching budget limit (80% threshold)",
+                                                       "Stop gracefully when budget exhausted with summary"
                                                    ],
-                            "notes":  "Tier: enhancement | Files: src/caption/parsers/ (format parsers), src/caption_fetcher.py (format detection) | Line ranges: caption_fetcher.py ~line 600-700 for format handling, parsers/__init__.py for parser registry"
+                            "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add query budget tracking to iterative matching",
+                            "notes":  "Tier: feature | Files: src/stages/iterative_match.py (new tracking), src/config/sections/iterative_matching.py (new config), config.yaml:2411-2450 (iterative_matching section) | Prevents infinite loops by tracking queries against budget. Line range: iterative_match.py:100-150 (budget tracking section)"
+                        },
+                        {
+                            "id":  "US-101-007",
+                            "acceptanceCriteria":  [
+                                                       "Add export/import methods to QueryLearningDB class",
+                                                       "Export method writes learning data to JSON file",
+                                                       "Import method loads learning data from JSON file",
+                                                       "Support export to ~/.matcher_global_cache/query_learning_export.json",
+                                                       "Import runs at DB initialization if export exists and local DB is empty",
+                                                       "Export includes version field for migration"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add cross-project learning export/import to QueryLearningDB",
+                            "notes":  "Tier: feature | Files: src/iterative_match/query_learning.py:82-663 (QueryLearningDB class), src/config/sections/iterative_matching.py:120-122 (learning_db_path config) | Enables sharing learnings across projects. Line range: query_learning.py:660-720 (new export/import methods)"
+                        },
+                        {
+                            "id":  "US-101-008",
+                            "acceptanceCriteria":  [
+                                                       "Add strategy effectiveness summary method to QueryLearningDB",
+                                                       "Method returns per-strategy success rates by gap pattern",
+                                                       "Method returns per-chapter-type success rates",
+                                                       "Add strategy effectiveness logging after each iterative match pass",
+                                                       "Log output includes: total queries, total gaps filled, success rate per strategy",
+                                                       "Summary available via get_summary() method"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add strategy effectiveness analytics to iterative matching",
+                            "notes":  "Tier: feature | Files: src/iterative_match/query_learning.py:647-662 (get_summary method), src/stages/iterative_match.py:200-250 (pass summary logging) | Provides visibility into which search strategies work best. Line range: query_learning.py:660-700 (enhanced summary)"
+                        },
+                        {
+                            "id":  "US-101-009",
+                            "acceptanceCriteria":  [
+                                                       "Add smart retry logic for failed queries",
+                                                       "Track failed queries in QueryLearningDB.template_failure",
+                                                       "On retry: apply different strategy (voiceover -\u003e similar_locked -\u003e entity)",
+                                                       "On retry: broaden query by removing specific terms",
+                                                       "Max 2 retries per query before marking as permanently failed",
+                                                       "Log retry attempts and outcomes"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "medium",
+                            "title":  "Add smart query retry logic to iterative matching",
+                            "notes":  "Tier: feature | Files: src/stages/iterative_match.py:300-400 (query execution), src/iterative_match/query_learning.py:531-584 (failure tracking) | Improves gap fill rate by intelligently retrying failed queries. Line range: iterative_match.py:350-420 (retry logic)"
+                        },
+                        {
+                            "id":  "US-101-010",
+                            "acceptanceCriteria":  [
+                                                       "Add batch query optimization to iterative matching",
+                                                       "Group similar queries to avoid redundant searches",
+                                                       "Implement query deduplication before execution",
+                                                       "Cache query results to avoid repeated API calls",
+                                                       "Use config: iterative_matching.cache_query_results (already exists)",
+                                                       "Log batch optimization savings: queries saved"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "title":  "Add batch query optimization to iterative matching",
+                            "notes":  "Tier: optimization | Files: src/stages/iterative_match.py:400-500 (query grouping), src/iterative_match/query_learning.py:111-119 (cache_query_results config reference) | Reduces API calls by deduplicating similar queries. Line range: iterative_match.py:420-480 (batch optimization)"
+                        },
+                        {
+                            "id":  "US-101-011",
+                            "acceptanceCriteria":  [
+                                                       "Add gap coverage progress report to iterative matching",
+                                                       "Report shows: initial gap count, current gap count, gaps filled this pass",
+                                                       "Report shows: confidence distribution (low/medium/high)",
+                                                       "Report shows: pattern distribution (abstract_concept, proper_noun, etc.)",
+                                                       "Report logged at end of each pass when log_pass_summaries=true",
+                                                       "Visual: ASCII progress bar showing gap fill percentage"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "title":  "Add gap coverage progress report to iterative matching",
+                            "notes":  "Tier: ux | Files: src/stages/iterative_match.py:500-600 (pass summary), config.yaml:2470 (log_pass_summaries config) | Provides visibility into iterative matching progress. Line range: iterative_match.py:520-580 (progress report)"
+                        },
+                        {
+                            "id":  "US-101-012",
+                            "acceptanceCriteria":  [
+                                                       "Add confidence score calibration based on learning",
+                                                       "Track actual match quality vs predicted confidence",
+                                                       "Calculate calibration factor per strategy type",
+                                                       "Apply calibration to confidence predictions",
+                                                       "Log calibration adjustments at pass end",
+                                                       "Calibration improves over time with more data"
+                                                   ],
+                            "passes":  false,
+                            "priority":  "low",
+                            "title":  "Add confidence score calibration to iterative matching",
+                            "notes":  "Tier: optimization | Files: src/matching/scoring.py (confidence scoring), src/iterative_match/query_learning.py:400-430 (result recording) | Improves confidence accuracy by learning from past matches. Line range: scoring.py:200-280 (calibration section)"
                         }
                     ]
 }

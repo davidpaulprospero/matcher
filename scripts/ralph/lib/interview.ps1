@@ -139,37 +139,37 @@ function Get-DistributedKeywordBudget {
     # Handle edge cases
     if ($Keywords.Count -eq 0) {
         return @{
-            adjustedResultsPerKeyword = 0
-            totalKeywords = 0
+            adjusted_budget = 0
+            keyword_count = 0
             willReduce = $false
             warningMessage = "No keywords provided"
             effectiveTotal = 0
         }
     }
 
-    $totalKeywords = $Keywords.Count
+    $keyword_count = $Keywords.Count
 
     # Always use the formula: floor(max_total_results / keyword_count)
     # This ensures: 1 keyword -> 200, 5 keywords -> 40, 10 keywords -> 20, etc.
-    $adjustedResults = [Math]::Floor($MaxTotalResults / $totalKeywords)
-    $effectiveTotal = $totalKeywords * $adjustedResults
+    $adjusted_budget = [Math]::Floor($MaxTotalResults / $keyword_count)
+    $effectiveTotal = $keyword_count * $adjusted_budget
 
     # Determine if we're reducing from the base results_per_keyword
-    $willReduce = $adjustedResults -lt $ResultsPerKeyword
+    $willReduce = $adjusted_budget -lt $ResultsPerKeyword
 
     # Calculate budget threshold
     $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
 
     $warningMessage = $null
     if ($willReduce) {
-        $warningMsg = "WARNING: $totalKeywords keywords exceeds budget threshold of $budgetThreshold. " +
-                      "Results per keyword will be reduced from $ResultsPerKeyword to $adjustedResults to stay within $MaxTotalResults limit."
+        $warningMsg = "WARNING: $keyword_count keywords exceeds budget threshold of $budgetThreshold. " +
+                      "Results per keyword will be reduced from $ResultsPerKeyword to $adjusted_budget to stay within $MaxTotalResults limit."
         $warningMessage = $warningMsg
     }
 
     return @{
-        adjustedResultsPerKeyword = $adjustedResults
-        totalKeywords = $totalKeywords
+        adjusted_budget = $adjusted_budget
+        keyword_count = $keyword_count
         willReduce = $willReduce
         warningMessage = $warningMessage
         effectiveTotal = $effectiveTotal
@@ -374,6 +374,12 @@ function Show-SearchBudgetStatus {
     # Show effective keyword count from budget calculation
     if ($splitKeywords.Count -gt 0) {
         Write-Host "  Effective Keywords: $($distributed.totalKeywords)" -ForegroundColor White
+    }
+
+    # Display the exact budget message format required by acceptance criteria
+    if ($splitKeywords.Count -gt 0) {
+        $budgetMessage = "Budget: $($budgetInfo.maxTotalResults) max | $($distributed.totalKeywords) keywords = $($distributed.adjusted_budget) results each"
+        Write-Host "  $budgetMessage" -ForegroundColor Cyan
     }
 
     if ($distributed.willReduce -and $ShowWarnings) {
