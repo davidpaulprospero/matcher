@@ -1127,7 +1127,7 @@ class CaptionStage(Stage):
 
             # US-81-009: Check batch failure threshold (only for actual fetch errors, not no_captions)
             _batch_failure_threshold = getattr(
-                config.pipeline, 'batch_failure_threshold', 0.5
+                getattr(config, 'pipeline', None), 'batch_failure_threshold', 0.5
             )
             total_processed = success_count + skip_count + fetch_failed_count
             if total_processed > 0 and _batch_failure_threshold < 1.0:
@@ -1575,6 +1575,31 @@ class CaptionStage(Stage):
             return "No video candidates available for caption fetch"
 
         return None
+
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        # Count input videos
+        input_count = 0
+        if hasattr(state, 'video_ids') and state.video_ids:
+            input_count = len(state.video_ids)
+        elif hasattr(state, 'downloaded_videos'):
+            input_count = len(state.downloaded_videos)
+
+        # Count output captions
+        output_count = None
+        if hasattr(state, 'captions'):
+            output_count = len(state.captions)
+
+        return {
+            'inputs': 'video candidates',
+            'outputs': 'captions',
+            'input_count': input_count,
+            'output_count': output_count,
+        }
 
     # === Helper Methods ===
 

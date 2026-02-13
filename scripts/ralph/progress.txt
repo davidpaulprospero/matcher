@@ -14,6 +14,16 @@
 - Gotcha: threading.Lock deadlocks in get_summary() -> is_exhausted(); must use RLock
 - Files: src/transcription/retry_budget.py, src/transcription/parallel_processor.py, src/transcription/metrics.py, src/config/sections/core.py, src/transcription/__init__.py, tests/test_transcription_retry_budget.py, tests/test_transcription_parallel_processor.py
 
+## Iteration 17 - [US-90-007] Verify caption-to-transcription fallback pipeline
+- Verified all 4 acceptance criteria:
+  1. CaptionStage correctly populates caption_results dict keyed by video_id ✓
+  2. CaptionStage falls back to transcription for videos without captions ✓
+  3. needs_transcription list correctly identifies videos requiring transcription ✓
+  4. Checkpoint correctly saves and restores caption_results ✓
+- Tests verified: test_caption_results_keyed_by_video_id, test_caption_failures_populate_transcription_fallback_list, test_caption_stage_restore_flow.py (9 tests)
+- Fixed bug: config.pipeline attribute access in caption_stage.py:1130 - added safe getattr
+- File modified: src/stages/caption_stage.py
+
 ## Iteration 14 - [US-89-009] Add multi-circuit coordination across components
 - CircuitBreakerRegistry class (src/downloader/circuit_breaker.py:43-116): register/unregister breakers, get_all_health_metrics(), is_any_tripped(), get_tripped_names(), get_aggregate_stats()
 - CircuitBreakerCoordinator singleton (lines 119-252): propagate_trip(), propagate_failure(), configurable cascade rules, enable/disable
@@ -22,6 +32,17 @@
 - Configurable cascade rules in config.yaml (lines 1463-1483): search<->caption, search->download
 - CircuitBreakerBuilder updated with with_coordinator() method
 - Tests: 7 for Registry, 8 for Coordinator, 1 for CascadeRule (16 tests total, all pass)
+
+
+## Iteration 16 - [US-90-006] Improve caption retry budget auto-scaling logic
+- Fixed edge cases in src/caption/retry_budget.py:
+  1. batch_size=None now handled - skips scaling to avoid TypeError
+  2. batch_size=0 now handled - skips scaling (no videos to process)
+  3. max_attempts=0 (unlimited mode) now preserved - doesn't incorrectly scale to finite value
+  4. attempts_per_video<=0 now uses default 1.0 instead of producing invalid results
+- Added validation in both scale_to_batch_size() and ensure_scaled() methods
+- All 334 caption_retry_budget tests pass
+- Files: src/caption/retry_budget.py
 
 ## Iteration 12 - [US-89-007] Add stage input/output validation layer
 - StageContract dataclass with required_inputs, optional_inputs, outputs fields (src/stages/__init__.py:570-580)
@@ -199,3 +220,36 @@
 - Status: COMPLETE (auto-detected from git commit, git-commit-detected)
 - Story was implemented in a previous session but prd.json was not updated (likely timeout)
 - Pre-flight check in ralph.ps1 detected the existing commit and auto-marked as complete
+
+## Iteration 15 - [US-89-010] Add download progress callbacks for UI integration
+- Added DownloadProgressCallback protocol (src/stages/download_segments.py:44-120): on_start, on_progress, on_complete, on_error methods
+- Added MultiCallback delegate class (lines 125-197): supports multiple callbacks, forwards to all registered callbacks
+- Updated _make_progress_hook to report bytes/speed/eta in on_progress every ~1 second (lines 1399-1427)
+- Updated _execute_download to accept progress_callback parameter and call on_start (lines 1117-1150)
+- Updated _download_segments to accept download_progress_callback (single, list, or MultiCallback) and convert to MultiCallback internally
+- Progress callback receives: bytes_downloaded, total_bytes, speed (bytes/sec), eta (seconds remaining)
+- All acceptance criteria verified: protocol, pass-through, bytes/speed/eta reporting, multiple callbacks via delegate
+- Files modified: src/stages/download_segments.py
+
+## Iteration 18 - [US-90-004] Add per-format circuit breaker for caption fetching
+- Added CaptionFormatType literal type (youtube, transcript, live_subtitle)
+- Added format_states dict to CaptionCircuitBreakerState for per-format tracking
+- Added get_format_state() method to get/create state for specific format type
+- Added check_and_wait_for_format() - checks/waits for specific format type
+- Added record_success_for_format() - records success for specific format
+- Added record_failure_for_format() - records failure and trips circuit if threshold reached
+- Added is_format_open() - checks if circuit is open for a format
+- Added get_format_stats() - gets stats for a specific format
+- Updated get_stats() to include format_stats with per-format breakdown
+- Updated to_checkpoint_dict/from_checkpoint_dict to serialize per-format state
+- All 62 existing tests pass
+- Per-format behavior verified: youtube failures don't affect transcript, each has own state
+- Files modified: src/caption/circuit_breaker.py
+
+## Iteration 19 - [US-90-005] Optimize caption pre-check to use faster --list-subs API
+- PRE-IMPLEMENTED: All 4 acceptance criteria verified
+- Pre-check uses --list-subs flag (caption_fetcher.py line 2765)
+- Videos without captions skipped (line 4867: "Pre-flight check: no captions available")
+- Config option pre_check_availability exists (CaptionFirstConfig: config.yaml:118456,8)
+- Pre-check cached via ListSubsCache class (cache.py:1190)
+- Config verified: python -c "from src.config.sections.download import CaptionFirstConfig; c = CaptionFirstConfig(); print('pre_check_availability:', c.pre_check_availability)" -> True
